@@ -1,9 +1,11 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building: steps 0–3, 3b and 3c done** (§2.1–§2.2, §7.1). Step 0 tripped no
+Status: **design rev 6 (2026-10-18); building: steps 0–3, 3b, 3c and 3d done** (§2.1–§2.2, §7.1). Step 0 tripped no
 decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
 keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
-id workspace at `pass_rows` again); the 5090 4K row stays under its bar with every item (O2, with the owner).
+id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) passes the keep rule on both lock classes
+and is kept. The 5090 4K row stays under its bar with every item (O2, with the owner); the sm_89 record is a gate
+before step 5 (§10 L3-4).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -79,7 +81,8 @@ before any code. Every bar is measured by §5.2's method.
      - batched decode above 8 rows runs mmq with ids inside graphs, so D2 changes its launch but not its bits
        (graphs-vs-eager bitwise).
    - **Speed:** a same-session ABBA against main's build, `holon_tg` at batch 1 (1K / 4K) and batch 16 / 32 / 64 on
-     the 5090, and the gate's offload decode rows. Each must stay within ≤ max(0.5%, 2 sd).
+     the 5090, and the gate's offload decode rows — measured on the re-filled lock against main's lock (C). Each must
+     stay within ≤ max(0.5%, 2 sd).
 6. **Memory** (§6):
    - every lock's startup KV pool stays ≥ its `max_model_len` and its recorded capability (each pass size is capped
      per class to keep this);
@@ -280,6 +283,8 @@ probe's, 1.3–1.4 / 9.5–10.3 / 76.5–83.6 ms; 5080: as above).
     `CHUNK`.
   - **Who sets it.** The provider sets it per type, arch and path, from a pinned **proven table** in `plugin.py`
     (`PASS_PROVEN`: (SM, type, path) → proven, like `CROSSOVER`; B2-N3).
+  - **The cap.** `ggml_cuda.pass_rows` (with `max_step_tokens`) caps every large call kernels.ggml_cuda makes: mmq
+    with ids (this item), dense `qlinear` mmq (D5's `call_rows`) and the router GEMM's pass (D3′).
     - The shared `holon_testing` helper iterates that table, so an entry exists only where its L0 runs. A pair not in
       the table keeps `CHUNK`.
     - For a proven mmq-with-ids pair it is `max(CHUNK, min(PASS_ROWS, ID_PAIRS ÷ top_k, its cap) ÷ CHUNK × CHUNK)`.
@@ -349,6 +354,14 @@ probe's, 1.3–1.4 / 9.5–10.3 / 76.5–83.6 ms; 5080: as above).
     already take their call's path (`chunk_with_decode`), as today.
   - **What it replaces:** cast + cuBLAS SGEMM + split-K reduce + top-k, 4 launches and 22 ms at 4K on the A5000.
   - **Kept** by M0.7's rule: ≥ max(0.5%, 3 sd) on some prefill row of a lock class.
+- **D3′ — the router per pass, not per chunk** (step 3d, the lead's decision after D3's revert; bounded as D3).
+  - D3's router GEMM is row-invariant, so one launch per expert pass gives every row its chunk's bits. kernels.ggml_cuda's
+    `moe_router@1` instance declares `pass_rows` (D0's cap; `CHUNK` where the GEMM does not serve the stack's
+    experts), and std.moe routes a pass of whole `CHUNK`s in one call where the router declares it (a contract term
+    of `moe_router@1`, as `linear_experts@2`'s `pass_rows`); the last partial chunk is a pass of its own.
+  - Keep rule: M0.7's, again, on both lock classes (§7.1, step 3d). D4's fused q8_1 quantize of down's input is
+    optional, taken only if D3′ leaves the 5090 4K row under 1.0×, and bitwise.
+
 - **D4 — SwiGLU in gate/up's mmq store** (bitwise; **in the set**, lead decision C-B1).
   - **No repack.** The offload store refuses kernels that repack (`offload.py:164-168`). Instead a tile of I/2 output
     rows loads gate rows i… and up rows inter + i… from two base offsets of the stored layout.
@@ -405,8 +418,9 @@ probe's, 1.3–1.4 / 9.5–10.3 / 76.5–83.6 ms; 5080: as above).
     - D9 with Q2_0's `TYPES` entry;
     - D10;
     - D11.
-  - Every hunk carries a "Holon:" marker, and `test_link`'s marker check (`test_ggml_cuda_moe.py:234-235`) adds
-    `mmq.cu` and `mmq.cuh` (B-m7).
+  - Every semantic hunk carries a "Holon:" marker; signature plumbing (parameters threaded through calls and
+    signatures without changing behaviour) is named in each patched file's header note instead (the step-3 panel's
+    B). `test_link`'s marker check (`test_ggml_cuda_moe.py:234-235`) adds `mmq.cu` and `mmq.cuh` (B-m7).
 
 - **D9 — IQ1_M's native mmq tile loader** (a `vendor.patch` hunk for FN; bitwise in q8_1's class).
   - **Why it fits int8.** IQ1_M weights scaled by 8 are 8·g ± 1 ∈ {±1, ±7, ±9} (the grid nibble is in {0, 1, 2}, and
@@ -442,18 +456,19 @@ probe's, 1.3–1.4 / 9.5–10.3 / 76.5–83.6 ms; 5080: as above).
     every other instance without them, as it does for `add` and `route_prepare` (`units.py:235`, `:262`). So
     `kernels.triton_experts` and third-party providers are unaffected.
   - **What `scratch_bytes` covers, per path** (B3-4):
-    - mmq with ids: the per-call transients, i.e. gate/up's f32 intermediate (none where D4's fused store runs) and
-      the call's q8_1 rows and id maps;
-    - mmvq calls (≤ `mmvq_tokens` rows): 0, since they use the persistent decode-size workspace.
-    - The persistent named id workspace shrinks to decode / verify size (`mmvq_tokens` and the graphed buckets'
-      rows). An mmq call above that size without `scratch` allocates its own transients, as today, so nothing is
-      refused and today's callers keep working.
+    - mmq with ids: gate/up's f32 intermediate (none where D4's fused store runs). The call's q8_1 rows and id maps
+      stay in the persistent named id workspace at `pass_rows` (§10 L3-2b: built first as decode-size, which cost the
+      5080 lock 0.2% of its 4K prefill);
+    - mmvq calls (≤ `mmvq_tokens` rows): 0. They skip D10's checks and carving (an eager small step is host-bound).
+    - An mmq call without `scratch` allocates its own transient, as today, so nothing is refused and today's callers
+      keep working.
   - **Contract terms** (B3-3, A3):
     - the provider keeps no reference to `out` or `scratch` past the call;
     - both are read and written on the compute stream, ordered with the work enqueued before the call;
     - one `scratch` may be reused by the successive calls of a pass (gate/up, then down);
-    - `out` must not alias `scratch` or `x`, and `scratch` must be 256-byte aligned (the device-wide helper asserts
-      it, `mmid.cu:319`). Both are refused before launch.
+    - neither `out` nor `scratch` may alias `x`, nor each other, and `scratch` must be 256-byte aligned (the
+      device-wide helper asserts it, `mmid.cu:319`). Where the call uses the buffer, a violation is refused before
+      launch (the mmvq-only path uses none and skips the checks).
     - Under `ring_copy = dma`, the refill of returned slots is ordered against these buffers exactly as X's lent ring
       slots are: after the step's compute stream.
     - **Lent memory is eager-only.** Graphed steps never borrow (`store.py:532`), so a buffer passed inside a captured
@@ -622,7 +637,12 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 - **Arms.** A same-session ABBA against main's build, with both engines timed at the same boundary: the time from
   submission to the first token, at the engine API.
 - **Prompts.** A fixed set chosen before code: ≥ 5 prompts at 1K and 4K and ≥ 3 at 32K, the same for every engine.
-- **Rounds.** ≥ 3 rounds, rising to ≥ 5 for rows predicted within 3% of their bar (§1.1).
+- **Rounds.** ≥ 3 rounds, rising to ≥ 5 for rows predicted within 3% of their bar (§1.1); on the 5090, 6 balanced
+  ABBA rounds for those rows (the step-3 panel's C).
+- **Short kernels** (under ≈ 50 µs): timed inside a captured graph, or over ≥ 100 back-to-back launches, and checked
+  against nsys device time (C).
+- **Allocator work** (C): `prefill.py` records each timed prompt's `num_alloc_retries`, `num_device_alloc` and
+  `num_device_free` deltas; steady state is zero on the final tree, the 16 GB lock included.
 - **Statistic.** The median over rounds of each round's geomean of the paired ratios. A difference under 2 sd of the
   rounds is reported as "≈" and escalated.
 - **Warm-up and outliers** (the panel's C2, from step 3 on; `prefill.py --warm-set`, `abrun.sh` / `abstat.py`):
@@ -665,8 +685,8 @@ and the id maps).
 | 8,192 (D6) | 604 MB | 738 MB | 208 MB | **946 MB** | +886 MB |
 
 - **D4** removes the gate/up output, but the peak is the SwiGLU + down term, so the peak is unchanged.
-- **D10** moves the id workspaces above decode size from persistent buffers to per-call transients, or to passed
-  `scratch`. The peak is unchanged: the startup profile runs the worst-case step on the allocating fallback.
+- **D10** moves gate/up's f32 intermediate (where D4's store does not apply) to passed `scratch`; the id workspaces
+  stay persistent at `pass_rows` (§10 L3-2b). The peak is unchanged.
 - **D5** adds ≈ 25 MB (30B) or ≈ 66 MB (8B) of `qlinear` workspace at 4,096.
 - **Per class** (96 KiB of KV per token on the 30B):
   - **16 GB RTX 5080, resident UD-IQ3_XXS** (`max_step_tokens` 2,048, `max_model_len` 16,384): M0.2 recorded 18.6K KV
@@ -693,6 +713,7 @@ and the id maps).
 | 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants (a passing near plant records L2's blindness at that scale) | 3–4 |
 | 3b | FN's requests: D10 (passed buffers and their contract terms; the decode-size persistent workspace; the one-buffer allocating fallback) and D11 (`lend_tail` in the `moe_resolve` variant contract; the tail-then-coldest order with `held` / `want` excluding the range; lfu's implementation with its reference and replay of both calls; `Lent`'s D10 exclusion; the bind check; `moe.ring_lend`) | D10 / D11 L0 and CPU checks, the E = 512 no-spare-empties tail step included; policy parity with `tail`; the tail plant's fired count; the `prompt_logprobs` identity with `tail`; **perf with `tail` on the 30B offload lock at 4K and 32K** (C4): `ring_ok` true and no `SHORT`, prefill against `coldest`, and miss bytes per token over the first decode tokens against `coldest` | 3.5–4.5 |
 | 3c | D9: IQ1_M's mmq hunk (or its fallback), with IQ1_M and Q2_0 in `TYPES` | D9's L0 on sm_86 / sm_120, memcheck; per-call speed against IQ2_S's loader | 2–3 |
+| 3d | D3′ (the router per pass) and the step-3 panel's fixes | D3′'s keep rule on both lock classes; identity (D3′'s bits are per-chunk D3's); sm_120 L0 and identity at the final tree; allocator counters; the 5090's A/B against `9e23a71` | 1 |
 | 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6; on the 16 GB lock a soak (16K prompts, then 32-seat decode, repeated): no OOM and `num_alloc_retries` = 0, free memory at its worst point recorded; `ggml_cuda.pass_rows` drops to 512 there only if retries appear (C6) | 1–2 |
 | 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
 
@@ -1095,6 +1116,48 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 ## 10. Review log
 
+### Building: the step-3 panel's code review (2026-10-19; A, B, C) and step 3d
+
+Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-10-19.json`,
+`evidence/mp3_bdec_2026-10-19.json`.
+
+| # | Finding | Disposition |
+|---|---|---|
+| B1 | "Holon:" markers on every hunk is not what the patch does | D8 restated: every semantic hunk carries a marker; signature plumbing is named in each patched file's header note (`mmq.cu`, `mmq.cuh`, `mmq-load-tiles.cuh`, `mmvq.cu`, `quantize.cu`, `moe-weighted-reduction.cu`); the semantic hunks that lacked one (the compact launch's slot and bounds, glu's output rows, the bf16 stores) are marked (`a1e284a`) |
+| B2 | D10's refusal is not what the mmvq-only path does | the contract (`std.moe.kernels`) and D10: refused where the call uses the buffer |
+| B3 | `ggml_cuda.pass_rows` also caps dense `qlinear` | the manifest help and D0 name every call it caps: mmq with ids, D5's dense calls, D3′'s router pass |
+| B4 | The batched-decode threshold lives in `mmid.cuh` | `plugin.py`'s `IDS_J_TOKENS` per SM beside `CROSSOVER` (16 on sm_86 / sm_120; 64 elsewhere, sm_89 provisional), passed through `mmq_id` / `mmq_id_glu` to `ggml_cuda_mul_mat_q` (`ids_j_tokens`; upstream's rule without it); the L0 tile-width test reads the table |
+| B5 | iq1_m / q2_0 in `PASS_PROVEN` on sm_89 and sm_120 before their L0 | sm_120: the 5080's L0 at the final tree runs them (`PLACED` per SM), passed. sm_89: a hard gate before step 5, with A1 (L3-4) |
+| B6 | std.moe's expert-store members are undocumented | listed in `Resident`'s docstring; `pass_buffers` None means the pass allocates |
+| C | Step 4 on the 5090: 6 balanced ABBA rounds for rows within 3% of their bar; short kernels timed in a graph or over ≥ 100 launches, checked against nsys; acceptance 5's offload decode rows on the re-filled lock against main's lock | §5.2 and acceptance 5 |
+| C | Commit B-dec's evidence | `evidence/mp3_bdec_2026-10-19.json` (per call on the 5090, 5080 and A5000; batched decode on the 5090 and 5080) |
+| C | Re-run the sm_120 L0 and identity at the final tree | the 5080 at `fed13f1`: L0 308 passed, memcheck 0 errors; identity below (step 3d) |
+| C-M2 | Confirm L3-2b's mechanism with the allocator's counters | `prefill.py` records each timed prompt's `num_alloc_retries`, `num_device_alloc`, `num_device_free` deltas. **All zero in steady state** on the final tree (5080 natural fit, 1K / 4K / 32K, 5 rounds; the 16 GB lock, UD-IQ3_XXS at its flags, 1K / 4K / 16K) — and on the tree with the cost (`a9a0333`) too. So the mechanism is not allocator traffic; it stays unexplained (GPU kernel time unchanged, idle time between kernels grown, cured by the id workspace's placement) |
+| A1 | sm_89 has no step-3 record | hard gate before step 5 (L3-4) |
+| A2 | The fused store's coverage | the every-type and routings tests assert `glu_store` for every type at the 30B's shape: every type takes it on sm_86 and sm_120 (MMA layouts), so the fused set is all of `TYPES` there |
+| A3 | `_check_buffers` misses scratch over `x` | refused (and in the CPU reference); an L0 case |
+| A4 | D4 on arenas | recorded: the offload store's arena stacks bind `linear_experts_arena@1` to the same `LinearExperts`, so D4's store runs there too; bits unaffected (identity, natural fit and capped F5b) |
+
+**Step 3d (D3′, the router per pass).**
+- **What landed** (`a1e284a`): D3's router GEMM back (the revert of `8f434fd`); kernels.ggml_cuda's router declares
+  `pass_rows`, and std.moe routes a pass of whole `CHUNK`s in one call (a `moe_router@1` contract term); the
+  call-size test checks the router's call sizes (4,096 then 4 at 4,100 tokens).
+- **Bits:** the final tree's `prompt_logprobs` hashes equal the per-chunk D3 + D4 tree's (`e9048de`): sm_86 resident
+  and natural; sm_120 5080 natural and capped F5b, 5090 resident. D3's L2 verdicts (§7.1) therefore stand for D3′.
+- **Keep rule** (each tree against `9e23a71`, D3 reverted; 5 interleaved rounds, §5.2's method):
+  - 5080 natural fit: 1.0001 / **1.0116** / 1.0050× at 1K / 4K / 32K (sd 0.0043 / 0.0002 / 0.0003): **kept**
+    (4K ≥ max(0.5%, 3 sd)). Per chunk, D3 had given +0.42% there: the per-chunk launches were the gap (L3-1).
+  - 5090 resident: 1.0149 / 1.0167 / **1.0101**× (sd 0.0073 / 0.0075 / 0.0028): **kept** (32K ≥ max(0.5%, 3 sd)).
+    This 5090 desktop held lower clocks than step 3's (p10 / p50 2,467 / 2,520 MHz), hence the wider sd.
+  - The 5090's medians, `9e23a71` → the final tree: 53.1 → 52.1, 179.3 → 174.7, 3,300 → 3,260 ms. Against step 0's
+    FreeToken medians (another session and desktop; step 4 measures both in one): 0.971× / 0.981× / 0.994× gated
+    (0.927× default): the 4K and 32K gated rows stay under their bars (O2).
+- **D4's fused q8_1 quantize** (optional, only if the 5090 4K row stays under 1.0×): not built. Step 0's nsys puts all
+  of the experts' q8_1 quantize at 4.9 ms of the 5090's 4K step (both stacks' inputs, ≈ 2.8%; down's alone less),
+  short of the row's gap, and a bitwise q8_1 store in mmq's tile is a kernel of its own: for the lead.
+- **The re-fill:** the final tree's natural fill on the 5080 is 3,229 / 1,700 / 1,529 (D3 returns 12 + 12 slots);
+  the A/B pinned both trees at 3,217 / 1,688 / 1,529. The 16 GB lock's startup KV: 18,416 tokens (main 18,752).
+
 ### Building: the lead's decisions after step 3 (2026-10-19)
 
 Records: `evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisects, the fits, the final tree's checks).
@@ -1106,7 +1169,7 @@ Records: `evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisect
 | L3-2b | Find the cost: bisected on the 5080 (4K prompts, 10 per arm, 5 interleaved rounds; each arm against D4 without D3) | 3c alone 0.9999×; step 3 with 3b's kernels.ggml_cuda `plugin.py` swapped for 3c's 0.9998×, with 3b's std / tiered / policy files swapped instead 0.9971×: the cost is in kernels.ggml_cuda's D10. Host time was not it: mmvq calls skipping D10's work (`e076f00`, an L0 check fails without it), a ring step counting held slots as the rounds pick them (`a815981`) and host caches for D10's helpers (2 → 0.4 ms of host time per 4K prompt on the A5000) left 0.9979×. The persistent id workspace back at `pass_rows` (3b had sized it for decode, so a 4,096-row call took its id maps and q8_1 activations from the caller's scratch, shared by gate/up and down, or a fresh buffer) gave 1.0000× | `c0fe9c2`: one persistent id workspace per `in` at `pass_rows` again; D10's `scratch` holds gate/up's f32 output only (none under D4's store); `1f535e8` drops the host caches. **Against D4 without D3, 5 rounds, the fixed prompt set: 0.9999 / 0.9997 / 1.0000× at 1K / 4K / 32K (sd ≤ 0.0008), within ±0.05%**; the final tree at 4K: 1.0000× (sd 0.0002). The mechanism (why a shared or fresh buffer costs 0.2%) is not isolated; GPU kernel time was unchanged on the A5000's nsys, the idle time between kernels grew |
 | L3-2c | The final tree's checks (`1f535e8`; the L3-2a revert after it changes no bits and, on these stacks, no memory) | sm_86: 618 passed (the kernel, MoE, tiered, offload and judge suites); sm_120 (5080): L0 308 passed, memcheck 0 errors | `prompt_logprobs` hashes equal to the D5 tree's (sm_86 resident and natural; 5080 natural and capped F5b), so D4, 3b, 3c and the fixes stay bitwise. The 5080's natural fill: 3,217 / 1,688 / 1,529 cache slots (52.36%, the D5 tree's and 6 + 6 slots under the step-3 tree's; the lock's 3,236 / 1,618 / 1,618 hold 52.7%). Acceptance 6: against the step-2 tree's fill in the same session (3,223 / 1,694) the cost is D5's 6 + 6 slots, inside its ≈ 9-expert budget; against the lock's counts, filled by `fit.py`'s default configuration, it is 19 gate/up slots: step 5's re-fill settles it. Step 3b's tail check (one round each): every borrowing step a ring step with `ring_ok`, no `SHORT`; the tail is gate/up's last 209 slots (the passes' `out`s only now); prefill 337.4 / 6,278 ms (`tail`) against 336.3 / 6,280 (`coldest`); miss bytes per decode token 120.6 / 57.4 against 121.3 / 58.6 MB. The 5090 (queued) did not run: its resident rows had shown no cost beyond 1 sd |
 | L3-3 | O2 to the owner; the bar stays; step 4 measures | — | — |
-| L3-4 | Retry the 4090 for B-dev5's sm_89 L0 (IQ1_M, Q2_0) and C5's per-call A/B | queued again (2026-10-19) | the allocation stayed queued (Priority) through these runs: not run. Needed before step 5's propagation round, not step 4 |
+| L3-4 | Retry the 4090 for B-dev5's sm_89 L0 (IQ1_M, Q2_0) and C5's per-call A/B; with the panel's A1, the sm_89 record | queued again twice (2026-10-19); never started (Priority) | **Hard gate before step 5** (not step 4), on a 4090 NVFP4 or MXFP4 lock at the final tree: the full L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`), memcheck and the `prompt_logprobs` identity — covering D4's NVFP4 scale2 epilogue, D5, B-dec's 64-token branch, D10 and the iq1_m / q2_0 `PASS_PROVEN` entries; any sm_89 pair that fails is dropped. Plus C5's per-call sweep (B-dec's sm_89 threshold) |
 
 ### Building: the panel's code review of steps 0–2 (2026-10-18; dispositions)
 
@@ -1136,7 +1199,7 @@ Records: `evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisect
 | B-dev2 | D2's flat range is launched only where a call's tokens span several column tiles (⌈T ÷ J⌉ > 1, read in the kernel as ntx > 1); otherwise upstream's launch, one tile per entry (D2 said the flat grid always) | with C-M6's fallback (J against T up to 64 tokens) every entry fits one tile, and the flat range's extra blocks and binary search cost 2–7% per call against main on the A5000 | ≤ 64-token calls run main's launch exactly (A/B 0.99–1.02 on three cards); bits the same either way |
 | B-dev3 | `vendor.sh --check` reverses `vendor.patch` with `patch -E` (D9 named the template instance file but not how the check treats a file upstream lacks) | the IQ1_M instance is Holon's own, created by the patch; `patch -R` alone leaves it empty, and the check's file list then differs from `SHA256SUMS` | the check passes with the patch-created file; a refresh still creates it by applying the patch |
 | B-dev4 | Q2_0's L0 oracle reads its blocks in the test helper, not through gguf-py (§5 assumes gguf-py's dequantization for every type) | gguf-py 0.19 (`uv.lock`) has no Q2_0 | the reader is ggml-quants.c's `dequantize_row_q2_0` definition; convert and get_rows equal it bit for bit; `testing`'s reference provider still cannot serve a Q2_0 file (FN's concern) |
-| B-dev5 | iq1_m and q2_0 are in `PASS_PROVEN` on sm_89 and sm_120 before their L0 runs there (D0: an entry exists only where its L0 runs) | the lead's instruction: `PASS_PROVEN` lists FN's types on every SM, and the cluster L0 (`PLACED` per SM) runs them | pending the lead's sm_89 / sm_120 L0 before step 5; a failing pair is removed |
+| B-dev5 | iq1_m and q2_0 are in `PASS_PROVEN` on sm_89 and sm_120 before their L0 runs there (D0: an entry exists only where its L0 runs) | the lead's instruction: `PASS_PROVEN` lists FN's types on every SM, and the cluster L0 (`PLACED` per SM) runs them | pending the lead's sm_89 / sm_120 L0 before step 5; a failing pair is removed; with the panel's A1 the whole sm_89 record is one gate before step 5 (L3-4) |
 | B-dec | C-M6's fallback narrowed (the panel's C5, decided before step 4; D2 said J against the mean at every T): J against T for calls of ≤ 16 tokens on sm_86 and sm_120, ≤ 64 on sm_89 until the 4090's per-call A/B runs | D2's own A/B: the mean's 8-row tiles made the down stack up to 8% slower at 16 tokens; above 16 the mean wins per call (5090 / 5080, every lock and FN type: 0.52–0.99× main's time at T = 17–64, 0.998–1.013× at 16) | batched decode, paired ×4 rounds, tokens/s over main's: 5090 Q4_K_M B16 / 32 / 64 1.001 / 1.018 / 1.054× (sd ≤ 0.003); 5080 UD-IQ3_XXS B16 / 32 1.000 / 1.029× (sd ≤ 0.001). Types outside the sweep (no lock uses them) are accepted only behind an end-to-end decode check: IQ1_M and Q2_0's is FN's |
 | B-dev6 | The tail's range is sized for the bound configuration's largest pass, min(`pass_rows`, `max_step_tokens`) rows (D11: `scratch_bytes(pass_rows)`) | no step carries more than `max_step_tokens` tokens (verify steps beyond it are graphed and never borrow), and `pass_rows` ≥ `CHUNK` would over-size short budgets | the 30B lock: unchanged (4,096, 366 slots); the CPU tests' 10-token budget lends 15 slots, not ≈ 770 (which the bind check would refuse) |
 | B-dev7 | The range holds one `scratch` plus gate/up's `out` and down's `out` (D10 named `out` and `scratch`) | down reads gate/up's output while writing its own (`out` must not overlap `x`), and the combine reads down's afterwards | three buffers at 256-byte boundaries; a pass larger than the range would fall back to allocating (never at the bound configuration) |
