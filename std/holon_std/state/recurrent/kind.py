@@ -18,7 +18,9 @@ Where checkpoints are taken is a list of policies, from the deployment's plugin 
     would keep them). Plugins implement it structurally.
   The kind keeps a request's last `keep_tentative` = the largest `keep` of its policies (the engine refuses one above
   0 without a state tier).
-- `recurrent.checkpoints`: units of the checkpoint pool (default: one per request slot; 0: no checkpoints, no cuts).
+- `recurrent.checkpoints`: units of the checkpoint pool. Set, they are required: the ledger refuses a start that cannot
+  give them (0: no checkpoints, no cuts). Unset, the default is one per request slot, best effort: a budget that does
+  not fit them gives the pool 0 units, so the kind takes no checkpoints and cuts nothing, and says so once (stderr).
   With a state tier the pool only stages payloads between a step and its commit (D7).
 
 Positions are multiples of the spec's alignment and of the page size: the prefix index files payloads per block of
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 import math
 import re
+import sys
 
 import numpy as np
 from holon.api import HitLen, MemOp, Payload, Ref
@@ -82,9 +85,11 @@ class Recurrent:
         self.policies = [self._policy(name.strip(), ctx) for name in
                          str(opts.get("recurrent.policy", "prompt_end")).split(",") if name.strip()]
         self.keep_tentative = max((getattr(p, "keep", 0) for p in self.policies), default=0)
-        units = self.wanted = int(opts.get("recurrent.checkpoints", ctx.options["max_seqs"]))
+        asked = str(opts.get("recurrent.checkpoints", "")).strip()
+        units = int(asked) if asked else ctx.options["max_seqs"]
         self.payloads = ctx.pool(f"{spec.name}.checkpoints", unit_bytes=spec.shape.unit_bytes, segments=spec.segments,
-                                 pref_units=units)
+                                 min_units=units if asked else 0, pref_units=units)    # set: required
+        self.warn = not asked and units > 0          # the default, best effort: say so if it got no units
         self.payload_pool = self.payloads.name
 
     def _policy(self, name: str, ctx):
@@ -119,10 +124,16 @@ class Recurrent:
         return 1 << 62
 
     def next_publish(self, seq) -> int | None:
-        """The next position after the request's computed tokens where a policy checkpoints; none if no checkpoint
-        units were asked for (`recurrent.checkpoints` 0). Asked for and given none (the ledger's budget did not fit
-        them), each is still cut for and published, finds no unit, and counts as dropped (`dropped_publishes`)."""
-        found = self._next(seq) if self.wanted else None
+        """The next position after the request's computed tokens where a policy checkpoints (none without
+        checkpoint units)."""
+        if not self.payloads.capacity:
+            if self.warn:                            # once, at the first request
+                self.warn = False
+                print(f"holon: {self.payloads.name} got 0 units (the state budget did not fit the default "
+                      f"recurrent.checkpoints): no prefix reuse for {self.spec.name}; set recurrent.checkpoints to "
+                      "require them", file=sys.stderr, flush=True)
+            return None
+        found = self._next(seq)
         return found[0] if found is not None else None
 
     def cut(self, seq, start: int, n: int) -> int:

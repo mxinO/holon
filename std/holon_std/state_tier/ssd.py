@@ -34,11 +34,10 @@ from holon.api import BlockRecord, Payload
 
 ALIGN = 4096
 MANIFEST = "manifest.json"
-# One 3-thread set (the default `io_threads`), K-M4 and step 3 on the RTX 5080's drive; tune measures them per host.
-# read: O_DIRECT, 3 threads; write: sustained past the drive's cache (K-M4's 3-thread window was 2.20 GB/s, as at 1,
-# 2 and 4: writes do not scale with threads); mixed: step 3's factor at 3 threads; read_beside: reads beside
-# background writes at 3 threads.
-RATES = {"read": 2.55e9, "write": 1.77e9, "mixed": 0.74, "read_beside": 0.80}
+# One 3-thread set (the default `io_threads`) on the RTX 5080 desktop's drive; tune measures them per host (`tune
+# --ssd-rates`). read: O_DIRECT page units, 3 threads (`tune`, step 4: 2.24 GB/s); write: sustained past the drive's
+# cache (K-M4); mixed: step 3's factor at 3 threads; read_beside: reads beside background writes at 3 threads.
+RATES = {"read": 2.24e9, "write": 1.77e9, "mixed": 0.74, "read_beside": 0.80}
 
 
 def _aligned(unit: Sequence[memoryview], offset: int) -> bool:
