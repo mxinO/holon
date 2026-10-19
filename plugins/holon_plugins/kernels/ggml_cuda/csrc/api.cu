@@ -430,13 +430,32 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
 
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       int64_t slots, int32_t * errors, void * workspace, size_t workspace_bytes, void * stream) {
+                       int64_t slots, int32_t * errors, int swiglu, const float * gate_scale, const float * up_scale,
+                       void * workspace, size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = experts_view((ggml_type) type, w, experts, out, in, 0, out);
     const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
-    ggml_tensor dst = with_prec(tensor3(GGML_TYPE_F32, y, out, k, tokens), prec);
-    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst, nullptr, slots, errors);
+    ggml_tensor dst = with_prec(tensor3(GGML_TYPE_F32, y, swiglu ? out/2 : out, k, tokens), prec);
+    ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst, nullptr, slots, errors, swiglu, gate_scale, up_scale);
+}
+
+int holon_ggml_mmq_glu(int type, int prec, int64_t out) {
+    const int cc = device_cc();
+    const ggml_prec prec_src1 = (ggml_prec) holon_ggml_mmq_prec(type, prec);
+    for (int J = 8; J <= 128; J += 8) {                                   // every tile width a call may pick
+        const bool fallback = ggml_cuda_mmq_needs_fallback(out);
+        const ggml_cuda_mmq_config c = ggml_cuda_mmq_get_config((ggml_type) type, J, fallback, cc, prec_src1);
+        if (c.type == GGML_TYPE_COUNT) {
+            continue;
+        }
+        const size_t smem = mmq_get_nbytes_shared(c, cc);
+        if (fallback || !c.use_mma_data_layout(cc) || out % c.I != 0 ||
+                (smem <= ggml_cuda_info().devices[ggml_cuda_get_device()].smpbo && size_t(c.I/2*c.J)*sizeof(float) > smem - c.J*sizeof(int))) {
+            return 0;
+        }
+    }
+    return 1;
 }
 
 void holon_ggml_swiglu(const float * x, int64_t rows, int64_t n, const float * gate_scale, const float * up_scale,

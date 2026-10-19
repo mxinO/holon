@@ -21,7 +21,9 @@ counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate a
 
 `linear_experts` is llama.cpp's MUL_MAT_ID per call of up to `pass_rows` rows (docs/v1-moe-prefill.md D0): mmvq with
 ids up to the type's limit (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack,
-else mmq with ids into f32, followed for swiglu by our f32 SwiGLU. `pass_rows` is 512 (llama.cpp's ubatch), or on an
+else mmq with ids into f32, followed for swiglu by our f32 SwiGLU — or, where mmq can (`mmq_glu`: the stack's rows in
+whole tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/v1-moe-prefill.md D4: no f32
+gate/up output). `pass_rows` is 512 (llama.cpp's ubatch), or on an
 (SM, type, mode) whose L0 proves a row's bits the same in any call of whole 512-row chunks (`PASS_PROVEN`) up to
 `PASS_ROWS`, capped by the id helper's pairs, the step budget and the `ggml_cuda.pass_rows` option; a call's last
 partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for `pass_rows`) holds mmq's id maps besides
@@ -459,6 +461,8 @@ class LinearExperts(_Matmul):
         # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which
         # is how a stack of more slots than experts (a class arena) costs no more than the layer's own stack
         self.slots = self.experts + self.top_k
+        # D4: SwiGLU in mmq's store (bitwise our SwiGLU of its unfused output), where mmq can for this stack
+        self.glu_store = self.swiglu and self.lib.mmq_glu(self.device, self.type, self.prec, self.out)
         # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
         # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
@@ -516,6 +520,10 @@ class LinearExperts(_Matmul):
                 self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
+                continue
+            if self.glu_store:
+                self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                                    gate_scale, up_scale)
                 continue
             if gate_up is None:
                 gate_up = torch.empty(min(tokens, self.pass_rows), self.top_k, self.out, device=x.device)

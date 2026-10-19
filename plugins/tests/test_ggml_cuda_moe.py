@@ -965,12 +965,16 @@ def test_nvfp4_scale2_per_expert_on_both_paths(ctx, lib):
         check(y, emulated(down, weighted, h, ids), INTER, f"down T={tokens}")
         assert torch.equal(y, down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None]), f"down T={tokens}"
     ids, x, h = uniform(64, E, seed=5), gate_up_input(64, seed=5), down_input(64, 5)
+    # D4: the fused store (docs/v1-moe-prefill.md) against ours with halves scaled to f32's smallest normals, their
+    # products below them (flushed alike)
+    assert fused.glu_store and check_swiglu(lib, fused, none, sg, x, ids, "subnormal halves",
+                                            gu | {"scale2": gu["scale2"] * 1e-36}) is None
     with pytest.raises(ValueError, match=r"scale2 \(32,\) for 32 experts, glu swiglu"):    # one row for two halves
         fused(x, gu | {"scale2": dw["scale2"]}, ids)
     with PLANTS["nvfp4-scale2-by-slot"]():                                                                  # N4
         assert not torch.equal(down(h, dw, ids), down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None])
     with PLANTS["nvfp4-scale2-after-swiglu"](), pytest.raises(AssertionError, match="mmq's SwiGLU differs"):  # N5
-        check_swiglu(lib, fused, none, sg, x, ids, "N5", gu)
+        check_swiglu(lib, experts(ctx, "nvfp4/hf", H, 2 * INTER, 1, "swiglu"), none, sg, x, ids, "N5", gu)
 
 
 @pytest.mark.parametrize("name", FP4)

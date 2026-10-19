@@ -134,7 +134,8 @@ ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tenso
 
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors) {
+        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
+        const bool glu, const float * gate_scale, const float * up_scale) { // Holon: glu, dst out/2 rows (mmq.cuh)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -352,13 +353,18 @@ void ggml_cuda_mul_mat_q(
 
     // Note that n_z is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
     // Holon: n_z compact entries, not the ne02 slots; each names its slot after expert_bounds (mmid.cuh)
-    const mmq_args args = {
+    mmq_args args = {
         src0_d, src0->type, (const int *) src1_q8_1.get(), ids_dst.get(), expert_bounds.get(), dst_d,
         src1_scale.ptr,
         ne00, ne01, ne_get_rows, s01, ne_get_rows, s1,
         n_z, n_z, s02, s12, s2,
         ne03, ne13, s03, s13, s3,
         ne12, J_best};
+    GGML_ASSERT(!glu || (dst->ne[0] == ne01/2 && ne01 % 2 == 0)); // Holon: glu stores silu(gate) * up, out/2 rows
+    GGML_ASSERT(!gate_scale == !up_scale && (glu || !gate_scale));
+    args.glu = glu;
+    args.gate_scale = gate_scale;
+    args.up_scale = up_scale;
 
     ggml_cuda_mul_mat_q_switch_type(ctx, args, stream, prec_src1);
 }

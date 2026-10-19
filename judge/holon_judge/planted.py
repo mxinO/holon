@@ -474,14 +474,23 @@ def scale2_by_slot() -> Iterator[None]:
 
 @contextlib.contextmanager
 def scale2_after_swiglu() -> Iterator[None]:
-    """N5: mmq's gate/up SwiGLU takes `scale2` after the product (silu(g)·u·s_g·s_u), not on each half before it."""
+    """N5: mmq's gate/up SwiGLU takes `scale2` after the product (silu(g)·u·s_g·s_u), not on each half before it — on
+    the unfused path (mmq's f32 output, then our SwiGLU), which the plant forces where mmq's store would fuse it
+    (docs/v1-moe-prefill.md D4: the fused store's scales are held by the same bitwise check against our SwiGLU)."""
     from holon_plugins.kernels.ggml_cuda import plugin
+
+    init = plugin.LinearExperts.__init__
+
+    def unfused(self, *args, **kwargs):
+        init(self, *args, **kwargs)
+        self.glu_store = False
 
     def planted(self, gate_up, y, gate_scale, up_scale, ids):
         self.lib.swiglu(gate_up, y, None, None, None)
         if up_scale is not None:
             y.mul_((gate_scale * up_scale)[ids][..., None])
-    with mock.patch.object(plugin.LinearExperts, "_swiglu", planted):
+    with mock.patch.object(plugin.LinearExperts, "_swiglu", planted), \
+            mock.patch.object(plugin.LinearExperts, "__init__", unfused):
         yield
 
 
