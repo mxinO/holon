@@ -3,9 +3,9 @@
 Status: **design rev 6 (2026-10-18); building: steps 0–3, 3b, 3c and 3d done** (§2.1–§2.2, §7.1). Step 0 tripped no
 decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
 keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
-id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) passes the keep rule on both lock classes
-and is kept. The 5090 4K row stays under its bar with every item (O2, with the owner); the sm_89 record is a gate
-before step 5 (§10 L3-4).
+id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is kept: it passes M0.7's rule on the 5090's
+32K row and the 5080's 4K row (not on every row). The 5090 4K row stays under its bar with every item (O2, with the
+owner); the sm_89 record is a gate before step 5 (§10 L3-4).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -688,6 +688,9 @@ and the id maps).
 - **D10** moves gate/up's f32 intermediate (where D4's store does not apply) to passed `scratch`; the id workspaces
   stay persistent at `pass_rows` (§10 L3-2b). The peak is unchanged.
 - **D5** adds ≈ 25 MB (30B) or ≈ 66 MB (8B) of `qlinear` workspace at 4,096.
+- **D3′**'s router transient grows with the pass: its partials [ks, T, E] f32 plus the logits [T, E], ≈ 34 MB on the
+  30B (E = 128) and ≈ 42 MB at FN's E = 512, at 4,096 tokens (the step-3 panel's A). The 16 GB soak watches it
+  (§7 step 4).
 - **Per class** (96 KiB of KV per token on the 30B):
   - **16 GB RTX 5080, resident UD-IQ3_XXS** (`max_step_tokens` 2,048, `max_model_len` 16,384): M0.2 recorded 18.6K KV
     tokens, so −1.8K leaves ≈ 16.8K, barely above 16,384. Step 0 measures it; if it lands under 16,384 or under the
@@ -1132,7 +1135,7 @@ Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-
 | C | Step 4 on the 5090: 6 balanced ABBA rounds for rows within 3% of their bar; short kernels timed in a graph or over ≥ 100 launches, checked against nsys; acceptance 5's offload decode rows on the re-filled lock against main's lock | §5.2 and acceptance 5 |
 | C | Commit B-dec's evidence | `evidence/mp3_bdec_2026-10-19.json` (per call on the 5090, 5080 and A5000; batched decode on the 5090 and 5080) |
 | C | Re-run the sm_120 L0 and identity at the final tree | the 5080 at `fed13f1`: L0 308 passed, memcheck 0 errors; identity below (step 3d) |
-| C-M2 | Confirm L3-2b's mechanism with the allocator's counters | `prefill.py` records each timed prompt's `num_alloc_retries`, `num_device_alloc`, `num_device_free` deltas. **All zero in steady state** on the final tree (5080 natural fit, 1K / 4K / 32K, 5 rounds; the 16 GB lock, UD-IQ3_XXS at its flags, 1K / 4K / 16K) — and on the tree with the cost (`a9a0333`) too. So the mechanism is not allocator traffic; it stays unexplained (GPU kernel time unchanged, idle time between kernels grown, cured by the id workspace's placement) |
+| C-M2 | Confirm L3-2b's mechanism with the allocator's counters | `prefill.py` records each timed prompt's `num_alloc_retries`, `num_device_alloc`, `num_device_free` deltas. **All zero in steady state** on the final tree (5080 natural fit, 1K / 4K / 32K, 5 rounds; the 16 GB lock, UD-IQ3_XXS at its flags, 1K / 4K / 16K) — and on the tree with the cost (`a9a0333`) too. So the mechanism is not allocator traffic; it stays unexplained (GPU kernel time unchanged, idle time between kernels grown, cured by the id workspace's placement). **Closed** (the panel's C): the allocator hypothesis is ruled out; the residual is recorded as an unexplained host-path effect of where a call's id maps and activations live |
 | A1 | sm_89 has no step-3 record | hard gate before step 5 (L3-4) |
 | A2 | The fused store's coverage | the every-type and routings tests assert `glu_store` for every type at the 30B's shape: every type takes it on sm_86 and sm_120 (MMA layouts), so the fused set is all of `TYPES` there |
 | A3 | `_check_buffers` misses scratch over `x` | refused (and in the CPU reference); an L0 case |
@@ -1144,7 +1147,8 @@ Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-
   call-size test checks the router's call sizes (4,096 then 4 at 4,100 tokens).
 - **Bits:** the final tree's `prompt_logprobs` hashes equal the per-chunk D3 + D4 tree's (`e9048de`): sm_86 resident
   and natural; sm_120 5080 natural and capped F5b, 5090 resident. D3's L2 verdicts (§7.1) therefore stand for D3′.
-- **Keep rule** (each tree against `9e23a71`, D3 reverted; 5 interleaved rounds, §5.2's method):
+- **Keep rule** (each tree against `9e23a71`, D3 reverted; 5 interleaved rounds, §5.2's method; it passes on the 5080's 4K
+  row and the 5090's 32K row):
   - 5080 natural fit: 1.0001 / **1.0116** / 1.0050× at 1K / 4K / 32K (sd 0.0043 / 0.0002 / 0.0003): **kept**
     (4K ≥ max(0.5%, 3 sd)). Per chunk, D3 had given +0.42% there: the per-chunk launches were the gap (L3-1).
   - 5090 resident: 1.0149 / 1.0167 / **1.0101**× (sd 0.0073 / 0.0075 / 0.0028): **kept** (32K ≥ max(0.5%, 3 sd)).

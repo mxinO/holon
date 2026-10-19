@@ -9,6 +9,7 @@ beside its llama.cpp and FreeToken ones, and each engine's expert-cache counters
 - freetoken: offload_ctx's worker plus `moe_collect_stats` (its in-graph decode miss counters), read per request.
 - llama: offload_ctx's worker as is.
 
+An arm may name its own `python` (e.g. a wrapper pinning another tree's PYTHONPATH).
 `chunk` / `kernel_chunk` (arm keys) set std.moe's expert-path pass size and kernels.ggml_cuda's mmq rows per call in
 the Holon worker's process only (prefill probes for D8; both 512 as shipped).
 `--nsys-context C` brackets context C's request with cudaProfilerStart/Stop (for `nsys --capture-range=cudaProfilerApi`)
@@ -244,7 +245,8 @@ def orchestrate(a: argparse.Namespace) -> None:
             else:
                 raise SystemExit(f"GPU stayed busy: {busy}")
             log = outdir / f"r{rnd}_{arm['name']}.log"
-            cmd = [*shlex.split(arm.get("wrap", "")), py[arm["engine"]], str(pathlib.Path(__file__)), "worker",
+            cmd = [*shlex.split(arm.get("wrap", "")), arm.get("python", py[arm["engine"]]), str(pathlib.Path(__file__)),
+                   "worker",
                    "--engine", arm["engine"], "--model", a.model, "--ctx", str(arm.get("ctx", a.ctx)),
                    "--flags", arm["flags"], "--contexts", *map(str, arm.get("contexts", a.contexts)),
                    "--nsys-context", str(arm.get("nsys_context", 0))]

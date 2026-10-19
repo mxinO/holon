@@ -209,9 +209,9 @@ def orchestrate(a: argparse.Namespace) -> None:
     arms = json.loads(pathlib.Path(a.arms).read_text())
     out = pathlib.Path(a.out)
     out.mkdir(parents=True, exist_ok=True)
-    for rnd in range(a.rounds):
+    for rnd in range(a.first_round, a.first_round + a.rounds):
         for arm in arms if rnd % 2 == 0 else arms[::-1]:
-            if rnd >= arm.get("rounds", a.rounds):
+            if rnd - a.first_round >= arm.get("rounds", a.rounds):
                 continue
             log = out / f"r{rnd}_{arm['name']}.log"
             nsys = shlex.split(arm.get("nsys", "").replace("{out}", str(out / f"{arm['name']}")))
@@ -247,6 +247,7 @@ def main() -> None:
     o.add_argument("--arms", required=True)
     o.add_argument("--out", required=True)
     o.add_argument("--rounds", type=int, default=2)
+    o.add_argument("--first-round", type=int, default=0, help="the first round's index (a driver running one round)")
     o.add_argument("--holon-python", default=sys.executable)
     o.add_argument("--freetoken-python", default=str(ROOT / "bench" / ".envs" / "freetoken-offload" / "bin" / "python"))
     for p in (w, o):
