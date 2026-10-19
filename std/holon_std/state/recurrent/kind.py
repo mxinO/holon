@@ -82,7 +82,7 @@ class Recurrent:
         self.policies = [self._policy(name.strip(), ctx) for name in
                          str(opts.get("recurrent.policy", "prompt_end")).split(",") if name.strip()]
         self.keep_tentative = max((getattr(p, "keep", 0) for p in self.policies), default=0)
-        units = int(opts.get("recurrent.checkpoints", ctx.options["max_seqs"]))
+        units = self.wanted = int(opts.get("recurrent.checkpoints", ctx.options["max_seqs"]))
         self.payloads = ctx.pool(f"{spec.name}.checkpoints", unit_bytes=spec.shape.unit_bytes, segments=spec.segments,
                                  pref_units=units)
         self.payload_pool = self.payloads.name
@@ -119,9 +119,10 @@ class Recurrent:
         return 1 << 62
 
     def next_publish(self, seq) -> int | None:
-        """The next position after the request's computed tokens where a policy checkpoints (none without
-        checkpoint units)."""
-        found = self._next(seq) if self.payloads.capacity else None
+        """The next position after the request's computed tokens where a policy checkpoints; none if no checkpoint
+        units were asked for (`recurrent.checkpoints` 0). Asked for and given none (the ledger's budget did not fit
+        them), each is still cut for and published, finds no unit, and counts as dropped (`dropped_publishes`)."""
+        found = self._next(seq) if self.wanted else None
         return found[0] if found is not None else None
 
     def cut(self, seq, start: int, n: int) -> int:

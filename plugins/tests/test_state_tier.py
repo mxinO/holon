@@ -24,10 +24,10 @@ class _Done:
 
 
 def _bare(admit: str = "publish", pages: int = 6, payloads: int = 3, stall: int = 0, wide: bool = False,
-          stream=None):
+          stream=None, max_seqs: int = 1, host_memory: int = 1 << 20):
     """A host level over one 2-segment page pool and one payload pool (`wide`: and one of twice its unit), room for
     `pages` blocks and `payloads` units of the first payload pool's size; its copy streams from `stream`."""
-    ledger = Ledger(torch.device("cpu"), host_memory=1 << 20)
+    ledger = Ledger(torch.device("cpu"), host_memory=host_memory)
     kv = ledger.request("state.kv", unit_bytes=64, segments=2, min_units=16, tokens_per_unit=16)
     ckpt = ledger.plugin_pool("ckpt", unit_bytes=32, min_units=4, pref_units=4)
     pools = {"kv": kv, "plugin.ckpt": ckpt} | ({"plugin.ckpt2": ledger.plugin_pool(
@@ -41,7 +41,7 @@ def _bare(admit: str = "publish", pages: int = 6, payloads: int = 3, stall: int 
         "state_tier.host.admit": admit, "state_tier.step_cost": "1,0,0", "state_tier.stall_bytes": str(stall)}},
         candidates=lambda op, facts: []))
     tier.attach(types.SimpleNamespace(
-        pools=pools, block=16, max_seqs=1, max_model_len=64,
+        pools=pools, block=16, max_seqs=max_seqs, max_model_len=64,
         stream=stream or (lambda: platform.Stream(torch.device("cpu"))),
         host_pool=lambda name, *, unit_bytes, segments, units, mapped=False: ledger.plugin_pool(
             name, unit_bytes=unit_bytes, segments=segments, min_units=units, pref_units=units, device="host",
@@ -101,6 +101,15 @@ def test_attach_refuses_a_payload_level_below_the_payloads_in_flight():
     _bare(pages=3)                                            # host only: no floor for pages (nothing reads back)
     with pytest.raises(RuntimeError, match="too small for the loads in flight"):
         _bare(payloads=1)                                     # a payload per request slot, and one more
+    # the device staging pool (4 units) below max_seqs + 1: refused with the shortfall in bytes, never silently
+    # running without payload stores (a pool the ledger shrank to 0 units dropped every hybrid hit)
+    with pytest.raises(RuntimeError, match=r"staging pools are below .* plugin.ckpt has 4, 32 bytes short"):
+        _bare(max_seqs=4, payloads=5)
+    # host memory is a deployment's: the refusal names the flag and the bytes the host level takes
+    tier, _, _ = _bare()
+    need = sum(p.capacity * p.unit_bytes for p in tier.host.values())
+    with pytest.raises(RuntimeError, match=rf"launch with --host-memory {need}\b"):
+        _bare(host_memory=need - 1)
 
 
 def test_page_loads_take_the_lane_and_payload_loads_do_not():

@@ -70,17 +70,23 @@ def test_a_checkpoint_hit_computes_what_recomputing_does(tiny, policy):
     assert engine.stats()["prefix_tokens_saved"] == 128 and hot == cold
 
 
-def test_without_checkpoint_units_nothing_is_reused(tiny):
-    """A checkpoint pool may get no units (its budget did not fit): publishes find no room, so a turn recomputes."""
+@pytest.mark.parametrize("asked", ["0", "4"], ids=["none-asked", "budget-short"])
+def test_without_checkpoint_units_nothing_is_reused(tiny, asked):
+    """A checkpoint pool with no units, asked for none or given none (its budget did not fit beside the paged floor,
+    so the ledger falls back to its minimum, 0): a turn recomputes. Asked for and given none, every checkpoint the
+    policies wanted counts as dropped, so `dropped_publishes` never reads 0 while hybrid hits are lost."""
     _, path, prompts = tiny
     first = prompts[2]
     turn = first + [7, 8, 9] + prompts[3]
     params = SamplingParams(temperature=0.0, max_tokens=5, logprobs=1)
     cold = _run(_engine(path, prefix_cache=False), turn, params)
-    engine = _engine(path, plugin_options={"recurrent.checkpoints": "0"})
+    probe = _engine(path, plugin_options={"recurrent.checkpoints": "4"}).ledger.pools.values()
+    fits = sum((q.capacity if q.name.endswith(".checkpoints") else q.min_units) * q.unit_bytes for q in probe)
+    engine = _engine(path, plugin_options={"recurrent.checkpoints": asked}, state_memory=fits - 1)
     assert engine.ledger.pool("plugin.ssm_state.checkpoints").capacity == 0
     _run(engine, first, params)
     assert _run(engine, turn, params) == cold and engine.stats()["prefix_tokens_saved"] == 0
+    assert (engine.stats()["dropped_publishes"] > 0) == (asked != "0")
 
 
 def _prefill_steps(engine, prompt) -> int:
@@ -197,12 +203,14 @@ class _Seq:
         self.tokens, self.num_computed, self.prompt_len = [0] * tokens, computed, prompt or tokens
 
 
-def _kind(policy: str, units: int = 2, unit=None):
+def _kind(policy: str, units: int = 2, unit=None, asked: int | None = None):
+    """The kind over a pool of `units` units (`asked`: `recurrent.checkpoints`, default max_seqs)."""
     from holon.api import Slot, StateSpec
     from holon_std.state.recurrent.kind import Recurrent
 
     class _Ctx:
-        options = {"plugins": {"recurrent.policy": policy}, "max_seqs": 2, "page_size": 4}
+        options = {"plugins": {"recurrent.policy": policy} | ({} if asked is None else {
+            "recurrent.checkpoints": str(asked)}), "max_seqs": 2, "page_size": 4}
 
         def pool(self, name, **kw):
             return type("P", (), {"capacity": units, "name": f"plugin.{name}", "num_free": units})()
@@ -221,7 +229,8 @@ def test_the_kinds_cuts_follow_the_in_step_grid():
     assert every.cut(_Seq(300, 64), 64, 236) == 64
     assert prompt_end.cut(_Seq(400, 0), 0, 100) == 64                  # budget-truncated: rounded to the grid
     assert prompt_end.cut(_Seq(400, 0), 0, 30) == 30                   # ... never to nothing
-    assert _kind("prompt_end", units=0).cut(_Seq(400, 0), 0, 100) == 100   # nothing to publish: no rounding
+    assert _kind("prompt_end", units=0, asked=0).cut(_Seq(400, 0), 0, 100) == 100   # none asked for: no rounding
+    assert _kind("prompt_end", units=0).cut(_Seq(400, 0), 0, 100) == 64  # asked, given none: cut, counted dropped
     # every 1024: the next position (2048) lies past the prompt, so its last step is not rounded
     assert _kind("every:1024").cut(_Seq(1500, 1024), 1024, 476) == 476
 

@@ -179,6 +179,13 @@ class HostTier:
         self.per_block = {k: max(1, self.block // self.page_size) for k in pages}
         load = {k: ctx.max_model_len // self.block * self.per_block[k] for k in pages} | {k: 1 for k in payloads}
         floor = {k: ctx.max_seqs + 1 for k in payloads}             # payload stores are mandatory
+        staging = {k: p for k, p in payloads.items() if p.capacity < floor[k]}
+        if staging:                       # the device pools a payload is published into before its store (D7, §7)
+            raise RuntimeError("state_tier: the payload staging pools are below their demand (max_seqs + 1 = "
+                               f"{ctx.max_seqs + 1} units each): " + ", ".join(
+                                   f"{k} has {p.capacity}, {(floor[k] - p.capacity) * p.unit_bytes} bytes short"
+                                   for k, p in staging.items())
+                               + "; raise recurrent.checkpoints or give the state pools that much more memory")
         if self.level is not None:                                   # loads read back into host units
             floor |= {k: ctx.max_seqs * load[k] for k in pages}
         short = {k: (int(self.host_bytes * share[k] // self.dev[k].unit_bytes), f) for k, f in floor.items()
@@ -187,10 +194,17 @@ class HostTier:
             raise RuntimeError("state_tier.host.bytes too small for the loads in flight: " + ", ".join(
                 f"{k} gets {n} units, needs {f}" for k, (n, f) in short.items()))
         self.unit_major = set(pages) if self.level is not None else set()
-        self.host = {k: ctx.host_pool(f"state_tier.{k}", unit_bytes=p.unit_bytes,
-                                      segments=1 if k in self.unit_major else p.segments,
-                                      units=int(self.host_bytes * share[k] // p.unit_bytes), mapped=True)
-                     for k, p in self.dev.items()}
+        units = {k: int(self.host_bytes * share[k] // p.unit_bytes) for k, p in self.dev.items()}
+        try:
+            self.host = {k: ctx.host_pool(f"state_tier.{k}", unit_bytes=p.unit_bytes,
+                                          segments=1 if k in self.unit_major else p.segments, units=units[k],
+                                          mapped=True)
+                         for k, p in self.dev.items()}
+        except Exception as e:            # host memory is a deployment's (`--host-memory`), never in a lock
+            need = sum(n * self.dev[k].unit_bytes for k, n in units.items())
+            raise RuntimeError(f"state_tier: the host level (state_tier.host.bytes) takes {need} bytes of pinned "
+                               f"host memory: launch with --host-memory {need}, plus what other plugins' host "
+                               f"pools hold if any ({e})") from e
         self.free = {k: collections.deque(range(p.capacity)) for k, p in self.host.items()}
         self.reserve = {k: int(self.reserve_opt) if self.reserve_opt is not None else load[k] for k in self.host}
         self.d2h, self.h2d = ctx.stream(), ctx.stream()

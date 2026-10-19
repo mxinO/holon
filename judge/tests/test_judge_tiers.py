@@ -215,7 +215,8 @@ def test_the_policies_plants_fail_bounded(tiny_hybrid, plant, broken):
     the first turn's prompt_end lies a block past it, and answers cross two aligned positions, so a checkpoint filed one
     block early lands where no other one is."""
     trace = _trace(320, 6, 140, (60, 90), 140, (0, 0, 1, 2, 1, 2), turns=2)
-    opts = {"state_tier.host.bytes": "32MiB", "state_tier.host.pages": "0.5"}
+    opts = {"state_tier.host.bytes": "32MiB", "state_tier.host.pages": "0.5",
+            "recurrent.checkpoints": "5"}                         # staging: max_seqs + 1
     build = _builder(tiny_hybrid, max_model_len=trace.max_len, state_memory=16 << 20, plugin_options=opts, slots={})
     tier = {"prefix_cache": True, "overlap": True, "slots": {"tier": "std.state_tier"}}
     configs = {f"{p}, tier": tier | {"plugin_options": opts | {"recurrent.policy": "prompt_end," + p}}
@@ -244,7 +245,7 @@ def test_a_branch_checkpoint_resumes_bitwise_as_recomputed_with_equal_chunks(tin
 
     build = _builder(tiny_hybrid, max_step_tokens=128, max_model_len=512, state_memory=8 << 20, max_seqs=2)
     tiered = build(options={"recurrent.policy": "prompt_end,branch", "state_tier.host.bytes": "32MiB",
-                            "state_tier.host.pages": "0.5"})
+                            "state_tier.host.pages": "0.5", "recurrent.checkpoints": "3"})
     ask(tiered, system + rest[0])                    # prompt_end at 192, past the system prompt
     ask(tiered, system + rest[1])                    # the system prompt's end is a branch point: a checkpoint at 128
     got = ask(tiered, system + rest[2])
