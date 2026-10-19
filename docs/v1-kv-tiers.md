@@ -1461,7 +1461,7 @@ the verification's new argument; fixed, the level's judge cells re-run: 5 passed
 | A-1 + B-2: a checkpoint pool without a tier still fell to 0 units silently (the lead's decision) | fixed | a set `recurrent.checkpoints` is required (`min_units`: the ledger refuses the start); the unset default stays best effort, takes no checkpoints and cuts nothing at 0 units, and says so once per pool on stderr, at the first request (the kind learns its final units only after the engine's last materialize). Post-tag std follow-up ("After the tag"); `test_without_checkpoint_units_nothing_is_reused` |
 | A-1 (doc) | done | the tier's staging refusal at `max_seqs` + 1 is a floor, not a guarantee against drops ("After the tag") |
 | B-1: `tune --ssd-rates` used a 27B unit | fixed | its I/O unit is the tuned engine's largest page unit (the level's unit-major page), or `--ssd-unit`; 557,056 B appears only in the 27B's evidence and tests |
-| C-1 (major): 3a's SSD cells beside decoders on lock 11's clock | rerun; **the 32K cell misses** | below |
+| C-1 (major): 3a's SSD cells beside decoders on lock 11's clock | rerun; **the 32K cell misses**; after the lead's bench change (no std change), 16K and 32K miss; stopped | below |
 | C-2: the default read rate; tune's write not sustained | fixed | `RATES["read"]` 2.24e9, `write` stays 1.77e9 (post-tag std follow-up); tune writes for 60 s and takes the rate of the last 30 s |
 | C-3: 3f on one resume | fixed | the median of 5 resumes per engine (`--resumes`) |
 | C-4: the bounded KL p99 by wave | done; noise established | below; lock 11 stands |
@@ -1490,6 +1490,32 @@ during write-backs, so the lane drains with the clock; the bench blocks it. **Fo
 lanes should catch up on wall time when the loop has not launched (a std change), or the bench should keep stepping
 the decoders while it parks, or both. The bar's SSD rate (the drive's 2.68 GB/s) is unchanged.
 
+**C-1, the lead's decision and the rerun.** The lead ruled out a clock change (lanes catching up on wall time would
+make decisions timing-dependent, against D4) and had the bench changed instead. **The procedure change was made after
+seeing the miss above** (1,050.2 ms against 1,030.2 at 32K): `Bench.down()` now keeps stepping the decoders while its
+write-backs run, as serving keeps launching, and drains only when no decoder runs (idle is unchanged). A unit test
+pins the clock's charge as it is (`test_the_clock_lanes_move_with_launches_never_with_wall_time`: after the writes
+finish in wall time, a read is still charged beside them until launches carry the clock past the write lane). Rerun
+on lock 11, same counters (`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `lead_decision`; clock screen before
+it 2,715 / 2,722 MHz, steady):
+
+| 3a beside decoders | SSD (bar) | gated steps | before the change |
+|---|---|---|---|
+| 4K | 345.4 (359.1) | 9 | 325.6, 9 |
+| 16K | **653.3 (646.7): misses by 1.0%** | 22 | 641.2, 22 |
+| 32K | **1,048.0 (1,030.7): misses by 1.7%** | 39 | 1,050.2, 39 |
+
+The gated steps did not move: stepping the decoders only until the real writes finish does not carry the clock past
+the write lane, because the clock charges the write-backs at 1.77 GB/s (the default sustained rate) and the drive
+wrote them at ≈ 2.3–2.6 GB/s; ≈ 0.5 s of steps advances the clock ≈ 0.5 s against ≈ 0.73 s charged, so the read is
+still charged beside writes. The first attribution (the blocked loop) was therefore only part of it: the rest is the
+clock's conservative write rate, which serving shares. Per the lead's rule, stopped here: nothing else was changed.
+3a idle on lock 11, to confirm: VRAM / RAM / SSD 124.6 / 124.9 / 239.4 ms at 4K, 157.3 / 167.2 / 449.8 at 16K and
+206.0 / 228.5 / 797.8 at 32K, against the first idle run's 124.5 / 124.6 / 238.4, 157.4 / 167.5 / 451.2 and 206.1 /
+228.9 / 740.1 (lock 10's default clock): unchanged but the SSD arm at 32K (+7.8%, bar 993.9). Idle the request is
+gated one step and its step waits for the copies (32K: 0.48 s of enqueue wait), so that difference is the drive's,
+not the clock's.
+
 **C-3.** 3f on lock 11, five parked 16K conversations resumed by each engine: restarted median 450.4 ms (570.4, then
 447.2–450.6), no restart 448.3 ms; `cached_tokens` and outputs identical for all five; bar 608.0 ms: pass.
 
@@ -1513,7 +1539,8 @@ The late sessions are in line in both runs (8: 1.30× the baseline's late p99, i
 8-session excess sits in the first-wave sessions, which never adopt a `branch` checkpoint, and is gone at 16. Noise,
 as established; lock 11 stands and the fired-row analysis was not needed.
 
-Core is unchanged. The full CI suite with these fixes: 1643 passed, 66 skipped; `run_all.sh` clean.
+Core is unchanged. The full CI suite with these fixes: 1643 passed, 66 skipped; `run_all.sh` clean. With the bench
+change and its test: 1644 passed, 66 skipped.
 
 ### Step 4 (2026-10-19): the gate
 
@@ -1548,6 +1575,7 @@ staging 5, `prompt_end,branch,answer:1`, the tuned clock; UD-Q4_K_M on the RTX 5
 | 3a beside, 16K | VRAM 195.5, RAM 208.4, SSD 620.4 ms | RAM ≤ 235.9, SSD ≤ 646.2 | pass (SSD by 4%) |
 | 3a beside, 32K | VRAM 242.7, RAM 275.8, SSD 987.6 ms | RAM ≤ 301.1, SSD ≤ 1,030.6 | pass (SSD by 4%) |
 | 3a beside, rerun on lock 11 (panel C-1) | 4K SSD 325.6, 16K 641.2, 32K **1,050.2** ms | SSD ≤ 359.2 / 646.3 / 1,030.2 | **32K misses** ("the panel's review") |
+| 3a beside, lock 11, the loop stepping while parking (the lead's bench change, made after the miss) | 4K SSD 345.4, 16K **653.3**, 32K **1,048.0** ms | SSD ≤ 359.1 / 646.7 / 1,030.7 | **16K and 32K miss** ("the panel's review") |
 | 3b (32K from RAM, 30 resumes, 285 gated gaps) | gated median 20.27 vs 20.27 ms (1.000×), p90 23.58 vs 23.07 (1.022×); append step 1.001× | ≤ 1.1×, p90 ≤ 1.2× | pass |
 | 3b-SSD (report) | 1,020 gated gaps (34 per resume): 1.000× median, 1.000× p90; append 1.001× | reported | — |
 | 3c (2 rounds) | tier 265 ms p50 against VRAM-only 5,597 ms: **0.047×** (geomean of pairs 0.059×; turns 1–5 0.078×, 6+ 0.045×); throughput **2.26×** (124.0 vs 54.9 tok/s, both rounds) | TTFT p50 ≤ 0.25×, throughput ≥ 1.2× | pass |

@@ -16407,5 +16407,7395 @@
    },
    "command": "python -m holon_tools tune <model> --class rtx-5080/cu130-torch2.11 --no-lock --ops none --ssd-rates <node-local dir> <lock 10's flags>"
   }
+ },
+ "lead_decision": {
+  "date": "2026-10-19",
+  "change": "Bench.down() keeps stepping the decoders while its write-backs run (made after seeing C-1's miss); std unchanged",
+  "clock_screen": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "seconds": 63.9,
+   "batch": 4,
+   "tok_s": 192.2,
+   "samples": 619,
+   "sm_mhz": {
+    "p10": 2715.0,
+    "p50": 2722.0,
+    "p90": 2737.0
+   },
+   "mem_mhz": 14801.0,
+   "power_w": 354.7,
+   "slowdown_share": 0.0,
+   "power_cap_share": 1.0,
+   "steady": true
+  },
+  "3a beside": {
+   "lengths": {
+    "4096": {
+     "kv_bytes": 142606336,
+     "ssd_bytes": 296550400,
+     "median_ttft_ms": {
+      "vram": 161.4895680686459,
+      "ram": 177.79386939946562,
+      "ssd": 345.4311644891277
+     },
+     "p90_ttft_ms": {
+      "vram": 163.731130072847,
+      "ram": 179.88348100334406,
+      "ssd": 346.73104202374816
+     },
+     "bars_ms": {
+      "ram": 188.29292604759328,
+      "ssd": 359.13401903486744
+     },
+     "pass": {
+      "ram": true,
+      "ssd": true
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 1.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 9.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 66.0,
+       "level_read_bytes": 296550400.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 160.58127698488533,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 334.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 161.20647406205535,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 338.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 161.52366204187274,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 338.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 161.74157103523612,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 162.03942010179162,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 163.731130072847,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 161.3228740170598,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 161.14212502725422,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 161.45547409541905,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 161.55171184800565,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 176.54373194091022,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 335.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 179.54877321608365,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 338.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 176.99181917123497,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 179.88348100334406,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 177.1186280529946,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 179.6984721440822,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 342.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 177.15529794804752,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 179.12487615831196,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 177.21955780871212,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 324.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 178.36818099021912,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 343.45577214844525,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 331.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 343.7856091186404,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 346.73104202374816,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 326.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 344.8191829957068,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 348.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 345.1502008829266,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 356.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 345.41249996982515,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 351.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 345.44982900843024,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 342.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 345.4845400992781,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 348.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 345.7879179622978,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2707.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 361.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 346.0432451684028,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 9,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 346.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ]
+     }
+    },
+    "16384": {
+     "kv_bytes": 570425344,
+     "ssd_bytes": 724369408,
+     "median_ttft_ms": {
+      "vram": 196.06099906377494,
+      "ram": 209.2926490586251,
+      "ssd": 653.304971405305
+     },
+     "p90_ttft_ms": {
+      "vram": 368.125522043556,
+      "ram": 212.56972383707762,
+      "ssd": 659.9300161469728
+     },
+     "bars_ms": {
+      "ram": 236.37443097956444,
+      "ssd": 646.6664612802713
+     },
+     "pass": {
+      "ram": true,
+      "ssd": false
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 1.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 22.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 258.0,
+       "level_read_bytes": 724369408.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 194.38061397522688,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 320.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 368.125522043556,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2775.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 309.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 194.9795710388571,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 319.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 195.5147769767791,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 321.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 195.00371115282178,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 323.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 195.9172550123185,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 196.2047431152314,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 196.43179210834205,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 196.6581700835377,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 196.9295588787645,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 206.16856310516596,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 321.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 208.8195369578898,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 320.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 211.93158789537847,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 319.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 209.2021240387112,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 321.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 207.0241468027234,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 321.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 210.02632984891534,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 208.7179080117494,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 320.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 212.56972383707762,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 209.383174078539,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.667
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 211.02964389137924,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 323.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 647.8970600292087,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2805.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 215.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.714
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 650.2931551076472,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 6,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 332.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 651.1212810873985,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1023
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 6,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 187.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 652.904748916626,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 6,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 327.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 651.9378861412406,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 6,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2737.0,
+          "p90": 2737.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 175.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 653.705193893984,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 325.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 656.3575081527233,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 6,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2782.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 210.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 657.8802790027112,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 321.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 657.5063220225275,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2737.0,
+          "p90": 2737.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 185.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 659.9300161469728,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 22,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 319.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ]
+     }
+    },
+    "32768": {
+     "kv_bytes": 1140850688,
+     "ssd_bytes": 1294794752,
+     "median_ttft_ms": {
+      "vram": 242.84476100001484,
+      "ram": 275.58583195786923,
+      "ssd": 1048.0324239470065
+     },
+     "p90_ttft_ms": {
+      "vram": 244.56424079835415,
+      "ram": 278.27822719700634,
+      "ssd": 1474.0856511052698
+     },
+     "bars_ms": {
+      "ram": 301.1716248315938,
+      "ssd": 1030.7315715502114
+     },
+     "pass": {
+      "ram": true,
+      "ssd": false
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 2.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 39.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 514.0,
+       "level_read_bytes": 1294794752.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 240.96940201707184,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 242.34327394515276,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 240.82972295582294,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 242.0176558662206,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 242.70297214388847,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 243.0570290889591,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 302.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 244.05920412391424,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 300.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 242.9865498561412,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 244.56424079835415,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 300.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 243.3453081175685,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 297.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 276.18154021911323,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 300.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 271.9106040894985,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 302.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 272.09619409404695,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 302.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.667
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 272.3789520096034,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 274.1257317829877,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 275.523992953822,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2047
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 302.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 276.95184480398893,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2047
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 300.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 275.64767096191645,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 298.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 278.27822719700634,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 301.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.667
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 276.02532994933426,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 2,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 295.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 1067.9557381663471,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 226.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 1034.609381109476,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2707.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 352.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 1037.85328916274,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 11,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 295.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 1041.9668050017208,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 1044.8306170292199,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 11,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 207.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.909
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 1048.4799158293754,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 11,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 325.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.909
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 1047.5849320646375,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2047
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2730.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 225.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.9
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 1049.2526309099048,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 11,
+         "sm_mhz": {
+          "p10": 2707.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 185.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.909
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 1474.0856511052698,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 14,
+         "sm_mhz": {
+          "p10": 2752.0,
+          "p50": 2760.0,
+          "p90": 2820.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 137.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.643
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 1051.073701120913,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 39,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2662.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 199.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ]
+     }
+    }
+   },
+   "cell": "3a beside",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/11.lock",
+   "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "options": {
+    "kv.format": "q8_0",
+    "recurrent.checkpoints": "5",
+    "recurrent.policy": "prompt_end,branch,answer:1",
+    "state_tier.host.bytes": "16GiB",
+    "state_tier.step_cost": "0.0137211,0.000366293,0.00133747",
+    "state_tier.host.pages": "0.85",
+    "state_tier.levels": "ssd",
+    "state_tier.ssd.bytes": "64GiB",
+    "state_tier.ssd.persist": "off"
+   },
+   "tier_stats": {
+    "restored_blocks": 0,
+    "gated_steps": 814,
+    "page_stores": 31292,
+    "payload_stores": 1830,
+    "write_backs": 31248,
+    "write_back_bytes": 148258029568,
+    "level_reads": 9218,
+    "level_payload_reads": 66,
+    "level_read_bytes": 25472860160,
+    "gated_loads": 99,
+    "loads": 165,
+    "loaded_blocks": 18304,
+    "load_bytes": 40785412096,
+    "payload_load_bytes": 15240462336,
+    "fence": 165,
+    "host_evicted_redundant": 8694,
+    "evicted_payloads": 350,
+    "level_evicted": 4890,
+    "host_units.kv": 6480,
+    "host_units.plugin.conv_state.checkpoints": 16,
+    "host_units.plugin.ssm_state.checkpoints": 16,
+    "level_units.kv": 104856,
+    "level_units.plugin.conv_state.checkpoints": 66,
+    "level_units.plugin.ssm_state.checkpoints": 66
+   },
+   "step_ms": 22.3,
+   "ssd_rate": 2680000000.0,
+   "link": 47500000000.0,
+   "device_pools": {
+    "state.conv_state": 5,
+    "plugin.conv_state.checkpoints": 5,
+    "state.ssm_state": 5,
+    "plugin.ssm_state.checkpoints": 5,
+    "state.kv": 3235
+   },
+   "state_bytes": 3341516800,
+   "command": "python bench/tier_resume.py --cell 3a --beside --model <Qwen3.8-27B-UD-IQ3_S.gguf> --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/11.lock --ssd-dir <node-local dir> --reps 10 --step-ms 22.3"
+  },
+  "3a idle": {
+   "lengths": {
+    "4096": {
+     "kv_bytes": 142606336,
+     "ssd_bytes": 296550400,
+     "median_ttft_ms": {
+      "vram": 124.64410602115095,
+      "ram": 124.859779025428,
+      "ssd": 239.4339714664966
+     },
+     "p90_ttft_ms": {
+      "vram": 125.09257299825549,
+      "ram": 126.2846749741584,
+      "ssd": 241.35683104395866
+     },
+     "bars_ms": {
+      "ram": 151.44746400009834,
+      "ssd": 322.2885569873725
+     },
+     "pass": {
+      "ram": true,
+      "ssd": true
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 1.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 1.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.07412327197380364,
+       "level_reads": 66.0,
+       "level_read_bytes": 296550400.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 124.73014509305358,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 345.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 124.66708500869572,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 346.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 124.95919410139322,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 350.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 125.09257299825549,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 352.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 124.93653385899961,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 350.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 124.32371801696718,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 352.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 124.54407685436308,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 351.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 124.24933793954551,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 352.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 124.24128805287182,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 355.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 124.62112703360617,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 355.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 123.40685306116939,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 347.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 125.71168877184391,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 346.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 124.07596898265183,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 351.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 126.2846749741584,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 350.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 123.4467828180641,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 349.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 125.30662212520838,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 351.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 122.99443501979113,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 354.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 125.1721321605146,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 354.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 124.5474258903414,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 355.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 125.31319190748036,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 354.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 239.10000291652977,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.058510566130280495,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 105.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 239.70428900793195,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.09454158786684275,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2760.0,
+          "p50": 2760.0,
+          "p90": 2760.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 277.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 239.42593205720186,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.08088790206238627,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 76.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 240.51857506856322,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.05947736999951303,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2782.0,
+          "p50": 2782.0,
+          "p90": 2782.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 262.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 236.03834211826324,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.057989080203697085,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 106.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 241.35683104395866,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.07715733395889401,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2805.0,
+          "p90": 2805.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 295.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 239.27621194161475,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.07108920998871326,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 112.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 239.4420108757913,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.058187408139929175,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2805.0,
+          "p90": 2805.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 271.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.667
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 238.69381519034505,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.09049797197803855,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 60.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 239.59907121025026,
+        "cached": 4096,
+        "loads": [
+         {
+          "blocks": 64,
+          "payloads": 0,
+          "runs": 256
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 296550400,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.08639337797649205,
+         "level_reads": 66,
+         "level_read_bytes": 296550400,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2752.0,
+          "p50": 2752.0,
+          "p90": 2752.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 287.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       }
+      ]
+     }
+    },
+    "16384": {
+     "kv_bytes": 570425344,
+     "ssd_bytes": 724369408,
+     "median_ttft_ms": {
+      "vram": 157.26519853342324,
+      "ram": 167.22305852454156,
+      "ssd": 449.78531391825527
+     },
+     "p90_ttft_ms": {
+      "vram": 172.7491649799049,
+      "ram": 170.4498988110572,
+      "ssd": 697.9300070088357
+     },
+     "bars_ms": {
+      "ram": 197.57863044921274,
+      "ssd": 607.8706607499196
+     },
+     "pass": {
+      "ram": true,
+      "ssd": true
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 1.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 1.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.2313068003859371,
+       "level_reads": 258.0,
+       "level_read_bytes": 724369408.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 160.98756599240005,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 342.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 156.37518395669758,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 163.01101399585605,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 156.84765996411443,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 156.5662631765008,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 157.02782105654478,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 157.5969869736582,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 342.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 157.32052805833519,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 172.7491649799049,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 157.2098690085113,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 166.73253197222948,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 335.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 166.48455103859305,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 166.98468010872602,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 167.06701996736228,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 340.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 166.95016995072365,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 167.37909708172083,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 168.20955299772322,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 344.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 167.47037693858147,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 338.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 170.4498988110572,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 343.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 168.2409718632698,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 1,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 341.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 448.2558879535645,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.23992132791318,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 59.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 443.35731817409396,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.2229115420486778,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 5,
+         "sm_mhz": {
+          "p10": 2775.0,
+          "p50": 2775.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 202.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 451.33234886452556,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.23978582001291215,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 57.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 449.6318700257689,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.23360813688486814,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2760.0,
+          "p50": 2767.0,
+          "p90": 2767.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 194.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 449.8768988996744,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.22900546388700604,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 5,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 58.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 444.8291389271617,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.22402188484556973,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2805.0,
+          "p50": 2805.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 167.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 449.6937289368361,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.22803999995812774,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 55.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 494.47542801499367,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.2734983558766544,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 5,
+         "sm_mhz": {
+          "p10": 2805.0,
+          "p50": 2805.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 191.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 454.06866213306785,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.23660304816439748,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 4,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 55.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 697.9300070088357,
+        "cached": 16384,
+        "loads": [
+         {
+          "blocks": 256,
+          "payloads": 0,
+          "runs": 1024
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 724369408,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.2210042029619217,
+         "level_reads": 258,
+         "level_read_bytes": 724369408,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2760.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 173.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       }
+      ]
+     }
+    },
+    "32768": {
+     "kv_bytes": 1140850688,
+     "ssd_bytes": 1294794752,
+     "median_ttft_ms": {
+      "vram": 205.98838245496154,
+      "ram": 228.5061024595052,
+      "ssd": 797.8331175399944
+     },
+     "p90_ttft_ms": {
+      "vram": 240.17631798051298,
+      "ram": 230.81633099354804,
+      "ssd": 1630.3892470896244
+     },
+     "bars_ms": {
+      "ram": 264.3152462865405,
+      "ssd": 993.8751930051579
+     },
+     "pass": {
+      "ram": true,
+      "ssd": true
+     },
+     "tier_median": {
+      "vram": {
+       "gated_steps": 0.0,
+       "gated_loads": 0.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ram": {
+       "gated_steps": 1.0,
+       "gated_loads": 1.0,
+       "load_enqueue_wait_s": 0.0,
+       "level_reads": 0.0,
+       "level_read_bytes": 0.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      },
+      "ssd": {
+       "gated_steps": 1.0,
+       "gated_loads": 2.0,
+       "load_enqueue_wait_s": 0.480743776075542,
+       "level_reads": 514.0,
+       "level_read_bytes": 1294794752.0,
+       "write_backs": 0.0,
+       "write_back_bytes": 0.0
+      }
+     },
+     "rows": {
+      "vram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 222.1397061366588,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 331.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 204.47719213552773,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 203.90841597691178,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 329.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 205.3044189233333,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 326.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 206.51138084940612,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 205.92729398049414,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 329.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 240.17631798051298,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.6,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 206.04947092942894,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 207.87036092951894,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 205.47646610066295,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 0,
+         "gated_loads": 0,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2737.0,
+          "p50": 2737.0,
+          "p90": 2737.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 325.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ram": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 227.15574502944946,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 2,
+         "write_back_bytes": 153944064
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2715.0,
+          "p50": 2715.0,
+          "p90": 2715.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 329.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 228.3205590210855,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 322.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 226.9253560807556,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 327.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 228.59496693126857,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2730.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 327.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 229.6680398285389,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 327.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 228.41723798774183,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 323.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.5
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 230.32536706887186,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 228.92566304653883,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 2,
+         "sm_mhz": {
+          "p10": 2737.0,
+          "p50": 2737.0,
+          "p90": 2737.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 326.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 230.81633099354804,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2722.0,
+          "p50": 2722.0,
+          "p90": 2722.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 328.8,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 228.0815881676972,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 0,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 1,
+         "load_enqueue_wait_s": 0.0,
+         "level_reads": 0,
+         "level_read_bytes": 0,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 3,
+         "sm_mhz": {
+          "p10": 2730.0,
+          "p50": 2730.0,
+          "p90": 2737.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 320.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 1.0
+        }
+       }
+      ],
+      "ssd": [
+       {
+        "round": 0,
+        "order": "abc",
+        "ttft_ms": 1004.5954619999975,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.7260809680446982,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 10,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2640.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 56.4,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 1,
+        "order": "cba",
+        "ttft_ms": 809.0756840538234,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.5307891080155969,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 2805.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 88.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 2,
+        "order": "abc",
+        "ttft_ms": 736.2025559414178,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.4563180790282786,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 52.9,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 3,
+        "order": "cba",
+        "ttft_ms": 737.3449890874326,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.45729493303224444,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 89.2,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 4,
+        "order": "abc",
+        "ttft_ms": 1630.3892470896244,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 1.3448912338353693,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 16,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 51.7,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 5,
+        "order": "cba",
+        "ttft_ms": 830.6506748776883,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.5521083190105855,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 2812.0,
+          "p50": 2812.0,
+          "p90": 2812.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 76.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 6,
+        "order": "abc",
+        "ttft_ms": 1147.2492280881852,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.44928021216765046,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 12,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 52.1,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 7,
+        "order": "cba",
+        "ttft_ms": 786.5905510261655,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.5041926191188395,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 51.0,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 8,
+        "order": "abc",
+        "ttft_ms": 742.1040937770158,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.4460226078517735,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 8,
+         "sm_mhz": {
+          "p10": 180.0,
+          "p50": 180.0,
+          "p90": 2632.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 14.3,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       },
+       {
+        "round": 9,
+        "order": "cba",
+        "ttft_ms": 732.3984019458294,
+        "cached": 32768,
+        "loads": [
+         {
+          "blocks": 512,
+          "payloads": 0,
+          "runs": 2048
+         },
+         {
+          "blocks": 0,
+          "payloads": 2,
+          "runs": 0
+         }
+        ],
+        "level_read_bytes": 1294794752,
+        "tier": {
+         "gated_steps": 1,
+         "gated_loads": 2,
+         "load_enqueue_wait_s": 0.45059513999149203,
+         "level_reads": 514,
+         "level_read_bytes": 1294794752,
+         "write_backs": 0,
+         "write_back_bytes": 0
+        },
+        "clocks": {
+         "samples": 7,
+         "sm_mhz": {
+          "p10": 2610.0,
+          "p50": 2610.0,
+          "p90": 2610.0
+         },
+         "mem_mhz": 14801.0,
+         "power_w": 45.5,
+         "slowdown_share": 0.0,
+         "power_cap_share": 0.0
+        }
+       }
+      ]
+     }
+    }
+   },
+   "cell": "3a",
+   "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/11.lock",
+   "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "options": {
+    "kv.format": "q8_0",
+    "recurrent.checkpoints": "5",
+    "recurrent.policy": "prompt_end,branch,answer:1",
+    "state_tier.host.bytes": "16GiB",
+    "state_tier.step_cost": "0.0137211,0.000366293,0.00133747",
+    "state_tier.host.pages": "0.85",
+    "state_tier.levels": "ssd",
+    "state_tier.ssd.bytes": "64GiB",
+    "state_tier.ssd.persist": "off"
+   },
+   "tier_stats": {
+    "restored_blocks": 0,
+    "gated_steps": 66,
+    "page_stores": 30919,
+    "payload_stores": 1022,
+    "write_backs": 30724,
+    "write_back_bytes": 133487067136,
+    "level_reads": 9218,
+    "level_payload_reads": 66,
+    "level_read_bytes": 25472860160,
+    "gated_loads": 99,
+    "loads": 165,
+    "loaded_blocks": 18304,
+    "load_bytes": 40785412096,
+    "payload_load_bytes": 15240462336,
+    "load_enqueue_wait_s": 9.777903607813641,
+    "fence": 165,
+    "host_evicted_redundant": 8696,
+    "evicted_payloads": 128,
+    "level_evicted": 4370,
+    "host_units.kv": 6340,
+    "host_units.plugin.conv_state.checkpoints": 13,
+    "host_units.plugin.ssm_state.checkpoints": 13,
+    "level_units.kv": 104856,
+    "level_units.plugin.conv_state.checkpoints": 66,
+    "level_units.plugin.ssm_state.checkpoints": 66
+   },
+   "step_ms": 22.3,
+   "ssd_rate": 2680000000.0,
+   "link": 47500000000.0,
+   "device_pools": {
+    "state.conv_state": 5,
+    "plugin.conv_state.checkpoints": 5,
+    "state.ssm_state": 5,
+    "plugin.ssm_state.checkpoints": 5,
+    "state.kv": 3235
+   },
+   "state_bytes": 3341516800,
+   "command": "python bench/tier_resume.py --cell 3a --model <Qwen3.8-27B-UD-IQ3_S.gguf> --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/11.lock --ssd-dir <node-local dir> --reps 10 --step-ms 22.3"
+  }
  }
 }
