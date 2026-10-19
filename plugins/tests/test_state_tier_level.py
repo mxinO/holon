@@ -336,7 +336,9 @@ def test_a_write_into_a_level_slot_waits_for_its_last_copy(tmp_path, planted):
     """A level at its floor (one page slot), two I/O threads. The watermark writes X (4) back into the slot, its write
     held; the next pass writes Y (3) back into the same slot (X evicted from the level at once). Y's write must wait
     for X's: released, X lands first and Y over it, so Y reads back bitwise. The plant `slot-reuse-unwaited` (no
-    wait) lets X land over Y. (Background writes: the watermark takes no units, so the engine never waits on X.)"""
+    wait) lets X land over Y. Both are background writes here (the watermark takes no units, so the engine never
+    waits on X); the urgent path is covered with `test_a_read_reusing_units_a_queued_write_frees_takes_that_write_ahead`
+    (a read's dependent write ordered after the queued write it needs)."""
     from holon_judge.planted import TIER_PLANTS
 
     level = _Slots(hold=4)

@@ -165,8 +165,8 @@ def test_the_level_passes_run_identity_without_a_watermark_and_with_late_io(tiny
     assert got["verdict"] == "pass", got["failures"]
 
 
-# free-on-ticket is not here: with the host pools at their floors it bites only as a refusal (a crash, which a plant
-# does not count), and a unit over them it changes nothing (docs/v1-kv-tiers.md §13, "After the tag").
+# free-on-ticket is not here: at the host pools' floors the tier's internal check catches it (a RuntimeError from
+# _read_back); above them the window did not open on this trace (docs/v1-kv-tiers.md §13, "After the tag").
 @pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
 def test_a_level_plant_is_caught(plant, dense_ssd):
     factory, checks = TIER_PLANTS[plant]
