@@ -741,7 +741,9 @@ def test_moe_router(ctx, lib, n, hidden):
     q8_1 loop runs several rounds at 16 experts of 4,096); the tile counters left zeroed, so a second call
     (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
     Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
-    `moe_topk`)."""
+    `moe_topk`); for prompt chunks (CHUNK rows and more, experts a multiple of 64: docs/v1-moe-prefill.md D3) the
+    router GEMM's logits, within the f32 budget and row-invariant across calls of 512 rows and more, then `moe_topk`'s
+    selection on them, bitwise."""
     gen = torch.Generator().manual_seed(n)
     router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
     router[1] = router[0]                                               # tied logits: the lower id first
@@ -776,7 +778,20 @@ def test_moe_router(ctx, lib, n, hidden):
                 assert all(map(bitwise, call(x[a:b]), (logits[a:b], w[a:b], ids[a:b]))), f"rows {a}:{b}"
             if x.dtype == torch.bfloat16:
                 assert all(map(bitwise, route(x[:rows], router), (w[:rows], ids[:rows])))
-                assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                if n % 64:
+                    assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                    continue
+                def logits_of(rows_: torch.Tensor) -> torch.Tensor:
+                    out = torch.full((len(rows_), n), float("nan"), device="cuda")
+                    lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n), *out.shape,
+                                                                     device="cuda"), out)
+                    return out
+                gemm = logits_of(x)
+                r = l0.check(gemm[finite], x[finite].double() @ router.double().T, torch.float32, hidden)
+                assert r.passed, f"router GEMM: {r}"
+                for a, b in ((0, CHUNK), (len(x) - CHUNK, len(x)), (3, 70)):
+                    assert bitwise(logits_of(x[a:b]), gemm[a:b]), f"router GEMM rows {a}:{b}"
+                assert all(map(bitwise, route(x, router), choose(gemm)))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
 
 
