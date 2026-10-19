@@ -1453,6 +1453,139 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### Step 4 (2026-10-19): the gate
+
+Same-session interleaved runs (the MoE prefill track's §5.2 method): 3a and 3b interleave their arms per rep in one
+engine; the served rows (3c–3e, 3h, 3i) are `bench/run.py` ABBA rounds of fresh worker processes, each round's
+paired request ratios reduced to a geomean and the rounds to their median, with pooled and per-round percentiles
+beside. Clocks: the RTX 5080 screen before the runs (2,715 / 2,722 MHz p10 / p50, steady) and per 3a/3b row
+(SM p50 2,610–2,820 MHz on every row but those an SSD read idled, below); the RTX 5090 screen after its runs (2,302 /
+2,340 MHz, power-capped and steady). The bars' rates are §8's: 47.5 GB/s link, 2.68 GB/s SSD, one decode step 22.3 ms
+(RTX 5080) / 14.7 ms (RTX 5090).
+
+Harness added in step 4 (bench, tools and judge; std and core unchanged, so nothing here is a post-tag std
+follow-up): `bench/tier_resume.py` (3a, 3b, 3b-SSD, 3f); the `claude_code_2turns` trace (3e); the Holon bench
+backend records `dropped_publishes` and the tier's counts; `tune --clock` (below); `holon_judge tiers --io-sleep`
+(level I/O jobs sleep 0 or the given seconds, even odds) and the `store_no_after` plant; run-identity compares the
+tier's counts (below). Evidence: `evidence/k4_tier_resume_rtx-5080_2026-10-19.json` (3a, 3b, 3f, the clock),
+`evidence/k4_agent_park_rtx-5080_2026-10-19.json` (3c, 3d), `evidence/bench_k4-3e-claude-code_rtx-5080_2026-10-19.json`,
+`evidence/bench_k4-3h-agent-park_rtx-5090_2026-10-19.json`, `evidence/bench_k4-3i-offload-agent-park_rtx-5080_2026-10-19.json`,
+`evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json` (plants), `evidence/k4_judge_tiers_rtx-5090_2026-10-19.json` (the
+27B pair), `evidence/k4_locks_2026-10-19.json` (the held locks and their checks).
+
+**The bar table** (Qwen3.8-27B UD-IQ3_S on the RTX 5080 at lock 10's settings plus the tier: `host.bytes` 16 GiB,
+staging 5, `prompt_end,branch,answer:1`, the tuned clock; UD-Q4_K_M on the RTX 5090; medians):
+
+| # | Measured | Bar | Verdict |
+|---|---|---|---|
+| 3a idle, 4K | VRAM 124.5, RAM 124.6, SSD 238.4 ms | RAM ≤ 151.3, SSD ≤ 322.1 | pass |
+| 3a idle, 16K | VRAM 157.4, RAM 167.5, SSD 451.2 ms | RAM ≤ 197.7, SSD ≤ 608.0 | pass |
+| 3a idle, 32K | VRAM 206.1, RAM 228.9, SSD 740.1 ms | RAM ≤ 264.4, SSD ≤ 994.0 | pass |
+| 3a beside 3 decoders, 4K | VRAM 161.4, RAM 178.4, SSD 325.1 ms | RAM ≤ 188.2, SSD ≤ 359.1 | pass |
+| 3a beside, 16K | VRAM 195.5, RAM 208.4, SSD 620.4 ms | RAM ≤ 235.9, SSD ≤ 646.2 | pass (SSD by 4%) |
+| 3a beside, 32K | VRAM 242.7, RAM 275.8, SSD 987.6 ms | RAM ≤ 301.1, SSD ≤ 1,030.6 | pass (SSD by 4%) |
+| 3b (32K from RAM, 30 resumes, 285 gated gaps) | gated median 20.27 vs 20.27 ms (1.000×), p90 23.58 vs 23.07 (1.022×); append step 1.001× | ≤ 1.1×, p90 ≤ 1.2× | pass |
+| 3b-SSD (report) | 1,020 gated gaps (34 per resume): 1.000× median, 1.000× p90; append 1.001× | reported | — |
+| 3c (2 rounds) | tier 265 ms p50 against VRAM-only 5,597 ms: **0.047×** (geomean of pairs 0.059×; turns 1–5 0.078×, 6+ 0.045×); throughput **2.26×** (124.0 vs 54.9 tok/s, both rounds) | TTFT p50 ≤ 0.25×, throughput ≥ 1.2× | pass |
+| 3d (1 round) | against `llama-server --cache-ram 16384 --ctx-checkpoints 32` (upstream `27c7a769d`): p50 264 vs 1,970 ms (0.134×), p90 565 vs 6,080 ms (0.093×), throughput 1.78× (124.0 vs 69.6 tok/s) | p50, p90 ≤ 1.0×, throughput ≥ 1.0× | **not gated: the reference fails at the matched settings** (below) |
+| 3e (3 rounds, temperature 1.0) | each session's first request: `branch` 141 ms p50 against 8,110 ms without (**0.017×**; geomean of pairs 0.041×; p90 0.71×: sessions 1–2 compute the 16K prompt in both arms) | p50 ≤ 0.2× | pass |
+| 3f (16K, `persist = close`) | restarted 575.5 ms (no restart 447.8); outputs and `cached_tokens` identical; 2,560 blocks and 20 payloads restored | ≤ 608.0 ms | pass |
+| 3h (RTX 5090) | tier, VRAM capped to the RTX 5080's state bytes: p50 159.0 ms against roomy 274.9 ms; with roomy's own policies (`prompt_end,branch`, the overhead measure) 265.2 ms (0.963×; geomean of pairs 0.742×) | ≤ 1.1 × 274.9 + 14.7 = 317.1 ms | pass |
+| 3i (report, 2 rounds) | Qwen3-30B-A3B Q4_K_M offload (the natural-fit lock 2, `max_seqs` 2 so a resume's loads run beside the other sequence's decode and expert fetches) with an 8 GiB host level against without: decode TPOT p50 11.0 vs 11.8 ms, p90 15.4 vs 17.7 ms; TTFT p50 2,609 vs 4,056 ms; throughput 1.17×; 100 loads (52.7 GB) per run. Host memory 24 GiB for the experts' pinned pools, 32 GiB with the level | reported | — |
+
+Notes on the rows:
+- 3a ran on the default clock (`step_cost` 0.015, 0.0004, 0.0005), before the tune; 3b, 3f and the served rows on
+  the tuned one.
+- `dropped_publishes` is 0 on `agent_park` at staging 5 (3c's tiered arm: 2,138 payload stores, 496 payloads evicted
+  from host at the default `host.pages` 0.25) and on 3e's arms.
+- 3c ran 2 rounds, both with the tiered arm first: the first session's later rounds were lost to the llama-server
+  hang (below); the two rounds agree to 1% and the margin is 5×.
+- 3a: every load fully fragmented (a run per unit: 256 / 1,024 / 2,048 runs). The bars are on medians; the SSD arm's
+  p90 is over its bar beside decoders (874 ms at 16K, 1,350 ms at 32K) and idle at 32K (1,068 ms): single slow reads
+  of the drive. Rows whose SSD read idled the GPU sampled 180–1,537 MHz (an idle card, not a throttle).
+- 3b's host time per gated step was recorded as process CPU time (all threads, CUDA spin-waits included: 34 ms RAM,
+  26 ms SSD per ≈ 20 ms step), which is not the engine loop's; the engine-loop measure is owed (`time.thread_time` with
+  blocking sync) and is not claimed here.
+- 3f's startup (engine build with the 16 GiB pin and the restore's crc verification of 7.24 GB persisted) was
+  10.7 s; the crc's share is not separated from the build's in this record.
+- 3f's first run missed (7,239 ms, `cached_tokens` 0) because of the bench, not the tier: engines A, B and B2 ran in
+  one process and A's device memory was not freed, so B measured ≈ 160 MB less, and its staging pools fell to 0 units
+  (below). B stored no payloads, B2 restored pages only, and the hybrid's hit trimmed to 0. The bench now frees each
+  engine and records every engine's pools (`device_pools`); the rerun above has 5 staging units in all three.
+- 3h: the roomy arm runs tiers off with 40 checkpoint units and 215,056 KV tokens (q8_0, as §8 sizes it); the
+  capped arms run the tier with exactly the RTX 5080's state bytes (3,341,516,800: 51,760 KV tokens, 5 staging units).
+  The gate arm (`answer:1`) is faster than roomy because roomy cannot keep `answer` checkpoints without a tier.
+  The first RTX 5090 desktop lost its GPU mid-run (`unspecified launch failure`, then no device); the cell was rerun
+  on another one.
+
+**The tier's clock** (`tune --clock`, new): `state_tier.step_cost` fitted to timed steps of the lock's engine
+(prefill of one row at 256–2,048 tokens, decode at 1–4 rows) in relative error. RTX 5080 (IQ3_S, q8_0):
+a, b, c = 13.7 ms, 0.366 ms/token, 1.33 ms/row (every sample within 5%); RTX 5090 (Q4_K_M, q8_0, 3h):
+10.7 ms, 0.217 ms/token, 0.435 ms/row; RTX 5090 (bf16, the lock): 11.1 ms, 0.198, 0.382. A plain least-squares fit
+let the prefill steps decide and missed 1-row decode by 37% (a = 0); `tools/tests/test_tune.py` holds the RTX 5080's
+samples. The SSD rates stay the default 3-thread set (measured on this drive, rev 8.5); no per-host tune of them ran.
+
+**The 27B agent locks** (acceptance 6):
+- RTX 5090, UD-Q4_K_M: `5.lock` → `6.lock` by `tune --clock --approve` over lock 5's settings plus the tier
+  (`slots.tier = std.state_tier`, `host.bytes` 16 GiB, staging 5, `prompt_end,branch,answer:1`, the step cost; the
+  copies' sites bound to `kernels.state_copy`, whose loads are the SM gather). Verdict approve: the snapshot trace
+  byte-identical to lock 5's, L2 passing (+0.38% ± 0.69% ΔPPL vs floor); attention stays `kernels.triton_attn`
+  (287 vs 194 tok/s). Snapshot ×3 run-identical; `bounded --policies` passes (baseline, `branch` + tier, `answer:1`
+  + tier).
+- RTX 5080, UD-IQ3_S: `10.lock` → `11.lock` the same way (step cost 13.7 ms, 0.366 ms/token, 1.34 ms/row). Verdict
+  approve: snapshot trace byte-identical to lock 10's, L2 passing (+0.67% ± 0.46% ΔPPL overall); snapshot ×3
+  run-identical. **`bounded --policies` fails for `branch`**: KL p99 0.0432 (± 0.016) against the baseline's 0.0195
+  (± 0.004), beyond the rule's margin (0.0195); `answer:1` + tier passes (p99 0.035 ± 0.016), top-1 and KL p50 pass
+  in every arm. The same check passed for UD-Q4_K_M on the A5000 (step 2) and the RTX 5090. **Decision rule
+  tripped (acceptance 6): neither lock is committed**; both are held (`6.lock` passes every check but waits on the
+  launch-flag question below). For the lead: whether the IQ3_S `branch` p99 is the rule's noise at n = 6,144 (a
+  larger `--sessions` would tell) or a branch-checkpoint numerics issue on this quantization.
+- Both locks need `--host-memory` (≥ 16 GiB of pinned host memory) at launch: `host_memory` is a deployment's, not
+  planned (as X's offload lock). Without it the tier's attach refuses. **For the lead:** whether the default 27B
+  agent lock may require a launch flag, or the tier should stay an opt-in arm over an unchanged lock.
+
+**The 27B tier-invariance pair** (RTX 5090, UD-Q4_K_M, host + SSD level, payload host pools at their floor, I/O
+sleeps 0 or 0.1 s; `evidence/k4_judge_tiers_rtx-5090_2026-10-19.json`): with a tight device pool (2.008 GB)
+invariance, run-identity (56 loads, 92 level reads per run) and the restart check (106 blocks restored) pass; the
+tiers-off null test (4 vs 16 checkpoint units) passes on a roomy pool (4.6 GB), where invariance is refused by its
+own rule (the larger pool keeps other checkpoints in the reference, so `cached_tokens` differ).
+
+**The GPU timing plants** (RTX A5000, `evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json`):
+- `store_no_after` (new: a D2H store without its `after`): caught (fired 498, changed 194; Qwen3-8B through the SSD
+  level).
+- `free_on_ticket` with I/O jobs sleeping 0 or 0.1 s (≥ 4 steps): on Qwen3-8B the first run fired 1,184 times with
+  steps and outputs identical, but its two runs' tier counts differed (614 against 570 write-backs, 687 against 664
+  level reads): the window opened, and run-identity did not compare where copies sit. **Run-identity now compares the
+  tier's counts** (all but wall times; clean runs were count-identical in every run here). With the rule, 2 and then 4
+  more planted runs did not reproduce the divergence (fired 1,228 and 2,456 times, counts identical). On the Qwen3.5-4B
+  hybrid with the payload host pools at their floor it crashed on the tier's internal check (`no host unit for a
+  payload … every copy loading`), as on the CPU. So: caught once by timing on the GPU (not reproducibly), and at the
+  floors by the tier's check.
+- `adopt_source_reused` (Qwen3.5-4B, payload floor, `answer:1`, identity and fork loops, delayed I/O): fired 288
+  times, changed nothing. Its join variant: caught (changed 4). The main variant's guard (a reading step's `done`
+  kept for reuse) stays covered by the tier-only tests (rev 8.4); the GPU did not open its window here.
+
+**Found in step 4:**
+- **Staging pools fall silently to 0 units under memory pressure.** The recurrent kind's checkpoint pool is a fixed
+  pool (`min_units` 0, `pref_units` = `recurrent.checkpoints`); the ledger grants the preference only if every other
+  pool keeps its minimum, else the minimum, 0. Lock 10's settings plus the tier sit ≈ 90 MB above that cliff on the
+  RTX 5080 (3.34 GB state budget against 3.25 GB for staging 5 beside the paged floor); 160 MB less free memory gave
+  0 staging units, no payload stores, `dropped_publishes` 0, and every hybrid hit trimmed to 0, with no error
+  (3f's first run; the 27B pair's 16-unit null run the same way). It predates K (any hybrid lock), but a tier
+  makes the staging pool load-bearing (D7). **For the lead:** a floor for the staging pool when a tier is bound (§7's
+  `max_seqs` at depth 0) as a std follow-up, or a refusal at attach when a payload kind has no staging units.
+- `bench/driver.py` refused traces where every session has a client (`agent_park`: `clients.pop(None)`); fixed.
+- `holon_judge tiers`' JSON report failed on the null test's pools keyed by units; fixed (the clean-checks test
+  asserts it).
+- **3d's reference cannot serve `agent_park` at the matched settings.** `llama-server` at `-c` = Holon's KV tokens
+  (52,304, unified, 4 slots; contexts reach ≈ 19.6K, so four of them exceed the pool) fails requests with
+  `Context size has been exceeded` (6 per run), and the bench's HTTP client then waits forever. It happened in the
+  default 8 GiB arm of the first session and in the `--cache-ram 16384` arm of the second; the first session's
+  16 GiB arm finished clean (the 3d row). Holon at the same KV preempts instead. **For the lead:** a 3d reference
+  sized another way (e.g. `-c` = 4 × the trace's longest context, ≈ 80K tokens, ≈ 2.8 GB of q8_0 KV; whether that fits
+  beside the weights and buffers is untested), or 3d reported on the one clean round. The bench's HTTP client should also fail a request
+  the server errors instead of waiting.
+
 ### After the tag (b596ba7, `v1-kv-tiers-api`)
 
 The tag stays at b596ba7 from now on (the lead, on reviewer B's rule). A std fix after it is a **post-tag std
