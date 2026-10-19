@@ -81,7 +81,7 @@ class HostTier:
         self.lru: dict[bool, collections.OrderedDict] = {True: collections.OrderedDict(),   # pages, payloads:
                                                          False: collections.OrderedDict()}  # least recent first
         self.parent: dict[int, int | None] = {}
-        self.kids: collections.Counter = collections.Counter()       # key -> children with a page copy
+        self.kids: dict[int, set[int]] = collections.defaultdict(set)   # key -> its children with a page copy
         self.loading: collections.Counter = collections.Counter()    # copy -> loads not yet `loaded`
         self.reading: collections.Counter = collections.Counter()    # host unit -> loads not yet `loaded`
         self.limbo: set[tuple[str, int]] = set()                     # released while still read
@@ -257,14 +257,13 @@ class HostTier:
         self.lru[k[1] is None][k] = None
         if k[1] is None:
             self.parent[k[0]] = parent
-            if (parent, None) in self.copies:
-                self.kids[parent] += 1
+            self.kids[parent].add(k[0])           # also before its parent's (write-back stores leaves first)
 
     def _room(self, need: dict[str, int], pages: bool) -> dict[str, list[int]] | None:
         """Host units for one copy, evicting its kind's least recently used copies (pages: leaves only) that no load
         reads; None if that cannot make room."""
         while any(len(self.free[k]) < n for k, n in need.items()):
-            victim = next((k for k in self.lru[pages] if not self.loading[k] and not (pages and self.kids[k[0]])
+            victim = next((k for k in self.lru[pages] if not self.loading[k] and not (pages and self.kids.get(k[0]))
                            and any(name in need for name in self.copies[k])), None)
             if victim is None:
                 return None
@@ -282,8 +281,8 @@ class HostTier:
                     self.free[name].append(u)
         del self.lru[k[1] is None][k]
         self.tentative.discard(k)
-        if k[1] is None and (parent := self.parent.pop(k[0])) is not None and (parent, None) in self.copies:
-            self.kids[parent] -= 1
+        if k[1] is None:
+            self.kids[self.parent.pop(k[0])].discard(k[0])
 
     def _copy(self, jobs: list, direction: str) -> None:
         """Every job's units, row by row: one op call per device pool (D10)."""

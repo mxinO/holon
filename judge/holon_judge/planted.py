@@ -46,6 +46,7 @@ import contextlib
 import dataclasses
 import functools
 import itertools
+import math
 import sys
 from collections.abc import Callable, Iterator
 from unittest import mock
@@ -1110,6 +1111,398 @@ def _shared(records, counts) -> int:
     return n
 
 
+def _landed(fence) -> bool:
+    """Whether a copy's fence has passed: a deferred CPU job ran, a CUDA event completed, every fence of a load (std's
+    `HostLoad`, the toy tier's)."""
+    if hasattr(fence, "ran"):
+        return fence.ran
+    if isinstance(getattr(fence, "fences", None), list):
+        return all(_landed(f) for f in fence.fences)
+    if hasattr(fence, "fence"):
+        return _landed(fence.fence)
+    event = getattr(fence, "_event", None)
+    return event is None or event.query()
+
+
+@contextlib.contextmanager
+def _tier_plant(name: str, make: Callable[[collections.Counter], list]) -> Iterator[collections.Counter]:
+    """The patches `make(fired)` returns in place; yields the plant's counter (`fired`: the times its broken path ran
+    where the bug can matter) and reports it."""
+    fired: collections.Counter = collections.Counter()
+    with contextlib.ExitStack() as stack:
+        for patch in make(fired):
+            stack.enter_context(patch)
+        yield fired
+    print(f"plant {name} fired: {dict(fired)}", file=sys.stderr)
+
+
+def _tier(name: str, make: Callable[[collections.Counter], list]) -> Callable[[], contextlib.AbstractContextManager]:
+    return lambda: _tier_plant(name, make)
+
+
+def _promote_unwaited(fired):
+    """A step's launch does not wait for its rows' loads (copies on freed units it still waits for). Fired: loads
+    not landed at that launch."""
+    from holon.core.state import StateManager
+
+    def planted(self, seqs):
+        if self.index is None or not (self.waits or self.index.freed):
+            return []
+        loads = list({id(load): load for seq in seqs for load in self.waits.pop(seq.slot, ())}.values())
+        for fence in self.index.freed.values():
+            fence.wait()
+        self.index.freed.clear()
+        fired["fired"] += sum(not _landed(x) for x in loads)
+        for seq in seqs:
+            self.due.pop(seq.slot, None)
+        return loads
+    return [mock.patch.object(StateManager, "launching", planted)]
+
+
+def _freed_unwaited(loading: bool):
+    """Device units freed while a copy is on them are reused without waiting for it: an evicted loading block's
+    load (`loading`), or a store reading the units (pages, and staging payload units). Fired: such copies not landed
+    when their units were freed."""
+    def make(fired):
+        from holon.core.prefix import PrefixIndex
+
+        free, attach = PrefixIndex._free, PrefixIndex.attach
+
+        def planted_free(self, e):
+            copy, load = e.copy, e.loading
+            free(self, e)
+            mine = load is not None if loading else copy is not None and not hasattr(copy, "due")   # a store's
+            if mine and self.freed.pop(id(copy), None) is not None:
+                fired["fired"] += not _landed(copy)
+
+        def planted_attach(self, e, spec, payload, after=()):
+            before = set(self.freed)
+            held = attach(self, e, spec, payload, after)
+            for key in set(self.freed) - before:
+                if not hasattr(self.freed[key], "due"):        # the payload store's (not a load `poll` freed)
+                    fired["fired"] += not _landed(self.freed.pop(key))
+            return held
+        return [mock.patch.object(PrefixIndex, "_free", planted_free)] + (
+            [] if loading else [mock.patch.object(PrefixIndex, "attach", planted_attach)])
+    return make
+
+
+def _waiter_unref(fired):
+    """A request publishing onto a block another request's promotion is loading (`_swap`) takes no reference on its
+    units. Fired: such swaps."""
+    from holon.core.state import StateManager
+
+    swap = StateManager._swap
+
+    def planted(self, slot, spec, span, units):
+        before = tuple(self.held[slot][spec][span])
+        swap(self, slot, spec, span, units)
+        if before != tuple(units) and any(e.loading is not None and e.units.get(spec) == tuple(units)
+                                          for e in self.index.entries.values()):
+            self._pool(spec).decref(np.asarray(units, dtype=np.int32))
+            fired["fired"] += 1
+    return [mock.patch.object(StateManager, "_swap", planted)]
+
+
+def _host_reads(tier, keys, payloads) -> list:
+    return [(name, u) for k in [*((key, None) for key in keys), *payloads]
+            for name, us in tier.copies[k].items() for u in us]
+
+
+def _load_before_store(fired):
+    """std.state_tier's load leaves out the stores that wrote the host units it reads (its copy's `after`, a payload
+    load's fence). Fired: loads with such a store not landed."""
+    from holon_std.state_tier.tier import HostTier
+
+    load = HostTier.load
+
+    def planted(self, keys, units, payloads, after):
+        fired["fired"] += any(not _landed(f) for r in _host_reads(self, keys, payloads)
+                              if (f := self.written.get(r)) is not None)
+        written, self.written = self.written, {}
+        try:
+            return load(self, keys, units, payloads, after)
+        finally:
+            self.written = written
+    return [mock.patch.object(HostTier, "load", planted)]
+
+
+def _promote_wrong_unit(fired):
+    """std.state_tier's page loads copy each block's neighbouring host units. Fired: blocks loaded."""
+    from holon_std.state_tier.tier import HostTier
+
+    load = HostTier.load
+
+    def planted(self, keys, units, payloads, after):
+        saved = {(k, None): self.copies[k, None] for k in keys}
+        for (k, _), host in saved.items():
+            self.copies[k, None] = {s: [(u + 1) % self.host[s].capacity for u in us] for s, us in host.items()}
+        fired["fired"] += len(keys)
+        try:
+            return load(self, keys, units, payloads, after)
+        finally:
+            self.copies.update(saved)
+    return [mock.patch.object(HostTier, "load", planted)]
+
+
+def _swap_onto_lower(fired):
+    """A block a request recomputes that only the tier holds is promoted into the request's own units, but the tier
+    loads nothing into them: the request keeps its recomputed bytes (rev 8.2's semantic form). Fired: such blocks."""
+    from holon.core.state import StateManager
+
+    publish = StateManager.publish
+
+    def planted(self, seq):
+        tier = self.index.tier if self.index is not None else None
+        if tier is None:
+            return publish(self, seq)
+        own, load = tier.__dict__.get("load"), tier.load
+
+        def skipped(keys, units, payloads, after):
+            fired["fired"] += len(keys)
+            return load([], {}, payloads, after)
+        tier.load = skipped
+        try:
+            return publish(self, seq)
+        finally:
+            if own is None:
+                del tier.load
+            else:
+                tier.load = own
+    return [mock.patch.object(StateManager, "publish", planted)]
+
+
+def _gate_on_landing(fired):
+    """A load-gated request runs once its copies have landed, not when the tier's clock reaches their due time.
+    Fired: gating decisions that differ."""
+    from holon.core.sched import Scheduler
+
+    prefill = Scheduler._prefill
+
+    def planted(self, budget):
+        due, now = self.state.due, self.clock()
+        saved = dict(due)
+        for slot, t in saved.items():
+            landed = all(_landed(x) for x in self.state.waits.get(slot, ()))
+            fired["fired"] += landed != (t <= now)
+            due[slot] = -math.inf if landed else math.inf
+        try:
+            return prefill(self, budget)
+        finally:
+            for slot in saved.keys() & due.keys():
+                if math.isinf(due[slot]):                      # not a request admitted into the slot meanwhile
+                    due[slot] = saved[slot]
+    return [mock.patch.object(Scheduler, "_prefill", planted)]
+
+
+def _promote_preempts(fired):
+    """An admission whose promotion was trimmed for want of units refuses, so the scheduler preempts lower requests
+    to make room. Fired: such refusals."""
+    from holon.core.state import StateManager
+
+    admit, promote, short = StateManager.admit, StateManager._promote, set()
+
+    def planted_promote(self, seq, entries, resident):
+        got = promote(self, seq, entries, resident)
+        if len(got) < len(entries):
+            short.add(id(seq))
+        return got
+
+    def planted_admit(self, seq):
+        ok = admit(self, seq)
+        if ok and id(seq) in short and len(self.held) > 1:
+            short.discard(id(seq))
+            self.release(seq)
+            seq.num_computed = 0
+            fired["fired"] += 1
+            return False
+        short.discard(id(seq))
+        return ok
+    return [mock.patch.object(StateManager, "_promote", planted_promote),
+            mock.patch.object(StateManager, "admit", planted_admit)]
+
+
+def _kids_any_level(fired):
+    """A demoted block still counts as its parent's child for device eligibility (kids over every level). Fired:
+    demotions under a parent."""
+    from holon.core.prefix import PrefixIndex
+
+    evict = PrefixIndex._evict
+
+    def planted(self, e):
+        parent = self.entries.get(e.parent) if e.parent is not None else None
+        evict(self, e)
+        if parent is not None and e.key in self.lower:
+            parent.kids += 1
+            fired["fired"] += 1
+    return [mock.patch.object(PrefixIndex, "_evict", planted)]
+
+
+def _interior_drop(fired):
+    """std.state_tier's host level evicts page copies least recently used whether or not a child copy hangs below
+    them (parents, older than their children, tend to go first). Fired: interior copies evicted."""
+    from holon_std.state_tier.tier import HostTier
+
+    room, release = HostTier._room, HostTier._release
+
+    def planted(self, need, pages):
+        kids = self.kids
+
+        def released(k):                              # its bookkeeping on the real child sets
+            fired["fired"] += k[1] is None and bool(kids.get(k[0]))
+            self.kids = kids
+            try:
+                release(self, k)
+            finally:
+                self.kids = {}
+        self.kids, self._release = {}, released                             # every copy looks like a leaf
+        try:
+            return room(self, need, pages)
+        finally:
+            self.kids = kids
+            del self._release
+    return [mock.patch.object(HostTier, "_room", planted)]
+
+
+def _filed_early(which: Callable) -> Callable:
+    """A payload `which(seq, at, payload, its kind)` picks is filed one block before its position (`register`)."""
+    def make(fired):
+        from holon.core.state import StateManager
+
+        register = StateManager.register
+
+        def planted(self, seq, spec, at, payload, done=None):
+            kind = next(b.kind for b in self.bound if b.spec.name == spec)
+            if which(seq, at, payload, kind) and at > self.index.block:
+                at -= self.index.block
+                fired["fired"] += 1
+            return register(self, seq, spec, at, payload, done)
+        return [mock.patch.object(StateManager, "register", planted)]
+    return make
+
+
+def _adopt_source_reused(fired):
+    """std.state_tier's `loaded` ignores a reading step's end (`done`): a host payload unit an adopt reads may be
+    reused by a later store without waiting for that step. Fired: reading steps ignored (on the CPU a step's adopt
+    has run by its launch's end, so nothing can change there)."""
+    from holon_std.state_tier.tier import HostTier
+
+    loaded = HostTier.loaded
+
+    def planted(self, load, done):
+        if done is not None and done is not load and load.payloads:
+            fired["fired"] += 1
+            done = load
+        return loaded(self, load, done)
+    return [mock.patch.object(HostTier, "loaded", planted)]
+
+
+def _adopt_source_reused_join(fired):
+    """A request adopting a payload an earlier request loaded adopts it through that earlier load instead of its own
+    (no reader of its own: the host unit may be reused before its step). Fired: adopts through an earlier load."""
+    from holon.core.state import StateManager
+
+    adopt = StateManager._adopt
+
+    def planted(self, seq, entry):
+        tier = self.index.tier if self.index is not None else None
+        if tier is None:
+            return adopt(self, seq, entry)
+        own, load, reused = tier.__dict__.get("load"), tier.load, []
+        earlier = self.__dict__.setdefault("_planted_loads", {})        # this engine's: keys repeat across engines
+
+        def joined(keys, units, payloads, after):
+            old = earlier.get(tuple(payloads))
+            if old is not None and not keys:
+                reused.append(old)
+                fired["fired"] += 1
+                return old
+            earlier[tuple(payloads)] = got = load(keys, units, payloads, after)
+            return got
+        tier.load = joined
+        try:
+            adopt(self, seq, entry)
+        finally:
+            if own is None:
+                del tier.load
+            else:
+                tier.load = own
+        for old in reused:                     # its first reader told the tier already: not again
+            if (track := self.index.loads.get(id(old))) is not None and old.told:
+                track[2] = True
+    return [mock.patch.object(StateManager, "_adopt", planted)]
+
+
+def _store_early(fired):
+    """A page store at publish is ordered after the committed step, not the last launched one (which may still write
+    the published blocks). Fired: stores issued while the last launched step had not ended."""
+    from holon.core.engine import Engine
+    from holon.core.prefix import PrefixIndex
+
+    commit, store, committing = Engine._commit, PrefixIndex.store, []
+
+    def planted_commit(self, step):
+        committing.append(step.out.done)
+        try:
+            return commit(self, step)
+        finally:
+            committing.pop()
+
+    def planted_store(self, entries, evicting=False):
+        if evicting or not committing or self.last is None or committing[-1] is self.last:
+            return store(self, entries, evicting)
+        fired["fired"] += not _landed(self.last)
+        last, self.last = self.last, committing[-1]
+        try:
+            return store(self, entries, evicting)
+        finally:
+            self.last = last
+    return [mock.patch.object(Engine, "_commit", planted_commit),
+            mock.patch.object(PrefixIndex, "store", planted_store)]
+
+
+def _load_no_after(fired):
+    """A promotion's load ignores its `after` (the last launched step, copies on reused units). Fired: promotions
+    with such a fence not landed."""
+    from holon.core.prefix import PrefixIndex
+
+    promote = PrefixIndex.promote
+
+    def planted(self, entries, units, after):
+        fired["fired"] += any(not _landed(f) for f in after)
+        return promote(self, entries, units, [])
+    return [mock.patch.object(PrefixIndex, "promote", planted)]
+
+
+# Tier plants (docs/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail). Each
+# yields its counter (`fired`). The SSD ones (read_unwaited, free_on_ticket, torn_manifest, stale_slot and the
+# delayed-I/O-thread cells) are step 3's.
+TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tuple[str, ...]]] = {
+    name: (_tier(name, make), checks) for name, make, checks in [
+        ("promote-unwaited", _promote_unwaited, ("invariance", "identity")),
+        ("load-reuse-unwaited", _freed_unwaited(loading=True), ("invariance", "identity")),
+        ("waiter-unref", _waiter_unref, ("identity",)),
+        ("load-before-store", _load_before_store, ("invariance", "identity")),
+        ("store-unwaited", _freed_unwaited(loading=False), ("invariance", "identity")),
+        ("promote-wrong-unit", _promote_wrong_unit, ("invariance",)),
+        ("swap-onto-lower", _swap_onto_lower, ("invariance",)),
+        ("gate-on-landing", _gate_on_landing, ("identity",)),
+        ("promote-preempts", _promote_preempts, ("identity",)),
+        ("kids-any-level", _kids_any_level, ("identity",)),
+        ("interior-drop", _interior_drop, ("identity",)),
+        ("adopt-source-reused", _adopt_source_reused, ("invariance", "identity")),
+        ("adopt-source-reused-join", _adopt_source_reused_join, ("invariance", "identity")),
+        ("store-early", _store_early, ("invariance", "identity")),
+        ("load-no-after", _load_no_after, ("invariance", "identity"))]}
+# The checkpoint policies' plants (`bounded --policies --plant`): a `branch` payload (at the request's branch point)
+# or an `answer` one (tentative) filed one block early.
+POLICY_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager]] = {
+    "branch-off-by-one": _tier("branch-off-by-one", _filed_early(          # where a `branch` policy checkpoints
+        lambda seq, at, p, kind: not p.tentative and at == seq.branch_at > 0 and any(
+            type(x).__name__ == "Branch" for x in getattr(kind, "policies", ())))),
+    "tentative-shift": _tier("tentative-shift", _filed_early(lambda seq, at, p, kind: p.tentative))}
+
+
 QWEN35_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qwen35-tiled-as-grouped": lambda: _qwen35_facts(order="grouped"),
     "qwen35-rotary-all-dims": lambda: _qwen35_facts(rotary_dim=256, sections=[]),     # partial_rotary_factor read as 1
@@ -1161,4 +1554,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # grammar.xgrammar's (plugins/tests/test_grammar.py)
     "mask-rows-not-reset": mask_rows_not_reset, "mask-column-shift": mask_column_shift,
     "no-rollback-after-probe": no_rollback_after_probe, "mask-bit-order": mask_bit_order,
-    "stop-tokens-masked": stop_tokens_masked, "closing-tokens-masked": closing_tokens_masked}
+    "stop-tokens-masked": stop_tokens_masked, "closing-tokens-masked": closing_tokens_masked,
+    # State tiers (docs/v1-kv-tiers.md §6): `holon_judge tiers --plant`, and the policies' `bounded --policies`
+    **{name: plant for name, (plant, _) in TIER_PLANTS.items()}, **POLICY_PLANTS}

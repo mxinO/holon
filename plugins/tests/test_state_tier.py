@@ -122,6 +122,15 @@ def test_the_host_level_evicts_leaves_first_and_never_what_it_is_loading():
     assert load.due == tier.t == pytest.approx(64 / 43e9)     # charged on the H2D lane; `loaded` brought the clock
 
 
+def test_a_parent_stored_after_its_child_is_not_a_leaf():
+    tier, _, _ = _bare("evict", pages=4)                     # write-back stores a chain's leaves first
+    tier.store([BlockRecord(2, 1, (2,), {"kv": (1,)}, {})], [], True)
+    tier.store([BlockRecord(1, None, (1,), {"kv": (0,)}, {})], [], True)
+    tier.hit([1, 2], [])                                      # 1 is the least recent copy, but not a leaf
+    _chain(tier, [5, 6, 7], evicting=True)
+    assert tier.dropped() == [(2, None)]
+
+
 @pytest.mark.parametrize("admit, stored", [("publish", {1, 2}), ("hit:2", {2}), ("evict", set())])
 def test_page_admission_options_and_mandatory_payloads(admit, stored):
     tier, _, ckpt = _bare(admit)

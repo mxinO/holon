@@ -1403,6 +1403,37 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
   level's split of `host.bytes` between pages and payloads is the option `host.pages` (a share, default 0.25: K-M5's
   page peak was ≤ 4.8 of 16 GiB).
 
+- **`holon_judge tiers`** (`judge/holon_judge/tiers.py`; `evidence/k2_judge_tiers_rtx-a5000_2026-10-19.json`):
+  invariance with a back-to-back reference, the null test (hybrids), run-identity ×3, and an audit after every step
+  (resident prefix closure and `kids`, unit references, refused admissions only without a free slot, the tier's
+  leaf-first drops). Clean on Qwen3-8B bf16 on the RTX A5000 through the `state_copy@1` provider (58 requests, 140 page
+  loads, 44 blocks promoted into place; run-identity with 133 loads and 8 aborted load-gated requests, also with
+  0.3 s delays) and on the tiny dense and hybrid models on the CPU (the hybrid: 122 page and 115 payload loads, null
+  test passing). `bounded --policies` on the 27B UD-Q4_K_M (8 + 4 late sessions): `branch` and `answer:1` with the
+  tier pass.
+- **Plants** (fired / changed): caught on the GPU (Qwen3-8B) — promote_unwaited 388/147, store_early 274/20,
+  store_unwaited 504/96, load_no_after 300/5, swap_onto_lower 44/17 (the real model shows the recomputed bytes); on the
+  CPU — promote_unwaited, waiter_unref, store_unwaited, promote_wrong_unit, gate_on_landing, promote_preempts,
+  kids_any_level, interior_drop, and branch_off_by_one (27B, fired 70). **Deviations from §6's predictions:**
+  - `load_before_store` and `load_reuse_unwaited` never change an outcome: D4's free-rule wait at the next launch and
+    a load's `after` (the last launched step) already order the read after the store, and a late copy into an evicted
+    loading block drains, in stream order, before the next writer. The tier's write fences are the second guard; no
+    configuration reached a window where only they matter;
+  - `tentative_shift` fails the bounded check on the tiny hybrid but not on the 27B at 8 + 4 sessions (fired 288, KL
+    inside 2× the floor): a decode-produced checkpoint one block early is within the bounded class there. Step 4's
+    lock trace is larger; the doc's prediction stands open;
+  - `adopt_source_reused` (both variants) cannot change an outcome on the CPU (a step's adopt has finished by its
+    launch): it moves to step 3's delayed-I/O-thread cells and the GPU;
+  - the hybrid invariance trace opens with two warm-up requests that make the system prompt's end a branch point:
+    otherwise back-to-back and interleaved orders place `branch` checkpoints differently and the judge, rightly,
+    refuses to compare (`cached_tokens` differ);
+  - the plants' pressure configuration uses write-back admission (`host.admit = evict`) and later due times, without
+    which `store_unwaited` has no window.
+- **Found by the judge:** std's host level counted a parent's child copies only for children stored after it, so
+  under write-back or `hit:<n>` admission (leaves stored first) a parent could be evicted as a leaf. Fixed (a set of
+  children with page copies) with a regression test; the judge record above predates the fix, which only changes
+  evictions under those admissions.
+
 ### Rev 8.2 (2026-10-18): the panel's review of step 1
 
 The core was found correct, with no blocker. Dispositions:

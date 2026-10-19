@@ -10,6 +10,7 @@ The judge runs outside the engine and drives it only as a client (design §10.3)
 | `l0` | L0 | `budget(dtype, reduction_len)` and `check(candidate, reference, dtype, reduction_len)` for op oracles |
 | `q8_1` | L0, L2 | llama.cpp's int8-dot matmuls emulated per path (`mmvq`, `mmq`): q8_1 activations and the stored-sum offsets; the reference of the GGUF kernels' L0 and of Tier B's floor |
 | `snapshot` | snapshot | records a fixed trace's token streams and a sha256 per delta (request, sequence, step); compares runs for byte identity; `trace(prompts)` is the snapshot trace of design §7.10 (long context, a prefix hit, the decode batch shrinking through every graph bucket up to 64, seeded n > 1, logprobs, prompt logprobs) |
+| `tiers` | exact | state tiers (docs/v1-kv-tiers.md acceptance 2, §6): tier invariance against C2's reference, the tiers-off null test, run-identity with the tier's copies delayed, an audit of the prefix index after every step, and the tier plants (`planted.TIER_PLANTS`) with fired and changed counts |
 | `recording` | | prompt sets and the recording format (safetensors + JSON provenance) |
 
 The prompt set is `prompts/v1.jsonl` (24 sequences, 32,807 tokens; chat, code, recall, agent; built in spike S5), frozen
@@ -115,3 +116,28 @@ the 8B KL p50 by 20%, so it must be accurate to ≲ 1e-6 nats (GPU fp32 reductio
 roundoff, s = u + u32·√K): per element |cand − ref| ≤ 3u·|ref| + 6s·rms(ref), and mean |cand − ref| ≤ s·rms(ref).
 On matmul (K = 1 … 14336), softmax, silu·mul and rmsnorm, on CPU and sm_86, legitimate bf16/fp16/fp32 results use
 ≤ 0.55 of the budget; a 1% scale error in bf16 uses 2.0 and 0.1% in fp16 1.6. See the `l0` docstring.
+
+## State tiers (milestone K)
+
+`python -m holon_judge tiers` judges a tier configuration (docs/v1-kv-tiers.md acceptance 2, §6; the checks are in
+`tiers.py`'s docstring). `--engine-args` is the tested configuration: a device pool (`--state-memory`) that holds about
+one session, so the filler before every interleaved return takes it all, host memory and the tier's options;
+`--pressure-args` overrides it for run-identity and the plants (loads due a step or more out, write-back admission,
+a host level near its floor). On the CPU the tier's copies run on `holon_testing.deferred` streams (seeds 0, 1, 2), on
+the GPU after an unseeded sleep of up to `--delay` seconds. Hybrids get the `prompt_end,branch,answer:1` policies
+unless the engine args set `recurrent.policy`, and the null test.
+
+```
+CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge tiers --model Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl \
+    --engine-args "--max-seqs 4 --max-model-len 2048 --state-memory <bytes> --host-memory <bytes> \
+                   --plugin-options state_tier.host.bytes=<bytes> state_tier.host.pages=1" \
+    --pressure-args "--plugin-options state_tier.host.admit=evict state_tier.stall_bytes=0" \
+    [--plant promote-unwaited store-early ...] --json <file>
+```
+
+Each plant runs the checks `TIER_PLANTS` names for it and once more with tiers off. It is caught when it fired (its
+broken path ran where the bug can matter: a copy not yet landed, a block promoted, ...), changed an outcome against
+the clean runs (a request's output or `cached_tokens`, a step, an audit finding) and a check failed; with tiers off it
+must change nothing. The checkpoint policies' plants (`branch-off-by-one`, `tentative-shift`) are judged by
+`bounded --policies`, which adds sessions starting in the second and third waves so `branch` checkpoints are taken and
+adopted.

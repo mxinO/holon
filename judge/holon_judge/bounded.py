@@ -21,7 +21,10 @@ depth-1 token feed fail it (`planted`; tested in judge/tests/test_bounded.py and
 evidence).
 
 The trace: sessions share a system prompt and every turn resends the whole history, generated tokens included, plus
-a new user chunk, so later turns hit the prefix cache (`tokens_saved`).
+a new user chunk, so later turns hit the prefix cache (`tokens_saved`). Each turn is one wave of requests. For the
+checkpoint policies (`--policies`, docs/v1-kv-tiers.md §6), late sessions start one or two waves after the first:
+a session's own wave never shows it a branch, so only they meet the system prompt's end as a branch point, and those
+of the third wave adopt the `branch` checkpoints the second published.
 """
 from __future__ import annotations
 
@@ -48,18 +51,21 @@ class Trace:
     system: list[int]
     chunks: list[list[list[int]]]           # per session, per turn: the new user tokens
     max_tokens: int
+    starts: tuple[int, ...] = ()            # per session, the wave of its first turn (none: all the first)
 
     @classmethod
     def from_prompts(cls, prompts: PromptSet, sessions: int = 48, turns: int = 4, system_len: int = 512,
-                     chunk_len: int = 96, max_tokens: int = 128) -> Trace:
+                     chunk_len: int = 96, max_tokens: int = 128, late: int = 0) -> Trace:
         """A deterministic trace cut from the prompt set: the system prompt from its longest prompt, user chunks
-        from the others in order."""
+        from the others in order; `late` more sessions start in the second and third waves, alternately."""
         longest = max(prompts.prompts, key=lambda p: len(p.ids))
         if len(longest.ids) < system_len:
             raise ValueError(f"no prompt has {system_len} tokens for the system prompt")
         rest = [p.ids[:chunk_len] for p in prompts.prompts if p is not longest]
-        chunks = [[rest[(s * turns + t) % len(rest)] for t in range(turns)] for s in range(sessions)]
-        return cls(longest.ids[:system_len], chunks, max_tokens)
+        n = sessions + late
+        chunks = [[rest[(s * turns + t) % len(rest)] for t in range(turns)] for s in range(n)]
+        return cls(longest.ids[:system_len], chunks, max_tokens, (0,) * sessions + tuple(1 + i % 2 for i in range(late))
+                   if late else ())
 
     @property
     def max_len(self) -> int:
@@ -68,16 +74,19 @@ class Trace:
                                       for t in range(len(self.chunks[0]))) + 1
 
     def run(self, engine, logprobs: int | None = None) -> list[Turn]:
-        """Every session's turns, generated greedily; one wave per turn."""
+        """Every session's turns, generated greedily; one wave per turn of the sessions started by then. In turn
+        order, then session order (turn i belongs to session i % sessions)."""
         params = SamplingParams(temperature=0.0, max_tokens=self.max_tokens, ignore_eos=True, logprobs=logprobs)
+        starts, turns = self.starts or (0,) * len(self.chunks), len(self.chunks[0])
         history = [list(self.system) for _ in self.chunks]
-        turns: list[Turn] = []
-        for t in range(len(self.chunks[0])):
-            prompts = [h + c[t] for h, c in zip(history, self.chunks, strict=True)]
-            for s, (prompt, (out, lps)) in enumerate(zip(prompts, _generate(engine, prompts, params), strict=True)):
-                turns.append((prompt, out, lps))
+        done: dict[tuple[int, int], Turn] = {}
+        for wave in range(max(starts) + turns):
+            now = [(s, wave - starts[s]) for s in range(len(self.chunks)) if 0 <= wave - starts[s] < turns]
+            prompts = [history[s] + self.chunks[s][t] for s, t in now]
+            for (s, t), prompt, (out, lps) in zip(now, prompts, _generate(engine, prompts, params), strict=True):
+                done[s, t] = (prompt, out, lps)
                 history[s] = prompt + out
-        return turns
+        return [done[s, t] for t in range(turns) for s in range(len(self.chunks))]
 
 
 def _generate(engine, prompts: list[list[int]], params: SamplingParams) -> list[tuple[list[int], list[Logprobs]]]:
