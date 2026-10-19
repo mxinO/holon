@@ -5,10 +5,10 @@ whose kernels are attributed to regions by NVTX ranges pushed around each engine
 - Prompts: spans of natural text (`bench/offload_ctx.py`'s corpus), a distinct start per (repetition, length), so no
   prompt is a prefix of another (FreeToken's radix cache stays cold; Holon runs with its prefix cache off).
 - Each arm runs in a fresh process: an untimed 512-token warm-up (with `--warm-set`, then an untimed pass over the
-  whole prompt set: §5.2), then `--reps` rounds over the lengths (one-token requests, greedy; one count for every
-  length, or one per length: the fixed prompt set of docs/v1-moe-prefill.md §5.2 is `--reps 5 5 3` at 1K / 4K / 32K),
-  then with `--profile` one more request per length between
-  cudaProfilerStart/Stop, each inside an NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
+  prompt set's shapes on distinct prompts: §5.2), then `--reps` rounds over the lengths (one-token requests, greedy;
+  one count for every length, or one per length: the fixed prompt set of docs/v1-moe-prefill.md §5.2 is `--reps 5 5 3`
+  at 1K / 4K / 32K), then with `--profile` one more request per length between cudaProfilerStart/Stop, each inside an
+  NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
 - Allocator work per timed prompt (both engines): `torch.cuda.memory_stats`' `num_alloc_retries`, `num_device_alloc`
   and `num_device_free` deltas.
 - Memory (Holon): the KV tokens the paged pools hold at startup, the startup profile's peak (the worst step's
@@ -48,6 +48,7 @@ import workloads  # noqa: E402
 
 CTX = 33792                       # every engine allocates this context (x4_refs' 32K rows)
 STRIDE = 7919                     # repetition r of length c starts at OFFSETS[c] + r · STRIDE
+WARM = 100                        # the whole-set warm-up's repetitions start here (distinct from the timed prompts)
 
 
 def prompt(corpus: list[int], length: int, rep: int) -> list[int]:
@@ -157,10 +158,10 @@ def worker(a: argparse.Namespace) -> None:
     request, close, memory = (holon_engine if a.engine == "holon" else freetoken_engine)(a)
     reps = dict(zip(a.lengths, a.reps * len(a.lengths) if len(a.reps) == 1 else a.reps, strict=True))
     request([corpus[i] for i in range(512)])                         # warm-up
-    if a.warm_set:                                                   # docs/v1-moe-prefill.md §5.2: the whole set
-        for c in a.lengths:
+    if a.warm_set:                  # docs/v1-moe-prefill.md §5.2: the whole set's shapes, on prompts of their own (an
+        for c in a.lengths:         # engine with a prefix cache would otherwise serve the timed prompts from it)
             for rep in range(reps[c]):
-                request(prompt(corpus, c, rep))
+                request(prompt(corpus, c, WARM + rep))
     torch.cuda.synchronize()
     base, startup_peak = torch.cuda.memory_allocated(), torch.cuda.max_memory_allocated()
     torch.cuda.reset_peak_memory_stats()
@@ -242,7 +243,7 @@ def main() -> None:
     w.add_argument("--dense-rows", type=int, default=0)
     w.add_argument("--ctx", type=int, default=CTX)
     w.add_argument("--max-seqs", type=int, default=1)
-    w.add_argument("--warm-set", action="store_true", help="an untimed pass over the whole prompt set first")
+    w.add_argument("--warm-set", action="store_true", help="an untimed pass over the prompt set's shapes first, on distinct prompts")
     o = sub.add_parser("run")
     o.add_argument("--arms", required=True)
     o.add_argument("--out", required=True)

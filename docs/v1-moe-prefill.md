@@ -646,7 +646,8 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 - **Statistic.** The median over rounds of each round's geomean of the paired ratios. A difference under 2 sd of the
   rounds is reported as "≈" and escalated.
 - **Warm-up and outliers** (the panel's C2, from step 3 on; `prefill.py --warm-set`, `abrun.sh` / `abstat.py`):
-  - each engine process first runs the whole prompt set once, untimed;
+  - each engine process first runs the prompt set's shapes once, untimed, on prompts of their own (FreeToken's radix
+    cache would otherwise serve the timed prompts: step 4's first 5090 round read its 32K prompts back in 14 ms);
   - a repetition over 1.5× its cell's median (engine, length, all rounds) is flagged, and its round is re-run once;
     a cell flagged again is reported with the flag;
   - the median of all paired ratios is reported beside the statistic;
