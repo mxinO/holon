@@ -602,7 +602,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where it gains ≥ 5%; prefill streaming of non-resident experts; an SSD expert tier) on additive core seams,
   closing on Qwen3-30B-A3B on the RTX 5080 vs FreeToken and llama.cpp; **K** KV and checkpoint tiers (pinned RAM /
   SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
-  table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
+  table, hyper-connections; `docs/v1-flash-next.md`; after the MoE prefill track, which it depends on; Qwen3.6-35B-A3B
+  is optional later evidence for its shared-expert units, off its critical path) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
   indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
 
   **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
@@ -650,6 +651,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
   an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
   kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them.
+- **KV streaming for sparse-attention mixers (K4; owner: FN, its first follow-up after its close)**: Strata streams a
+  QSA layer's KV through pinned RAM from 64K contexts (`--kv-resident`, R §3.1 C4); FN's bars stop at 32K, where
+  Strata keeps KV in VRAM. Built on `std.mixers.qsa` and X's `DeviceResolver`, reading K's host copies if K's D15
+  measures that cheaper; GLM's DSA adopts it.
 - **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
   store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
   `docs/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
@@ -684,6 +689,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
   a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
   and offloaded.
+- **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree
+  (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
+  at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its
+  own size entry for the type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

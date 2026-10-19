@@ -136,10 +136,12 @@ class GDN(nn.Module):
         return Planner(rule, params.get("conv_kernel", 4), rewind)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads_k: int, heads_v: int, head_k_dim: int,
-                 head_v_dim: int, conv_kernel: int = 4, v_head_order: str = "grouped", norm_eps: float = 1e-6) -> None:
+                 head_v_dim: int, conv_kernel: int = 4, v_head_order: str = "grouped", norm_eps: float = 1e-6,
+                 out_gate: str = "silu") -> None:
         super().__init__()
-        if v_head_order not in kernels.ORDERS or heads_v % heads_k:
-            raise ValueError(f"v_head_order {v_head_order!r} / heads {heads_k}, {heads_v}: unsupported")
+        if v_head_order not in kernels.ORDERS or heads_v % heads_k or out_gate not in kernels.OUT_GATES:
+            raise ValueError(f"v_head_order {v_head_order!r} / heads {heads_k}, {heads_v} / out_gate {out_gate!r}: "
+                             "unsupported")
         self.hk, self.hv, self.dk, self.dv, self.kernel = heads_k, heads_v, head_k_dim, head_v_dim, conv_kernel
         self.channels = 2 * heads_k * head_k_dim + heads_v * head_v_dim
         self.in_proj_qkv = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=self.channels))
@@ -154,7 +156,8 @@ class GDN(nn.Module):
         dtype = str(ctx.dtype).removeprefix("torch.")
         site = f"std.mixers.gdn[layer={layer}]"
         conv = {"channels": self.channels, "kernel_size": conv_kernel, "dtype": dtype}
-        norm = {"dim": head_v_dim, "eps": norm_eps, "dtype": dtype}
+        norm = {"dim": head_v_dim, "eps": norm_eps, "dtype": dtype} | (
+            {"out_gate": out_gate} if out_gate != "silu" else {})        # D8: other sites' facts stay as they were
         self._conv = ctx.select_kernel(kernels.CAUSAL_CONV1D, site=site, **conv).impl(ctx, **conv)
         self._norm = ctx.select_kernel(kernels.GATED_RMSNORM, site=site, **norm).impl(ctx, **norm)
         conv_bound, ssm_bound = ctx.state(CONV, layer), ctx.state(SSM, layer)

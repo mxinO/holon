@@ -1,0 +1,833 @@
+{
+ "name": "fn0_share0_rtx-5090",
+ "date": "2026-10-18",
+ "gpu": "rtx-5090",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+ "command": "python bench/offload_ctx.py run --name fn0_share0_rtx-5090 --gpu 0 --model Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf --arms spikes/fn0/arms_share0_rtx-5090.json --rounds 3 --requests fn_1k.json --contexts 1024 --resume",
+ "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
+ "method": "Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3, D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another: - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),   one request per context; - `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with   Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts   (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)   moved past it, and `--spans` picks the candidates timed (default the first 3). The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.",
+ "contexts": [
+  1024
+ ],
+ "ctx": 33792,
+ "output_tokens": 256,
+ "corpus": {
+  "corpus": "fn",
+  "corpus_tokens": 189707,
+  "corpus_sha256": "de504e5865358603de84312707a311d8d6397041dcbb3532cac1b03335bd9d6e"
+ },
+ "warmup": {
+  "tokens": 2048,
+  "output": 64
+ },
+ "requests": [
+  {
+   "key": "1024/0",
+   "context": 1024,
+   "start": 0
+  },
+  {
+   "key": "1024/1",
+   "context": 1024,
+   "start": 31617
+  },
+  {
+   "key": "1024/2",
+   "context": 1024,
+   "start": 63234
+  }
+ ],
+ "arms": [
+  {
+   "name": "strata_na_off",
+   "engine": "strata",
+   "env": {
+    "STRATA_ROUTE_TAIL_SKIP": "0"
+   },
+   "flags": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+  },
+  {
+   "name": "strata_na_off_share0",
+   "engine": "strata",
+   "env": {
+    "STRATA_ROUTE_TAIL_SKIP": "0",
+    "STRATA_PREFILL_CPU_SHARE": "0"
+   },
+   "flags": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+  }
+ ],
+ "summary": {
+  "strata_na_off": {
+   "1024/0": {
+    "prefill_tps": {
+     "median": 1860.89,
+     "min": 1840.17,
+     "max": 1969.39,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 112.48,
+     "min": 112.14,
+     "max": 113.71,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.93,
+     "min": 0.93,
+     "max": 0.93,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 535.1,
+     "min": 503.9,
+     "max": 540.9,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2282.8,
+     "min": 2257.7,
+     "max": 2289.0,
+     "n": 3
+    }
+   },
+   "1024/1": {
+    "prefill_tps": {
+     "median": 2119.53,
+     "min": 1934.73,
+     "max": 2128.78,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 110.52,
+     "min": 108.46,
+     "max": 110.61,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.92,
+     "min": 0.92,
+     "max": 0.92,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 471.1,
+     "min": 469.1,
+     "max": 517.0,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2319.2,
+     "min": 2317.1,
+     "max": 2363.0,
+     "n": 3
+    }
+   },
+   "1024/2": {
+    "prefill_tps": {
+     "median": 2290.03,
+     "min": 2214.17,
+     "max": 2377.44,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 119.61,
+     "min": 119.07,
+     "max": 119.85,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.95,
+     "min": 0.95,
+     "max": 0.95,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 436.1,
+     "min": 419.4,
+     "max": 451.0,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2142.9,
+     "min": 2138.3,
+     "max": 2152.7,
+     "n": 3
+    }
+   }
+  },
+  "strata_na_off_share0": {
+   "1024/0": {
+    "prefill_tps": {
+     "median": 2111.97,
+     "min": 2054.02,
+     "max": 2116.21,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 113.21,
+     "min": 112.56,
+     "max": 113.32,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.93,
+     "min": 0.93,
+     "max": 0.93,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 469.7,
+     "min": 468.7,
+     "max": 480.9,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2267.0,
+     "min": 2265.2,
+     "max": 2282.6,
+     "n": 3
+    }
+   },
+   "1024/1": {
+    "prefill_tps": {
+     "median": 2124.3,
+     "min": 2123.47,
+     "max": 2130.78,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 108.55,
+     "min": 108.1,
+     "max": 110.46,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.92,
+     "min": 0.92,
+     "max": 0.92,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 468.7,
+     "min": 468.4,
+     "max": 469.8,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2361.2,
+     "min": 2320.4,
+     "max": 2371.8,
+     "n": 3
+    }
+   },
+   "1024/2": {
+    "prefill_tps": {
+     "median": 2359.17,
+     "min": 2351.55,
+     "max": 2371.41,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 120.39,
+     "min": 120.31,
+     "max": 122.75,
+     "n": 3
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "hit_rate": {
+     "median": 0.95,
+     "min": 0.95,
+     "max": 0.96,
+     "n": 3
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 3
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 3
+    },
+    "engine_prompt_ms": {
+     "median": 422.3,
+     "min": 420.9,
+     "max": 424.1,
+     "n": 3
+    },
+    "engine_decode_ms": {
+     "median": 2129.5,
+     "min": 2088.0,
+     "max": 2130.7,
+     "n": 3
+    }
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "strata_na_off",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 1860.8916,
+     "decode_tps": 112.1371,
+     "reused": 0,
+     "hit_rate": 0.9327,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 535.1,
+     "engine_decode_ms": 2289.0
+    },
+    "1024/1": {
+     "prefill_tps": 1934.7284,
+     "decode_tps": 108.4585,
+     "reused": 0,
+     "hit_rate": 0.9205,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 517.0,
+     "engine_decode_ms": 2363.0
+    },
+    "1024/2": {
+     "prefill_tps": 2214.1728,
+     "decode_tps": 119.0744,
+     "reused": 0,
+     "hit_rate": 0.9501,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 451.0,
+     "engine_decode_ms": 2152.7
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "prefill: the CPU share is ON by default for prompt chunks below 1024 tokens (the idle CPU takes some of the experts the GPU would stream; answers can differ slightly from 0.1.40.3, mean KL ~0.004). STRATA_PREFILL_CPU_SHARE=0 turns it off.",
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages NOT requested: only 11 GiB of free 2 MiB blocks for a 46 GiB arena, compaction would ",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.7 s (36128 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 58 us per missed expert (35.5 GB/s of expert bytes), the link 48.3 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 67 us per missed expert (30.7 GB/s of expert bytes), the link 48.3 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 92.1% (111938 hits / 121604 lookups); 1276 more read by the GPU over PCIe or from another GPU (1.0% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.3% (113545 hits / 121735 lookups); 1145 more read by the GPU over PCIe or from another GPU (0.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (116191 hits / 122292 lookups); 588 more read by the GPU over PCIe or from another GPU (0.5% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)",
+    "strata: expert arena: MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages NOT requested: only 11 GiB of free 2 MiB blocks for a 46 GiB arena, compaction would stall the load (STRATA_ARENA_THP=1 requ"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 51.2
+  },
+  {
+   "round": 0,
+   "arm": "strata_na_off_share0",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 2054.0249,
+     "decode_tps": 112.5602,
+     "reused": 0,
+     "hit_rate": 0.9324,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 480.9,
+     "engine_decode_ms": 2282.6
+    },
+    "1024/1": {
+     "prefill_tps": 2123.4738,
+     "decode_tps": 108.5531,
+     "reused": 0,
+     "hit_rate": 0.916,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 469.8,
+     "engine_decode_ms": 2361.2
+    },
+    "1024/2": {
+     "prefill_tps": 2351.5492,
+     "decode_tps": 120.3075,
+     "reused": 0,
+     "hit_rate": 0.9512,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 424.1,
+     "engine_decode_ms": 2130.7
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.6 s (42346 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 57 us per missed expert (35.6 GB/s of expert bytes), the link 48.4 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 61 us per missed expert (33.3 GB/s of expert bytes), the link 48.4 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 91.6% (111323 hits / 121529 lookups); 1351 more read by the GPU over PCIe or from another GPU (1.1% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.2% (113502 hits / 121727 lookups); 1153 more read by the GPU over PCIe or from another GPU (0.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: decode expert cache hit rate: 95.1% (116369 hits / 122336 lookups); 544 more read by the GPU over PCIe or from another GPU (0.4% of all 122880 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 60.8
+  },
+  {
+   "round": 1,
+   "arm": "strata_na_off_share0",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 2116.2056,
+     "decode_tps": 113.2141,
+     "reused": 0,
+     "hit_rate": 0.9319,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 468.7,
+     "engine_decode_ms": 2267.0
+    },
+    "1024/1": {
+     "prefill_tps": 2130.776,
+     "decode_tps": 110.4558,
+     "reused": 0,
+     "hit_rate": 0.923,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 468.4,
+     "engine_decode_ms": 2320.4
+    },
+    "1024/2": {
+     "prefill_tps": 2371.4052,
+     "decode_tps": 122.7485,
+     "reused": 0,
+     "hit_rate": 0.9577,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 420.9,
+     "engine_decode_ms": 2088.0
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.6 s (42840 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 56 us per missed expert (36.4 GB/s of expert bytes), the link 48.8 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 60 us per missed expert (34.0 GB/s of expert bytes), the link 48.8 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 92.3% (112316 hits / 121680 lookups); 1200 more read by the GPU over PCIe or from another GPU (1.0% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.2% (113479 hits / 121777 lookups); 1103 more read by the GPU over PCIe or from another GPU (0.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: decode expert cache hit rate: 95.8% (117251 hits / 122426 lookups); 454 more read by the GPU over PCIe or from another GPU (0.4% of all 122880 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 36.3
+  },
+  {
+   "round": 1,
+   "arm": "strata_na_off",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 1840.1724,
+     "decode_tps": 113.7124,
+     "reused": 0,
+     "hit_rate": 0.9344,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 540.9,
+     "engine_decode_ms": 2257.7
+    },
+    "1024/1": {
+     "prefill_tps": 2119.529,
+     "decode_tps": 110.517,
+     "reused": 0,
+     "hit_rate": 0.9214,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 471.1,
+     "engine_decode_ms": 2319.2
+    },
+    "1024/2": {
+     "prefill_tps": 2290.0292,
+     "decode_tps": 119.8545,
+     "reused": 0,
+     "hit_rate": 0.9497,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 436.1,
+     "engine_decode_ms": 2138.3
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "prefill: the CPU share is ON by default for prompt chunks below 1024 tokens (the idle CPU takes some of the experts the GPU would stream; answers can differ slightly from 0.1.40.3, mean KL ~0.004). STRATA_PREFILL_CPU_SHARE=0 turns it off.",
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.6 s (43046 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 56 us per missed expert (36.6 GB/s of expert bytes), the link 48.5 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 64 us per missed expert (32.1 GB/s of expert bytes), the link 48.5 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 92.1% (112104 hits / 121661 lookups); 1219 more read by the GPU over PCIe or from another GPU (1.0% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.4% (113864 hits / 121852 lookups); 1028 more read by the GPU over PCIe or from another GPU (0.8% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (116185 hits / 122337 lookups); 543 more read by the GPU over PCIe or from another GPU (0.4% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 36.4
+  },
+  {
+   "round": 2,
+   "arm": "strata_na_off",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 1969.3928,
+     "decode_tps": 112.476,
+     "reused": 0,
+     "hit_rate": 0.9314,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 503.9,
+     "engine_decode_ms": 2282.8
+    },
+    "1024/1": {
+     "prefill_tps": 2128.7812,
+     "decode_tps": 110.6097,
+     "reused": 0,
+     "hit_rate": 0.9216,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 469.1,
+     "engine_decode_ms": 2317.1
+    },
+    "1024/2": {
+     "prefill_tps": 2377.4432,
+     "decode_tps": 119.608,
+     "reused": 0,
+     "hit_rate": 0.9492,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 419.4,
+     "engine_decode_ms": 2142.9
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "prefill: the CPU share is ON by default for prompt chunks below 1024 tokens (the idle CPU takes some of the experts the GPU would stream; answers can differ slightly from 0.1.40.3, mean KL ~0.004). STRATA_PREFILL_CPU_SHARE=0 turns it off.",
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.7 s (41009 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 56 us per missed expert (36.4 GB/s of expert bytes), the link 48.7 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 60 us per missed expert (34.2 GB/s of expert bytes), the link 48.7 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 92.2% (112103 hits / 121635 lookups); 1245 more read by the GPU over PCIe or from another GPU (1.0% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.1% (113379 hits / 121736 lookups); 1144 more read by the GPU over PCIe or from another GPU (0.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 94.9% (116042 hits / 122252 lookups); 628 more read by the GPU over PCIe or from another GPU (0.5% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 36.5
+  },
+  {
+   "round": 2,
+   "arm": "strata_na_off_share0",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 2111.9711,
+     "decode_tps": 113.3159,
+     "reused": 0,
+     "hit_rate": 0.9324,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 469.7,
+     "engine_decode_ms": 2265.2
+    },
+    "1024/1": {
+     "prefill_tps": 2124.2964,
+     "decode_tps": 108.1047,
+     "reused": 0,
+     "hit_rate": 0.916,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 468.7,
+     "engine_decode_ms": 2371.8
+    },
+    "1024/2": {
+     "prefill_tps": 2359.1688,
+     "decode_tps": 120.3913,
+     "reused": 0,
+     "hit_rate": 0.9512,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 422.3,
+     "engine_decode_ms": 2129.5
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "13183",
+    "expert_cache_mib": "25625",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 23983 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 13183 slots, 25.03 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 25.71 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 10093 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq3_s experts (largest blob 2.66 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.2 s)",
+    "strata generate: pre-filled 13183 of 13183 slots from the profile in 0.6 s (43045 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 13183 resident experts, decided on the device",
+    "strata serve: PCIe share: the CPU pool takes 56 us per missed expert (36.7 GB/s of expert bytes), the link 48.7 GB/s -> pcie_frac 0.40 (was 0.45; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: PCIe share: the CPU pool takes 61 us per missed expert (33.8 GB/s of expert bytes), the link 48.7 GB/s -> pcie_frac 0.45 (was 0.55; --pcie-frac N fixes it, STRATA_PCIE_FRAC_DEFAULT=old keeps the start-up rule)",
+    "strata serve: decode expert cache hit rate: 91.6% (111323 hits / 121529 lookups); 1351 more read by the GPU over PCIe or from another GPU (1.1% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 93.2% (113502 hits / 121727 lookups); 1153 more read by the GPU over PCIe or from another GPU (0.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 95.0% (28656 hits / 30174 lookups); 546 more read by the GPU over PCIe or from another GPU (1.8% of all 30720 routed)",
+    "strata serve: decode expert cache hit rate: 95.1% (116369 hits / 122336 lookups); 544 more read by the GPU over PCIe or from another GPU (0.4% of all 122880 routed)",
+    "strata serve: the prompt path borrows 2170 CUDA0 cache slots (4.12 GiB)"
+   ],
+   "peak_vram_mib": 31816,
+   "wall_s": 36.2
+  }
+ ]
+}

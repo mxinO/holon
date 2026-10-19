@@ -300,16 +300,12 @@ wheels = [
 [[package]]
 name = "gguf"
 version = "0.19.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd#27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" }
 dependencies = [
     { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pyyaml", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "requests", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "tqdm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/48/ae/17f1308ae45cd7b08ebb521747d5b23f4efc4d172038a4e228dd5106c3ff/gguf-0.19.0.tar.gz", hash = "sha256:dbadcd6cc7ccd44256f2229fe7c2dff5e8aa5cf0612ab987fd2b1a57e428923f", size = 111220, upload-time = "2026-05-06T13:04:03.667Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b3/bb/d71d6da82763528c2c2ed6b59a9d6142c6595545a4c448e2085d155e88c2/gguf-0.19.0-py3-none-any.whl", hash = "sha256:70bcd10edfe697fb2dad6e40af2234b9d8ece9a41a99761405121ebda1c3c1cd", size = 118475, upload-time = "2026-05-06T13:04:02.588Z" },
 ]
 
 [[package]]
@@ -414,6 +410,7 @@ dependencies = [
     { name = "compressed-tensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-std", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pandas", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pyarrow", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -426,8 +423,9 @@ dependencies = [
 requires-dist = [
     { name = "accelerate" },
     { name = "compressed-tensors", specifier = "==0.17.0" },
-    { name = "gguf" },
+    { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
     { name = "holonlm", editable = "core" },
+    { name = "holonlm-std", editable = "std" },
     { name = "huggingface-hub" },
     { name = "pandas" },
     { name = "pyarrow" },
@@ -475,7 +473,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gguf", specifier = ">=0.17" },
+    { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
     { name = "holonlm", editable = "core" },
     { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "safetensors", specifier = ">=0.5" },
@@ -490,6 +488,8 @@ dependencies = [
     { name = "compressed-tensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-judge", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-plugins", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-std", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "safetensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -498,8 +498,10 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "compressed-tensors", specifier = "==0.17.0" },
-    { name = "gguf" },
+    { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
     { name = "holonlm", editable = "core" },
+    { name = "holonlm-judge", editable = "judge" },
+    { name = "holonlm-plugins", editable = "plugins" },
     { name = "holonlm-std", editable = "std" },
     { name = "safetensors" },
     { name = "transformers" },

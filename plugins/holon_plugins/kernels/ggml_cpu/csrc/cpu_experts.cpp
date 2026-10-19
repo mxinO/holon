@@ -38,6 +38,7 @@ typedef void (*from_float_t)(const float * x, void * y, int64_t k);
 void quantize_row_q8_0(const float * x, void * y, int64_t k);
 void quantize_row_q8_K(const float * x, void * y, int64_t k);
 #define DOT(name) void name(int, float *, size_t, const void *, size_t, const void *, size_t, int);
+DOT(ggml_vec_dot_q2_0_q8_0)
 DOT(ggml_vec_dot_q4_0_q8_0) DOT(ggml_vec_dot_q5_0_q8_0) DOT(ggml_vec_dot_q8_0_q8_0) DOT(ggml_vec_dot_iq4_nl_q8_0)
 DOT(ggml_vec_dot_q2_K_q8_K) DOT(ggml_vec_dot_q3_K_q8_K) DOT(ggml_vec_dot_q4_K_q8_K) DOT(ggml_vec_dot_q5_K_q8_K)
 DOT(ggml_vec_dot_q6_K_q8_K) DOT(ggml_vec_dot_iq1_s_q8_K) DOT(ggml_vec_dot_iq1_m_q8_K) DOT(ggml_vec_dot_iq2_xxs_q8_K)
@@ -64,6 +65,7 @@ Traits traits(int type) {
     const Traits q8_0{nullptr, GGML_TYPE_Q8_0, quantize_row_q8_0}, q8_k{nullptr, GGML_TYPE_Q8_K, quantize_row_q8_K};
     auto with = [](Traits t, vec_dot_t dot) { t.dot = dot; return t; };
     switch (type) {
+        case GGML_TYPE_Q2_0: return with(q8_0, ggml_vec_dot_q2_0_q8_0);
         case GGML_TYPE_Q4_0: return with(q8_0, ggml_vec_dot_q4_0_q8_0);
         case GGML_TYPE_Q5_0: return with(q8_0, ggml_vec_dot_q5_0_q8_0);
         case GGML_TYPE_Q8_0: return with(q8_0, ggml_vec_dot_q8_0_q8_0);

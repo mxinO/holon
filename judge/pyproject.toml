@@ -4,7 +4,8 @@ version = "0.1.1"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Holon judge harness: op oracles, goldens, snapshots, perf (out-of-process client)"
-dependencies = ["holonlm", "gguf",  # gguf-py: the GGUF oracle (M0.1)
+dependencies = ["holonlm", "holonlm-std",  # std's references: the floors' D3 block, hf_reference, …
+                "gguf",  # gguf-py: the GGUF oracle (M0.1)
                 "transformers", "safetensors", "huggingface-hub", "accelerate",  # goldens on HF transformers
                 "xgrammar", "pandas", "pyarrow",  # the constrained check (JSONSchemaBench parquet)
                 "compressed-tensors==0.17.0"]  # hf_quant's owner check (M0.6 D10 ran it at 0.17.0)

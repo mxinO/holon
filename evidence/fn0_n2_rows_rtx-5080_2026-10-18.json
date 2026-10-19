@@ -1,0 +1,216 @@
+{
+ "name": "fn0_n2_rows",
+ "date": "2026-10-18",
+ "gpu": "rtx-5080",
+ "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
+ "command": "python spikes/fn0/n2_rows.py --shard <PLE shard> --seconds 3.0",
+ "method": "- **Zero-copy row gather** (D5's RAM tier): the IQ4_NL table (`per_layer_token_embd.weight` of the model's second   shard, 90 B per row) is read into mapped pinned host memory (the core's form: anonymous mmap + cudaHostRegister); one   kernel per call reads 16 rows per token over PCIe, each row into shared memory and dequantized to fp32 in the   kernel, for 1-4,096 tokens of uniform random row ids (hashed rows are pseudo-random; repeats that a real prompt   would dedupe are not modelled, so this is the pessimistic case). Timed with CUDA events, median of 50 calls. - **O_DIRECT 4 KiB reads** (D5's SSD tier): random page-aligned 4 KiB reads of the same table on the desktop's NVMe   with Linux AIO, 1-4 submitting threads, queue depth 16-256, 3 s each: IOPS, GB/s and latency percentiles.",
+ "table": {
+  "rows": 320001536,
+  "bytes": 28800138240,
+  "row_bytes": 90,
+  "rows_per_token": 16
+ },
+ "gather": [
+  {
+   "tokens": 1,
+   "rows": 16,
+   "us": 6.66,
+   "us_p10": 6.46,
+   "us_p90": 7.94,
+   "us_per_token": 6.656,
+   "useful_gbps": 0.216
+  },
+  {
+   "tokens": 4,
+   "rows": 64,
+   "us": 6.99,
+   "us_p10": 6.85,
+   "us_p90": 8.99,
+   "us_per_token": 1.748,
+   "useful_gbps": 0.824
+  },
+  {
+   "tokens": 16,
+   "rows": 256,
+   "us": 15.79,
+   "us_p10": 12.58,
+   "us_p90": 23.81,
+   "us_per_token": 0.987,
+   "useful_gbps": 1.459
+  },
+  {
+   "tokens": 64,
+   "rows": 1024,
+   "us": 56.93,
+   "us_p10": 53.41,
+   "us_p90": 60.35,
+   "us_per_token": 0.889,
+   "useful_gbps": 1.619
+  },
+  {
+   "tokens": 256,
+   "rows": 4096,
+   "us": 139.26,
+   "us_p10": 135.17,
+   "us_p90": 147.46,
+   "us_per_token": 0.544,
+   "useful_gbps": 2.647
+  },
+  {
+   "tokens": 1024,
+   "rows": 16384,
+   "us": 523.26,
+   "us_p10": 509.92,
+   "us_p90": 544.77,
+   "us_per_token": 0.511,
+   "useful_gbps": 2.818
+  },
+  {
+   "tokens": 4096,
+   "rows": 65536,
+   "us": 2057.86,
+   "us_p10": 2027.49,
+   "us_p90": 2094.08,
+   "us_per_token": 0.502,
+   "useful_gbps": 2.866
+  }
+ ],
+ "odirect_4k": [
+  {
+   "workers": 1,
+   "qd": 16,
+   "gbps": 0.778,
+   "kiops": 189.872,
+   "lat_p50_us": 75.75,
+   "lat_p99_us": 148.389,
+   "reads": 576710.0
+  },
+  {
+   "workers": 1,
+   "qd": 32,
+   "gbps": 1.106,
+   "kiops": 269.95,
+   "lat_p50_us": 95.15,
+   "lat_p99_us": 194.069,
+   "reads": 815647.0
+  },
+  {
+   "workers": 1,
+   "qd": 64,
+   "gbps": 1.114,
+   "kiops": 272.056,
+   "lat_p50_us": 157.299,
+   "lat_p99_us": 281.77,
+   "reads": 824153.0
+  },
+  {
+   "workers": 1,
+   "qd": 128,
+   "gbps": 1.122,
+   "kiops": 274.042,
+   "lat_p50_us": 274.009,
+   "lat_p99_us": 490.149,
+   "reads": 826304.0
+  },
+  {
+   "workers": 1,
+   "qd": 256,
+   "gbps": 1.126,
+   "kiops": 274.941,
+   "lat_p50_us": 504.948,
+   "lat_p99_us": 933.477,
+   "reads": 830379.0
+  },
+  {
+   "workers": 2,
+   "qd": 16,
+   "gbps": 0.803,
+   "kiops": 196.019,
+   "lat_p50_us": 74.91,
+   "lat_p99_us": 148.62,
+   "reads": 592041.0
+  },
+  {
+   "workers": 2,
+   "qd": 32,
+   "gbps": 1.342,
+   "kiops": 327.627,
+   "lat_p50_us": 84.2,
+   "lat_p99_us": 202.479,
+   "reads": 994372.0
+  },
+  {
+   "workers": 2,
+   "qd": 64,
+   "gbps": 1.558,
+   "kiops": 380.393,
+   "lat_p50_us": 150.83,
+   "lat_p99_us": 297.869,
+   "reads": 1152688.0
+  },
+  {
+   "workers": 2,
+   "qd": 128,
+   "gbps": 1.552,
+   "kiops": 379.021,
+   "lat_p50_us": 317.219,
+   "lat_p99_us": 475.259,
+   "reads": 1151032.0
+  },
+  {
+   "workers": 2,
+   "qd": 256,
+   "gbps": 1.561,
+   "kiops": 381.105,
+   "lat_p50_us": 649.208,
+   "lat_p99_us": 873.448,
+   "reads": 1152716.0
+  },
+  {
+   "workers": 4,
+   "qd": 16,
+   "gbps": 0.801,
+   "kiops": 195.642,
+   "lat_p50_us": 75.07,
+   "lat_p99_us": 148.62,
+   "reads": 594916.0
+  },
+  {
+   "workers": 4,
+   "qd": 32,
+   "gbps": 1.361,
+   "kiops": 332.392,
+   "lat_p50_us": 84.02,
+   "lat_p99_us": 203.669,
+   "reads": 1006676.0
+  },
+  {
+   "workers": 4,
+   "qd": 64,
+   "gbps": 1.563,
+   "kiops": 381.604,
+   "lat_p50_us": 152.279,
+   "lat_p99_us": 299.469,
+   "reads": 1154733.0
+  },
+  {
+   "workers": 4,
+   "qd": 128,
+   "gbps": 1.554,
+   "kiops": 379.34,
+   "lat_p50_us": 320.869,
+   "lat_p99_us": 473.019,
+   "reads": 1154890.0
+  },
+  {
+   "workers": 4,
+   "qd": 256,
+   "gbps": 1.556,
+   "kiops": 379.858,
+   "lat_p50_us": 654.948,
+   "lat_p99_us": 827.288,
+   "reads": 1152061.0
+  }
+ ]
+}

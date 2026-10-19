@@ -29,6 +29,8 @@ holonlm-plugins = { workspace = true }
 holonlm-tools = { workspace = true }
 holonlm-testing = { workspace = true }
 torch = { index = "pytorch-cu130" }
+# gguf-py from llama.cpp's own tree (FN D1): PyPI's 0.19.0 stops at Q1_0, without Q2_0 (type 42); the commit FN cites
+gguf = { git = "https://github.com/ggml-org/llama.cpp", rev = "27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd", subdirectory = "gguf-py" }
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
@@ -94,7 +96,7 @@ forbidden_modules = ["holon_std"]
 name = "std units are injected, never imported by each other"
 type = "independence"
 modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe", "holon_std.tiered",
-           "holon_std.mixers.gqa", "holon_std.mixers.gdn",
+           "holon_std.mixers.gqa", "holon_std.mixers.gdn", "holon_std.mixers.qsa", "holon_std.hyper",
            "holon_std.state.paged", "holon_std.state.recurrent", "holon_std.state_tier",
            "holon_std.sampling", "holon_std.weights.hf", "holon_std.weights.gguf", "holon_std.spec.greedy"]
 

@@ -51,6 +51,17 @@ Songlin Yang, Yu Zhang). License text below and in `plugins/holon_plugins/kernel
   kernel, the `v_head_tiled` order, the recurrent kernel's skip sentinel at slot < 0, has-initial-state flags);
   `plugins/holon_plugins/kernels/fla/SHA256SUMS` pins the upstream files.
 
+### FreeToken (and vLLM, which it adapted) — Apache-2.0
+
+Source: https://github.com/FlashML-org/FreeToken at `21d9578bde22840798b6063824416264fbdcdc25`
+(`python/freetoken/kernel/triton/qsa/attend.py`, Copyright contributors to the vLLM project, adapted by FreeToken from
+vLLM's `vllm/models/qwen4_exp/nvidia/ops/qsa.py`). Apache-2.0, as Holon.
+
+- `plugins/holon_plugins/kernels/qsa_triton/kernel.py` (`_attend`, `_merge`) — adapted: the sparse paged attention's
+  structure (one program per query, kv head and split of the selected tokens, the group's query heads as one tile, the
+  tokens gathered through the page table with an online softmax, the splits merged by their log-sum-exp), here over
+  selected blocks, gqa's HND layouts and q8_0 / fp8 read in the kernel, the output gate applied at the store.
+
 ### Qwen tokenizer — Apache-2.0
 
 Source: the `tokenizer.json` of Qwen2 / Qwen3 (https://huggingface.co/Qwen), Copyright Alibaba Cloud (Qwen team).

@@ -1,0 +1,35 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "inputs": "N4 recall-32k, QSA layer 3, 4096 tokens",
+ "buffers": 24,
+ "rounds": 4,
+ "results": [
+  {
+   "rows": 1,
+   "sequences": 1,
+   "tokens": 4096,
+   "blocks": 1024,
+   "buffers_mb": 204,
+   "qsa_select_us": 23.43,
+   "qsa_attend_us": 18.22
+  },
+  {
+   "rows": 4,
+   "sequences": 1,
+   "tokens": 4096,
+   "blocks": 1024,
+   "buffers_mb": 204,
+   "qsa_select_us": 22.15,
+   "qsa_attend_us": 34.5
+  },
+  {
+   "rows": 4,
+   "sequences": 4,
+   "tokens": 4096,
+   "blocks": 1024,
+   "buffers_mb": 816,
+   "qsa_select_us": 23.01,
+   "qsa_attend_us": 43.48
+  }
+ ]
+}

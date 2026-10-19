@@ -1,26 +1,40 @@
 """Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3,
-D14): every arm loads in a fresh process, runs one untimed warm-up request, then for each context C one request of
-a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt time; decode tok/s =
-(tokens - 1) / (last token - first token). Prompts are spans of natural text (the judge prompt set's token ids,
-concatenated and cut at fixed, distinct offsets, wrapping), the same ids for every engine and round, so an expert
-cache sees real routing and no prefix cache can reuse one prompt for another.
+D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each
+context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt
+time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for
+every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another:
+- `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),
+  one request per context;
+- `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with
+  Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts
+  (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)
+  moved past it, and `--spans` picks the candidates timed (default the first 3).
+The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.
 
 Engines: `llama` = llama-server (`--server`; its own `timings`: prompt_ms, and predicted_ms over the tokens after the
 first); `freetoken` = FreeToken's offline `LLM` in its own venv (`--python`), timed in process as each token reaches
-the frontend. An arm's flags are the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its
-CLI defaults apply). Arms are interleaved: every round runs each arm once, in reverse order on odd rounds, each after
-checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
+the frontend; `strata` = Strata's engine (`--strata`) in its `--serve` mode with raw token ids on stdin, timed in
+this client as each verify window's tokens reach stdout (`--eos-ids 999999`, an id outside the vocabulary, so a
+request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `holon` = Holon's
+`Engine` in process (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
+the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
+`holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
+reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
-        [--contexts 1024 4096 32768] [--ctx 33792] [--server <llama-server>] [--python <freetoken venv python>]
-    python bench/offload_ctx.py worker --engine llama --server <llama-server> --model <file.gguf> --flags '-cmoe'
+        [--contexts 1024 4096 32768] [--ctx 33792] [--corpus v1|fn] [--spans 0 1 2] [--server <llama-server>] \\
+        [--python <freetoken venv python>] [--strata <strata engine>] [--holon-python <python>]
+    python bench/offload_ctx.py worker --engine llama --server <llama-server> --model <file.gguf> --flags '-cmoe' \\
+        --requests <requests.json>
 
-arms.json: [{"name": "cache47", "engine": "llama", "flags": "-cmoe --moe-cache-mib 7900"}, ...]
+arms.json: [{"name": "cache47", "engine": "llama", "flags": "-cmoe --moe-cache-mib 7900"},
+            {"name": "strata", "engine": "strata", "flags": "--pack <dir> --kv fp16", "env": {"STRATA_X": "0"}}, ...]
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import http.client as client
 import json
 import os
@@ -42,6 +56,11 @@ CORPUS = ROOT / "judge" / "prompts" / "v1.jsonl"
 WARMUP = (0, 512, 64)                                   # offset, prompt tokens, output tokens
 OFFSETS = {1024: 4096, 4096: 8192, 32768: 20000}         # distinct starts: no prompt is a prefix of another
 OUTPUT = 256
+# D11's corpus (docs/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
+FN_SETS = ("v1-long.jsonl", "v1-qwen3_5.jsonl", "v1.jsonl")
+FN_TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
+FN_WARMUP = 2048                                        # the warm-up span: the corpus's last 2,048 tokens
+STRATA_NO_EOS = 999999                                  # an id outside the vocabulary: Strata's ignore-EOS
 # log lines kept in the record: what each engine resolved (placement, cache size, strategy, hit rates)
 KEEP = re.compile(r"(?i)moe.cache|moe strateg|auto-selected|offloaded \d+/\d+ layers|fit|n_cpu_moe|model buffer size|"
                   r"kv.?cache size|slots|hit rate|load_mode|expert")
@@ -50,6 +69,61 @@ KEEP = re.compile(r"(?i)moe.cache|moe strateg|auto-selected|offloaded \d+/\d+ la
 def prompt(corpus: list[int], context: int) -> list[int]:
     start = OFFSETS.get(context, 0)
     return [corpus[(start + i) % len(corpus)] for i in range(context)]
+
+
+def span(corpus: list[int], start: int, n: int) -> list[int]:
+    return [corpus[(start + i) % len(corpus)] for i in range(n)]
+
+
+def fn_corpus() -> list[int]:
+    """D11's corpus: the prompt sets' text concatenated and tokenized with the model's tokenizer (special tokens kept
+    as the template wrote them)."""
+    from tokenizers import Tokenizer
+    repo, rev = FN_TOKENIZER
+    hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
+                                                                       "~/.cache/huggingface").expanduser() / "hub")
+    tok = Tokenizer.from_file(str(hub / f"models--{repo.replace('/', '--')}" / "snapshots" / rev / "tokenizer.json"))
+    text = "".join(json.loads(line)["text"] for name in FN_SETS
+                   for line in (ROOT / "judge" / "prompts" / name).read_text().splitlines() if line)
+    return tok.encode(text, add_special_tokens=False).ids
+
+
+def fn_starts(n: int, contexts: list[int]) -> dict[int, list[int]]:
+    """Each context's six candidate starts (D11), none inside the warm-up span [n - FN_WARMUP, n)."""
+    out = {}
+    for c, context in enumerate(contexts):
+        starts = [(k * (n // 6) + c * (n // 18)) % n for k in range(6)]
+        out[context] = [0 if o >= n - FN_WARMUP else o for o in starts]
+    return out
+
+
+def plan(a: argparse.Namespace) -> dict:
+    """The warm-up request and the timed ones (key "C" or "C/k" for candidate k) with their ids, for requests.json."""
+    if a.corpus == "v1":
+        corpus = workloads.corpus(CORPUS)
+        off, p, n = WARMUP
+        warm = {"ids": span(corpus, off, p), "output": n}
+        reqs = [{"key": str(c), "context": c, "start": OFFSETS.get(c, 0), "ids": prompt(corpus, c)}
+                for c in a.contexts]
+    else:
+        corpus = fn_corpus()
+        warm = {"ids": corpus[-FN_WARMUP:], "output": 64}
+        starts = fn_starts(len(corpus), a.contexts)
+        reqs = [{"key": f"{c}/{k}", "context": c, "start": starts[c][k], "ids": span(corpus, starts[c][k], c)}
+                for c in a.contexts for k in a.spans]
+    digest = hashlib.sha256(json.dumps(corpus).encode()).hexdigest()
+    return {"corpus": a.corpus, "corpus_tokens": len(corpus), "corpus_sha256": digest, "warmup": warm,
+            "requests": reqs}
+
+
+def requests(a: argparse.Namespace, corpus: list[int] | None = None) -> tuple[dict, list[dict]]:
+    """A worker's warm-up and timed requests: `--requests`' file, else (callers from spikes/) the v1 offsets."""
+    if getattr(a, "requests", None):
+        p = json.loads(pathlib.Path(a.requests).read_text())
+        return p["warmup"], p["requests"]
+    off, p, n = WARMUP
+    return ({"ids": span(corpus, off, p), "output": n},
+            [{"key": str(c), "ids": prompt(corpus, c)} for c in a.contexts])
 
 
 # ---- workers: one arm, one process; print one JSON line ----
@@ -93,10 +167,9 @@ def llama_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
             assert t["prompt_n"] == len(ids) and t["predicted_n"] == n, t
             return {"prefill_tps": len(ids) / t["prompt_ms"] * 1e3, "decode_tps": (n - 1) / t["predicted_ms"] * 1e3}
 
-        off, p, n = WARMUP
-        request([corpus[(off + i) % len(corpus)] for i in range(p)], n)
-        results = {str(c): {k: round(v, 3) for k, v in request(prompt(corpus, c), OUTPUT).items()}
-                   for c in a.contexts}
+        warm, reqs = requests(a, corpus)
+        request(warm["ids"], warm["output"])
+        results = {r["key"]: {k: round(v, 3) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
     finally:
         server.send_signal(2)                           # SIGINT: a clean exit logs the MoE cache's hit rates
         try:
@@ -142,16 +215,115 @@ def freetoken_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
         assert len(s) == n, (len(s), n)
         return {"prefill_tps": len(ids) / (s[0] - t0), "decode_tps": (n - 1) / (s[-1] - s[0])}
 
-    off, p, n = WARMUP
-    request([corpus[(off + i) % len(corpus)] for i in range(p)], n)
-    return {"results": {str(c): {k: round(v, 3) for k, v in request(prompt(corpus, c), OUTPUT).items()}
-                        for c in a.contexts}}
+    warm, reqs = requests(a, corpus)
+    request(warm["ids"], warm["output"])
+    return {"results": {r["key"]: {k: round(v, 3) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}}
+
+
+def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
+    """Strata's engine in `--serve` mode: `GEN <n> <ids>` on stdin; `T <id>` per token (flushed per verify window),
+    then `DONE <generated> <prompt> <prompt_ms> <decode_ms> <reason> <accepted> <offered> <reused> <hits> <lookups>
+    ...` on stdout (St generate.cpp:10635-10732, 12936-12942). The PLE shard is the model's second."""
+    ple = a.model.replace("-00001-of-00002.gguf", "-00002-of-00002.gguf")
+    cmd = [*shlex.split(a.wrap), a.server, "--serve", "--native", a.model, "--ple-gguf", ple, "--max-context",
+           str(a.ctx), "--eos-ids", str(STRATA_NO_EOS), "--prompt-cache", "0", *shlex.split(a.flags)]
+    log = open(a.log, "w") if a.log else subprocess.DEVNULL
+    engine = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1)
+    info = {}
+    try:
+        for line in engine.stdout:
+            if line.startswith("INFO "):
+                info = dict(x.split("=", 1) for x in line.split()[1:] if "=" in x)
+            if line.startswith("READY"):
+                break
+        else:
+            raise RuntimeError(f"strata exited with {engine.wait()} before READY")
+
+        def request(ids: list[int], n: int) -> dict:
+            t0 = time.perf_counter()
+            engine.stdin.write(f"GEN {n} {','.join(map(str, ids))}\n")
+            engine.stdin.flush()
+            stamps, resume = [], None
+            for line in engine.stdout:
+                now = time.perf_counter()
+                if line.startswith("T "):
+                    stamps.append(now)
+                elif line.startswith("RESUME "):
+                    resume = int(line.split()[1])
+                elif line.startswith("ERR"):
+                    raise RuntimeError(line.strip())
+                elif line.startswith("DONE "):
+                    f = line.split()
+                    break
+            else:
+                raise RuntimeError(f"strata exited with {engine.wait()} during a request")
+            gen, acc, off = int(f[1]), int(f[6]), int(f[7])
+            assert len(stamps) == gen == n and f[5] == "length", (len(stamps), f[:6])
+            return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0]),
+                    "reused": int(f[8]) + (resume or 0), "hit_rate": int(f[9]) / max(int(f[10]), 1),
+                    "drafts_accepted": acc, "drafts_offered": off, "tokens_per_pass": gen / max(gen - acc, 1),
+                    "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4])}
+
+        warm, reqs = requests(a, corpus)
+        request(warm["ids"], warm["output"])
+        results = {r["key"]: {k: round(v, 4) if isinstance(v, float) else v
+                              for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+    finally:
+        try:
+            engine.stdin.write("QUIT\n")
+            engine.stdin.flush()
+            engine.wait(120)
+        except (OSError, subprocess.TimeoutExpired):
+            engine.kill()
+            engine.wait()
+        if a.log:
+            log.close()
+    return {"results": results, "info": {k: info[k] for k in ("context", "expert_slots", "expert_cache_mib", "spec",
+                                                              "mtp_max", "pcie_frac", "spec_min_p", "engine")
+                                         if k in info}}
+
+
+def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
+    """Holon's `Engine` in process (as spikes/x4_gap/ctx.py), a stamp as each token reaches the host; prefix cache
+    off, so no request reuses another's tokens."""
+    import dataclasses
+
+    import torch
+    from holon.api import SamplingParams
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
+
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
+    engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=a.ctx, prefix_cache=False))
+
+    def request(ids: list[int], n: int) -> dict:
+        stamps, done = [], False
+        torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
+        while not done:
+            for d in engine.step():
+                if d.rid == rid:
+                    stamps += [time.perf_counter()] * len(d.token_ids)
+                    done = d.finish_reason is not None
+        assert len(stamps) == n, (len(stamps), n)
+        return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
+
+    warm, reqs = requests(a, corpus)
+    request(warm["ids"], warm["output"])
+    results = {r["key"]: {k: round(v, 3) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+    engine.close()
+    return {"results": results}
+
+
+WORKERS = {"llama": llama_worker, "freetoken": freetoken_worker, "strata": strata_worker, "holon": holon_worker}
 
 
 def worker(a: argparse.Namespace) -> None:
-    corpus = workloads.corpus(CORPUS)
-    out = (llama_worker if a.engine == "llama" else freetoken_worker)(a, corpus)
-    print("RESULT " + json.dumps(out), flush=True)
+    corpus = None if a.requests else workloads.corpus(CORPUS)
+    print("RESULT " + json.dumps(WORKERS[a.engine](a, corpus)), flush=True)
 
 
 # ---- orchestrator ----
@@ -180,12 +352,13 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         time.sleep(10)
     else:
         raise SystemExit(f"GPU {a.gpu} stayed busy: {busy}")
-    py = sys.executable if arm["engine"] == "llama" else a.python
+    py = {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
     cmd = [py, str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"], "--model", a.model, "--ctx",
-           str(a.ctx), "--flags", arm["flags"], "--contexts", *map(str, arm.get("contexts", a.contexts))]
-    if arm["engine"] == "llama":
-        cmd += ["--server", a.server, "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
-    env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(a.gpu), CUDA_DEVICE_ORDER="PCI_BUS_ID")
+           str(a.ctx), f"--flags={arm['flags']}", "--requests", str(log.parent / "requests.json")]   # one '-'-led value
+    if arm["engine"] in ("llama", "strata"):
+        cmd += ["--server", a.server if arm["engine"] == "llama" else a.strata,
+                "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(a.gpu), CUDA_DEVICE_ORDER="PCI_BUS_ID", **arm.get("env", {}))
     stop, peak = threading.Event(), [0]
     sampler = threading.Thread(target=peak_vram, args=(a.gpu, stop, peak), daemon=True)
     sampler.start()
@@ -194,7 +367,7 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
     stop.set()
     text = log.read_text(errors="replace")
-    if arm["engine"] == "llama":
+    if arm["engine"] in ("llama", "strata"):
         text = log.with_suffix(".server.log").read_text(errors="replace") + text
     line = next((x for x in text.splitlines() if x.startswith("RESULT ")), None)
     if p.returncode or line is None:
@@ -221,6 +394,12 @@ def orchestrate(a: argparse.Namespace) -> None:
     outdir = ROOT / "bench" / ".out" / a.name
     outdir.mkdir(parents=True, exist_ok=True)
     raw = outdir / "raw.jsonl"
+    reqs = outdir / "requests.json"
+    if a.requests:
+        reqs.write_text(pathlib.Path(a.requests).read_text())
+    elif not (a.resume and reqs.exists()):
+        reqs.write_text(json.dumps(plan(a)))
+    p = json.loads(reqs.read_text())
     rows = [json.loads(x) for x in raw.read_text().splitlines()] if raw.exists() and a.resume else []
     done = {(r["round"], r["arm"]) for r in rows if "error" not in r}
     for rnd in range(a.rounds):
@@ -238,7 +417,10 @@ def orchestrate(a: argparse.Namespace) -> None:
         "name": a.name, "date": datetime.date.today().isoformat(), "gpu": gpu, "model": run.model_id(a.model),
         "command": "python bench/offload_ctx.py " + run.public_flags(shlex.join(sys.argv[1:]), a.model),
         "commit": run.git("rev-parse", "HEAD"), "method": __doc__.split("\n\n")[0].replace("\n", " "),
-        "contexts": a.contexts, "ctx": a.ctx, "output_tokens": OUTPUT, "warmup": WARMUP, "offsets": OFFSETS,
+        "contexts": a.contexts, "ctx": a.ctx, "output_tokens": OUTPUT,
+        "corpus": {k: p[k] for k in ("corpus", "corpus_tokens", "corpus_sha256")},
+        "warmup": {"tokens": len(p["warmup"]["ids"]), "output": p["warmup"]["output"]},
+        "requests": [{k: r[k] for k in ("key", "context", "start") if k in r} for r in p["requests"]],
         "arms": [arm | {"flags": run.public_flags(arm["flags"], a.model)} for arm in arms],
         "summary": summary(rows), "rows": rows}
     out = pathlib.Path(a.out or outdir / "record.json")
@@ -250,8 +432,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("worker")
-    w.add_argument("--engine", choices=("llama", "freetoken"), required=True)
-    w.add_argument("--server")
+    w.add_argument("--engine", choices=tuple(WORKERS), required=True)
+    w.add_argument("--server", help="llama-server, or Strata's engine")
+    w.add_argument("--requests", help="the orchestrator's requests.json (default: --contexts at the v1 offsets)")
     w.add_argument("--log")
     w.add_argument("--wrap", default="", help="a command prefix for the server (e.g. nsys profile ...)")
     o = sub.add_parser("run")
@@ -261,16 +444,30 @@ def main() -> None:
     o.add_argument("--rounds", type=int, default=3)
     o.add_argument("--server", default=str(ROOT / "bench" / ".envs" / "llama.cpp-offload" / "bin" / "llama-server"))
     o.add_argument("--python", default=str(ROOT / "bench" / ".envs" / "freetoken-offload" / "bin" / "python"))
+    o.add_argument("--strata", default=str(ROOT / "bench" / ".envs" / "strata" / "strata"))
+    o.add_argument("--holon-python", default=sys.executable)
+    o.add_argument("--requests", help="a plan written by `plan` (fn's corpus needs tokenizers, which a bench venv "
+                   "may lack)")
+    pl = sub.add_parser("plan", help="write requests.json")
+    pl.add_argument("--out", required=True)
+    for p in (o, pl):
+        p.add_argument("--corpus", choices=("v1", "fn"), default="v1")
+        p.add_argument("--spans", type=int, nargs="+", default=[0, 1, 2], help="fn: the candidate starts timed")
+        p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])
     o.add_argument("--out")
     o.add_argument("--resume", action="store_true", help="keep the rows of bench/.out/<name>/raw.jsonl")
     for p in (w, o):
         p.add_argument("--model", required=True)
-        p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])
+        if p is w:
+            p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])
         p.add_argument("--ctx", type=int, default=33792, help="context each engine allocates (KV) for every run")
         if p is w:
             p.add_argument("--flags", default="")
     a = ap.parse_args()
-    worker(a) if a.cmd == "worker" else orchestrate(a)
+    if a.cmd == "plan":
+        pathlib.Path(a.out).write_text(json.dumps(plan(a)))
+    else:
+        worker(a) if a.cmd == "worker" else orchestrate(a)
 
 
 if __name__ == "__main__":

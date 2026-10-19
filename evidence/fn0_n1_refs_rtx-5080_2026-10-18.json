@@ -1,0 +1,751 @@
+{
+ "name": "fn0_refs_rtx-5080",
+ "date": "2026-10-18",
+ "gpu": "rtx-5080",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+ "command": "python bench/offload_ctx.py run --name fn0_refs_rtx-5080 --gpu 0 --model Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf --arms spikes/fn0/arms_refs_rtx-5080.json --rounds 3 --requests fn_full.json --contexts 1024 4096 32768 --server llama-server --resume",
+ "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
+ "method": "Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3, D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another: - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),   one request per context; - `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with   Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts   (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)   moved past it, and `--spans` picks the candidates timed (default the first 3). The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.",
+ "contexts": [
+  1024,
+  4096,
+  32768
+ ],
+ "ctx": 33792,
+ "output_tokens": 256,
+ "corpus": {
+  "corpus": "fn",
+  "corpus_tokens": 189707,
+  "corpus_sha256": "de504e5865358603de84312707a311d8d6397041dcbb3532cac1b03335bd9d6e"
+ },
+ "warmup": {
+  "tokens": 2048,
+  "output": 64
+ },
+ "requests": [
+  {
+   "key": "1024/0",
+   "context": 1024,
+   "start": 0
+  },
+  {
+   "key": "1024/1",
+   "context": 1024,
+   "start": 31617
+  },
+  {
+   "key": "1024/2",
+   "context": 1024,
+   "start": 63234
+  },
+  {
+   "key": "4096/0",
+   "context": 4096,
+   "start": 10539
+  },
+  {
+   "key": "4096/1",
+   "context": 4096,
+   "start": 42156
+  },
+  {
+   "key": "4096/2",
+   "context": 4096,
+   "start": 73773
+  },
+  {
+   "key": "32768/0",
+   "context": 32768,
+   "start": 21078
+  },
+  {
+   "key": "32768/1",
+   "context": 32768,
+   "start": 52695
+  },
+  {
+   "key": "32768/2",
+   "context": 32768,
+   "start": 84312
+  }
+ ],
+ "arms": [
+  {
+   "name": "llama_fit",
+   "engine": "llama",
+   "flags": "-lv 4"
+  },
+  {
+   "name": "freetoken_auto",
+   "engine": "freetoken",
+   "flags": "--moe-cache-auto"
+  }
+ ],
+ "summary": {
+  "llama_fit": {
+   "1024/0": {
+    "prefill_tps": {
+     "median": 376.92,
+     "min": 375.13,
+     "max": 377.63,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 36.35,
+     "min": 36.3,
+     "max": 37.58,
+     "n": 3
+    }
+   },
+   "1024/1": {
+    "prefill_tps": {
+     "median": 401.46,
+     "min": 401.1,
+     "max": 401.55,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 38.19,
+     "min": 36.5,
+     "max": 39.19,
+     "n": 3
+    }
+   },
+   "1024/2": {
+    "prefill_tps": {
+     "median": 422.37,
+     "min": 421.44,
+     "max": 422.97,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 35.19,
+     "min": 33.61,
+     "max": 36.9,
+     "n": 3
+    }
+   },
+   "4096/0": {
+    "prefill_tps": {
+     "median": 419.91,
+     "min": 419.82,
+     "max": 420.27,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 36.25,
+     "min": 34.87,
+     "max": 36.63,
+     "n": 3
+    }
+   },
+   "4096/1": {
+    "prefill_tps": {
+     "median": 413.55,
+     "min": 413.33,
+     "max": 414.02,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 36.05,
+     "min": 33.32,
+     "max": 37.48,
+     "n": 3
+    }
+   },
+   "4096/2": {
+    "prefill_tps": {
+     "median": 417.64,
+     "min": 417.63,
+     "max": 418.26,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 35.61,
+     "min": 35.16,
+     "max": 37.69,
+     "n": 3
+    }
+   },
+   "32768/0": {
+    "prefill_tps": {
+     "median": 406.91,
+     "min": 406.83,
+     "max": 407.0,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 33.81,
+     "min": 33.49,
+     "max": 34.31,
+     "n": 3
+    }
+   },
+   "32768/1": {
+    "prefill_tps": {
+     "median": 401.4,
+     "min": 401.21,
+     "max": 401.41,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 36.23,
+     "min": 32.98,
+     "max": 36.78,
+     "n": 3
+    }
+   },
+   "32768/2": {
+    "prefill_tps": {
+     "median": 403.43,
+     "min": 403.35,
+     "max": 403.67,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 35.01,
+     "min": 34.27,
+     "max": 36.42,
+     "n": 3
+    }
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "llama_fit",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 375.13,
+     "decode_tps": 36.349
+    },
+    "1024/1": {
+     "prefill_tps": 401.46,
+     "decode_tps": 36.502
+    },
+    "1024/2": {
+     "prefill_tps": 422.969,
+     "decode_tps": 35.193
+    },
+    "4096/0": {
+     "prefill_tps": 419.913,
+     "decode_tps": 34.874
+    },
+    "4096/1": {
+     "prefill_tps": 414.017,
+     "decode_tps": 33.316
+    },
+    "4096/2": {
+     "prefill_tps": 418.259,
+     "decode_tps": 35.613
+    },
+    "32768/0": {
+     "prefill_tps": 406.829,
+     "decode_tps": 34.306
+    },
+    "32768/1": {
+     "prefill_tps": 401.215,
+     "decode_tps": 36.778
+    },
+    "32768/2": {
+     "prefill_tps": 403.345,
+     "decode_tps": 35.014
+    }
+   },
+   "log": [
+    "0.00.172.280 I srv load_model: loading model '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.172.282 I srv load_model: local path '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.172.296 I cmn common_init_: fitting params to device memory ...",
+    "0.00.172.297 I cmn common_init_: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)",
+    "0.00.172.328 I common_params_fit_impl: getting device memory data for initial parameters:",
+    "0.00.506.974 I common_params_fit_impl: projected to use 38427 MiB of device memory vs. 15547 MiB of free device memory",
+    "0.00.506.976 I common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 23903 MiB",
+    "0.00.506.977 I common_params_fit_impl: context size set by user to 33792 -> no change",
+    "0.00.506.979 I common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:",
+    "0.00.788.857 I common_params_fit_impl: with only dense weights in device memory there is a total surplus of 9558 MiB",
+    "0.00.788.859 I common_params_fit_impl: id=0, target=14523 MiB",
+    "0.01.095.067 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.095.070 I common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem= 453 MiB",
+    "0.01.095.071 I common_params_fit_impl: filling dense-only layers back-to-front:",
+    "0.01.469.581 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.469.584 I common_params_fit_impl: id=0, n_layer=49, n_part=48, overflow_type=4, mem= 5699 MiB",
+    "0.01.469.585 I common_params_fit_impl: set ngl_per_device[0].n_layer=49",
+    "0.01.469.586 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers, 5699 MiB used, 9848 MiB free",
+    "0.01.469.586 I common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:",
+    "0.01.729.987 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.729.990 I common_params_fit_impl: id=0, n_layer=49, n_part= 0, overflow_type=4, mem= 38427 MiB",
+    "0.02.074.784 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.074.786 I common_params_fit_impl: id=0, n_layer=49, n_part=36, overflow_type=4, mem= 13694 MiB",
+    "0.02.074.787 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 36), id_dense_start=0",
+    "0.02.421.541 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.421.544 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=4, mem= 14269 MiB",
+    "0.02.421.545 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 35), id_dense_start=0",
+    "0.02.763.808 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.763.811 I common_params_fit_impl: id=0, n_layer=49, n_part=34, overflow_type=4, mem= 14907 MiB",
+    "0.02.763.812 I common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(49, 34), id_dense_start_high=0",
+    "0.02.763.813 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP",
+    "0.03.105.979 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.105.981 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=2, mem= 14478 MiB",
+    "0.03.105.982 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(49, 35, UP), id_dense_start=0",
+    "0.03.105.983 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE",
+    "0.03.446.797 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.446.800 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=3, mem= 14700 MiB",
+    "0.03.446.802 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers (35 overflowing), 14478 MiB used, 1069 MiB free",
+    "0.03.446.803 I common_fit_params: successfully fit params to free device memory",
+    "0.03.446.804 I common_fit_params: fitting params to free memory took 3.27 seconds",
+    "0.03.479.661 I llama_model_loader: - kv 14: qwen4exp.expert_count u32 = 512",
+    "0.03.479.661 I llama_model_loader: - kv 15: qwen4exp.expert_used_count u32 = 10",
+    "0.03.479.662 I llama_model_loader: - kv 18: qwen4exp.expert_feed_forward_length u32 = 640",
+    "0.03.479.662 I llama_model_loader: - kv 19: qwen4exp.expert_shared_feed_forward_length u32 = 640",
+    "0.03.655.415 I print_info: n_expert = 512",
+    "0.03.655.416 I print_info: n_expert_groups = 0",
+    "0.03.655.416 I print_info: n_expert_used = 10",
+    "0.03.655.509 I load_tensors: loading model tensors, this can take a while... (load_mode = mmap)",
+    "0.05.639.407 I load_tensors: offloaded 49/49 layers to GPU",
+    "0.05.639.411 I load_tensors: CPU_Mapped model buffer size = 322.07 MiB",
+    "0.05.639.411 I load_tensors: CPU_Mapped model buffer size = 436.25 MiB",
+    "0.05.639.412 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.412 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.413 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.413 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.414 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.414 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.415 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.639.415 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.416 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.639.416 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.417 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.417 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.418 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.418 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.419 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.419 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.420 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.420 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.421 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.421 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.422 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.422 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.423 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.639.423 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.424 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.424 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.425 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.639.425 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.426 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.639.426 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.426 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.427 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.428 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.428 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.429 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.429 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.430 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.430 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.431 I load_tensors: CPU_Mapped model buffer size = 175.00 MiB",
+    "0.05.639.431 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.431 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.432 I load_tensors: CPU_Mapped model buffer size = 175.00 MiB",
+    "0.05.639.432 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.432 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.433 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.433 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.434 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.434 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.435 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.435 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.436 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.436 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.437 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.437 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.438 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.639.438 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.439 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.639.439 I load_tensors: CUDA0 model buffer size = 12964.97 MiB",
+    "0.05.639.440 I load_tensors: CPU_Mapped model buffer size = 27465.95 MiB",
+    "0.09.078.080 I srv load_model: speculative decoding will use checkpoints",
+    "0.09.078.084 I srv load_model: initializing, n_slots = 1, n_ctx_slot = 33792, kv_unified = 'false'",
+    "0.09.078.097 I slot load_model: id 0 | task -1 | new slot, n_ctx = 33792",
+    "0.09.078.114 I srv load_model: prompt cache is enabled, size limit: 8192 MiB",
+    "0.09.078.115 I srv load_model: context checkpoints enabled, max = 32, min spacing = 8192",
+    "0.09.078.115 I srv load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391",
+    "0.09.078.115 I srv load_model: use `--cache-ram 0` to disable the prompt cache",
+    "0.09.078.129 I srv init: idle slots will be saved to prompt cache upon starting a new task",
+    "0.09.099.714 I srv update_slots: all slots are idle",
+    "0.21.009.950 I srv update_slots: all slots are idle",
+    "0.30.909.024 I srv update_slots: all slots are idle",
+    "0.40.588.442 I srv update_slots: all slots are idle",
+    "0.50.394.492 I srv update_slots: all slots are idle",
+    "1.07.601.711 I srv update_slots: all slots are idle",
+    "1.25.324.295 I srv update_slots: all slots are idle",
+    "1.42.454.089 I srv update_slots: all slots are idle",
+    "3.10.612.112 I srv update_slots: all slots are idle",
+    "4.39.709.571 I srv update_slots: all slots are idle",
+    "6.08.725.123 I srv update_slots: all slots are idle"
+   ],
+   "peak_vram_mib": 14912,
+   "wall_s": 370.1
+  },
+  {
+   "round": 0,
+   "arm": "freetoken_auto",
+   "error": "offload_ctx.py worker: error: argument --flags: expected one argument"
+  },
+  {
+   "round": 1,
+   "arm": "freetoken_auto",
+   "error": "offload_ctx.py worker: error: argument --flags: expected one argument"
+  },
+  {
+   "round": 1,
+   "arm": "llama_fit",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 377.628,
+     "decode_tps": 36.3
+    },
+    "1024/1": {
+     "prefill_tps": 401.104,
+     "decode_tps": 38.186
+    },
+    "1024/2": {
+     "prefill_tps": 421.444,
+     "decode_tps": 33.609
+    },
+    "4096/0": {
+     "prefill_tps": 420.27,
+     "decode_tps": 36.635
+    },
+    "4096/1": {
+     "prefill_tps": 413.326,
+     "decode_tps": 37.478
+    },
+    "4096/2": {
+     "prefill_tps": 417.639,
+     "decode_tps": 37.691
+    },
+    "32768/0": {
+     "prefill_tps": 407.001,
+     "decode_tps": 33.809
+    },
+    "32768/1": {
+     "prefill_tps": 401.411,
+     "decode_tps": 36.227
+    },
+    "32768/2": {
+     "prefill_tps": 403.665,
+     "decode_tps": 36.418
+    }
+   },
+   "log": [
+    "0.00.135.670 I srv load_model: loading model '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.135.672 I srv load_model: local path '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.135.687 I cmn common_init_: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)",
+    "0.00.135.687 I cmn common_init_: fitting params to device memory ...",
+    "0.00.135.720 I common_params_fit_impl: getting device memory data for initial parameters:",
+    "0.00.453.767 I common_params_fit_impl: projected to use 38427 MiB of device memory vs. 15547 MiB of free device memory",
+    "0.00.453.769 I common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 23903 MiB",
+    "0.00.453.770 I common_params_fit_impl: context size set by user to 33792 -> no change",
+    "0.00.453.772 I common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:",
+    "0.00.734.692 I common_params_fit_impl: with only dense weights in device memory there is a total surplus of 9558 MiB",
+    "0.00.734.695 I common_params_fit_impl: id=0, target=14523 MiB",
+    "0.01.042.487 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.042.490 I common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem= 453 MiB",
+    "0.01.042.491 I common_params_fit_impl: filling dense-only layers back-to-front:",
+    "0.01.422.291 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.422.294 I common_params_fit_impl: id=0, n_layer=49, n_part=48, overflow_type=4, mem= 5699 MiB",
+    "0.01.422.296 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers, 5699 MiB used, 9848 MiB free",
+    "0.01.422.296 I common_params_fit_impl: set ngl_per_device[0].n_layer=49",
+    "0.01.422.297 I common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:",
+    "0.01.687.216 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.687.219 I common_params_fit_impl: id=0, n_layer=49, n_part= 0, overflow_type=4, mem= 38427 MiB",
+    "0.02.042.212 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.042.214 I common_params_fit_impl: id=0, n_layer=49, n_part=36, overflow_type=4, mem= 13694 MiB",
+    "0.02.042.216 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 36), id_dense_start=0",
+    "0.02.389.237 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.389.240 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=4, mem= 14269 MiB",
+    "0.02.389.241 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 35), id_dense_start=0",
+    "0.02.736.884 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.736.887 I common_params_fit_impl: id=0, n_layer=49, n_part=34, overflow_type=4, mem= 14907 MiB",
+    "0.02.736.889 I common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(49, 34), id_dense_start_high=0",
+    "0.02.736.889 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP",
+    "0.03.089.916 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.089.919 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=2, mem= 14478 MiB",
+    "0.03.089.921 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(49, 35, UP), id_dense_start=0",
+    "0.03.089.921 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE",
+    "0.03.433.713 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.433.716 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=3, mem= 14700 MiB",
+    "0.03.433.717 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers (35 overflowing), 14478 MiB used, 1069 MiB free",
+    "0.03.433.719 I common_fit_params: successfully fit params to free device memory",
+    "0.03.433.720 I common_fit_params: fitting params to free memory took 3.30 seconds",
+    "0.03.466.857 I llama_model_loader: - kv 14: qwen4exp.expert_count u32 = 512",
+    "0.03.466.857 I llama_model_loader: - kv 15: qwen4exp.expert_used_count u32 = 10",
+    "0.03.466.858 I llama_model_loader: - kv 18: qwen4exp.expert_feed_forward_length u32 = 640",
+    "0.03.466.858 I llama_model_loader: - kv 19: qwen4exp.expert_shared_feed_forward_length u32 = 640",
+    "0.03.650.264 I print_info: n_expert = 512",
+    "0.03.650.264 I print_info: n_expert_groups = 0",
+    "0.03.650.264 I print_info: n_expert_used = 10",
+    "0.03.650.355 I load_tensors: loading model tensors, this can take a while... (load_mode = mmap)",
+    "0.05.368.880 I load_tensors: offloaded 49/49 layers to GPU",
+    "0.05.368.884 I load_tensors: CPU_Mapped model buffer size = 322.07 MiB",
+    "0.05.368.885 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.885 I load_tensors: CPU_Mapped model buffer size = 436.25 MiB",
+    "0.05.368.886 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.886 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.887 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.887 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.888 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.889 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.889 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.890 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.890 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.890 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.891 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.891 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.892 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.892 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.893 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.893 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.894 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.894 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.895 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.895 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.895 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.896 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.896 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.896 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.897 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.897 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.898 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.368.898 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.898 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.899 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.899 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.900 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.900 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.901 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.901 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.902 I load_tensors: CPU_Mapped model buffer size = 175.00 MiB",
+    "0.05.368.902 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.902 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.903 I load_tensors: CPU_Mapped model buffer size = 175.00 MiB",
+    "0.05.368.903 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.903 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.904 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.904 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.905 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.905 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.906 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.906 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.907 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.907 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.908 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.908 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.909 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.368.909 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.368.910 I load_tensors: CPU_Mapped model buffer size = 27465.95 MiB",
+    "0.05.368.910 I load_tensors: CUDA0 model buffer size = 12964.97 MiB",
+    "0.06.501.279 I srv load_model: speculative decoding will use checkpoints",
+    "0.06.501.282 I srv load_model: initializing, n_slots = 1, n_ctx_slot = 33792, kv_unified = 'false'",
+    "0.06.501.299 I slot load_model: id 0 | task -1 | new slot, n_ctx = 33792",
+    "0.06.501.318 I srv load_model: prompt cache is enabled, size limit: 8192 MiB",
+    "0.06.501.319 I srv load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391",
+    "0.06.501.319 I srv load_model: use `--cache-ram 0` to disable the prompt cache",
+    "0.06.501.320 I srv load_model: context checkpoints enabled, max = 32, min spacing = 8192",
+    "0.06.501.336 I srv init: idle slots will be saved to prompt cache upon starting a new task",
+    "0.06.505.894 I srv update_slots: all slots are idle",
+    "0.14.984.188 I srv update_slots: all slots are idle",
+    "0.24.871.615 I srv update_slots: all slots are idle",
+    "0.34.243.435 I srv update_slots: all slots are idle",
+    "0.44.401.817 I srv update_slots: all slots are idle",
+    "1.01.251.354 I srv update_slots: all slots are idle",
+    "1.18.141.657 I srv update_slots: all slots are idle",
+    "1.34.889.714 I srv update_slots: all slots are idle",
+    "3.03.125.564 I srv update_slots: all slots are idle",
+    "4.32.292.011 I srv update_slots: all slots are idle",
+    "6.00.964.675 I srv update_slots: all slots are idle"
+   ],
+   "peak_vram_mib": 14912,
+   "wall_s": 362.2
+  },
+  {
+   "round": 2,
+   "arm": "llama_fit",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 376.92,
+     "decode_tps": 37.58
+    },
+    "1024/1": {
+     "prefill_tps": 401.546,
+     "decode_tps": 39.194
+    },
+    "1024/2": {
+     "prefill_tps": 422.368,
+     "decode_tps": 36.898
+    },
+    "4096/0": {
+     "prefill_tps": 419.825,
+     "decode_tps": 36.253
+    },
+    "4096/1": {
+     "prefill_tps": 413.551,
+     "decode_tps": 36.053
+    },
+    "4096/2": {
+     "prefill_tps": 417.63,
+     "decode_tps": 35.162
+    },
+    "32768/0": {
+     "prefill_tps": 406.911,
+     "decode_tps": 33.494
+    },
+    "32768/1": {
+     "prefill_tps": 401.402,
+     "decode_tps": 32.981
+    },
+    "32768/2": {
+     "prefill_tps": 403.425,
+     "decode_tps": 34.275
+    }
+   },
+   "log": [
+    "0.00.137.824 I srv load_model: loading model '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.137.825 I srv load_model: local path '/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf'",
+    "0.00.137.840 I cmn common_init_: fitting params to device memory ...",
+    "0.00.137.841 I cmn common_init_: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)",
+    "0.00.137.875 I common_params_fit_impl: getting device memory data for initial parameters:",
+    "0.00.460.351 I common_params_fit_impl: projected to use 38427 MiB of device memory vs. 15547 MiB of free device memory",
+    "0.00.460.354 I common_params_fit_impl: cannot meet free memory target of 1024 MiB, need to reduce device memory by 23903 MiB",
+    "0.00.460.354 I common_params_fit_impl: context size set by user to 33792 -> no change",
+    "0.00.460.357 I common_params_fit_impl: getting device memory data with all MoE tensors moved to system memory:",
+    "0.00.743.702 I common_params_fit_impl: with only dense weights in device memory there is a total surplus of 9558 MiB",
+    "0.00.743.704 I common_params_fit_impl: id=0, target=14523 MiB",
+    "0.01.052.123 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.052.126 I common_params_fit_impl: filling dense-only layers back-to-front:",
+    "0.01.052.126 I common_params_fit_impl: id=0, n_layer= 0, n_part= 0, overflow_type=4, mem= 453 MiB",
+    "0.01.428.258 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.428.261 I common_params_fit_impl: id=0, n_layer=49, n_part=48, overflow_type=4, mem= 5699 MiB",
+    "0.01.428.262 I common_params_fit_impl: set ngl_per_device[0].n_layer=49",
+    "0.01.428.263 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers, 5699 MiB used, 9848 MiB free",
+    "0.01.428.264 I common_params_fit_impl: converting dense-only layers to full layers and filling them front-to-back with overflow to next device/system memory:",
+    "0.01.688.770 I common_params_fit_impl: memory for test allocation by device:",
+    "0.01.688.772 I common_params_fit_impl: id=0, n_layer=49, n_part= 0, overflow_type=4, mem= 38427 MiB",
+    "0.02.033.901 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.033.903 I common_params_fit_impl: id=0, n_layer=49, n_part=36, overflow_type=4, mem= 13694 MiB",
+    "0.02.033.905 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 36), id_dense_start=0",
+    "0.02.379.321 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.379.324 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=4, mem= 14269 MiB",
+    "0.02.379.325 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part)=(49, 35), id_dense_start=0",
+    "0.02.719.088 I common_params_fit_impl: memory for test allocation by device:",
+    "0.02.719.091 I common_params_fit_impl: id=0, n_layer=49, n_part=34, overflow_type=4, mem= 14907 MiB",
+    "0.02.719.092 I common_params_fit_impl: set ngl_per_device_high[0].(n_layer, n_part)=(49, 34), id_dense_start_high=0",
+    "0.02.719.092 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_UP",
+    "0.03.062.463 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.062.466 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=2, mem= 14478 MiB",
+    "0.03.062.467 I common_params_fit_impl: set ngl_per_device[0].(n_layer, n_part, overflow_type)=(49, 35, UP), id_dense_start=0",
+    "0.03.062.467 I common_params_fit_impl: trying to fit one extra layer with overflow_type=LAYER_FRACTION_GATE",
+    "0.03.403.463 I common_params_fit_impl: memory for test allocation by device:",
+    "0.03.403.466 I common_params_fit_impl: id=0, n_layer=49, n_part=35, overflow_type=3, mem= 14700 MiB",
+    "0.03.403.467 I common_params_fit_impl: - CUDA0 (NVIDIA GeForce RTX 5080): 49 layers (35 overflowing), 14478 MiB used, 1069 MiB free",
+    "0.03.403.469 I common_fit_params: successfully fit params to free device memory",
+    "0.03.403.470 I common_fit_params: fitting params to free memory took 3.27 seconds",
+    "0.03.436.315 I llama_model_loader: - kv 14: qwen4exp.expert_count u32 = 512",
+    "0.03.436.315 I llama_model_loader: - kv 15: qwen4exp.expert_used_count u32 = 10",
+    "0.03.436.316 I llama_model_loader: - kv 18: qwen4exp.expert_feed_forward_length u32 = 640",
+    "0.03.436.316 I llama_model_loader: - kv 19: qwen4exp.expert_shared_feed_forward_length u32 = 640",
+    "0.03.613.099 I print_info: n_expert = 512",
+    "0.03.613.099 I print_info: n_expert_groups = 0",
+    "0.03.613.099 I print_info: n_expert_used = 10",
+    "0.03.613.192 I load_tensors: loading model tensors, this can take a while... (load_mode = mmap)",
+    "0.05.331.454 I load_tensors: offloaded 49/49 layers to GPU",
+    "0.05.331.458 I load_tensors: CPU_Mapped model buffer size = 322.07 MiB",
+    "0.05.331.458 I load_tensors: CPU_Mapped model buffer size = 436.25 MiB",
+    "0.05.331.459 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.459 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.460 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.460 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.461 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.461 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.462 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.462 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.463 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.463 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.464 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.464 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.465 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.465 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.466 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.466 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.467 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.467 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.468 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.468 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.469 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.469 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.470 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.470 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.470 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.471 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.471 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.471 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.472 I load_tensors: CPU_Mapped model buffer size = 206.25 MiB",
+    "0.05.331.472 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.473 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.474 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.474 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.475 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.475 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.476 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.476 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.477 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.477 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.478 I load_tensors: CPU_Mapped model buffer size = 175.00 MiB",
+    "0.05.331.478 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.478 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.479 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.479 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.480 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.480 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.481 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.481 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.482 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.482 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.483 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.483 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.484 I load_tensors: CPU_Mapped model buffer size = 225.00 MiB",
+    "0.05.331.484 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.485 I load_tensors: CPU_Mapped model buffer size = 256.25 MiB",
+    "0.05.331.485 I load_tensors: CPU_Mapped model buffer size = 27465.95 MiB",
+    "0.05.331.485 I load_tensors: CUDA0 model buffer size = 12964.97 MiB",
+    "0.06.448.443 I srv load_model: speculative decoding will use checkpoints",
+    "0.06.448.446 I srv load_model: initializing, n_slots = 1, n_ctx_slot = 33792, kv_unified = 'false'",
+    "0.06.448.458 I slot load_model: id 0 | task -1 | new slot, n_ctx = 33792",
+    "0.06.448.477 I srv load_model: prompt cache is enabled, size limit: 8192 MiB",
+    "0.06.448.478 I srv load_model: for more info see https://github.com/ggml-org/llama.cpp/pull/16391",
+    "0.06.448.478 I srv load_model: use `--cache-ram 0` to disable the prompt cache",
+    "0.06.448.479 I srv load_model: context checkpoints enabled, max = 32, min spacing = 8192",
+    "0.06.448.493 I srv init: idle slots will be saved to prompt cache upon starting a new task",
+    "0.06.452.944 I srv update_slots: all slots are idle",
+    "0.14.958.251 I srv update_slots: all slots are idle",
+    "0.24.611.972 I srv update_slots: all slots are idle",
+    "0.33.809.822 I srv update_slots: all slots are idle",
+    "0.43.286.773 I srv update_slots: all slots are idle",
+    "1.00.219.707 I srv update_slots: all slots are idle",
+    "1.17.374.589 I srv update_slots: all slots are idle",
+    "1.34.611.467 I srv update_slots: all slots are idle",
+    "3.02.937.866 I srv update_slots: all slots are idle",
+    "4.32.797.167 I srv update_slots: all slots are idle",
+    "6.01.954.929 I srv update_slots: all slots are idle"
+   ],
+   "peak_vram_mib": 14912,
+   "wall_s": 363.3
+  },
+  {
+   "round": 2,
+   "arm": "freetoken_auto",
+   "error": "offload_ctx.py worker: error: argument --flags: expected one argument"
+  }
+ ]
+}

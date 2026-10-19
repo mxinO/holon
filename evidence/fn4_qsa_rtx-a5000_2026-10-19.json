@@ -1,0 +1,80 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "inputs": "N4 recall-32k, QSA layer 3, 31878 tokens",
+ "buffers": 24,
+ "rounds": 4,
+ "results": [
+  {
+   "rows": 1,
+   "sequences": 1,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 1588,
+   "qsa_select_us": 25.34,
+   "qsa_attend_us": 18.63
+  },
+  {
+   "rows": 2,
+   "sequences": 1,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 1588,
+   "qsa_select_us": 27.3,
+   "qsa_attend_us": 22.5
+  },
+  {
+   "rows": 2,
+   "sequences": 2,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 3176,
+   "qsa_select_us": 45.14,
+   "qsa_attend_us": 25.56
+  },
+  {
+   "rows": 4,
+   "sequences": 1,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 1588,
+   "qsa_select_us": 28.82,
+   "qsa_attend_us": 37.09
+  },
+  {
+   "rows": 4,
+   "sequences": 4,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 6353,
+   "qsa_select_us": 57.46,
+   "qsa_attend_us": 42.91
+  },
+  {
+   "rows": 8,
+   "sequences": 1,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 1588,
+   "qsa_select_us": 32.49,
+   "qsa_attend_us": 48.51
+  },
+  {
+   "rows": 8,
+   "sequences": 8,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 12705,
+   "qsa_select_us": 95.55,
+   "qsa_attend_us": 66.65
+  },
+  {
+   "rows": 512,
+   "sequences": 1,
+   "tokens": 31878,
+   "blocks": 7969,
+   "buffers_mb": 1588,
+   "qsa_select_us": 1041.43,
+   "qsa_attend_us": 2610.49
+  }
+ ]
+}

@@ -1,0 +1,26 @@
+[plugin]
+name = "kernels.qsa_triton"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]
+provides = ["kernel.qsa_index@1", "kernel.qsa_select@1", "kernel.qsa_attend@1"]
+requires = ["op.qsa_index@1", "op.qsa_select@1", "op.qsa_attend@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]
+
+[provenance]
+source = "https://github.com/FlashML-org/FreeToken"
+commit = "21d9578bde22840798b6063824416264fbdcdc25"
+license = "Apache-2.0"
+files = ["kernel.py"]

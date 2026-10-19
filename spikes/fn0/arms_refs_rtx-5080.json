@@ -1,0 +1,12 @@
+[
+ {
+  "name": "llama_fit",
+  "engine": "llama",
+  "flags": "-lv 4"
+ },
+ {
+  "name": "freetoken_auto",
+  "engine": "freetoken",
+  "flags": "--moe-cache-auto"
+ }
+]

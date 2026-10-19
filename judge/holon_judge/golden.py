@@ -17,7 +17,7 @@ import transformers
 from holon.api import Fingerprint
 from holon_std.weights.hf import reference as hf_reference
 
-from . import hf_quant, modes, moe, w4a4
+from . import archs, hf_quant, modes, moe, w4a4
 from . import kv as kv_format
 from . import q8_1 as q8_1_emulator
 from .placement import split_digest
@@ -141,8 +141,10 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
         source = gguf.file_meta(path) | {"q8_1": q8_1, "config": model_meta(hf_config)["model"],
                                          "config_sha256": config_sha256} | _moe_meta(mirrored) | _emulation_meta(q8_1) \
             | per_shape | ({"cpu_split": split_digest(cpu_split)} if cpu_split else {})
+        skeleton = _skeleton(hf_config)
+        source |= archs.prepare(skeleton, path, device, dtype)
         with kv_format.emulate(kv):
-            rows, wall = _streamed(_skeleton(hf_config), lambda select: dict(gguf.hf_state(path, select)), "blk.",
+            rows, wall = _streamed(skeleton, lambda select: dict(gguf.hf_state(path, select)), "blk.",
                                    prompts, k, dtype, device, mirrored, prepare)
     elif stream or hf_quant.quantized(path):
         is_moe = _is_moe(path)
@@ -164,10 +166,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                     moe.mirror(module, None if quantized else dtype,
                                modes.experts(kinds, q8_1, act or "q8_1") if q8_1 else None, prefix)
 
-            rows, wall = _streamed(_skeleton(path), state, "model.layers.", prompts, k, dtype, device, mirrored,
-                                   prepare)
+            skeleton = _skeleton(path)
+            changes = archs.prepare(skeleton, None, device, dtype)
+            rows, wall = _streamed(skeleton, state, "model.layers.", prompts, k, dtype, device, mirrored, prepare)
         source = model_meta(path) | _moe_meta(mirrored) | _emulation_meta(q8_1, act) | (
-            {"hf_reference": _hash(hf_reference)} if quantized else {})
+            {"hf_reference": _hash(hf_reference)} if quantized else {}) | changes
     else:
         if q8_1:
             raise ValueError(f"{path}: a dense checkpoint has no quantized linears to emulate")
@@ -185,7 +188,7 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
                     block.gate.weight.data = block.gate.weight.data.float()
             moe.mirror(hf, operand_dtype=dtype)
         hf = place(hf, device)
-        source = model_meta(path) | _moe_meta(mirrored)
+        source = model_meta(path) | _moe_meta(mirrored) | archs.prepare(hf, None, device, dtype)
         _torch_paths(hf)
         t0 = time.perf_counter()
         with kv_format.emulate(kv):
@@ -236,8 +239,9 @@ def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k:
     cast to `dtype` on `device`, MoE routers kept F32 if `router_f32`."""
     def load(module: torch.nn.Module, tensors: dict[str, torch.Tensor], strip: str = "") -> None:
         keep = lambda name: router_f32 and name.endswith(".mlp.gate.weight")          # noqa: E731
-        module.load_state_dict({n.removeprefix(strip): (t if keep(n) else t.to(dtype)).to(device)
-                                for n, t in tensors.items()}, strict=bool(strip), assign=True)
+        module.load_state_dict({n.removeprefix(strip): (t if keep(n) or not t.is_floating_point() else t.to(dtype)
+                                                        ).to(device) for n, t in tensors.items()},
+                               strict=bool(strip), assign=True)
 
     config, blocks = model.config, model.model.layers
     load(model, state(lambda name: not name.startswith(layers)))
@@ -261,9 +265,18 @@ def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k:
         prepare(block, prefix)
         hidden = [block(h, **kwargs) for h, (_, kwargs) in zip(hidden, kept[i], strict=True)]
         block.to("meta")
-    rows = [topk_rows(model.lm_head(model.model.norm(h))[0, :-1], torch.tensor(p.ids[1:], device=device), k)
+    final = archs.final_norm(model)
+    rows = [_head(model.lm_head, final(h)[0, :-1], torch.tensor(p.ids[1:], device=device), k)
             for h, p in zip(hidden, prompts.prompts, strict=True)]
     return rows, time.perf_counter() - t0
+
+
+def _head(lm_head: torch.nn.Module, x: torch.Tensor, target: torch.Tensor, k: int, rows: int = 1024
+          ) -> tuple[torch.Tensor, ...]:
+    """The head's recording rows, `rows` positions at a time (a 32K prompt's fp32 logits at a 248K vocabulary would be
+    32.5 GB)."""
+    out = [topk_rows(lm_head(x[a:a + rows]), target[a:a + rows], k) for a in range(0, len(target), rows)]
+    return tuple(torch.cat(t) for t in zip(*out, strict=True))
 
 
 def place(model: torch.nn.Module, device: str) -> torch.nn.Module:
@@ -291,7 +304,8 @@ def _torch_paths(model: torch.nn.Module) -> None:
 
 
 def _is_moe(config_dir: pathlib.Path) -> bool:
-    return transformers.AutoConfig.from_pretrained(config_dir).model_type.endswith("_moe")
+    """A sparse-MoE model: its HF model has a `*SparseMoeBlock` (D2: `qwen4_exp` is one without the `_moe` suffix)."""
+    return any(type(m).__name__.endswith("SparseMoeBlock") for m in _skeleton(config_dir).modules())
 
 
 def _moe_meta(mirrored: bool) -> dict:
