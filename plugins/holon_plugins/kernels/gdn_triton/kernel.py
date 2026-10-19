@@ -125,8 +125,10 @@ def _gated_rmsnorm(o_ptr, z_ptr, w_ptr, out_ptr, rows, H, D, eps, so_t, so_h, sz
     gated = w[None, :] * normed
     if not W_IN_F32:
         gated = gated.to(out_ptr.dtype.element_ty).to(tl.float32)
-    act = 1.0 / (1.0 + tl.exp(-z))
-    y = gated * (act if SIGMOID else z * act)
+    if SIGMOID:
+        y = gated * (1.0 / (1.0 + tl.exp(-z)))
+    else:
+        y = gated * (z / (1.0 + tl.exp(-z)))                # silu's expression as before: its bits unchanged
     tl.store(out_ptr + row.to(tl.int64)[:, None] * D + d[None, :], y.to(out_ptr.dtype.element_ty), mask=ok)
 
 
