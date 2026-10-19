@@ -34,7 +34,7 @@ class ZlibLevel:
     def bind(self, ctx, shapes, identity) -> dict[str, int]:
         return {name: int(self.nbytes * share) // unit_bytes for name, (unit_bytes, _, share) in shapes.items()}
 
-    def write(self, key, spec, src) -> None:
+    def write(self, key, spec, src, slots=None) -> None:        # slots: the tier's; blobs need none
         blobs = {name: [zlib.compress(b"".join(unit), self.level) for unit in units] for name, units in src.items()}
         with self.lock:
             self.blobs[key, spec] = blobs

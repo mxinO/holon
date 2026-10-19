@@ -26,12 +26,13 @@ copy). Below `host.reserve` free units (default: one `max_model_len` load's), `b
 A load of a copy only the level holds reads it into host units, which it holds from then on; one read per copy, so a
 later load of it waits for that read.
 
-I/O (`iothreads.py`). Jobs run on `ssd.io_threads` threads in the order decided, but while a read is queued no write
-starts except one that frees units a queued read needs (D11's read priority, rev 8.3); a job first waits, on the host,
-for what it depends on (the fences of the host units it fills or reads, the copy's previous job). A load that reads
-from the level has its H2D enqueued by an I/O thread once its reads are done, in the order loads were decided, unless
-it was abandoned first (`loaded(load, None)` completes the wait for that enqueue as a no-op). The engine's host wait
-for an enqueue is `stats()["load_enqueue_wait_s"]`.
+I/O (`iothreads.py`). Jobs run on `io_threads` threads (default 3) in the order decided, but while a read is queued
+no write starts except one a queued job depends on (D11's read priority, rev 8.3); a job first waits, on the host, for
+what it depends on (the fences of the host units it fills or reads, the copy's previous job, the last job on the
+level slots it writes: the tier chooses them when it decides the write, so a write never waits for room). A load that
+reads from the level has its H2D enqueued by an I/O thread once its reads are done, in the order loads were decided,
+unless it was abandoned first (`loaded(load, None)` completes the wait for that enqueue as a no-op). The engine's host
+wait for an enqueue is `stats()["load_enqueue_wait_s"]`.
 
 Fences. A host unit keeps what must pass before it is reused, one fence per ordered source (a later one implies the
 earlier): the latest writer of its bytes (a store's D2H, or a level read), the latest step that read it (`loaded`'s
@@ -43,7 +44,10 @@ H2D lane at `h2d_rate`; a load is due once the lane has carried its pages (one o
 its step waits, but it still occupies the lane), and `loaded` brings the clock up to the due time it waited for.
 Payload loads from the host level take no lane (their adopt reads the host copy in-step): due at once. A level read
 first passes the level's lane at its read rate, behind the writes it depends on (charged at the write rate divided
-by the level's mixed factor); other write-backs go on a lane of their own at the write rate (they wait for reads).
+by the level's mixed factor); other write-backs go on a lane of their own at the write rate. A read decided while
+that lane is busy is charged at the level's read-side factor (`read_beside`, the read rate measured beside background
+writes) and pushes the lane back by its time (D4, rev 8.5). A load of a copy a level read wrote, done or not, is due
+no earlier than that read.
 `stats` counts, besides stores, loads, write-backs and evictions, the gated loads (due after the clock when issued)
 and the steps launched while one is not due."""
 from __future__ import annotations
@@ -126,11 +130,11 @@ class HostTier:
         levels = [x.strip() for x in str(get("levels", "")).split(",") if x.strip()]
         if len(levels) > 1:
             raise ValueError(f"state_tier.levels {levels}: K binds one level below host")
-        self.threads_n = int(get("ssd.io_threads", "2"))
+        self.threads_n = int(get("io_threads", "3"))
         self.level = None
         if levels == ["ssd"]:
             self.level = SsdLevel({k: get(f"ssd.{k}", None) for k in ("dir", "direct", "persist", "read", "write",
-                                                                       "mixed")}
+                                                                       "mixed", "read_beside")}
                                   | {"bytes": nbytes(get("ssd.bytes", "64GiB"))}, self.threads_n)
         elif levels:
             self.level = ctx.unit(Ref(levels[0]), options=dict(opts))
@@ -152,7 +156,9 @@ class HostTier:
         self.limbo: set[tuple[str, int]] = set()                     # released while still read
         self.fences: dict[tuple[str, int], dict[str, Any]] = collections.defaultdict(dict)   # -> source -> fence
         self.written: dict[tuple[str, int], Any] = {}
-        self.jobs: dict[tuple[int, str | None], Any] = {}            # copy -> its latest level job
+        self.jobs: dict[tuple[int, str | None], Any] = {}            # copy -> its latest level job, unfinished
+        self.slot_jobs: dict[tuple[str, int], Any] = {}              # a freed level slot -> its last job, unfinished
+        self.read_due: dict[tuple[int, str | None], float] = {}      # a copy read back -> when its read is due
         self.enqueues: Any = None                                    # the latest load enqueue job
         self.hits: collections.Counter = collections.Counter()
         self.tentative: set[tuple[int, str]] = set()
@@ -172,9 +178,11 @@ class HostTier:
             q.unit_bytes for q in payloads.values()) for k, p in payloads.items()}     # as many units per spec
         self.per_block = {k: max(1, self.block // self.page_size) for k in pages}
         load = {k: ctx.max_model_len // self.block * self.per_block[k] for k in pages} | {k: 1 for k in payloads}
-        floor = {k: ctx.max_seqs * n for k, n in load.items()} | {k: ctx.max_seqs + 1 for k in payloads}
-        short = {k: (int(self.host_bytes * share[k] // p.unit_bytes), floor[k]) for k, p in self.dev.items()
-                 if self.host_bytes * share[k] // p.unit_bytes < floor[k]}
+        floor = {k: ctx.max_seqs + 1 for k in payloads}             # payload stores are mandatory
+        if self.level is not None:                                   # loads read back into host units
+            floor |= {k: ctx.max_seqs * load[k] for k in pages}
+        short = {k: (int(self.host_bytes * share[k] // self.dev[k].unit_bytes), f) for k, f in floor.items()
+                 if self.host_bytes * share[k] // self.dev[k].unit_bytes < f}
         if short:
             raise RuntimeError("state_tier.host.bytes too small for the loads in flight: " + ", ".join(
                 f"{k} gets {n} units, needs {f}" for k, (n, f) in short.items()))
@@ -192,19 +200,24 @@ class HostTier:
         self.io = IoThreads(self.threads_n)
         self.low_cap = dict(self.level.bind(ctx, {k: (p.unit_bytes, p.segments, share[k]) for k, p in self.dev.items()},
                                             ctx.identity))
-        self.low_free = dict(self.low_cap)
         rates = self.level.rates()
         self.read_rate, self.write_rate, self.mixed = (float(rates[k]) for k in ("read", "write", "mixed"))
-        records = self.level.restore()
+        self.read_beside = float(rates.get("read_beside", 1.0))
+        records = self.level.restore()                                 # their slots: units, payloads' units
+        claimed = {(name, s) for r in records for name, us in [*r.units.items(),
+                                                               *((p.pool, p.units) for p in r.payloads.values())]
+                   for s in us}
+        self.slots = {name: collections.deque(s for s in range(n) if (name, s) not in claimed)   # once (A3)
+                      for name, n in self.low_cap.items()}
         for r in records:                                              # parents first
             self._meta(r.key, r.parent, r.tokens)
             if r.units:
-                self._low_add((r.key, None), dict(self.per_block), r.parent)
+                self._low_add((r.key, None), {name: list(us) for name, us in r.units.items()}, r.parent)
             for spec, p in r.payloads.items():
-                self._low_add((r.key, spec), {p.pool: len(p.units)}, None)
+                self._low_add((r.key, spec), {p.pool: list(p.units)}, None)
         self.counts["restored_blocks"] += len(records)
-        return [BlockRecord(r.key, r.parent, r.tokens, r.units, {s: Payload((), p.pool) for s, p in r.payloads.items()})
-                for r in records]
+        return [BlockRecord(r.key, r.parent, r.tokens, {s: () for s in r.units},
+                            {s: Payload((), p.pool) for s, p in r.payloads.items()}) for r in records]
 
     def _bind(self, name: str, pool: Any, direction: str):
         facts = {"direction": direction, "chunk": pool.unit_bytes // pool.segments}
@@ -258,7 +271,7 @@ class HostTier:
         for k in copies:                            # the level's copies come to host units first (one read each)
             if k not in self.copies:
                 read_bytes += self._read_back(k, dependent)
-        level = bool(read_bytes)
+        prior = max((self.read_due.get(k, 0.0) for k in copies), default=0.0)   # reads of its copies before
         for i, key in enumerate(keys):
             host = self.copies[key, None]                 # a copy the core loads is one the tier still holds
             for spec, us in units.items():
@@ -272,6 +285,9 @@ class HostTier:
             self.counts["payload_load_bytes"] += len(hu) * self.dev[pool].unit_bytes
         reads += [(name, u) for name, _, hu in jobs for u in hu]
         written = list({id(f): f for r in reads if (f := self.written.get(r)) is not None}.values())
+        # A copy a level read wrote (this load's, or an earlier one's, done or not): its H2D waits for that read on an
+        # I/O thread, never on the engine thread (decided by what wrote it, not by whether it is done).
+        level = bool(read_bytes) or any(isinstance(f, Ticket) for f in written)
         load = HostLoad([], self.t, out, copies, reads, None, level and bool(jobs), tier=self)
         if not jobs:
             load.fences = written
@@ -283,11 +299,17 @@ class HostTier:
         self.reading.update(reads)
         for k in copies:
             self.lru[k[1] is None].move_to_end(k)
-        if level:                                     # D4: the level's lane, then the H2D lane
-            self.nvme = max(self.nvme, self.t) + read_bytes / self.read_rate
-            load.due = self.nvme
+        if read_bytes:                                # D4: the level's lane, then the H2D lane
+            beside = self.wlane > self.t                # background writes run beside it: the read-side factor
+            cost = read_bytes / (self.read_rate * (self.read_beside if beside else 1.0))
+            self.nvme = max(self.nvme, self.t) + cost
+            self.wlane += cost if beside else 0.0       # and they wait for it
+            for k in copies:
+                if self.read_due.get(k) == -1.0:
+                    self.read_due[k] = self.nvme
+        load.due = max(self.t, prior, self.nvme if read_bytes else 0.0)
         if pages:
-            self.lane = max(self.lane, load.due if level else self.t) + pages / self.h2d_rate
+            self.lane = max(self.lane, load.due) + pages / self.h2d_rate
             if level or pages > self.stall:
                 load.due = self.lane
         if load.due > self.t:                                 # its readers wait for the clock: gated
@@ -374,7 +396,8 @@ class HostTier:
                     self._write_back(k, urgent=False)
         self.io.close()
         records = [BlockRecord(key, *self.meta[key], {s: () for s in self.pages} if (key, None) in self.low else {},
-                               {s: Payload((0,) * sum(self.low[key, s].values()), next(iter(self.low[key, s])))
+                               {s: Payload(tuple(u for us in self.low[key, s].values() for u in us),
+                                           next(iter(self.low[key, s])))
                                 for s in specs if s is not None and (key, s) in self.low})
                    for key, specs in self.specs.items() if any((key, s) in self.low for s in specs)]
         self.level.close(records if persist else [])
@@ -384,7 +407,8 @@ class HostTier:
         self.counts["gated_steps"] += self.t < self.gated                 # launched while a gated load waits
         self.t += self.a + self.b * int(plan.n_query.sum()) + self.c * len(plan.slots)
         if self.level is not None:                   # D11's watermark: host leaves go to the level
-            self.jobs = {k: j for k, j in self.jobs.items() if k in self.low or not j.ticket.done()}
+            self.jobs = {k: j for k, j in self.jobs.items() if not j.ticket.done()}      # unfinished only
+            self.slot_jobs = {k: j for k, j in self.slot_jobs.items() if not j.ticket.done()}
             for name, want in self.reserve.items():
                 if len(self.free[name]) < want:
                     self._room({name: want}, pages=name in self.pages, take=False)
@@ -394,7 +418,7 @@ class HostTier:
         held = {k: p.capacity - len(self.free[k]) for k, p in self.host.items()}
         out = dict(self.counts) | {f"host_units.{k}": n for k, n in held.items()}
         if self.level is not None:
-            out |= {f"level_units.{k}": self.low_cap[k] - n for k, n in self.low_free.items()}
+            out |= {f"level_units.{k}": self.low_cap[k] - len(free) for k, free in self.slots.items()}
         return out
 
     # -- the host level ------------------------------------------------------------------------------------------
@@ -451,6 +475,7 @@ class HostTier:
                 else:
                     self.free[name].append(u)
         del self.lru[k[1] is None][k]
+        self.read_due.pop(k, None)
         if k[1] is None:
             self._unlink(k[0], self.host_kids)
         if k not in self.low:
@@ -489,7 +514,7 @@ class HostTier:
                     del self.tree[parent]
 
     def _need(self, k) -> dict[str, int]:
-        return {name: len(us) for name, us in self.copies[k].items()} if k in self.copies else dict(self.low[k])
+        return {name: len(us) for name, us in (self.copies[k] if k in self.copies else self.low[k]).items()}
 
     # -- the level -----------------------------------------------------------------------------------------------
     def _keeps(self, k) -> bool:
@@ -508,7 +533,7 @@ class HostTier:
     def _low_room(self, need: dict[str, int], keep) -> bool:
         """Logical room on the level for `need` units, evicting its redundant copies first (also on host), then its
         least recently used leaves no load reads; False if that cannot make it."""
-        while any(self.low_free[k] < n for k, n in need.items()):
+        while any(len(self.slots[k]) < n for k, n in need.items()):
             fits = lambda k: k != keep and not self.loading[k] and any(name in need for name in self.low[k])  # noqa
             victim = next((k for k in self.low_lru if fits(k) and k in self.copies), None) or next(
                 (k for k in self.low_lru if fits(k) and not (k[1] is None and self.kids.get(k[0]))), None)
@@ -521,11 +546,9 @@ class HostTier:
                 self.counts["level_evicted"] += 1
         return True
 
-    def _low_add(self, k, units: dict[str, int], parent: int | None) -> None:
-        self.low[k] = units
+    def _low_add(self, k, slots: dict[str, list[int]], parent: int | None) -> None:
+        self.low[k] = slots
         self.low_lru[k] = None
-        for name, n in units.items():
-            self.low_free[name] -= n
         if k not in self.copies:
             self.specs.setdefault(k[0], set()).add(k[1])
             if k[1] is None:
@@ -534,10 +557,13 @@ class HostTier:
     def _low_release(self, k) -> None:
         if k not in self.low:
             return
-        for name, n in self.low.pop(k).items():
-            self.low_free[name] += n
+        last = self.jobs.get(k)
+        for name, slots in self.low.pop(k).items():   # free now; a write into one waits for its last job (A1)
+            self.slots[name].extend(slots)
+            if last is not None:
+                self.slot_jobs.update({(name, s): last for s in slots})
         del self.low_lru[k]
-        self.io.then(self.jobs.get(k), lambda: self.level.drop(*k))   # once its last job is done
+        self.io.then(last, lambda: self.level.drop(*k))   # once its last job is done
         if k not in self.copies:
             self._gone(k)
 
@@ -554,13 +580,13 @@ class HostTier:
         """Write `k`'s host copy to the level (decided now: it is on the level, its host units free; their reuse waits
         for the write). `urgent`: a read waits for it (the read queue, charged at the mixed rate)."""
         host, parent = self.copies[k], self.parent.get(k[0])
-        units = {name: len(us) for name, us in host.items()}
+        slots = {name: [self.slots[name].popleft() for _ in us] for name, us in host.items()}   # chosen now (A1)
         src = {name: [self._iovec(name, u) for u in us] for name, us in host.items()}
-        deps = [self.written[name, u] for name, us in host.items() for u in us
-                if (name, u) in self.written]
+        deps = [self.written[name, u] for name, us in host.items() for u in us if (name, u) in self.written]
+        deps += [j.ticket for name, ss in slots.items() for s in ss if (j := self.slot_jobs.pop((name, s), None))]
         nbytes_ = sum(len(us) * self.host[name].unit_bytes for name, us in host.items())
-        self._low_add(k, units, parent)
-        job = self._submit(k, lambda: self.level.write(k[0], k[1], src), deps, read=urgent)
+        self._low_add(k, slots, parent)
+        job = self._submit(k, lambda: self.level.write(k[0], k[1], src, slots), deps, read=urgent)
         if dependent is not None:
             dependent.append(job)
         for name, us in host.items():
@@ -576,8 +602,7 @@ class HostTier:
 
     def _read_back(self, k, dependent: list) -> int:
         """Bring the level's copy of `k` to host units (decided now: the host holds it, written by the read)."""
-        need = dict(self.low[k])
-        host = self._room(need, pages=k[1] is None, dependent=dependent)
+        host = self._room(self._need(k), pages=k[1] is None, dependent=dependent)
         if host is None:
             raise RuntimeError(f"state_tier: no host units to read {k} back (every copy loading)")
         dst = {name: [self._iovec(name, u) for u in us] for name, us in host.items()}
@@ -590,6 +615,7 @@ class HostTier:
         for name, us in host.items():
             for u in us:
                 self.written[name, u] = self.fences[name, u]["store"] = job.ticket
+        self.read_due[k] = -1.0                      # set to the read's due time by `load`
         self.counts["level_reads"] += 1
         self.counts["level_payload_reads"] += k[1] is not None
         nbytes_ = sum(len(us) * self.host[name].unit_bytes for name, us in host.items())

@@ -151,18 +151,23 @@ def test_the_level_below_host_passes_the_checks(dense_ssd):
     assert clean["restart"]["restored_blocks"] > 0 and clean["restart"]["level_reads_after_restart"] > 0
 
 
-def test_the_level_without_a_watermark_passes_run_identity(tiny_checkpoint, tmp_path):
+@pytest.mark.parametrize("reserve, lag", [("0", 0), (None, 3)])
+def test_the_level_passes_run_identity_without_a_watermark_and_with_late_io(tiny_checkpoint, tmp_path, reserve, lag):
     """No `host.reserve`: a load's read-backs make room in the host level themselves, and never by evicting what the
-    same load already read back."""
+    same load already read back. And with the level's I/O completions landing 0 … 3 launches late (seeded per run;
+    at once for what waits for them), the host level at its floor: decisions never read completion."""
     build = _builder(tiny_checkpoint, max_model_len=256, state_memory=17 * 16 * 512, plugin_options={
         "state_tier.host.bytes": "520KiB", "state_tier.host.pages": "1", "state_tier.levels": "ssd",
-        "state_tier.ssd.dir": str(tmp_path / "level"), "state_tier.ssd.bytes": "8MiB", "state_tier.host.reserve": "0"})
-    got = tiers.identity(build, _trace(512, 12, 64, (10, 40), 8), lambda i=0: tiers.Deferred(i), 2, options=PRESSURE)
+        "state_tier.ssd.dir": str(tmp_path / "level"), "state_tier.ssd.bytes": "8MiB"} | (
+        {"state_tier.host.reserve": reserve} if reserve else {}))
+    got = tiers.identity(build, _trace(512, 12, 64, (10, 40), 8), lambda i=0: tiers.Deferred(i, io_lag=lag), 3,
+                         options=PRESSURE)
     assert got["verdict"] == "pass", got["failures"]
 
 
-# free-on-ticket is not here: it fires and changes nothing, on the CPU (with or without the watermark) and on the
-# A5000 (docs/v1-kv-tiers.md §13, "Step 3 as built").
+# free-on-ticket is not here: it fires and changes nothing, on the CPU (with or without the watermark, with I/O
+# completions lagged 0 … 3 launches across seeds) and on the A5000: it moves which level holds a copy, which reaches
+# neither the schedule nor the outputs there (docs/v1-kv-tiers.md §13, "Rev 8.5").
 @pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
 def test_a_level_plant_is_caught(plant, dense_ssd):
     factory, checks = TIER_PLANTS[plant]

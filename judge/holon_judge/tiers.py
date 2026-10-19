@@ -44,6 +44,7 @@ import gc
 import pathlib
 import random
 import shutil
+import threading
 import time
 from collections.abc import Callable, Iterator
 from unittest import mock
@@ -86,18 +87,42 @@ class _Sleepy:
 
 
 class Deferred:
-    """The CPU: `holon_judge.deferred`'s streams (a copy lands 0 … `most` launches late unless waited for)."""
+    """The CPU: `holon_judge.deferred`'s streams (a copy lands 0 … `most` launches late unless waited for). With
+    `io_lag`, a level I/O job's completion is also deferred, 0 … `io_lag` launches (seeded), unless something waits
+    for its ticket: what reads its completion without waiting (the free-on-ticket plant) sees it late."""
 
     io_delay = 0.005                       # seconds: the level's I/O jobs, unseeded (up to)
 
-    def __init__(self, seed: int, most: int = 2) -> None:
+    def __init__(self, seed: int, most: int = 2, io_lag: int = 0) -> None:
         self.streams = deferred.Deferred(seed, most=most)
+        self.io_lag, self.rng, self.lagged, self.lock = io_lag, random.Random(seed + 1000), [], threading.Lock()
 
     def wrap(self, make: Callable[[], object]) -> object:
         return self.streams.stream()
 
     def pump(self) -> None:
         self.streams.pump()
+        with self.lock:
+            due = [job for at, job in self.lagged if at <= self.streams.launches]
+            self.lagged = [(at, job) for at, job in self.lagged if at > self.streams.launches]
+        for job in due:
+            job.ticket._event.set()
+
+    def complete(self, job) -> None:
+        with self.lock:
+            at = self.streams.launches + self.rng.randint(0, self.io_lag)
+            if at > self.streams.launches:
+                self.lagged.append((at, job))
+                return
+        job.ticket._event.set()
+
+    def release(self, ticket) -> None:
+        """Someone waits for `ticket`: its completion lands now."""
+        with self.lock:
+            mine = [(at, job) for at, job in self.lagged if job.ticket is ticket]
+            self.lagged = [x for x in self.lagged if x not in mine]
+        for _, job in mine:
+            job.ticket._event.set()
 
 
 @contextlib.contextmanager
@@ -122,7 +147,20 @@ def copy_streams(streams: Delayed | Deferred | None) -> Iterator[None]:
 
     def delayed(self, fn, deps=(), read=False):              # an unseeded sleep before each level I/O job
         return submit(self, fn, [lambda: time.sleep(rng.uniform(0, streams.io_delay)), *deps], read)
-    with mock.patch.object(Engine, "_tier_ctx", planted), mock.patch.object(IoThreads, "submit", delayed):
+    with contextlib.ExitStack() as stack:
+        stack.enter_context(mock.patch.object(Engine, "_tier_ctx", planted))
+        stack.enter_context(mock.patch.object(IoThreads, "submit", delayed))
+        if getattr(streams, "io_lag", 0):                     # deferred I/O completions
+            from holon_std.state_tier.iothreads import Ticket
+
+            wait = Ticket.wait
+
+            def waited(ticket):
+                streams.release(ticket)
+                wait(ticket)
+            stack.enter_context(mock.patch.object(IoThreads, "_complete", lambda io, job: streams.complete(job)))
+            stack.enter_context(mock.patch.object(Ticket, "wait", waited))
+            stack.enter_context(mock.patch.object(Ticket, "synchronize", waited))
         yield
 
 

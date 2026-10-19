@@ -97,9 +97,10 @@ def test_page_admission_options_and_mandatory_payloads(admit, stored):
     assert not tier.tentative
 
 
-def test_attach_refuses_a_host_level_below_the_loads_in_flight():
+def test_attach_refuses_a_payload_level_below_the_payloads_in_flight():
+    _bare(pages=3)                                            # host only: no floor for pages (nothing reads back)
     with pytest.raises(RuntimeError, match="too small for the loads in flight"):
-        _bare(pages=3)                                        # one max_model_len load is 4 blocks
+        _bare(payloads=1)                                     # a payload per request slot, and one more
 
 
 def test_page_loads_take_the_lane_and_payload_loads_do_not():

@@ -1534,7 +1534,7 @@ def _torn_manifest(checked: bool):
                 level._io = killed
             return close(self)
         return [mock.patch.object(HostTier, "close", planted)] + (
-            [] if checked else [mock.patch.object(SsdLevel, "_verify", lambda self, name, slot, crc: True)])
+            [] if checked else [mock.patch.object(SsdLevel, "_verify", lambda self, name, slot, crc, local: True)])
     return make
 
 

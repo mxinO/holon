@@ -7,21 +7,22 @@ share slots), and one without the bytes.
 
 I/O. `os.preadv` / `os.pwritev` of whole units, on the tier's I/O threads. With `ssd.direct` (the default) a unit
 whose segments and offset are 4 KiB-aligned goes through an `O_DIRECT` descriptor; otherwise, or where the filesystem
-refuses `O_DIRECT`, buffered, with `POSIX_FADV_DONTNEED` after. A write records the crc32 of the bytes it wrote.
+refuses `O_DIRECT`, buffered, with `POSIX_FADV_DONTNEED` after. A write goes to the slots the tier chose and never
+waits; with persistence it records the crc32 of the bytes it wrote.
 
 Persistence (`ssd.persist = close`). `close` writes a snapshot: the slot files `fdatasync`ed, then the manifest (the
 identity, the geometry and one record per block: key, parent, tokens, slot and crc32 per unit of each copy) written
 to a temporary file, `fsync`ed, renamed into place and the directory `fsync`ed. `bind` reads the manifest, then
 unlinks it and `fsync`s the directory before any slot can be rewritten, so a record never names a slot reused after it
 was written. `restore` keeps a record only if its identity matches, every slot lies inside the current geometry and
-holds its crc (verified on threads), and its parent is kept (parents first); a crash leaves no manifest: nothing is
-restored."""
+holds its crc (verified on threads, through the `O_DIRECT` descriptor into a reused aligned buffer), and its parent
+is kept (parents first); a crash leaves no manifest: nothing is restored."""
 from __future__ import annotations
 
-import collections
 import concurrent.futures
 import fcntl
 import json
+import mmap
 import os
 import pathlib
 import threading
@@ -33,7 +34,9 @@ from holon.api import BlockRecord, Payload
 
 ALIGN = 4096
 MANIFEST = "manifest.json"
-RATES = {"read": 2.17e9, "write": 1.77e9, "mixed": 0.79}      # K-M4 on the RTX 5080's drive (tune measures them)
+# K-M4 and step 3 on the RTX 5080's drive (tune measures them): reads, writes, the factor on a write a queued read
+# waits for, and the read-side factor beside background writes (3 threads)
+RATES = {"read": 2.17e9, "write": 1.77e9, "mixed": 0.79, "read_beside": 0.80}
 
 
 def _aligned(unit: Sequence[memoryview], offset: int) -> bool:
@@ -59,7 +62,7 @@ class SsdLevel:
         self.persist = str(options.get("persist") or "off")
         if self.persist not in ("off", "close"):
             raise ValueError(f"state_tier.ssd.persist {self.persist!r}: off or close")
-        self.overrides = {k: float(options[k]) for k in ("read", "write", "mixed") if options.get(k)}
+        self.overrides = {k: float(options[k]) for k in ("read", "write", "mixed", "read_beside") if options.get(k)}
         self.cv = threading.Condition()
         self.held: dict[tuple[int, str | None], dict[str, list[int]]] = {}     # copy -> shape -> slots
         self.crcs: dict[tuple[int, str | None], dict[str, list[int]]] = {}
@@ -94,7 +97,7 @@ class SsdLevel:
             self.manifest = json.loads(path.read_text())
             path.unlink()
             _fsync_dir(self.root)
-        self.fd, self.dfd, self.free = {}, {}, {}
+        self.fd, self.dfd = {}, {}
         for name, (_, n, stride) in self.geometry.items():
             fd = self.fd[name] = os.open(files[name], os.O_RDWR | os.O_CREAT, 0o600)
             os.ftruncate(fd, n * stride)
@@ -108,29 +111,27 @@ class SsdLevel:
                     self.dfd[name] = os.open(files[name], os.O_RDWR | os.O_DIRECT)
                 except OSError:
                     pass                                             # no O_DIRECT here: buffered
-            self.free[name] = collections.deque(range(n))
         return {name: n for name, (_, n, _) in self.geometry.items()}
 
     def rates(self) -> dict[str, object]:
         return RATES | self.overrides | {"lane": f"ssd:{os.stat(self.root).st_dev}"}
 
     # -- I/O ---------------------------------------------------------------------------------------------------
-    def write(self, key: int, spec: str | None, src: Mapping[str, Sequence[Sequence[memoryview]]]) -> None:
-        with self.cv:
-            while any(len(self.free[name]) < len(units) for name, units in src.items()):
-                self.cv.wait()                                       # a dropped copy's last read is still running
-            slots = {name: [self.free[name].popleft() for _ in units] for name, units in src.items()}
+    def write(self, key: int, spec: str | None, src: Mapping[str, Sequence[Sequence[memoryview]]],
+              slots: Mapping[str, Sequence[int]]) -> None:
+        """Into the slots the tier chose (free, and no earlier job on them still running): it never waits."""
         crcs = {}
         for name, units in src.items():
             crcs[name] = []
             for unit, slot in zip(units, slots[name], strict=True):
-                crc = 0
-                for mv in unit:
-                    crc = zlib.crc32(mv, crc)
-                crcs[name].append(crc)
+                if self.persist == "close":                          # only a snapshot reads it
+                    crc = 0
+                    for mv in unit:
+                        crc = zlib.crc32(mv, crc)
+                    crcs[name].append(crc)
                 self._io(name, slot, unit, write=True)
         with self.cv:
-            self.held[key, spec], self.crcs[key, spec] = slots, crcs
+            self.held[key, spec], self.crcs[key, spec] = {k: list(v) for k, v in slots.items()}, crcs
 
     def read(self, key: int, spec: str | None, dst: Mapping[str, Sequence[Sequence[memoryview]]]) -> None:
         with self.cv:
@@ -141,10 +142,8 @@ class SsdLevel:
 
     def drop(self, key: int, spec: str | None) -> None:
         with self.cv:
-            for name, slots in self.held.pop((key, spec), {}).items():
-                self.free[name].extend(slots)
+            self.held.pop((key, spec), None)
             self.crcs.pop((key, spec), None)
-            self.cv.notify_all()
 
     def _io(self, name: str, slot: int, unit: Sequence[memoryview], write: bool) -> None:
         offset, total = slot * self.geometry[name][2], sum(len(mv) for mv in unit)
@@ -171,8 +170,9 @@ class SsdLevel:
             if ok:
                 claimed |= {(name, s) for name, s, _ in slots}
                 good.append((r, slots))
+        local = threading.local()
         with concurrent.futures.ThreadPoolExecutor(self.threads) as pool:
-            checks = list(pool.map(lambda rs: all(self._verify(name, s, c) for name, s, c in rs[1]), good))
+            checks = list(pool.map(lambda rs: all(self._verify(name, s, c, local) for name, s, c in rs[1]), good))
         kept, out = {}, []
         for (r, _), ok in zip(good, checks, strict=True):
             if ok:
@@ -187,22 +187,26 @@ class SsdLevel:
                 out.append(r)
         records = []
         for r in out:
+            slots = {}
             for spec, copy in r["copies"].items():
                 key = (r["key"], None if spec == "" else spec)
-                self.held[key] = {name: [s for s, _ in pairs] for name, pairs in copy.items()}
+                slots[spec] = self.held[key] = {name: [s for s, _ in pairs] for name, pairs in copy.items()}
                 self.crcs[key] = {name: [c for _, c in pairs] for name, pairs in copy.items()}
-                for name, pairs in copy.items():
-                    for s, _ in pairs:
-                        self.free[name].remove(s)
-            records.append(BlockRecord(r["key"], r["parent"], tuple(r["tokens"]), {s: () for s in r["pages"]}, {
-                spec: Payload((0,) * n, shape) for spec, (shape, n) in r["payloads"].items()}))
+            records.append(BlockRecord(r["key"], r["parent"], tuple(r["tokens"]),
+                                       {name: tuple(us) for name, us in slots.get("", {}).items()},
+                                       {spec: Payload(tuple(slots[spec][shape]), shape)
+                                        for spec, (shape, _) in r["payloads"].items()}))
         return records
 
-    def _verify(self, name: str, slot: int, crc: int) -> bool:
-        """Whether the slot holds the bytes whose crc32 the manifest recorded."""
+    def _verify(self, name: str, slot: int, crc: int, local) -> bool:
+        """Whether the slot holds the bytes whose crc32 the manifest recorded: read through the O_DIRECT descriptor
+        where there is one, into a page-aligned buffer each verifying thread reuses."""
         unit_bytes, _, stride = self.geometry[name]
-        buf = bytearray(unit_bytes)
-        return os.preadv(self.fd[name], [buf], slot * stride) == unit_bytes and zlib.crc32(buf) == crc
+        if getattr(local, "buf", None) is None:
+            local.buf = mmap.mmap(-1, max(g[2] for g in self.geometry.values()))
+        view = memoryview(local.buf)[:stride]
+        fd = self.dfd[name] if self.dfd[name] is not None else self.fd[name]
+        return os.preadv(fd, [view], slot * stride) == stride and zlib.crc32(view[:unit_bytes]) == crc
 
     def close(self, records: Sequence[BlockRecord]) -> None:
         try:

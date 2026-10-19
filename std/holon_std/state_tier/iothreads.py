@@ -104,7 +104,10 @@ class IoThreads:
         with self.cv:
             jobs = [*self.reads, *self.writes]
         for job in jobs:
-            job.ticket._event.wait()
+            try:
+                job.ticket.wait()
+            except RuntimeError:
+                pass                                 # raised where the tier waits for it
 
     def close(self) -> None:
         self.drain()
@@ -135,4 +138,8 @@ class IoThreads:
                 then, job.then = job.then, None
             for fn in then:                          # before its ticket: whatever waits for it sees them done
                 fn()
-            job.ticket._event.set()
+            self._complete(job)
+
+    def _complete(self, job: Job) -> None:
+        """The job's ticket is done (the judge's deferred I/O lags this, as its copy streams lag copies)."""
+        job.ticket._event.set()

@@ -22,13 +22,14 @@ numerics = "exact"         # a hit's bytes are the same whichever level held the
 "state_tier.host.reserve" = { help = "with a level: the free host units per pool the step hook keeps by writing host leaves back (default: one max_model_len load's)" }
 "state_tier.levels" = { help = "the level below host: ssd, or the Ref of a level unit (one in K)", default = "" }
 "state_tier.ssd.dir" = { help = "the SSD level's directory (its slot files, lock and manifest)", planned = false }
-"state_tier.ssd.bytes" = { help = "the SSD level's size, split over its shapes as host.bytes is", default = "64GiB", planned = false }
-"state_tier.ssd.io_threads" = { help = "the level's I/O threads", default = "2", planned = false }
+"state_tier.ssd.bytes" = { help = "the SSD level's size, split over its shapes as host.bytes is (decides the hit set: planned)", default = "64GiB" }
+"state_tier.io_threads" = { help = "the tier's I/O threads: the level's concurrency", default = "3", planned = false }
 "state_tier.ssd.direct" = { help = "O_DIRECT for aligned units where the filesystem allows it (else buffered, DONTNEED)", default = "true" }
 "state_tier.ssd.persist" = { help = "off, or close: a snapshot at a clean close, restored at the next start of the same identity", default = "off" }
 "state_tier.ssd.read" = { help = "the level's read rate the clock charges, bytes/s (default K-M4's)" }
 "state_tier.ssd.write" = { help = "the level's write rate, bytes/s" }
 "state_tier.ssd.mixed" = { help = "the factor on a write a queued read waits for" }
+"state_tier.ssd.read_beside" = { help = "the factor on a read decided while background writes run (step 3: 0.80 at 3 threads)" }
 
 [dependencies]
 python = ["numpy", "torch"]
