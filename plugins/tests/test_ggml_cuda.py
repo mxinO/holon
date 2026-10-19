@@ -143,9 +143,9 @@ class Sized:
     def __getattr__(self, name: str):
         return getattr(self.kernel, name)
 
-    def __call__(self, *args):
+    def __call__(self, *args, **kw):
         self.kernel.lib.workspace_high_water()                  # reset
-        y = self.kernel(*args)
+        y = self.kernel(*args, **kw)
         used, sized = self.kernel.lib.workspace_high_water(), self.sized(*args)
         assert used <= sized, f"a call took {used} workspace bytes, sized for {sized}"
         return y

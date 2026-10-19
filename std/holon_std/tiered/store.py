@@ -8,7 +8,9 @@ binds kernels. Then, through the engine's hooks:
 
 - `before_materialize`: one VRAM pool for every class's arena — a fill pool growing to every piece, or the size
   `cache` pins — and per class a mapped host pool of the tier, filled from the extents; both pools' unit is the
-  classes' common divisor, so a between-step copy of a piece is a MemOp of whole units;
+  classes' common divisor, so a between-step copy of a piece is a MemOp of whole units; with `ring_lend = "tail"`
+  the tail (docs/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
+  (`tail_bytes`);
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
   class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
   weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
@@ -109,7 +111,7 @@ class SlotClass:
 
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
-                 ring_tokens: int = 0, ring_copy: str = "sm", policy: Ref | str = "",
+                 ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -121,7 +123,14 @@ class TieredStore:
         self.staging, self.prefill, self.ring_tokens = staging, max(prefill, staging), ring_tokens
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
-        self.ring_copy = ring_copy
+        # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
+        # experts holding the last slots of the largest class arena, a contiguous range its clients' passes take their
+        # buffers from (`tail`), then the coldest ("tail", docs/v1-moe-prefill.md D11)
+        if ring_lend not in ("coldest", "tail"):
+            raise ValueError(f"{name}: ring_lend {ring_lend!r}: coldest or tail")
+        self.ring_copy, self.ring_lend = ring_copy, ring_lend
+        self.tail_bytes: list[Callable[[], int]] = []        # the bytes the clients' passes take from a tail
+        self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -146,8 +155,8 @@ class TieredStore:
         # Route taps: (step, record) at each commit; the record holds the step's routing `counts` [G, E] of decode
         # and verify rows, the experts any of its rows `routed` [G, E] (bool) and its victims' `scope` (what the call
         # holding its decode rows routed, under a variant), the delta log's `records` [n, 3] and,
-        # when it borrowed slots (its empty ones, then lent), its `lends` (each `lend(need)` call's need per class;
-        # else None).
+        # when it borrowed slots (its empty ones, then lent), its `lends` (per call, its need per class: row 0 the
+        # tail's, n at its class (D11; zero without one), then each `lend(need)` round's; else None).
         self.taps: list[Callable[[object, dict], None]] = []
         self._copies: dict[int, list[MemOp]] = {}               # launch -> the swaps' copies handed in then
         self._mode: str | None = None                           # the step being launched borrows: ring or stage
@@ -224,7 +233,7 @@ class TieredStore:
             self.n_before = self.ctx.static(f"{self.name}.n_before", shape[:1], torch.int32)
             self.lent_slots = self.ctx.static(f"{self.name}.lent_slots", shape, torch.int32)
             self.lent_call = self.ctx.static(f"{self.name}.lent_call", shape[:2], torch.int32)
-            self.lend_needs = self.ctx.static(f"{self.name}.lend_needs", (ROUNDS, n_classes), torch.int64)
+            self.lend_needs = self.ctx.static(f"{self.name}.lend_needs", (1 + ROUNDS, n_classes), torch.int64)
             self.pool = self.ctx.static(f"{self.name}.pool", (n_classes, 2 * self.roles * math.prod(shape[:2]) + 1),
                                         torch.int32)
             self.ring_fetch = self.ctx.static(f"{self.name}.ring_fetch", (shape[0], self.roles, 2, self.items),
@@ -253,6 +262,9 @@ class TieredStore:
         g = self._order[group]
         self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
                                              {n: t[g] for n, t in self.state.items()}))
+        if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
+            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
+                             f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
         if self.exclusive:                       # its SSD reads: a copy task on the I/O worker, bound after materialize
             self.reads.append(_Reads(self, g))
             self.resolvers[-1].io_slot = self.io.bind(self.reads[-1])
@@ -322,6 +334,7 @@ class TieredStore:
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
                                      for g in self._order])
         self._class_index = torch.from_numpy(self.class_table).to(self.ctx.device)
+        self.tail = self._tail(lambda c: c.cap)
         if self.exclusive:
             piece = np.zeros(self.residency.host.shape, dtype=np.int32)
             for c in classes:
@@ -365,6 +378,8 @@ class TieredStore:
                 all(n >= self.prefill for n in budget.taken.values())
             if self.lending or staging == self.prefill:
                 break
+        if self.lending and self.tail:                           # this layout lends: its tail can stage a pass
+            self._tail(lambda c: budget.taken[c.name])
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
         free, arenas, at = {}, {}, 0
@@ -373,6 +388,13 @@ class TieredStore:
             at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
             arenas[c.name] = c.slots(), c.host_view()
+        # each class's first slot a streaming step does not lend to its ring and staging: its arena's end, the tail's
+        # start in the tail's class
+        ends = [c.size for c in classes]
+        self.lend_ends = {"coldest": torch.tensor(ends, device=self.ctx.device)}
+        if self.tail:
+            ends[self.tail[0]] -= self.tail[1]
+            self.lend_ends["tail"] = torch.tensor(ends, device=self.ctx.device)
         # −1 − tier: every piece in the RAM tier (inclusive), or on the SSD until placed (exclusive)
         self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):
@@ -532,8 +554,17 @@ class TieredStore:
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
-            self.lent = Lent(self, self._mode)
+            self.lent = Lent(self, self._mode, self.tail if self._mode == "ring" else None)
             self.lent.begin()
+
+    def tail_view(self) -> torch.Tensor | None:
+        """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
+        to its end; None in a step that lends none."""
+        if self.lent is None or self.lent.tail is None:
+            return None
+        cls, n = self.lent.tail
+        c = list(self.classes.values())[cls]
+        return c.slots()[c.size - n:].view(-1)
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""
@@ -546,13 +577,26 @@ class TieredStore:
                 self.lent = None
 
     # -- the policy's means -------------------------------------------------------------------------------------------
-    def lend(self, need: torch.Tensor, call: int = 0) -> torch.Tensor:
+    def lend(self, need: torch.Tensor, call: int = 1) -> torch.Tensor:
         """Device lending under a device-owned policy (D4; a prefill step's `Lent` calls it at the step's first
         resolve, which zeroes the log and the error words, eagerly, no host sync): the whole experts its resolve
         contract's `lend` picks for `need` (slots per class) are unmapped and logged `(group, −1, item)`, their slots
-        kept with the call's number for their return to their layers, empty, at the step's end; their scores stay.
-        Returns the picks [groups, items]."""
+        kept with the call's number (1…ROUNDS; 0 is the tail's) for their return to their layers, empty, at the step's
+        end; their scores stay. Returns the picks [groups, items]."""
         picked = self.resolvers[0].resolve.lend(need, self.residency.device, self._class_index, **self.state)
+        return self._unmap(picked, call)
+
+    def lend_tail(self, cls: int, n: int) -> torch.Tensor:
+        """A tail step's call 0 (docs/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last `n`
+        slots, as the resolve contract's `lend_tail` picks them (the policy's spares there released), unmapped and
+        logged as `lend`'s. Returns the picks [groups, items]."""
+        picked = self.resolvers[0].resolve.lend_tail(cls, n, self.residency.device, self._class_index, self.limits,
+                                                     **self.state)
+        return self._unmap(picked, 0)
+
+    def _unmap(self, picked: torch.Tensor, call: int) -> torch.Tensor:
+        """`picked` [groups, items] unmapped in every role and logged `(group, −1, item)`, their slots kept with the
+        call's number."""
         self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
         self.lent_call.masked_fill_(picked, call)
         self.residency.device.masked_fill_(picked[..., None], -1)
@@ -592,6 +636,24 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
+    def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
+        """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
+        class most groups have, ties to the lower class index — and its last n slots, enough for the clients'
+        `tail_bytes`; refused where that class's other cache slots (`slots(c)` cache slots, less the tail's) cannot
+        lend a prefill pass's staging (D5): a tail step then always stages, never short."""
+        if self.ring_lend != "tail" or not self.ring_tokens:        # (`resolver` stops streaming where none lends)
+            return None
+        classes = list(self.classes.values())
+        first = [classes.index(self.groups[g][0]) for g in self._order]
+        cls = max(sorted(set(first)), key=first.count)
+        c = classes[cls]
+        n = -(-max((f() for f in self.tail_bytes), default=0) // c.unit_bytes)
+        if slots(c) - n < self.prefill:
+            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
+                             f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
+                             f"prefill pass's {self.prefill} misses")
+        return cls, n
+
     def _check_pinned(self) -> None:
         """D4: placement never follows free memory. A pinned arena that did not get its pinned size (it grows above
         the paged floor like a fill) refuses to serve."""

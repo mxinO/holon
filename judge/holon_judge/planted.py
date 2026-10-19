@@ -30,9 +30,10 @@
   miss read from the neighbouring slot; a two-phase swap's copy unordered and unwaited (with an unseeded delay on
   the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
   precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
-  victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert. Each reports how
-  often it fired. F5b (bounded L2 with frozen placement, run-identical ×3 with adaptive placement): the CPU's rows
-  read without waiting for the CPU in one layer; the CPU experts' gate / up halves swapped.
+  victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert, and a tail's
+  (docs/v1-moe-prefill.md D11: parity and the prompt-logprob identity fail). Each reports how often it fired. F5b
+  (bounded L2 with frozen placement, run-identical ×3 with adaptive placement): the CPU's rows read without waiting
+  for the CPU in one layer; the CPU experts' gate / up halves swapped.
 
 The GGUF plants patch names, so they rely on how the engine reaches them: `_loaded` replaces `load_weights` and
 `resolve_model` in `holon.core.engine`'s namespace (it imports them by name), and the kernel plants wrap
@@ -1123,6 +1124,27 @@ def lent_slot_still_mapped() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def tail_unmap_undone() -> Iterator[None]:
+    """A tail step's lending (docs/v1-moe-prefill.md D11) logs the range's experts unmapped but leaves them mapped:
+    they keep naming slots the step's expert passes write their buffers into (D10), and the slots come back as empty
+    slots while the experts still name them. `lent-slot-still-mapped` cannot stand in: the tail never calls `lend`.
+    Reports the experts lent."""
+    from holon_std.tiered import store as tiered
+
+    lend_tail, fired = tiered.TieredStore.lend_tail, collections.Counter()
+
+    def planted(self, *args):
+        before = self.residency.device.clone()
+        picked = lend_tail(self, *args)
+        self.residency.device.copy_(before)                     # the unmap undone
+        fired["lent"] += picked.sum()                          # a tensor: the step goes on without a host sync
+        return picked
+    with mock.patch.object(tiered.TieredStore, "lend_tail", planted):
+        yield
+    print(f"plant tail-unmap-undone fired: { {k: int(v) for k, v in fired.items()} }", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def cpu_wait_skipped(layers: tuple[int, ...] = (0,)) -> Iterator[None]:
     """F5b: the graph reads the CPU's rows of the layers in `layers` (by default the first: 1 in 48 on the vehicle,
     § 6's ≈ 1%) without waiting for the CPU — the row patch races the worker writing them. Reports the patches that
@@ -1208,7 +1230,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "lfu-victim-needed": lambda: _lfu_kernel(1, "lfu-victim-needed",           # victims the step's decode rows route
                                              lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
     "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
-    "lent-slot-still-mapped": lent_slot_still_mapped,
+    "lent-slot-still-mapped": lent_slot_still_mapped, "tail-unmap-undone": tail_unmap_undone,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)

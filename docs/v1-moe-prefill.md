@@ -251,6 +251,25 @@ end at equal I/O, P8; D3 59% of the router, the A5000's ratio; D4 the SwiGLU pas
   so D2–D5 pay there in full (P11); D1's KV cost is a fraction of §6's (P12–P14): no class needs `ggml_cuda.pass_rows`
   below its step budget (O3: 2,048 on the 2,048-token locks, 4,096 elsewhere).
 
+**Restated from the step-2 base** (the panel's C1, written before step 3's runs). The base is step 2's measured time
+to the first token (§7.1); the remaining items' savings are the nsys terms above: D3 59% of the router, D4 the SwiGLU
+pass (an upper bound), D5 the dense GEMM and q8_1 terms at 512 against 4,096 rows (5090: the shipped arm's against the
+probe's, 1.3–1.4 / 9.5–10.3 / 76.5–83.6 ms; 5080: as above).
+
+| Row (bar) | Step 2, measured | + D3, D4, D5 (predicted) | ≤ bar |
+|---|---|---|---|
+| 5090 resident 1K (≥ 0.95×) | 0.923× | 0.992–0.994× | — |
+| 5090 resident 4K (≥ 1.0×) | 0.880× | **0.988–0.993×** | **under the bar with the full set (O2)** |
+| 5090 resident 32K, gated (≥ 1.0×) | 0.955× | 1.006–1.009× | within 3% |
+| 5090 resident 32K, default (reported) | 0.891× | 0.939–0.941× | — |
+| 5080 offload 4K (≥ 1.0×) | 1.036× | 1.135–1.152× | — |
+| 5080 offload 32K, gated (≥ 1.0×) | 0.963× | 1.002–1.008× | within 3% |
+| 5080 offload 32K, default (reported) | 0.918× | 0.955–0.961× | — |
+| 5080 offload 1K (≥ 1.5×) | 1.816× | 1.872–1.876× | — |
+
+- D2 realised 80–90% of its band (§7.1, step 2), so the 5090 4K row now falls short even with D4's upper bound: it is
+  reported to the owner (O2) and does not block step 3.
+
 ## 3. Decisions
 
 - **D0 — One source for the pass size: the bound kernel's `pass_rows`** (lead decision; B-M1, B-M3, C-B3).
@@ -603,6 +622,12 @@ and the router kernel serves `moe_router@1`'s facts. `kernels.triton_experts` de
 - **Rounds.** ≥ 3 rounds, rising to ≥ 5 for rows predicted within 3% of their bar (§1.1).
 - **Statistic.** The median over rounds of each round's geomean of the paired ratios. A difference under 2 sd of the
   rounds is reported as "≈" and escalated.
+- **Warm-up and outliers** (the panel's C2, from step 3 on; `prefill.py --warm-set`, `abrun.sh` / `abstat.py`):
+  - each engine process first runs the whole prompt set once, untimed;
+  - a repetition over 1.5× its cell's median (engine, length, all rounds) is flagged, and its round is re-run once;
+    a cell flagged again is reported with the flag;
+  - the median of all paired ratios is reported beside the statistic;
+  - every record keeps each row's round index and the round's arm order.
 - **Decode tolerance:** ≤ max(0.5%, 2 sd).
 - **Comparisons against main** pin pool sizes, or record that no preemption or eviction occurred (A-minor: D1's KV
   shrink could change admission).
@@ -664,7 +689,7 @@ and the id maps).
 | 3 | D4, then D3 and D5, each measured alone | D4's L0 and identity; D3 / D5 keep-or-revert by M0.7's rule, L2 with near and far plants (a passing near plant records L2's blindness at that scale) | 3–4 |
 | 3b | FN's requests: D10 (passed buffers and their contract terms; the decode-size persistent workspace; the one-buffer allocating fallback) and D11 (`lend_tail` in the `moe_resolve` variant contract; the tail-then-coldest order with `held` / `want` excluding the range; lfu's implementation with its reference and replay of both calls; `Lent`'s D10 exclusion; the bind check; `moe.ring_lend`) | D10 / D11 L0 and CPU checks, the E = 512 no-spare-empties tail step included; policy parity with `tail`; the tail plant's fired count; the `prompt_logprobs` identity with `tail`; **perf with `tail` on the 30B offload lock at 4K and 32K** (C4): `ring_ok` true and no `SHORT`, prefill against `coldest`, and miss bytes per token over the first decode tokens against `coldest` | 3.5–4.5 |
 | 3c | D9: IQ1_M's mmq hunk (or its fallback), with IQ1_M and Q2_0 in `TYPES` | D9's L0 on sm_86 / sm_120, memcheck; per-call speed against IQ2_S's loader | 2–3 |
-| 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6 | 1–2 |
+| 4 | The bars on the bar cards (§5.2's method) | acceptance 1, 2, 3, 5, 6; on the 16 GB lock a soak (16K prompts, then 32-seat decode, repeated): no OOM and `num_alloc_retries` = 0, free memory at its worst point recorded; `ggml_cuda.pass_rows` drops to 512 there only if retries appear (C6) | 1–2 |
 | 5 | Close: **one** propagation round over the 18 classes, covering D1–D5, D9 / Q2_0, D10, D11 and `pass_rows`; the 5080 offload lock re-filled and re-pinned; `pytest` on a GPU, `scripts/ci/run_all.sh`, panel code review, plan §10 status. FN's step 4 then finds D0, D2, D9, D10 and D11 on main | acceptance 4, 7; its L2 verdicts as its own evidence | 1.5–2 |
 
 **Schedule:** about 15.5–22 working days, in the order 0 → 1 → 2 → 3 → 3b → 3c → 4 → 5. Steps 3b and 3c do not depend on
@@ -757,7 +782,8 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
     rule (J 16–128).
   - Mutations, on every SM:
     - "the decode skips each entry's last partial tile" fails 50 (sm_86), 62 (sm_89) and 56 (sm_120) tests;
-    - "the ids path takes the stream-k fixup" aborts the test process in the first call with ids.
+    - a forced fixup on the ids path (`fixup_needed` true for every call with ids, its assert dropped) aborts the test
+      process (SIGABRT) in the test's first call with ids (A4).
   - Memcheck: 0 errors on sm_86, sm_89 and sm_120. Racecheck on sm_120 (5090, 5080): 0 hazards.
   - Identity, main against the branch:
     - the A5000: resident and natural;
@@ -787,6 +813,107 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
     - D2 realised 80–90% of §2.2's band at its low end: 5090 −17 / −142 ms at 4K / 32K against −19…−22 /
       −155…−179; 5080 −41 / −335 against −46…−52 / −368…−411.
     - The 5080 4K row already meets its bar.
+
+**Step 3b (D10, D11).**
+- **What landed.**
+  - `std.moe.kernels` (std minors, additive): `linear_experts@2`'s passed-buffer term (D10: `scratch_bytes`, `out`,
+    `scratch`, no reference past the call, the current stream, one `scratch` for a pass's calls, no overlap of `out`
+    with `x` or `scratch`, 256-byte alignment, refusal before launch, the same bits); `moe_resolve@1`'s variant term
+    `lend_tail(cls, n, residency, classes, limits, **state)` with the largest-class rule (D11).
+  - kernels.ggml_cuda `LinearExperts` (no native change):
+    - `scratch_bytes(tokens)` is the call's largest mmq launch: `workspace_bytes_id` past the persistent workspace's
+      rows, plus gate/up's f32 output; 0 for mmvq-only calls. Merged onto step 3, a stack whose SwiGLU runs in mmq's
+      store (D4, `glu_store`) has no f32 output, so its `scratch_bytes` is the id maps only.
+    - `out` / `scratch` are checked before any launch: `out` a contiguous f32 of the call's shape; `scratch`
+      contiguous uint8, 256-byte aligned and at least `scratch_bytes`; `out` overlapping neither `x` nor `scratch`.
+    - The persistent `ggml_cuda.id[…]` workspace is sized for `resident_rows` = min(`pass_rows`, max(`mmvq_tokens`,
+      `max_seqs` · (1 + `max_draft_tokens`))). A larger mmq call without `scratch` allocates one buffer of
+      `scratch_bytes`.
+  - testing's CPU `LinearExperts` takes the buffers: each chunk's f32 result goes through `scratch`, then `out`. Its
+    arena decode now re-decodes only the slots whose bytes changed (the tail's buffers change some on every call).
+  - std.moe:
+    - `MoE._forward` passes each pass the store's lent buffers (`pass_buffers`, the tail's), else the fallback
+      (`pass_scratch`: one 256-byte-aligned buffer of the larger `scratch_bytes`, for both calls).
+    - `ExpertLinear` / `ArenaExperts` pass the keywords only to instances defining `scratch_bytes`.
+    - `Offload` lays the range out as `scratch`, gate/up's `out`, then down's `out`, at 256-byte boundaries, and gives
+      the store the bytes of its largest pass.
+    - `moe.ring_lend` (`coldest` | `tail`) is declared in `[options]`.
+  - std.tiered:
+    - `ring_lend`; the tail (class, n) at each materialize, with the bind refusals.
+    - `lend_tail` as call 0, sharing `_unmap` with `lend`; the rounds are calls 1…`ROUNDS`; `lend_needs` is
+      [`ROUNDS` + 1, C]; the give-back sentinel is (`ROUNDS` + 1)·E.
+    - `held` is recounted from the tables after every call, outside the range; the pool takes slots outside the range
+      only (`lend_ends`); `tail_view()` gives the range.
+  - placement.lfu: `lend_tail` (oracle and CPU provider). Its replay tracks slots from the trace's start (slot map,
+    empty stacks, class sizes), models call 0, and returns each step's stacks. kernels.expert_io's F11 resolve
+    (`MoeResolveLfu`) has `lend_tail`; lru's does not.
+  - judge: `route_dump` records the slots, the stacks and the class sizes, and `parity` also compares the empty slots'
+    stacks. The plant `tail-unmap-undone` (`tail_unmap_undone`) is registered in `PLANTS`.
+  - `spikes/moe_prefill/identity.py` records the offload store's borrowing steps and tail.
+- **Decided while building** (B-dev6…B-dev10 in §10 are the deviations from rev 6):
+  - Declaring `lend_tail` means the bound resolve instance has it. lru, promote, profile_decay and static are refused
+    at the first resolver, with the error naming the policy.
+  - An empty stack entry with a slot in the range leaves the stack whole (every empty slot does, for the step) and
+    returns unchanged; its other roles' slots serve the step's pool, as the evicted experts' other-class slots do.
+  - The range's class: the first role's class that most layers have, ties to the lower index (the contract text).
+  - `TieredStore.lend`'s default call number is 1, the first round.
+- **Checks** (sm_86, RTX A5000).
+  - **CPU, FN's shape:** `test_a_tail_step_lends_its_passes_a_contiguous_range`, at E = 512, top-10, two layers,
+    `*=0.75`, steps of 10 tokens, `chunk_with_decode` 4. The range is 15 gate/up slots. `_tail_checked` asserts on
+    every tail step:
+    - `lends` row 0 is n at the tail's class, then the rounds;
+    - the range's holders are evicted in every role, with call 0, and no round picks one;
+    - the range is contiguous, the class's last n slots, and at least the clients' bytes;
+    - no pool, stage or ring slot falls in the range, and no mapped piece does, at the start and after every layer;
+    - `held` equals the pool's count per class; a held ring has a slot for every missing piece; no `SHORT`;
+    - after the give-back, the found entries are unchanged below and the lent ones lie whole above, by call then id.
+
+    The first tail step finds no empty slot. The outputs are the resident store's, mixed steps included. Parity
+    (residency, empty counts and stacks per step) holds, and the device's final stacks equal the replay's. `tail` is
+    refused at bind under lru, promote and profile_decay, and under `*=0.5` (512 − 15 slots < `prefill` 512).
+  - **CPU, std:** the call-size test records the fallback, one `scratch` per pass of the larger `scratch_bytes`, the
+    same buffer for both calls, no `out`. Without `scratch_bytes` the keywords are not passed.
+  - **Mutations** of the tail test, each failing it:
+    - the range counted as held (only `_held`): "held counts other slots than the pool's";
+    - `Lent.end` = the arena's end: "the pool holds the tail";
+    - the tail numbered as round 1 (A5);
+    - empty slots in the range left in the pool;
+    - `lend_tail` picking nothing.
+  - **L0 (`test_ggml_cuda_moe.py`):** the arena test runs `passed_buffers` for glu none and swiglu:
+    - NaN-poisoned `out` and `scratch` give the allocating call's bits at 4,608 (4,096 + 512) and 4,097 (4,096 + an
+      mmvq row) tokens;
+    - a `max_seqs` 64 binding keeps 64-row calls' id maps in its workspace: `scratch_bytes(64)` is gate/up's output,
+      less than `scratch_bytes(65)`, and both calls are bitwise;
+    - short, misaligned and overlapping (with `scratch`, with `x`) buffers and a wrong `out` shape are refused with
+      nothing launched.
+
+    The graph-replay test also captures every decode bucket with static NaN-poisoned `out`s and one `scratch` for
+    gate/up then down, replayed on new routing: bitwise the eager allocating call. Mutation: gate/up's f32 output
+    carved over the id workspace aborts the test process.
+  - **L0, the store on the GPU:** `test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store[-*=0.75 tail]`:
+    - ring steps lend the tail;
+    - outputs are bitwise the resident store's, with parity and `_tail_checked`;
+    - no host sync in `Lent`.
+  - **Memcheck** (sm_86, passed buffers of exactly their sizes added): 0 errors, at both commits.
+  - **Identity** (`identity.py run --config natural`, 30B Q4_K_M, A5000; 1,027 / 4,096 tokens;
+    `evidence/mp3b_identity_rtx-a5000_2026-10-18.json`):
+    - main (`b5b1e7f`), the branch, and the branch with `moe.ring_lend=tail` (tail 366 gate/up slots, 4 ring steps)
+      all give `3a7308bf…` / `e7670f73…`, each run-identical ×2, at both commits of the step.
+    - The branch with `tail` under the plant gives `ed55a19a…` / `1e8e5ecf…`: the plant fired 695 times in 2 ring
+      steps.
+  - **The plant on the CPU:** it fired 15 times and parity first differs at step 1. The outputs stay the resident
+    store's there: the staging step's rounds lend the planted experts again, which unmaps them, so only the rounds'
+    picks differ from the replay's.
+  - **Static CI** (`run_all.sh b5b1e7f`): clean.
+  - **Suite time** (`--durations`, the shared host; `test_moe_engine.py` / `test_ggml_cuda_moe.py`):
+    - before (`7cd24de`): 68.5 / 177.0 s, 159 passed in 253.7 s;
+    - after: 53.9 / 199.0 s, 161 passed in 257.8 s (an earlier run of the step's first commit: 57.4 / 158.5 s).
+    - The added tests cost ≈ 5 s (the E = 512 test 4.0 s plus its 1.0 s fixture), ≈ 1 s (the GPU tail case) and
+      ≈ 0.5 s (graph replay). The CPU tests got faster: the reference provider re-decodes only changed slots.
+  - **Review:** one correctness reviewer over the step's diff. First round: no blockers; one major (the test did not
+    check that `held` excludes the range), one minor and four nits. All were fixed in the second commit, and the
+    re-review found none remaining.
+  - Not run here: step 3b's perf check on the cluster (the lead's).
 
 **Step 3c (D9, IQ1_M and Q2_0).**
 - **What landed** (`d4e11f4`; a `vendor.patch` hunk, every part marked "Holon:", `vendor.sh --check` clean):
@@ -878,6 +1005,9 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
     - 5090 1K and 4K, without D4;
     - 5090 4K and the 5080 32K-gated row at the bar's low end, even with D4.
   - These are re-sent with the measured gated arm after the bar cards' step 0.
+  - **From the step-2 base (C1; escalated by the lead):** the 5090 resident 4K row is predicted at 0.988–0.993× with
+    every remaining item, under its bar; both 32K gated rows at ≈ 1.002–1.009×, within 3% (§2.2). Step 3's
+    measurements replace the prediction.
   - Acceptance 1's 32K row is now against the gated FreeToken, which step 0 measures as slower than the reference
     that recorded 0.88× (≈ 4–7% modelled). The owner confirms the relabel.
 - **O3: pass size per class.** `ggml_cuda.pass_rows` lowers the step-size gain on classes whose KV capacity cannot
@@ -890,7 +1020,27 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 
 ## 10. Review log
 
-### Building: deviations from rev 6 (steps 1–2 and 3c, 2026-10-18; recorded for the panel)
+### Building: the panel's code review of steps 0–2 (2026-10-18; dispositions)
+
+| # | Finding | Disposition |
+|---|---|---|
+| A1 | The step-2 checks ran on a tree with uncommitted edits | re-run at `1c82ae1` on a clean tree (sm_86, RTX A5000): L0 266 passed, 8 skipped; memcheck 0 errors; skip-tail mutation 50 failed; forced-fixup mutation aborts the process; identity, resident and natural, identical to main's at 1,027 / 4,096 tokens (the branch's pass 4,096 on both stores) |
+| A2 | The call-size test covers the resident store only | parametrized over both stores: offload runs a streaming step, the ring on, at the 4,100-token budget ([1,024, 3], [4,096, 4] among the cases) (`3d705ff`) |
+| A3 | `pass_rows` is trusted to be whole chunks | `units.pass_rows` asserts ≥ `CHUNK` and a multiple of it (`3d705ff`) |
+| A4 | The ids-fixup mutation's description | described as a forced fixup on the ids path, its assert dropped (§7.1, step 2) |
+| B1 | The arena contract does not say an arena instance may expose `pass_rows` | `linear_experts_arena@1` states the term, at the bits of its `CHUNK`-row calls over the same slots (`3d705ff`) |
+| B2 | The 8,192 choice of `ggml_cuda.pass_rows` exceeds `PASS_ROWS` | dropped: choices 512 / 2,048 / 4,096 (`3d705ff`) |
+| B3 | A stale comment at `plugin.py:80-81` | reworded: the instance cuts a call's last partial chunk itself, whatever its caller passes (`3d705ff`) |
+| B4 | Lean tests | the every-type pass check runs only where `pass_rows` > `CHUNK`; the E = 128 checks are folded into the NaN-poisoned tile test (`3d705ff`); suite times before and after: §7.1, step 3 (acceptance 7) |
+| B5 | The flat launch is chosen inside the kernel | the flat range is a template instance of its own, chosen on the host (ntx > 1); the non-flat instance decodes tiles as upstream (`3d705ff`) |
+| C1 | §2.2's cells from the step-2 base | restated in §2.2 before step 3's runs: the 5090 4K row 0.988–0.993×, under its bar with every item; to the owner as O2 (escalated by the lead), not blocking |
+| C2 | §5.2's method | from step 3 on: an untimed pass over the whole prompt set per engine process, the 1.5×-median repetition flag and re-run, the median of paired ratios beside the statistic, round index and arm order recorded (§5.2) |
+| C3 | B16 ≈ −0.5% and a 1–2.5% cost at T = 16 on the down stack | found: the flat range's binary search, compiled into every instance, raised Q6_K J = 32 from 128 to 146 registers (occupancy halved). Fixed by B5's separate instance (`3d705ff`). Measured: §7.1, step 3 |
+| C4 | The 5080 offload lock does not fit D5 | re-filled (scratch, not committed) at the start of step 3's runs: §7.1, step 3 |
+| C5 | Batched decode: J against T only up to 16 tokens | taken as deviation B-dec (decided before step 4): 16 on sm_86 and sm_120, 64 on sm_89 until the 4090's per-call A/B runs. Measured: B-dec |
+| C6 | "Reserved ≤ profiled peak" is not the right memory gate | dropped; step 4 runs a soak on the 16 GB lock instead (§7: no OOM, `num_alloc_retries` = 0, free memory at the worst point; `pass_rows` 512 there only if retries appear) |
+
+### Building: deviations from rev 6 (steps 1–2, 3b and 3c, 2026-10-18; recorded for the panel)
 
 | # | Deviation | Why | Effect |
 |---|---|---|---|
@@ -899,7 +1049,12 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
 | B-dev3 | `vendor.sh --check` reverses `vendor.patch` with `patch -E` (D9 named the template instance file but not how the check treats a file upstream lacks) | the IQ1_M instance is Holon's own, created by the patch; `patch -R` alone leaves it empty, and the check's file list then differs from `SHA256SUMS` | the check passes with the patch-created file; a refresh still creates it by applying the patch |
 | B-dev4 | Q2_0's L0 oracle reads its blocks in the test helper, not through gguf-py (§5 assumes gguf-py's dequantization for every type) | gguf-py 0.19 (`uv.lock`) has no Q2_0 | the reader is ggml-quants.c's `dequantize_row_q2_0` definition; convert and get_rows equal it bit for bit; `testing`'s reference provider still cannot serve a Q2_0 file (FN's concern) |
 | B-dev5 | iq1_m and q2_0 are in `PASS_PROVEN` on sm_89 and sm_120 before their L0 runs there (D0: an entry exists only where its L0 runs) | the lead's instruction: `PASS_PROVEN` lists FN's types on every SM, and the cluster L0 (`PLACED` per SM) runs them | pending the lead's sm_89 / sm_120 L0 before step 5; a failing pair is removed |
-| B-dec | C-M6's fallback taken: J against T for calls of ≤ 64 tokens | D2's own A/B: the mean's 8-row tiles made the down stack up to 8% slower at 16 tokens on the 5090 and 5080 | batched decode keeps main's speed (5090 B16 / 32 / 64: 0.996 / 0.996 / 1.006×); a lower threshold (16) would gain up to ≈ 30% per call at 24–64 tokens: held for the perf reviewer (lead) |
+| B-dec | C-M6's fallback narrowed (the panel's C5, decided before step 4; D2 said J against the mean at every T): J against T for calls of ≤ 16 tokens on sm_86 and sm_120, ≤ 64 on sm_89 until the 4090's per-call A/B runs | D2's own A/B: the mean's 8-row tiles made the down stack up to 8% slower at 16 tokens; above 16 the mean wins per call (5090 / 5080, every lock and FN type: 0.52–0.99× main's time at T = 17–64, 0.998–1.013× at 16) | batched decode, paired ×4 rounds, tokens/s over main's: 5090 Q4_K_M B16 / 32 / 64 1.001 / 1.018 / 1.054× (sd ≤ 0.003); 5080 UD-IQ3_XXS B16 / 32 1.000 / 1.029× (sd ≤ 0.001). Types outside the sweep (no lock uses them) are accepted only behind an end-to-end decode check: IQ1_M and Q2_0's is FN's |
+| B-dev6 | The tail's range is sized for the bound configuration's largest pass, min(`pass_rows`, `max_step_tokens`) rows (D11: `scratch_bytes(pass_rows)`) | no step carries more than `max_step_tokens` tokens (verify steps beyond it are graphed and never borrow), and `pass_rows` ≥ `CHUNK` would over-size short budgets | the 30B lock: unchanged (4,096, 366 slots); the CPU tests' 10-token budget lends 15 slots, not ≈ 770 (which the bind check would refuse) |
+| B-dev7 | The range holds one `scratch` plus gate/up's `out` and down's `out` (D10 named `out` and `scratch`) | down reads gate/up's output while writing its own (`out` must not overlap `x`), and the combine reads down's afterwards | three buffers at 256-byte boundaries; a pass larger than the range would fall back to allocating (never at the bound configuration) |
+| B-dev8 | The tail is lent on streaming (ring) steps only, and only where steps stream at all (`ring_tokens` after X's forcing); a staging step lends as X | the passes that need the range are the large ones (D8), which only streaming steps take; a store that never streams cannot use a tail | staging steps and non-streaming stores run D10's allocating fallback; no refusal where the tail would never be lent |
+| B-dev9 | The bind check's capacity half runs at each materialize's start, against the class's cap (pinned, or every piece), and again on a layout that lends; its policy half at the first resolver (D11: "at bind") | the range's bytes come from the stacks' kernels, bound after the store's resolvers | refused at engine construction, before any step, as at bind |
+| B-dev10 | D10's fallback buffer is sized per pass, from the pass's own tokens (none where no kernel needs one), not from `pass_rows`; ggml's `scratch_bytes` leaves out the id maps of launches the decode-size workspace holds | a decode pass would otherwise allocate a prefill pass's buffer, and graphed buckets would take id maps into the graph pool (P15: the fallback must not add to the reserved excess) | the startup profile's worst step allocates the largest pass's buffer; decode keeps main's graph-pool use (gate/up's f32 output only; none where D4 fuses SwiGLU into the store) |
 
 ### Rev 5 → rev 6 (the panel's fifth round, 2026-10-18; B clean)
 

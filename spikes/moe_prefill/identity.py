@@ -7,7 +7,8 @@ flags, and compare the hashes (`compare`). Modelled on `holon_judge.kernel_ident
   the capped fit with F5b's CPU share (x8_close's arm).
 - Prompts: natural text (`bench/offload_ctx.py`'s corpus) at the lengths given, distinct starts; prefix cache off,
   one sequence, the context `--ctx`.
-- The record names each expert store's pass at the longest length (`pass_tokens`).
+- The record names each expert store's pass at the longest length (`pass_tokens`), and the offload store's borrowing
+  steps by use and its tail (D11), if any.
 - The hash: SHA-256 over each position's chosen-token logprob, top-k ids and top-k logprobs (the f32 values, exactly,
   as float64), in order; `--runs` repeats the requests in one engine (run-identical) and the record keeps every run's.
 
@@ -79,8 +80,11 @@ def run(a: argparse.Namespace) -> None:
         runs.append(hashes)
     stores = {type(m._store).__name__: m._store.pass_tokens(max(a.lengths)) for m in engine.executor.model.modules()
               if hasattr(m, "_store") and hasattr(m._store, "pass_tokens")}
+    # the offload store's borrowing steps by use, and its tail (docs/v1-moe-prefill.md D11: class, slots), if any
+    store = engine.ctx.shared_objects.get("std.moe.offload")
+    lending = None if store is None else {"borrowed": dict(store.borrowed), "tail": getattr(store, "tail", None)}
     engine.close()
-    record = {"expert_pass": stores, "gpu": torch.cuda.get_device_name(),
+    record = {"expert_pass": stores, "lending": lending, "gpu": torch.cuda.get_device_name(),
               "tree": tree(pathlib.Path(holon.__file__).resolve().parents[2]), "model": pathlib.Path(a.model).name,
               "config": a.config, "flags": a.flags, "lengths": a.lengths, "logprobs": a.logprobs, "runs": runs,
               "run_identical": all(r == runs[0] for r in runs)}

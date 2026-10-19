@@ -8,6 +8,7 @@ from torch import nn
 from . import kernels
 
 CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
+ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/v1-moe-prefill.md D10)
 
 
 def _dtype(t: torch.dtype) -> str:
@@ -141,9 +142,33 @@ class ExpertLinear(nn.Module):
         """Its bound `linear_experts@2` instance."""
         return self._kernel
 
-    def forward(self, x, ids: torch.Tensor) -> torch.Tensor:
-        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
-        return self._kernel(x, self.parts, ids)
+    def forward(self, x, ids: torch.Tensor, out: torch.Tensor | None = None,
+                scratch: torch.Tensor | None = None) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels); D10's
+        buffers where the kernel takes them."""
+        return self._kernel(x, self.parts, ids, **passed(self._kernel, out=out, scratch=scratch))
+
+
+def takes_buffers(kernel) -> bool:
+    """Whether a `linear_experts@2` instance takes passed buffers (it defines `scratch_bytes`, docs/v1-moe-prefill.md
+    D10)."""
+    return hasattr(kernel, "scratch_bytes")
+
+
+def passed(kernel, **given) -> dict:
+    """The keywords of D10's buffers `given` for a call of `kernel`: those passed, if it takes them; else none."""
+    return {k: v for k, v in given.items() if v is not None} if takes_buffers(kernel) else {}
+
+
+def pass_scratch(stacks, tokens: int, device: torch.device) -> torch.Tensor | None:
+    """D10's allocating fallback, where no tail is lent: one buffer for a pass of `tokens`, of the larger of its
+    stacks' kernels' `scratch_bytes`, for both calls (gate/up, then down); None where none needs any."""
+    nbytes = max((s.kernel.scratch_bytes(tokens) for s in stacks if takes_buffers(s.kernel)), default=0)
+    if not nbytes:
+        return None
+    buf = torch.empty(nbytes + ALIGN - 1, dtype=torch.uint8, device=device)
+    at = -buf.data_ptr() % ALIGN
+    return buf[at:at + nbytes]
 
 
 def pass_rows(stacks) -> int:
@@ -197,6 +222,11 @@ class Resident:
         """Tokens per expert pass: as many as both stacks' kernels take at their chunks' bits (docs/v1-moe-prefill.md
         D1), on a step of at least a chunk."""
         return pass_rows(self._stacks) if tokens >= CHUNK else CHUNK
+
+    @staticmethod
+    def pass_buffers(tokens: int) -> None:
+        """No lent memory: the pass allocates its buffers (D10's fallback)."""
+        return None
 
     @staticmethod
     def finish() -> None:
@@ -290,8 +320,11 @@ class MoE(nn.Module):
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a, xc)
-            h = self._gate_up(xin, gate_up)                           # [t, k, inter] f32, SwiGLU applied
-            y = self._store.patch(self._down(h, down))                # (F5b: the CPU's rows in place)
+            # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
+            out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
+                None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
+            h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
+            y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
             if residual is None:
                 self._combine(y, weights, out[a:b])
             else:
