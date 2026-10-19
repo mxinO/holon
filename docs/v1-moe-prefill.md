@@ -686,6 +686,14 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
     output's own bf16 rounding adds, on a fraction of the k/v rows: L2 is blind at that scale (recorded as such).
   - `qlinear-large-no-fixup` (far): **fails**. Every fixed-up tile loses the partials of the blocks before its end, so
     k / v of those rows are wrong.
+- **D3, L2 on the A5000** (the same settings; the tree with D5):
+  - D3 passes: the logits move by the f32 order only (≈ 1e-6 relative), which the bf16 floor cannot see.
+  - `router-prefill-bf16-logits` (near), an analytic estimate in place of a CPU run: bf16 keeps 8 bits, so a logit
+    moves by ≤ 2⁻⁹ relative (≈ 0.01 at the 30B's logit scale of a few units). The softmax weights then move by ≤ 1%,
+    and the selection flips only where the 8th and 9th logits sit within that, swapping a low-weight expert. That is the
+    decode router's precedent (its bf16-against-f32 KL p99 0.037 against the floor's 0.040): **passes**, L2 blind at
+    that scale.
+  - `router-prefill-short-k` (far): a logit loses an eighth of its terms, so most routes change: **fails**.
 
 **Step 1 (D0, D1).**
 - **What landed.**
