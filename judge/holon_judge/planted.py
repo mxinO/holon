@@ -1485,6 +1485,25 @@ def _read_unwaited(fired):
     return [mock.patch.object(HostTier, "_after_reads", planted)]
 
 
+def _slot_reuse_unwaited(fired):
+    """std.state_tier writes a copy into a level slot without waiting for the last job of the copy that held it (a
+    write still running there lands after, over it). Fired: writes into such slots."""
+    from holon_std.state_tier.tier import HostTier
+
+    write_back = HostTier._write_back
+
+    def planted(self, k, urgent, dependent=None):
+        held = self.slot_jobs
+        fired["fired"] += sum(1 for name in self.copies[k] for s in list(self.slots[name])[:len(self.copies[k][name])]
+                              if (name, s) in held and not held[name, s].ticket.done())
+        self.slot_jobs = {}
+        try:
+            return write_back(self, k, urgent, dependent)
+        finally:
+            self.slot_jobs = held
+    return [mock.patch.object(HostTier, "_write_back", planted)]
+
+
 def _free_on_ticket(fired):
     """std.state_tier frees a written-back copy's host units when the write completes, not when it is decided (its
     next decisions then depend on I/O timing). Fired: such write-backs."""
@@ -1581,6 +1600,7 @@ TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tu
         ("tentative-shift", _filed_early(lambda seq, at, p, kind: p.tentative), ("identity",)),
         ("read-unwaited", _read_unwaited, ("invariance", "identity")),
         ("free-on-ticket", _free_on_ticket, ("identity",)),
+        ("slot-reuse-unwaited", _slot_reuse_unwaited, ("identity",)),
         ("torn-manifest", _torn_manifest(checked=True), ("restart",)),
         ("torn-manifest-unchecked", _torn_manifest(checked=False), ("restart",)),
         ("stale-slot", _stale_slot, ("restart",))]}

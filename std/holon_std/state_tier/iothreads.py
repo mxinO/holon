@@ -58,7 +58,7 @@ class IoThreads:
         self.cv = threading.Condition()
         self.reads: collections.deque[Job] = collections.deque()     # reads, and the writes they depend on
         self.writes: collections.deque[Job] = collections.deque()    # the other writes: while no read is queued
-        self.closed, self.cpus = False, _cpus()
+        self.closed, self.cpus, self.running = False, _cpus(), set()      # running: taken, not yet done
         self.threads = [threading.Thread(target=self._loop, name=f"{name}.{i}", daemon=True) for i in range(n)]
         for t in self.threads:
             t.start()
@@ -102,7 +102,7 @@ class IoThreads:
     def drain(self) -> None:
         """Wait for every job submitted so far."""
         with self.cv:
-            jobs = [*self.reads, *self.writes]
+            jobs = [*self.running, *self.reads, *self.writes]
         for job in jobs:
             try:
                 job.ticket.wait()
@@ -121,9 +121,10 @@ class IoThreads:
         with self.cv:
             while not (self.reads or self.writes or self.closed):
                 self.cv.wait()
-            if self.reads:
-                return self.reads.popleft()
-            return self.writes.popleft() if self.writes else None
+            job = self.reads.popleft() if self.reads else self.writes.popleft() if self.writes else None
+            if job is not None:
+                self.running.add(job)
+            return job
 
     def _loop(self) -> None:
         os.sched_setaffinity(0, self.cpus)
@@ -138,6 +139,8 @@ class IoThreads:
                 then, job.then = job.then, None
             for fn in then:                          # before its ticket: whatever waits for it sees them done
                 fn()
+            with self.cv:
+                self.running.discard(job)
             self._complete(job)
 
     def _complete(self, job: Job) -> None:

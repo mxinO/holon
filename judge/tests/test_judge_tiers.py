@@ -165,9 +165,8 @@ def test_the_level_passes_run_identity_without_a_watermark_and_with_late_io(tiny
     assert got["verdict"] == "pass", got["failures"]
 
 
-# free-on-ticket is not here: it fires and changes nothing, on the CPU (with or without the watermark, with I/O
-# completions lagged 0 … 3 launches across seeds) and on the A5000: it moves which level holds a copy, which reaches
-# neither the schedule nor the outputs there (docs/v1-kv-tiers.md §13, "Rev 8.5").
+# free-on-ticket is not here: with the host pools at their floors it bites only as a refusal (a crash, which a plant
+# does not count), and a unit over them it changes nothing (docs/v1-kv-tiers.md §13, "After the tag").
 @pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
 def test_a_level_plant_is_caught(plant, dense_ssd):
     factory, checks = TIER_PLANTS[plant]

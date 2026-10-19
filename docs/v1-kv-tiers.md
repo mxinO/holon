@@ -387,6 +387,9 @@ Plugin kinds:
     the background write lane is busy (`wlane > now`) is charged at `read_rate` times the measured read-side factor
     (`read_beside`: reads beside background writes ran at 0.79–0.92 of their pure rate; 0.80 at 3 threads), not the
     throughput factor, and pushes the background lane back by its charged time; dependent writes stay as built.
+    The SSD level's defaults are one 3-thread set (the default `io_threads`) from K-M4 and step 3 on the RTX 5080's
+    drive: read 2.55 GB/s, write 1.77 GB/s (sustained), mixed 0.74, `read_beside` 0.80; **tune measures them per
+    host** (`ssd.read`, `ssd.write`, `ssd.mixed`, `ssd.read_beside`).
   - Every load is charged to the lanes, promote-into-place loads included, though those are never gated (A-7).
   - A load of at most `stall_bytes` is due now: the step waits for it. It still occupies the lanes (rev 8.3).
   - A payload load takes no H2D lane: the kind's adopt reads the host copy inside the step (rev 8.3).
@@ -1431,7 +1434,7 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
 | A1 (major): an urgent write-back could hang: `SsdLevel.write` waited for slot space behind a queued write that never got a thread | fixed | the tier chooses a write's level slots when it decides it (`slots` per pool, from its own free lists) and passes them; a write into a slot waits, on its I/O thread, for the last job on the copy that held it (a dependency the dispatcher moves ahead), so the level never waits for room. `test_a_write_into_a_full_level_returns_at_once` hangs on the old level. The `Level` text changed: the tag moved |
 | A2: a second load of a copy whose read-back is in flight waited for it on the engine thread | fixed | a load of a copy a level read wrote (done or not, decided without timing) takes the level path: its H2D is enqueued on an I/O thread after that read, due no earlier than it (`test_a_second_load_of_a_copy_being_read_back_waits_on_an_io_thread` fails on the old tier) |
 | A3: restore was quadratic | fixed | the tier builds each pool's free slots once, all slots minus the restored copies' |
-| A4: `free_on_ticket` must bite (deferred I/O on the CPU, a seeded lag of 0–3 launches, the host page pool at its floor, run-identity across seeds) | built; it does not bite | the judge's CPU streams defer a level job's completion 0–3 launches (seeded; at once for whatever waits for it). The plant fires 240–267 times and changes nothing, also with a larger watermark and level reads charged like the H2D lane: planted runs move copies between levels (99 level reads against 97) identically across seeds, since the units it holds back are never needed before the next commit, and where a copy sits reaches neither the schedule nor the outputs here. A correct tier stays run-identical under the lag (`test_the_level_passes_run_identity_without_a_watermark_and_with_late_io`). Step 4 tries the GPU with I/O sleeps of 0 or ≥ 2 steps |
+| A4: `free_on_ticket` must bite (deferred I/O on the CPU, a seeded lag of 0–3 launches, the host page pool at its floor, run-identity across seeds) | built; it does not bite | the judge's CPU streams defer a level job's completion 0–3 launches (seeded; at once for whatever waits for it). The plant fires 240–267 times and changes nothing, also with a larger watermark and level reads charged like the H2D lane: planted runs move copies between levels (99 level reads against 97) identically across seeds, and where a copy sits reaches neither the schedule nor the outputs here (superseded: "After the tag"). A correct tier stays run-identical under the lag (`test_the_level_passes_run_identity_without_a_watermark_and_with_late_io`). Step 4 tries the GPU with I/O sleeps of 0 or ≥ 2 steps |
 | A5: no engine-level checkpoint read-back from the level | fixed | `test_branch_checkpoints_come_back_from_the_level_bitwise`: the tiny hybrid, `branch`, the payload host level at its floor, eight branched prefixes resumed in turn: outputs and hits equal a roomy host level's, `level_payload_reads > 0`. Acceptance 2: hybrids with `prompt_end` / `answer` through a level are judged by run-identity and `bounded` |
 | C1 (lead decision on D4): reads beside background writes | done | D4 rev 8.5: `read_beside` (0.80) while `wlane > now`, the read pushing `wlane` back by its time; tested in `test_host_evictions_go_to_the_level_and_come_back_bitwise` |
 | C2 (major): the attach page floor refused the 27B's host-only sizing | fixed | the page floor applies only with a level (loads read back into host units); payloads keep theirs |
@@ -1449,6 +1452,19 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `stale_slot` and `torn_manifest` with the crc check off are caught (`evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`,
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
+
+### After the tag (b596ba7, `v1-kv-tiers-api`)
+
+The tag stays at b596ba7 from now on (the lead, on reviewer B's rule). A std fix after it is a **post-tag std
+follow-up**, recorded here as X recorded its own, and never moves the tag. `policies.last_turn` lands strictly after
+b596ba7 as a plugin-only diff, verified with `scripts/ci/check_core_diff.sh` and `git diff --stat` (step 5).
+
+| Follow-up | Change |
+|---|---|
+| C (minor, rev 8.5's review): the SSD level's default rates were 2-thread values with 3 threads the default | one 3-thread set: read 2.55 GB/s (K-M4, O_DIRECT, 3 threads), write 1.77 GB/s (sustained; K-M4's 3-thread window was 2.20, as at 1, 2 and 4 threads), mixed 0.74 (step 3 at 3 threads), `read_beside` 0.80; D4: tune measures them per host |
+| A (rev 8.5's review): the slot-ordering guard (a write into a level slot waits for the last job of the copy that held it) had no test that bites | `test_a_write_into_a_level_slot_waits_for_its_last_copy`: a level storing by (shape, slot) at its floor (one page slot), two I/O threads; the watermark writes X back, its write held, then writes Y back into X's slot (X evicted at once); released, Y reads back bitwise and the level saw X's write first. Y is a background write-back, not an urgent one: a store or a read that takes the unit X's write frees waits for X (on the engine or an I/O thread), so only the watermark can queue both; the guard is the same line. The plant `slot-reuse-unwaited` (the guard dropped) fails it; deleting the line fails the clean cell |
+| Found by that test: `IoThreads.drain` waited for queued jobs only, not running ones | it waits for every job taken and not done (std, post-tag; `close` was unaffected: it joins the threads) |
+| A (rev 8.5's review): `free_on_ticket` had no configuration that bites; the rationale given ("never needed before the next commit") was false: the watermark frees units for the same commit's stores | the judge's lagged I/O also completes deferred jobs at each commit's start and each `Engine.step` on a seeded coin per job. On the tiny hybrid with the page and payload host pools **at their floors**, `host.reserve` one load, run-identity across 3 seeds: the plant fires 40 times and **bites as a refusal**: the units it holds back are the floor's, so a read-back finds no host unit (`no host units to read … back`), a crash, which the judge's rule does not count as caught (a crash is not an outcome). **One or more units over the floors** (1 page + 1 payload unit, 4 + 2): it fires 120 times and the three seeds' runs are step- and output-identical, to each other and to the clean run: no decision in that trace needed the units it held back by the time it decided. Step 4 tries the GPU with sleeps of 0 or ≥ 2 steps |
 
 ### Step 3 as built (2026-10-19)
 
@@ -1508,11 +1524,9 @@ the verification's new argument; fixed, the level's judge cells re-run: 5 passed
 - **Plants on the level** (CPU, caught): `read_unwaited` (the H2D enqueued at once), `torn_manifest` (the close's
   data writes lost after the manifest; restore discards by crc, `cached_tokens` short) and its variant with the crc
   check off (outputs differ), `stale_slot` (the manifest kept at startup: after a crash the next start restores
-  records naming rewritten slots). `free_on_ticket` (host units freed when the write completes) fires and changes
-  nothing on the CPU: the units are never back before the tier's next decision, in the same commit, so its extra
-  evictions repeat in every run; it changes nothing without the watermark either, nor on the A5000 (fired 1,228).
-  §6's prediction is not met: the window (a decision short of host units only because a write has not completed) did
-  not open in any configuration tried.
+  records naming rewritten slots). `free_on_ticket` (host units freed when the write completes): see "After the tag"
+  for where it bites and where it does not (the rationale first given here was wrong: the watermark frees units for
+  the same commit's stores).
 - **Not built in step 3:** `adopt_source_reused` with a delayed I/O thread on the GPU, and core liveness cells with an
   SSD load: the core does not tell a level load from a host one; the tier-side part (an abandoned level load is never
   enqueued and never waited for) is `test_an_abandoned_load_is_never_enqueued_and_never_waited_for`.

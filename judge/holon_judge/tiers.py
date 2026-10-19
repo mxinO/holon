@@ -89,7 +89,8 @@ class _Sleepy:
 class Deferred:
     """The CPU: `holon_judge.deferred`'s streams (a copy lands 0 … `most` launches late unless waited for). With
     `io_lag`, a level I/O job's completion is also deferred, 0 … `io_lag` launches (seeded), unless something waits
-    for its ticket: what reads its completion without waiting (the free-on-ticket plant) sees it late."""
+    for its ticket, and at each commit's start and each `Engine.step` a seeded coin per deferred job completes it
+    early: what reads completion without waiting (the free-on-ticket plant) sees it at varying points."""
 
     io_delay = 0.005                       # seconds: the level's I/O jobs, unseeded (up to)
 
@@ -115,6 +116,14 @@ class Deferred:
                 self.lagged.append((at, job))
                 return
         job.ticket._event.set()
+
+    def coin(self) -> None:
+        """At a commit's start or a step's entry: each deferred completion lands now on a seeded coin."""
+        with self.lock:
+            due = [(at, job) for at, job in self.lagged if self.rng.random() < 0.5]
+            self.lagged = [x for x in self.lagged if x not in due]
+        for _, job in due:
+            job.ticket._event.set()
 
     def release(self, ticket) -> None:
         """Someone waits for `ticket`: its completion lands now."""
@@ -161,6 +170,17 @@ def copy_streams(streams: Delayed | Deferred | None) -> Iterator[None]:
             stack.enter_context(mock.patch.object(IoThreads, "_complete", lambda io, job: streams.complete(job)))
             stack.enter_context(mock.patch.object(Ticket, "wait", waited))
             stack.enter_context(mock.patch.object(Ticket, "synchronize", waited))
+            step, commit = Engine.step, Engine._commit
+
+            def stepped(engine, *a, **k):
+                streams.coin()
+                return step(engine, *a, **k)
+
+            def committed(engine, *a, **k):
+                streams.coin()
+                return commit(engine, *a, **k)
+            stack.enter_context(mock.patch.object(Engine, "step", stepped))
+            stack.enter_context(mock.patch.object(Engine, "_commit", committed))
         yield
 
 

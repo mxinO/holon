@@ -3,6 +3,7 @@ manifest's snapshot, restore with crc, geometry and identity, and the plants on 
 then the tier over it on CPU pools (write-back at host eviction and the watermark, read-back bitwise, what is never
 written back, the level's own eviction order, read priority and dependent writes, abandonment before the enqueue, one
 read per copy, the lanes, and a restart)."""
+import contextlib
 import threading
 import time
 import types
@@ -222,7 +223,7 @@ def test_host_evictions_go_to_the_level_and_come_back_bitwise(tmp_path):
     wlane = tier.wlane
     assert wlane > tier.t                                               # background writes on their lane
     load = tier.load([3], {"kv": [10]}, [(1, "c")], [])
-    cost = tier.counts["level_read_bytes"] / (2.17e9 * 0.80)          # D4: the read-side factor beside them
+    cost = tier.counts["level_read_bytes"] / (tier.read_rate * 0.80)  # D4: the read-side factor beside them
     assert tier.wlane == pytest.approx(wlane + cost)                  # and they wait for the reads
     load.synchronize()
     tier.loaded(load, _Done())
@@ -288,6 +289,75 @@ def test_a_read_reusing_units_a_queued_write_frees_takes_that_write_ahead(tmp_pa
     waiter.join(10)
     assert not waiter.is_alive(), "the read waits for a write queued behind it"
     assert torch.equal(kv.units()[:, 11], kv.units()[:, second - 1])
+
+
+class _Slots:
+    """A level storing by (shape, slot), as the SSD level does, at its floor (one page slot); its write of `hold`
+    waits for `go`."""
+
+    persist = "off"
+
+    def __init__(self, hold: int) -> None:
+        self.data, self.held, self.writes, self.hold, self.go = {}, {}, [], hold, threading.Event()
+
+    def bind(self, ctx, shapes, identity):
+        return {name: 1 for name in shapes}
+
+    def write(self, key, spec, src, slots):
+        if key == self.hold:
+            self.go.wait()
+        for name, units in src.items():
+            for unit, slot in zip(units, slots[name], strict=True):
+                self.data[name, slot] = [bytes(mv) for mv in unit]
+        self.held[key, spec] = {k: list(v) for k, v in slots.items()}
+        self.writes.append(key)
+
+    def read(self, key, spec, dst):
+        for name, units in dst.items():
+            for unit, slot in zip(units, self.held[key, spec][name], strict=True):
+                for mv, b in zip(unit, self.data[name, slot], strict=True):
+                    mv[:] = b
+
+    def drop(self, key, spec):
+        self.held.pop((key, spec), None)
+
+    def rates(self):
+        return {"read": 1e6, "write": 1e6, "mixed": 0.5, "lane": None}
+
+    def restore(self):
+        return []
+
+    def close(self, records):
+        pass
+
+
+@pytest.mark.parametrize("planted", [False, True])
+def test_a_write_into_a_level_slot_waits_for_its_last_copy(tmp_path, planted):
+    """A level at its floor (one page slot), two I/O threads. The watermark writes X (4) back into the slot, its write
+    held; the next pass writes Y (3) back into the same slot (X evicted from the level at once). Y's write must wait
+    for X's: released, X lands first and Y over it, so Y reads back bitwise. The plant `slot-reuse-unwaited` (no
+    wait) lets X land over Y. (Background writes: the watermark takes no units, so the engine never waits on X.)"""
+    from holon_judge.planted import TIER_PLANTS
+
+    level = _Slots(hold=4)
+    launch = types.SimpleNamespace(n_query=np.ones(1, np.int32), slots=[0])
+    with TIER_PLANTS["slot-reuse-unwaited"][0]() if planted else contextlib.nullcontext():
+        tier, kv, _ = _tier(tmp_path, level=level, extra={"state_tier.io_threads": "2", "state_tier.host.reserve": "1"})
+        _pages(tier, [1, 2, 3, 4])                                    # the host level full
+        tier.before_launch(launch)                                    # X = 4 down, held mid-write
+        tier.reserve["kv"] = 2
+        tier.before_launch(launch)                                    # Y = 3 down into X's slot
+        assert set(tier.low) == {(3, None)}
+        deadline = time.monotonic() + 1                               # Y lands now if nothing orders it after X
+        while 3 not in level.writes and time.monotonic() < deadline:
+            time.sleep(0.01)
+        level.go.set()
+        tier.io.drain()
+        back = tier.load([3], {"kv": [11]}, [], [])
+        back.synchronize()
+        tier.io.drain()
+    good = torch.equal(kv.units()[:, 11], kv.units()[:, 2]) and level.writes.index(4) < level.writes.index(3)
+    assert good != planted
 
 
 def test_a_second_load_of_a_copy_being_read_back_waits_on_an_io_thread(tmp_path):
