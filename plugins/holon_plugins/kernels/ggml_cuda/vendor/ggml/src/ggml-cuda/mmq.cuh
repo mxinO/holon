@@ -1,5 +1,9 @@
 #pragma once
 
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
+// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments.
+
 #include "common.cuh"
 #include "unary.cuh" // Holon: ggml_cuda_op_silu_single, for the fused gate/up store
 
@@ -1182,7 +1186,7 @@ static __global__ void mul_mat_q(
 
         if (ids_dst) {
             col_low  = expert_bounds[zt + 0];
-            channel_x = expert_bounds[nchannels_y.z + 1 + zt];
+            channel_x = expert_bounds[nchannels_y.z + 1 + zt]; // Holon: the compact launch's slot
             col_high = expert_bounds[zt + 1];
             col_diff = col_high - col_low;
 
@@ -1211,7 +1215,7 @@ static __global__ void mul_mat_q(
         }
 
         offset_y   += (col_low + jt*J)*(sizeof(block_q8_1_mmq)/sizeof(int));
-        offset_dst += it*I_out;
+        offset_dst += it*I_out; // Holon: glu's output rows (D4)
         const float * y_scale_tile = nullptr;
         if constexpr (type == GGML_TYPE_NVFP4) {
             offset_y_scale += col_low + jt*J;
@@ -1221,7 +1225,7 @@ static __global__ void mul_mat_q(
         const int tile_x_max_i = nrows_x  - it*I - 1;
         const int tile_y_max_j = col_diff - jt*J - 1;
 
-        const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x;
+        const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
         constexpr bool fixup = false;
         mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
@@ -1267,7 +1271,7 @@ static __global__ void mul_mat_q(
 
         if (ids_dst) {
             col_low  = expert_bounds[zt + 0];
-            channel_x = expert_bounds[nchannels_y.z + 1 + zt];
+            channel_x = expert_bounds[nchannels_y.z + 1 + zt]; // Holon: the compact launch's slot
             col_high = expert_bounds[zt + 1];
             col_diff = col_high - col_low;
 
@@ -1302,7 +1306,7 @@ static __global__ void mul_mat_q(
         }
 
         offset_y += (col_low + jt * J) * (sizeof(block_q8_1_mmq) / sizeof(int));
-        offset_dst += it*I_out;
+        offset_dst += it*I_out; // Holon: glu's output rows (D4)
         const float * y_scale_tile = nullptr;
         if constexpr (type == GGML_TYPE_NVFP4) {
             offset_y_scale += col_low + jt * J;
@@ -1312,7 +1316,7 @@ static __global__ void mul_mat_q(
         const int tile_x_max_i = nrows_x  - it*I - 1;
         const int tile_y_max_j = col_diff - jt*J - 1;
 
-        const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x;
+        const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
         constexpr bool fixup = false; // All but (potentially) the last iterations write their data to dst rather than the fixup buffer.
         mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
@@ -1351,7 +1355,7 @@ static __global__ void mul_mat_q(
 
     if (ids_dst) {
         col_low  = expert_bounds[zt + 0];
-        channel_x = expert_bounds[nchannels_y.z + 1 + zt];
+        channel_x = expert_bounds[nchannels_y.z + 1 + zt]; // Holon: the compact launch's slot
         col_high = expert_bounds[zt + 1];
         col_diff = col_high - col_low;
 
@@ -1381,7 +1385,7 @@ static __global__ void mul_mat_q(
     }
 
     offset_y += (col_low + jt * J) * (sizeof(block_q8_1_mmq) / sizeof(int));
-    offset_dst += it*I_out;
+    offset_dst += it*I_out; // Holon: glu's output rows (D4)
     const float * y_scale_tile = nullptr;
     if constexpr (type == GGML_TYPE_NVFP4) {
         offset_y_scale += col_low + jt * J;
@@ -1391,7 +1395,7 @@ static __global__ void mul_mat_q(
     const int tile_x_max_i = nrows_x  - it*I - 1;
     const int tile_y_max_j = col_diff - jt*J - 1;
 
-    const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x;
+    const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
     constexpr bool fixup = true; // Last index writes its data to fixup buffer to avoid data races with other blocks.
     mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
@@ -1789,7 +1793,8 @@ extern DECL_MMQ_CASE_W4A4(GGML_TYPE_NVFP4);
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
         const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr,
-        bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr); // Holon: glu (D4)
+        bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr, // Holon: glu (D4)
+        int64_t ids_j_tokens = INT64_MAX); // Holon: J against the tokens up to this many (D2); upstream: always
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 

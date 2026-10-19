@@ -216,6 +216,8 @@ def _check_buffers(x: torch.Tensor, out, scratch, shape: tuple, nbytes: int) -> 
         return a.data_ptr() < b.data_ptr() + b.nbytes and b.data_ptr() < a.data_ptr() + a.nbytes
     if out is not None and (overlap(out, x) or scratch is not None and overlap(out, scratch)):
         raise ValueError("out overlaps x or scratch")
+    if scratch is not None and overlap(scratch, x):
+        raise ValueError("scratch overlaps x")
 
 
 class MoeTopk:

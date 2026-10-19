@@ -1,3 +1,6 @@
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker; no signature plumbing beyond
+// the marked hunks.
+
 #include "moe-weighted-reduction.cuh"
 
 // Holon: a + b in f32 without flushing subnormals (fast math would), as torch's bf16 residual add computes it
@@ -74,7 +77,7 @@ void ggml_cuda_op_moe_weighted_reduction(ggml_backend_cuda_context & ctx,
     launch_moe_weighted_reduction((const float *) experts->data,
                                   expert_scale ? (const float *) expert_scale->data : nullptr,
                                   (const float *) weights->data,
-                                  (nv_bfloat16 *) dst->data,
+                                  (nv_bfloat16 *) dst->data, // Holon: bf16 out, the residual add
                                   residual ? (const nv_bfloat16 *) residual->data : nullptr,
                                   n_embd, n_tokens, (int) n_expert_used, stream);
     CUDA_CHECK(cudaGetLastError());

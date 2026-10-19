@@ -6,7 +6,8 @@
 
 // Holon: `split` (docs/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
 // fused gate/up tile loads gate rows i... in its upper half and the matching up rows (split rows on) in its lower half;
-// 0 everywhere else, where the loads are upstream's
+// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/v1-moe-prefill.md D8): `split` in every
+// loader's signature and row offset, marked at each signature only
 
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q1_0(
         const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split

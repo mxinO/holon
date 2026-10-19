@@ -62,6 +62,8 @@ from holon_plugins.kernels.ggml_cuda.plugin import (
     CHUNK,
     FP4,
     ID_ERRORS,
+    IDS_J_TOKENS,
+    IDS_J_TOKENS_DEFAULT,
     NATIVE_FP4,
     PASS_PROVEN,
     PASS_ROWS,
@@ -256,6 +258,7 @@ def test_linear_experts_every_type(ctx, lib, name):
     down = experts(ctx, name, INTER, H, K)
     t = gate_up.mmvq_tokens
     assert 1 <= t <= 8 and fused.mmvq_tokens == down.mmvq_tokens == t
+    assert fused.glu_store, f"{name}: D4's store not taken at out {2 * INTER}"       # every type, on every MMA SM
     sg, sd = stack(name, E, 2 * INTER, H, seed=1), stack(name, E, H, INTER, seed=2)
     for tokens in (1, t, t + 1, 64):
         ids, x, h = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens), down_input(tokens, tokens)
@@ -323,6 +326,7 @@ def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     sg, sd = qwen_stacks[name]
     gate_up, fused = experts(ctx, name, H, 2 * INTER, 1, n=EQ), experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=EQ)
     down = experts(ctx, name, INTER, H, K, n=EQ)
+    assert fused.glu_store, f"{name}: D4's store not taken at out {2 * INTER}"
     t = gate_up.mmvq_tokens
     rng = torch.Generator().manual_seed(7)
     same = torch.randperm(EQ, generator=rng)[:K]
@@ -373,7 +377,7 @@ def test_every_tile_of_every_entry_is_written(ctx, lib, name):
         def call(n, ids, a=0, x=x, w=w, k=k, out=out):
             y = torch.full((n, K, out), float("nan"), device="cuda")
             ws = torch.empty(lib.workspace_bytes_id(device, k, n, K, slots), dtype=torch.uint8, device="cuda")
-            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[a:a + n], ids[a:a + n], y, ws, slots, errors)
+            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[a:a + n], ids[a:a + n], y, ws, slots, errors, J_AGAINST_T)
             return y
         for routing, ids in routings.items():
             what = f"{name} {stage} {routing}"
@@ -540,8 +544,8 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
 # EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
 # compact where the arena has more
 HELPERS = {"per_slot": EP + K, "compact": 128}
-# mmq with ids picks J against a call's tokens up to this many, above against its entries' mean (mmid.cuh)
-J_AGAINST_T = 64 if SM == 89 else 16
+# mmq with ids picks J against a call's tokens up to this many, above against its entries' mean (the plugin's rule)
+J_AGAINST_T = IDS_J_TOKENS.get(SM, IDS_J_TOKENS_DEFAULT)
 
 
 def helper(fn) -> str:
@@ -626,8 +630,8 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
     tail) give the allocating call's bits; `scratch` is gate/up's f32 output only (the persistent workspace holds every
-    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short, misaligned or overlapping buffer is
-    refused before anything is launched."""
+    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short or misaligned buffer, or one
+    overlapping another or `x`, is refused before anything is launched."""
     for glu, fused in (("none", True), ("swiglu", True), ("swiglu", False)):
         f = facts | {"glu": glu}
         kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **f).impl(ctx, **f)
@@ -654,7 +658,8 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
                     ({"out": scratch[:size].view(torch.float32).view(shape), "scratch": scratch}, "overlaps"),
                     ({"out": torch.empty(*shape[:2], shape[2] + 1, device="cuda")}, "contiguous f32"),
                     ({"out": flat[x.nbytes - 256:][:size].view(torch.float32).view(shape),
-                      "x": flat[:x.nbytes].view(x.dtype).view(x.shape)}, "overlaps")):
+                      "x": flat[:x.nbytes].view(x.dtype).view(x.shape)}, "overlaps"),
+                    ({"scratch": scratch, "x": scratch[256:256 + x.nbytes].view(x.dtype).view(x.shape)}, "overlaps")):
         xs = kw.pop("x", x)
 
         def call(kw=kw, xs=xs, why=why):
@@ -801,7 +806,9 @@ def test_moe_router(ctx, lib, n, hidden):
     q8_1 loop runs several rounds at 16 experts of 4,096); the tile counters left zeroed, so a second call
     (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
     Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
-    `moe_topk`)."""
+    `moe_topk`); for prompt chunks (CHUNK rows and more, experts a multiple of 64: docs/v1-moe-prefill.md D3) the
+    router GEMM's logits, within the f32 budget and row-invariant across calls of 512 rows and more, then `moe_topk`'s
+    selection on them, bitwise."""
     gen = torch.Generator().manual_seed(n)
     router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
     router[1] = router[0]                                               # tied logits: the lower id first
@@ -836,7 +843,20 @@ def test_moe_router(ctx, lib, n, hidden):
                 assert all(map(bitwise, call(x[a:b]), (logits[a:b], w[a:b], ids[a:b]))), f"rows {a}:{b}"
             if x.dtype == torch.bfloat16:
                 assert all(map(bitwise, route(x[:rows], router), (w[:rows], ids[:rows])))
-                assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                if n % 64:
+                    assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                    continue
+                def logits_of(rows_: torch.Tensor) -> torch.Tensor:
+                    out = torch.full((len(rows_), n), float("nan"), device="cuda")
+                    lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n), *out.shape,
+                                                                     device="cuda"), out)
+                    return out
+                gemm = logits_of(x)
+                r = l0.check(gemm[finite], x[finite].double() @ router.double().T, torch.float32, hidden)
+                assert r.passed, f"router GEMM: {r}"
+                for a, b in ((0, CHUNK), (len(x) - CHUNK, len(x)), (3, 70)):
+                    assert bitwise(logits_of(x[a:b]), gemm[a:b]), f"router GEMM rows {a}:{b}"
+                assert all(map(bitwise, route(x, router), choose(gemm)))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
 
 

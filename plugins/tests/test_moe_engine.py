@@ -17,7 +17,7 @@ from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.kernels import DECODE, PADDING
 from holon_std.moe.offload import KEY
-from holon_std.moe.units import CHUNK
+from holon_std.moe.units import CHUNK, MoE
 from holon_std.tiered.ring import Lent
 from holon_testing.gguf_files import write
 from holon_testing.ref_kernels.kernels import LinearExperts
@@ -120,7 +120,7 @@ def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, mo
     chunk's: calls of 512 then 88 rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up
     then down in every layer. D10's fallback: each pass allocates one `scratch` of the larger of its kernels'
     `scratch_bytes`, passed to both calls (no `out`: no lent memory); a kernel that does not define `scratch_bytes` is
-    called without the keywords."""
+    called without the keywords. D3′: a router with `pass_rows` takes a pass in one call."""
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}}
@@ -150,6 +150,15 @@ def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, mo
             monkeypatch.delattr(LinearExperts, "scratch_bytes")       # the last prompt: a kernel without buffers
         else:
             assert buffers == [([], None)] * len(buffers)
+    # D3′: a router declaring `pass_rows` routes a pass of whole CHUNKs in one call, the last partial chunk on its own
+    moes = [m for m in engine.executor.model.modules() if hasattr(m, "_route_rows")]
+    routed, route = [], MoE._route
+    monkeypatch.setattr(MoE, "_route", lambda self, x: routed.append(len(x)) or route(self, x))
+    for m in moes:
+        m._route_rows = 4096
+    prompt = torch.randint(0, 512, (4100,), generator=torch.Generator().manual_seed(1)).tolist()
+    engine.generate([prompt], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+    assert routed == [4096, 4] * layers, routed
 
 
 def test_gate_and_up_of_different_layouts_fail_at_startup(tiny_moe, tmp_path):

@@ -189,7 +189,17 @@ def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str =
 
 class Resident:
     """std.moe.resident@1, the default expert store: every expert in VRAM, as the weight source stacked it (docs/
-    v1-offload.md D5: the merge is the store's)."""
+    v1-offload.md D5: the merge is the store's).
+
+    An expert store's members, as `MoE` calls them (std.moe.offload@1 is the other store):
+    - `merge(gate, up)` / `stack(down)`: the layer's gate/up and down stacks, at `finalize_weights`;
+    - `transform(ids, weights, first)`: the route transform's ids and weights for tokens `first`…, per pass;
+    - `route(ids, first, x)`: the ids each stack reads (an arena's slots), per pass;
+    - `patch(y)`: down's outputs with any rows computed elsewhere written in (F5b's CPU share);
+    - `pass_tokens(tokens)`: the tokens per expert pass of a step of `tokens` (whole CHUNKs);
+    - `pass_buffers(tokens)`: D10's lent `(gate/up's out, down's out, scratch)` for a pass, or None: the pass
+      allocates its own (`pass_scratch`);
+    - `finish()`: after the layer's last pass of the step."""
 
     def __init__(self, ctx, **site) -> None:
         self.device = ctx.device                       # where expert stacks are held
@@ -243,7 +253,8 @@ def _store(ctx, **site):
 class MoE(nn.Module):
     """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
     `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
-    time; the expert path, in f32 (design D3), a pass of the store's size (whole CHUNKs)."""
+    time, or a whole pass where it declares `pass_rows` (D3′); the expert path, in f32 (design D3), a pass of the
+    store's size (whole CHUNKs)."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
                  layer: int = 0) -> None:
@@ -273,6 +284,7 @@ class MoE(nn.Module):
                         if ctx.candidates(kernels.MOE_ROUTER, router) else None)
         self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
         self._prepare = getattr(self._router, "route_prepare", None)
+        self._route_rows = getattr(self._router, "pass_rows", CHUNK)  # rows one router call takes at its chunks' bits
         combine = {"hidden": hidden, "top_k": top_k, "dtype": dtype, "y_dtype": "float32"}
         self._combine = ctx.select_kernel(kernels.MOE_COMBINE, site=f"std.moe[hidden={hidden},top_k={top_k}]",
                                           **combine).impl(ctx, **combine)
@@ -312,7 +324,9 @@ class MoE(nn.Module):
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
+            # the router per CHUNK, or per pass where its rows' bits do not depend on the call (its `pass_rows`)
+            step = b - a if (b - a) % CHUNK == 0 and b - a <= self._route_rows else CHUNK
+            routes = [self._route(xc[c:c + step]) for c in range(0, b - a, step)]
             if len(routes) == 1:                       # the gate/up input: maybe prepared by the router's launch
                 weights, ids, xin = routes[0]
             else:

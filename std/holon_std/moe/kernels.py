@@ -14,6 +14,9 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
   `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
   `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
+  It may expose `pass_rows` (a multiple of `CHUNK`; else `CHUNK`): a row's result is the same in any call of whole
+  `CHUNK`s up to that many rows as in its own chunk's call, so std.moe routes an expert pass in one call
+  (docs/v1-moe-prefill.md D3′).
 - `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token t
   applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role, as
   `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
@@ -33,15 +36,16 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   promised for a call that is not a whole number of `CHUNK`s, nor across placements (`linear_experts_arena@1`'s own
   term). std.moe passes at most the smaller of a layer's two stacks' `pass_rows` per call.
   Passed buffers (docs/v1-moe-prefill.md D10): an instance that defines `scratch_bytes(tokens) -> int` (the bytes of
-  scratch a call of `tokens` tokens takes; 0 where it needs none) accepts the optional keywords `out` (the result,
-  [T, k, out_y] f32, contiguous: written and returned) and `scratch` (a contiguous uint8 buffer of at least
-  `scratch_bytes(T)` bytes, 256-byte aligned, for the call's transients); std calls every other instance without
-  them. The instance keeps no reference to either past the call; both are read and written on the current stream,
-  after the work enqueued before the call; one `scratch` may serve the successive calls of a pass (gate/up, then
-  down); `out` must not overlap `scratch` or `x`. A short, misaligned or overlapping buffer is refused (ValueError)
-  before anything is launched. The results are bitwise those of the call without them, wherever they live. Without
-  `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the graph's: static);
-  with it, it may still use its own persistent workspaces (its calls run in order on the stream).
+  scratch a call of `tokens` tokens takes; 0 where it needs none) accepts the optional keywords `out` (the result, [T,
+  k, out_y] f32, contiguous: written and returned) and `scratch` (a contiguous uint8 buffer of at least
+  `scratch_bytes(T)` bytes, 256-byte aligned, for the call's transients); std calls every other instance without them.
+  The instance keeps no reference to either past the call; both are read and written on the current stream, after the
+  work enqueued before the call; one `scratch` may serve the successive calls of a pass (gate/up, then down); neither
+  `out` nor `scratch` may overlap `x`, nor each other. Where the call uses a buffer, a short, misaligned or
+  overlapping one is refused (ValueError) before anything is launched (a call that needs no `scratch`, e.g. a
+  decode-size one, may leave it unchecked). The results are bitwise those of the call without them, wherever they
+  live. Without `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the
+  graph's: static); with it, it may still use its own persistent workspaces (its calls run in order on the stream).
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,

@@ -163,6 +163,13 @@ CROSSOVER: dict[tuple[str, str, int, int, str], int] = {
     ("rtx-5090", "q6_k", 5120, 248320, "q8_1"): 6,
 }
 
+# D2's batched-decode rule per SM (docs/v1-moe-prefill.md B-dec): mmq with ids picks its tile width against a call's
+# tokens up to this many, above against the launch's mean rows per entry. 16 where D2's per-call sweep and the paired
+# batched-decode rounds measured it (sm_86 RTX A5000, sm_120 RTX 5080 / 5090); step 2's 64 elsewhere — on sm_89
+# provisional until the 4090's sweep runs.
+IDS_J_TOKENS: dict[int, int] = {86: 16, 120: 16}
+IDS_J_TOKENS_DEFAULT = 64
+
 
 def ggml_type(layout: str) -> int | None:
     """The ggml type id of a `"ggml.<type>/gguf.native"` layout, None for any other layout."""
@@ -471,6 +478,7 @@ class LinearExperts(_Matmul):
         self.slots = self.experts + self.top_k
         # D4: SwiGLU in mmq's store (bitwise our SwiGLU of its unfused output), where mmq can for this stack
         self.glu_store = self.swiglu and self.lib.mmq_glu(self.device, self.type, self.prec, self.out)
+        self.ids_j_tokens = IDS_J_TOKENS.get(ctx.fingerprint.sm, IDS_J_TOKENS_DEFAULT)      # D2's batched-decode rule
         # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
         # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
@@ -532,6 +540,8 @@ class LinearExperts(_Matmul):
                              f"{POOL_ALIGN}-byte aligned, at least {self.scratch_bytes(tokens)} bytes")
         if out is not None and (_overlap(out, x) or scratch is not None and _overlap(out, scratch)):
             raise ValueError("kernels.ggml_cuda: out overlaps x or scratch")
+        if scratch is not None and _overlap(scratch, x):
+            raise ValueError("kernels.ggml_cuda: scratch overlaps x")
 
     def _gate_up_out(self, tokens: int, device: torch.device, scratch: torch.Tensor | None) -> torch.Tensor | None:
         """Gate/up's f32 output before our SwiGLU (D10) from `scratch`, or a new buffer where the caller passed none;
@@ -578,16 +588,17 @@ class LinearExperts(_Matmul):
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
-                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors)
+                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                                self.ids_j_tokens)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
             if self.glu_store:
                 self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
-                                    gate_scale, up_scale)
+                                    gate_scale, up_scale, self.ids_j_tokens)
                 continue
             self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots,
-                            self.errors)
+                            self.errors, self.ids_j_tokens)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
 
@@ -617,10 +628,14 @@ class MoeTopk:
 class MoeRouter:
     """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
     through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
-    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile;
-    larger calls (prompt chunks) as `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its
-    call's path, as `qlinear`'s mmvq / mmq). Its logits scratch is a workspace, its tile counters a static buffer each
-    call leaves zeroed."""
+    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile.
+    Prompt chunks (calls of at least CHUNK rows, experts a multiple of 64; docs/v1-moe-prefill.md D3): our router
+    GEMM, per logit a fixed number of f32 fma chains (2,048 / experts) over equal parts of hidden ascending, added in
+    order, from x's values as given (`moe_router_logits`, no f32 copy), then `moe_topk`'s selection; calls between, as
+    `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its call's path, as `qlinear`'s mmvq /
+    mmq: batched decode and verify keep their bits). The GEMM's rows do not depend on the call, so it declares
+    `pass_rows` (D3′): std.moe routes an expert pass of whole CHUNKs in one launch. Its logits scratch is a
+    workspace, its tile counters a static buffer each call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
                  dtype: str) -> None:
@@ -629,8 +644,15 @@ class MoeRouter:
         self.rows = self.lib.moe_router_rows()
         self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
         self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
+        # the router GEMM's expert tile and hidden steps
+        self.prefill = experts % 64 == 0 and hidden % (32 * self.lib.moe_router_partials(experts)) == 0
+        # D3′: the GEMM is row-invariant, so a call of whole CHUNKs gives each row its chunk's bits, up to an expert
+        # pass (std.moe.kernels' `pass_rows` term: std routes a pass in one call)
+        self.pass_rows = max(CHUNK, _cap(ctx) // CHUNK * CHUNK) if self.prefill else CHUNK
 
     def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
+        if len(x) >= CHUNK and self.prefill:
+            return self.topk(self._logits(x, router))
         if not 0 < len(x) <= self.rows:
             return self.topk(torch.nn.functional.linear(x.float(), router))
         x = x.contiguous()
@@ -641,6 +663,13 @@ class MoeRouter:
         logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
         self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
         return weights, ids
+
+    def _logits(self, x: torch.Tensor, router: torch.Tensor) -> torch.Tensor:
+        """A prompt chunk's f32 logits [T, E] (the router GEMM, D3)."""
+        logits = torch.empty(len(x), router.shape[0], device=x.device)
+        partials = torch.empty(self.lib.moe_router_partials(len(router)), *logits.shape, device=x.device)
+        self.lib.moe_router_logits(x.contiguous(), router.contiguous(), partials, logits)
+        return logits
 
     def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
         """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance

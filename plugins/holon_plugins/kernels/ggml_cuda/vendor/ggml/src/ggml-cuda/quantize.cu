@@ -1,3 +1,7 @@
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// x as void * with x_bf16 / type_x (bf16 activations) through the q8_1 quantizers and their launches, read through
+// load_x / load_x4.
+
 #include "quantize.cuh"
 #include <cstdint>
 

@@ -1,3 +1,7 @@
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// src1's type to the q8_1 quantizers (bf16 activations); x_scale and the bf16 dst in mmq_args; glu, gate_scale,
+// up_scale and ids_j_tokens through ggml_cuda_mul_mat_q to the launch.
+
 #include "common.cuh"
 #include "mmq.cuh"
 #include "quantize.cuh"
@@ -138,7 +142,8 @@ ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tenso
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
         const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
-        const bool glu, const float * gate_scale, const float * up_scale) { // Holon: glu, dst out/2 rows (mmq.cuh)
+        const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
+        const int64_t ids_j_tokens) { // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -205,9 +210,9 @@ void ggml_cuda_mul_mat_q(
             // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
             // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
             // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
-            // ggml_cuda_mmq_ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the
-            // weights of the experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
-            ncols_opt = ne12 <= ggml_cuda_mmq_ids_j_tokens(cc) ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
+            // ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the weights of the
+            // experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
+            ncols_opt = ne12 <= ids_j_tokens ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
         }
 
         int ntiles_J_best = INT_MAX;
@@ -292,7 +297,7 @@ void ggml_cuda_mul_mat_q(
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
     ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
-    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1);
+    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1); // Holon: the compact launch's bounds and slots
 
     // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
     // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).

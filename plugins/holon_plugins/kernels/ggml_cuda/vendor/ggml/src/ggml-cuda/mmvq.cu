@@ -1,3 +1,6 @@
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked: the
+// dst pointer as void * (a bf16 or f32 dst) through the kernels and their launches; src1's q8_1 buffer as src1_q.
+
 #include "mmvq.cuh"
 #include "quantize.cuh"
 #include "unary.cuh"
@@ -791,7 +794,7 @@ static __global__ void mul_mat_vec_q(
         return;
     }
 
-    const uint32_t dst0 = sample_dst*stride_sample_dst + channel_dst*stride_channel_dst + row0;
+    const uint32_t dst0 = sample_dst*stride_sample_dst + channel_dst*stride_channel_dst + row0; // Holon: bf16 dst
 
     // sum up partial sums and write back result
 #pragma unroll
