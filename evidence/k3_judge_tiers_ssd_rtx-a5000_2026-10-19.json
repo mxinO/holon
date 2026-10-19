@@ -1,0 +1,1072 @@
+{
+ "measurement": "K step 3: holon_judge tiers with std.state_tier's SSD level on the RTX A5000 (Qwen3-8B bf16): tier invariance through the level, run-identity with unseeded copy and I/O delays, the restart check (3f's two engines, and a crash), and the level's plants",
+ "date": "2026-10-19",
+ "hardware": "NVIDIA RTX A5000",
+ "storage": "the level's directory on the dev host's network filesystem (buffered I/O): a functional run, not a rate",
+ "commit": "b79fc15",
+ "dirty": true,
+ "notes": [
+  "the runs ran on the working tree after the dispatcher fix (queued writes a read depends on go first) and before the read-back fix (a load never evicts what it already read back), which only turns a crash into a run; none of these runs crashed",
+  "gpu_qwen3-8b_ssd: run-identity under write-back admission read nothing from the level (the 1.3 GiB host level held the closed loop); gpu_qwen3-8b_ssd_publish: write-through and a host level near its floor, still nothing (8 sessions fit device + host); gpu_qwen3-8b_ssd_16_sessions: 16 sessions with longer chunks reach the level (640 reads per run), and the reference's device pool no longer holds a session there (its invariance fails on that, by construction)"
+ ],
+ "predictions": {
+  "written": "before the runs, from \u00a76",
+  "clean": "invariance, run-identity and restart pass through the level",
+  "read-unwaited": "invariance fails (SSD trace)",
+  "free-on-ticket": "run-identical fails with I/O delays",
+  "torn-manifest": "restore discards by crc: cached_tokens short; with the crc check off, outputs differ",
+  "stale-slot": "crc mismatch discards: cached_tokens short; with the crc check off, outputs differ"
+ },
+ "verdicts": {
+  "clean": "invariance passes (8 sessions: 7,402 level reads, 44 blocks promoted into place); run-identity passes with 640 level reads per run (16 sessions, three runs identical); restart passes (338 / 434 blocks restored, nothing after a crash)",
+  "read-unwaited": "caught (fired 133, changed 47; invariance and run-identity fail)",
+  "torn-manifest": "caught (fired 740, changed 8); with the crc check off, caught (changed 8)",
+  "stale-slot": "caught (fired 2, changed 1: blocks restored after a crash)",
+  "free-on-ticket": "fired 1,228, changed nothing: prediction not met (also on the CPU, with or without the watermark)"
+ },
+ "runs": {
+  "gpu_qwen3-8b_ssd": {
+   "model": "Qwen/Qwen3-8B",
+   "dtype": "bfloat16",
+   "engine_args": "--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB",
+   "pressure_args": "--plugin-options state_tier.host.admit=evict state_tier.stall_bytes=0 state_tier.h2d_rate=1e9",
+   "tier": "std.state_tier",
+   "trace": {
+    "sessions": 8,
+    "turns": 4,
+    "system_len": 512,
+    "chunk_len": 96,
+    "max_tokens": 32
+   },
+   "streams": "unseeded sleeps up to 0.05 s",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "checks": {
+    "invariance": {
+     "hybrid": false,
+     "tier_kernels": [
+      "holon_plugins.kernels.state_copy.plugin.StateCopy"
+     ],
+     "requests": 58,
+     "tokens_saved": 39968,
+     "reference": {
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 0,
+      "tier.page_stores": 286,
+      "tier.host_units.kv": 286,
+      "tier.level_units.kv": 0
+     },
+     "tested": {
+      "promoted_into_place": 44,
+      "page_loads": 140,
+      "loaded_blocks": 8946,
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 140,
+      "tier.page_stores": 790,
+      "tier.gated_loads": 140,
+      "tier.loads": 140,
+      "tier.loaded_blocks": 8946,
+      "tier.load_bytes": 21106262016,
+      "tier.fence": 140,
+      "tier.write_backs": 742,
+      "tier.write_back_bytes": 1750597632,
+      "tier.level_reads": 7402,
+      "tier.level_payload_reads": 0,
+      "tier.level_read_bytes": 17463508992,
+      "tier.load_enqueue_wait_s": 25.077962547540665,
+      "tier.host_evicted_redundant": 7001,
+      "tier.host_units.kv": 449,
+      "tier.level_units.kv": 742
+     },
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    },
+    "identity": {
+     "runs": 3,
+     "steps": 459,
+     "loads": [
+      133,
+      133,
+      133
+     ],
+     "counts": [
+      {
+       "promoted_into_place": 123,
+       "page_loads": 133,
+       "loaded_blocks": 189,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 16,
+       "tier.evict_stores": 205,
+       "tier.gated_loads": 133,
+       "tier.loads": 133,
+       "tier.loaded_blocks": 189,
+       "tier.load_bytes": 445906944,
+       "tier.fence": 133,
+       "tier.host_units.kv": 205,
+       "tier.level_units.kv": 0
+      },
+      {
+       "promoted_into_place": 123,
+       "page_loads": 133,
+       "loaded_blocks": 189,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 16,
+       "tier.evict_stores": 205,
+       "tier.gated_loads": 133,
+       "tier.loads": 133,
+       "tier.loaded_blocks": 189,
+       "tier.load_bytes": 445906944,
+       "tier.fence": 133,
+       "tier.host_units.kv": 205,
+       "tier.level_units.kv": 0
+      },
+      {
+       "promoted_into_place": 123,
+       "page_loads": 133,
+       "loaded_blocks": 189,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 16,
+       "tier.evict_stores": 205,
+       "tier.gated_loads": 133,
+       "tier.loads": 133,
+       "tier.loaded_blocks": 189,
+       "tier.load_bytes": 445906944,
+       "tier.fence": 133,
+       "tier.host_units.kv": 205,
+       "tier.level_units.kv": 0
+      }
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "fail",
+     "failures": [
+      "level reads per run [0, 0, 0]: at least 32"
+     ]
+    },
+    "restart": {
+     "sessions": 8,
+     "restored_blocks": 338,
+     "restored_after_crash": 0,
+     "level_reads_after_restart": 86,
+     "cached_tokens": 4992,
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "wall_s": {
+    "invariance": 216.0,
+    "identity": 135.1,
+    "restart": 158.9
+   },
+   "plants": {
+    "read-unwaited": {
+     "fired": {
+      "fired": 133
+     },
+     "changed": 47,
+     "checks": {
+      "invariance": {
+       "hybrid": false,
+       "tier_kernels": [
+        "holon_plugins.kernels.state_copy.plugin.StateCopy"
+       ],
+       "requests": 58,
+       "tokens_saved": 39968,
+       "reference": {
+        "tier.restored_blocks": 0,
+        "tier.gated_steps": 0,
+        "tier.page_stores": 286,
+        "tier.host_units.kv": 286,
+        "tier.level_units.kv": 0
+       },
+       "tested": {
+        "promoted_into_place": 24,
+        "page_loads": 140,
+        "loaded_blocks": 8946,
+        "tier.restored_blocks": 0,
+        "tier.gated_steps": 140,
+        "tier.page_stores": 810,
+        "tier.gated_loads": 140,
+        "tier.loads": 140,
+        "tier.loaded_blocks": 8946,
+        "tier.load_bytes": 21106262016,
+        "tier.fence": 140,
+        "tier.write_backs": 760,
+        "tier.write_back_bytes": 1793064960,
+        "tier.level_reads": 7434,
+        "tier.level_payload_reads": 0,
+        "tier.level_read_bytes": 17539006464,
+        "tier.host_evicted_redundant": 7035,
+        "tier.host_units.kv": 449,
+        "tier.level_units.kv": 760
+       },
+       "cached_differ": [],
+       "outputs_differ": [
+        "regenerate 0 1",
+        "regenerate 0 2",
+        "regenerate 0 3",
+        "regenerate 1 1",
+        "regenerate 1 2",
+        "regenerate 1 3",
+        "regenerate 2 1",
+        "regenerate 2 2",
+        "regenerate 2 3",
+        "regenerate 3 1",
+        "regenerate 3 2",
+        "regenerate 3 3",
+        "regenerate 4 1",
+        "regenerate 4 2",
+        "regenerate 4 3",
+        "regenerate 5 1",
+        "regenerate 5 2",
+        "regenerate 5 3",
+        "regenerate 6 1",
+        "regenerate 6 2",
+        "regenerate 6 3",
+        "regenerate 7 1",
+        "regenerate 7 2",
+        "regenerate 7 3",
+        "turn 0 1",
+        "turn 0 2",
+        "turn 0 3",
+        "turn 1 2",
+        "turn 1 3",
+        "turn 2 1",
+        "turn 2 3",
+        "turn 3 1",
+        "turn 3 2",
+        "turn 3 3",
+        "turn 4 1",
+        "turn 4 2",
+        "turn 4 3",
+        "turn 5 1",
+        "turn 5 2",
+        "turn 5 3",
+        "turn 6 0",
+        "turn 6 1",
+        "turn 6 2",
+        "turn 6 3",
+        "turn 7 1",
+        "turn 7 2",
+        "turn 7 3"
+       ],
+       "changed": 47,
+       "findings": {},
+       "verdict": "fail",
+       "failures": [
+        "outputs differ for 47 requests (first ['regenerate 0 1', 'regenerate 0 2', 'regenerate 0 3'])"
+       ]
+      },
+      "identity": {
+       "runs": 2,
+       "steps": 459,
+       "loads": [
+        133,
+        133
+       ],
+       "counts": [
+        {
+         "promoted_into_place": 123,
+         "page_loads": 133,
+         "loaded_blocks": 189,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 16,
+         "tier.evict_stores": 205,
+         "tier.gated_loads": 133,
+         "tier.loads": 133,
+         "tier.loaded_blocks": 189,
+         "tier.load_bytes": 445906944,
+         "tier.fence": 133,
+         "tier.host_units.kv": 205,
+         "tier.level_units.kv": 0
+        },
+        {
+         "promoted_into_place": 123,
+         "page_loads": 133,
+         "loaded_blocks": 189,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 16,
+         "tier.evict_stores": 205,
+         "tier.gated_loads": 133,
+         "tier.loads": 133,
+         "tier.loaded_blocks": 189,
+         "tier.load_bytes": 445906944,
+         "tier.fence": 133,
+         "tier.host_units.kv": 205,
+         "tier.level_units.kv": 0
+        }
+       ],
+       "diffs": [],
+       "changed": 0,
+       "findings": {},
+       "moved_at_step": [
+        null,
+        null
+       ],
+       "verdict": "fail",
+       "failures": [
+        "level reads per run [0, 0]: at least 32"
+       ]
+      }
+     },
+     "verdict": "caught",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    },
+    "free-on-ticket": {
+     "fired": {},
+     "changed": 0,
+     "checks": {
+      "identity": {
+       "runs": 2,
+       "steps": 459,
+       "loads": [
+        133,
+        133
+       ],
+       "counts": [
+        {
+         "promoted_into_place": 123,
+         "page_loads": 133,
+         "loaded_blocks": 189,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 16,
+         "tier.evict_stores": 205,
+         "tier.gated_loads": 133,
+         "tier.loads": 133,
+         "tier.loaded_blocks": 189,
+         "tier.load_bytes": 445906944,
+         "tier.fence": 133,
+         "tier.host_units.kv": 205,
+         "tier.level_units.kv": 0
+        },
+        {
+         "promoted_into_place": 123,
+         "page_loads": 133,
+         "loaded_blocks": 189,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 16,
+         "tier.evict_stores": 205,
+         "tier.gated_loads": 133,
+         "tier.loads": 133,
+         "tier.loaded_blocks": 189,
+         "tier.load_bytes": 445906944,
+         "tier.fence": 133,
+         "tier.host_units.kv": 205,
+         "tier.level_units.kv": 0
+        }
+       ],
+       "diffs": [],
+       "changed": 0,
+       "findings": {},
+       "moved_at_step": [
+        null,
+        null
+       ],
+       "verdict": "fail",
+       "failures": [
+        "level reads per run [0, 0]: at least 32"
+       ]
+      }
+     },
+     "verdict": "never fired",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    },
+    "stale-slot": {
+     "fired": {
+      "fired": 2
+     },
+     "changed": 1,
+     "checks": {
+      "restart": {
+       "sessions": 8,
+       "restored_blocks": 338,
+       "restored_after_crash": 338,
+       "level_reads_after_restart": 86,
+       "cached_tokens": 4992,
+       "cached_differ": [],
+       "outputs_differ": [],
+       "changed": 1,
+       "findings": {},
+       "verdict": "fail",
+       "failures": [
+        "338 blocks restored after a crash"
+       ]
+      }
+     },
+     "verdict": "caught",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    },
+    "torn-manifest": {
+     "fired": {
+      "fired": 740
+     },
+     "changed": 8,
+     "checks": {
+      "restart": {
+       "sessions": 8,
+       "restored_blocks": 0,
+       "restored_after_crash": 0,
+       "level_reads_after_restart": 0,
+       "cached_tokens": 3616,
+       "cached_differ": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+       ],
+       "outputs_differ": [
+        2,
+        3,
+        7
+       ],
+       "changed": 8,
+       "findings": {},
+       "verdict": "fail",
+       "failures": [
+        "cached_tokens differ for sessions [0, 1, 2, 3, 4, 5, 6, 7] after the restart",
+        "outputs differ for sessions [2, 3, 7]",
+        "nothing was restored"
+       ]
+      }
+     },
+     "verdict": "caught",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    },
+    "torn-manifest-unchecked": {
+     "fired": {
+      "fired": 740
+     },
+     "changed": 8,
+     "checks": {
+      "restart": {
+       "sessions": 8,
+       "restored_blocks": 338,
+       "restored_after_crash": 0,
+       "level_reads_after_restart": 86,
+       "cached_tokens": 4992,
+       "cached_differ": [],
+       "outputs_differ": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+       ],
+       "changed": 8,
+       "findings": {},
+       "verdict": "fail",
+       "failures": [
+        "outputs differ for sessions [0, 1, 2, 3, 4, 5, 6, 7]"
+       ]
+      }
+     },
+     "verdict": "caught",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    }
+   },
+   "tiers_off": {
+    "clean": {
+     "runs": 1,
+     "steps": 449,
+     "loads": [
+      0
+     ],
+     "counts": [
+      {}
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "passed": false,
+   "command": "CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge tiers --model Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl --engine-args \"--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB\" --pressure-args \"--plugin-options state_tier.host.admit=evict state_tier.stall_bytes=0 state_tier.h2d_rate=1e9\" --plant-runs 2 --plant read-unwaited free-on-ticket stale-slot torn-manifest torn-manifest-unchecked --json <file>"
+  },
+  "gpu_qwen3-8b_ssd_publish": {
+   "model": "Qwen/Qwen3-8B",
+   "dtype": "bfloat16",
+   "engine_args": "--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB",
+   "pressure_args": "--plugin-options state_tier.host.bytes=1160MiB state_tier.stall_bytes=0 state_tier.h2d_rate=1e9",
+   "tier": "std.state_tier",
+   "trace": {
+    "sessions": 8,
+    "turns": 4,
+    "system_len": 512,
+    "chunk_len": 96,
+    "max_tokens": 32
+   },
+   "streams": "unseeded sleeps up to 0.05 s",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "checks": {
+    "invariance": {
+     "hybrid": false,
+     "tier_kernels": [
+      "holon_plugins.kernels.state_copy.plugin.StateCopy"
+     ],
+     "requests": 58,
+     "tokens_saved": 39968,
+     "reference": {
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 0,
+      "tier.page_stores": 286,
+      "tier.host_units.kv": 286,
+      "tier.level_units.kv": 0
+     },
+     "tested": {
+      "promoted_into_place": 44,
+      "page_loads": 140,
+      "loaded_blocks": 8946,
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 140,
+      "tier.page_stores": 790,
+      "tier.gated_loads": 140,
+      "tier.loads": 140,
+      "tier.loaded_blocks": 8946,
+      "tier.load_bytes": 21106262016,
+      "tier.fence": 140,
+      "tier.write_backs": 742,
+      "tier.write_back_bytes": 1750597632,
+      "tier.level_reads": 7402,
+      "tier.level_payload_reads": 0,
+      "tier.level_read_bytes": 17463508992,
+      "tier.load_enqueue_wait_s": 20.37011268734932,
+      "tier.host_evicted_redundant": 7001,
+      "tier.host_units.kv": 449,
+      "tier.level_units.kv": 742
+     },
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    },
+    "identity": {
+     "runs": 3,
+     "steps": 480,
+     "loads": [
+      30,
+      30,
+      30
+     ],
+     "counts": [
+      {
+       "promoted_into_place": 7,
+       "page_loads": 30,
+       "loaded_blocks": 222,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 34,
+       "tier.page_stores": 278,
+       "tier.gated_loads": 30,
+       "tier.loads": 30,
+       "tier.loaded_blocks": 222,
+       "tier.load_bytes": 523763712,
+       "tier.fence": 30,
+       "tier.abandoned": 4,
+       "tier.host_units.kv": 278,
+       "tier.level_units.kv": 0
+      },
+      {
+       "promoted_into_place": 7,
+       "page_loads": 30,
+       "loaded_blocks": 222,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 34,
+       "tier.page_stores": 278,
+       "tier.gated_loads": 30,
+       "tier.loads": 30,
+       "tier.loaded_blocks": 222,
+       "tier.load_bytes": 523763712,
+       "tier.fence": 30,
+       "tier.abandoned": 4,
+       "tier.host_units.kv": 278,
+       "tier.level_units.kv": 0
+      },
+      {
+       "promoted_into_place": 7,
+       "page_loads": 30,
+       "loaded_blocks": 222,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 34,
+       "tier.page_stores": 278,
+       "tier.gated_loads": 30,
+       "tier.loads": 30,
+       "tier.loaded_blocks": 222,
+       "tier.load_bytes": 523763712,
+       "tier.fence": 30,
+       "tier.abandoned": 4,
+       "tier.host_units.kv": 278,
+       "tier.level_units.kv": 0
+      }
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "fail",
+     "failures": [
+      "loads per run [30, 30, 30]: at least 32",
+      "level reads per run [0, 0, 0]: at least 32"
+     ]
+    },
+    "restart": {
+     "sessions": 8,
+     "restored_blocks": 338,
+     "restored_after_crash": 0,
+     "level_reads_after_restart": 86,
+     "cached_tokens": 4992,
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "wall_s": {
+    "invariance": 196.3,
+    "identity": 129.4,
+    "restart": 154.2
+   },
+   "plants": {
+    "free-on-ticket": {
+     "fired": {},
+     "changed": 0,
+     "checks": {
+      "identity": {
+       "runs": 2,
+       "steps": 480,
+       "loads": [
+        30,
+        30
+       ],
+       "counts": [
+        {
+         "promoted_into_place": 7,
+         "page_loads": 30,
+         "loaded_blocks": 222,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 34,
+         "tier.page_stores": 278,
+         "tier.gated_loads": 30,
+         "tier.loads": 30,
+         "tier.loaded_blocks": 222,
+         "tier.load_bytes": 523763712,
+         "tier.fence": 30,
+         "tier.abandoned": 4,
+         "tier.host_units.kv": 278,
+         "tier.level_units.kv": 0
+        },
+        {
+         "promoted_into_place": 7,
+         "page_loads": 30,
+         "loaded_blocks": 222,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 34,
+         "tier.page_stores": 278,
+         "tier.gated_loads": 30,
+         "tier.loads": 30,
+         "tier.loaded_blocks": 222,
+         "tier.load_bytes": 523763712,
+         "tier.fence": 30,
+         "tier.abandoned": 4,
+         "tier.host_units.kv": 278,
+         "tier.level_units.kv": 0
+        }
+       ],
+       "diffs": [],
+       "changed": 0,
+       "findings": {},
+       "moved_at_step": [
+        null,
+        null
+       ],
+       "verdict": "fail",
+       "failures": [
+        "loads per run [30, 30]: at least 32",
+        "level reads per run [0, 0]: at least 32"
+       ]
+      }
+     },
+     "verdict": "never fired",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    }
+   },
+   "tiers_off": {
+    "clean": {
+     "runs": 1,
+     "steps": 449,
+     "loads": [
+      0
+     ],
+     "counts": [
+      {}
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "passed": false,
+   "command": "CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge tiers --model Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl --engine-args \"--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB\" --pressure-args \"--plugin-options state_tier.host.bytes=1160MiB state_tier.stall_bytes=0 state_tier.h2d_rate=1e9\" --plant-runs 2 --plant free-on-ticket --json <file>"
+  },
+  "gpu_qwen3-8b_ssd_16_sessions": {
+   "model": "Qwen/Qwen3-8B",
+   "dtype": "bfloat16",
+   "engine_args": "--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB",
+   "pressure_args": "--plugin-options state_tier.host.bytes=1160MiB state_tier.stall_bytes=0 state_tier.h2d_rate=1e9",
+   "tier": "std.state_tier",
+   "trace": {
+    "sessions": 16,
+    "turns": 4,
+    "system_len": 512,
+    "chunk_len": 160,
+    "max_tokens": 32
+   },
+   "streams": "unseeded sleeps up to 0.05 s",
+   "hardware": "NVIDIA RTX A5000",
+   "torch": "2.11.0+cu130",
+   "checks": {
+    "invariance": {
+     "hybrid": false,
+     "tier_kernels": [
+      "holon_plugins.kernels.state_copy.plugin.StateCopy"
+     ],
+     "requests": 114,
+     "tokens_saved": 92512,
+     "reference": {
+      "promoted_into_place": 6,
+      "page_loads": 13,
+      "loaded_blocks": 39,
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 0,
+      "tier.page_stores": 730,
+      "tier.loads": 13,
+      "tier.loaded_blocks": 39,
+      "tier.load_bytes": 92012544,
+      "tier.fence": 13,
+      "tier.write_backs": 281,
+      "tier.write_back_bytes": 662962176,
+      "tier.host_units.kv": 449,
+      "tier.level_units.kv": 281
+     },
+     "tested": {
+      "promoted_into_place": 100,
+      "page_loads": 299,
+      "loaded_blocks": 18840,
+      "tier.restored_blocks": 0,
+      "tier.gated_steps": 289,
+      "tier.page_stores": 1234,
+      "tier.gated_loads": 289,
+      "tier.loads": 299,
+      "tier.loaded_blocks": 18840,
+      "tier.load_bytes": 44449136640,
+      "tier.fence": 299,
+      "tier.write_backs": 1176,
+      "tier.write_back_bytes": 2774532096,
+      "tier.level_reads": 16130,
+      "tier.level_payload_reads": 0,
+      "tier.level_read_bytes": 38055444480,
+      "tier.load_enqueue_wait_s": 37.59727166965604,
+      "tier.host_evicted_redundant": 15739,
+      "tier.host_units.kv": 449,
+      "tier.level_units.kv": 1176
+     },
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "fail",
+     "failures": [
+      "the reference loaded pages 13 times: the device pool cannot hold a session"
+     ]
+    },
+    "identity": {
+     "runs": 3,
+     "steps": 980,
+     "loads": [
+      106,
+      106,
+      106
+     ],
+     "counts": [
+      {
+       "promoted_into_place": 14,
+       "page_loads": 106,
+       "loaded_blocks": 1061,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 103,
+       "tier.page_stores": 723,
+       "tier.gated_loads": 106,
+       "tier.loads": 106,
+       "tier.loaded_blocks": 1061,
+       "tier.load_bytes": 2503213056,
+       "tier.fence": 106,
+       "tier.abandoned": 2,
+       "tier.write_backs": 570,
+       "tier.write_back_bytes": 1344798720,
+       "tier.level_reads": 640,
+       "tier.level_payload_reads": 0,
+       "tier.level_read_bytes": 1509949440,
+       "tier.load_enqueue_wait_s": 0.5903558395802975,
+       "tier.host_evicted_redundant": 406,
+       "tier.host_units.kv": 387,
+       "tier.level_units.kv": 570
+      },
+      {
+       "promoted_into_place": 14,
+       "page_loads": 106,
+       "loaded_blocks": 1061,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 103,
+       "tier.page_stores": 723,
+       "tier.gated_loads": 106,
+       "tier.loads": 106,
+       "tier.loaded_blocks": 1061,
+       "tier.load_bytes": 2503213056,
+       "tier.fence": 106,
+       "tier.abandoned": 2,
+       "tier.write_backs": 570,
+       "tier.write_back_bytes": 1344798720,
+       "tier.level_reads": 640,
+       "tier.level_payload_reads": 0,
+       "tier.level_read_bytes": 1509949440,
+       "tier.load_enqueue_wait_s": 0.7453662380576134,
+       "tier.host_evicted_redundant": 406,
+       "tier.host_units.kv": 387,
+       "tier.level_units.kv": 570
+      },
+      {
+       "promoted_into_place": 14,
+       "page_loads": 106,
+       "loaded_blocks": 1061,
+       "aborted_gated": 8,
+       "tier.restored_blocks": 0,
+       "tier.gated_steps": 103,
+       "tier.page_stores": 723,
+       "tier.gated_loads": 106,
+       "tier.loads": 106,
+       "tier.loaded_blocks": 1061,
+       "tier.load_bytes": 2503213056,
+       "tier.fence": 106,
+       "tier.abandoned": 2,
+       "tier.write_backs": 570,
+       "tier.write_back_bytes": 1344798720,
+       "tier.level_reads": 640,
+       "tier.level_payload_reads": 0,
+       "tier.level_read_bytes": 1509949440,
+       "tier.load_enqueue_wait_s": 0.6095555312931538,
+       "tier.host_evicted_redundant": 406,
+       "tier.host_units.kv": 387,
+       "tier.level_units.kv": 570
+      }
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    },
+    "restart": {
+     "sessions": 16,
+     "restored_blocks": 434,
+     "restored_after_crash": 0,
+     "level_reads_after_restart": 182,
+     "cached_tokens": 11328,
+     "cached_differ": [],
+     "outputs_differ": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "wall_s": {
+    "invariance": 318.1,
+    "identity": 163.9,
+    "restart": 178.1
+   },
+   "plants": {
+    "free-on-ticket": {
+     "fired": {
+      "fired": 1228
+     },
+     "changed": 0,
+     "checks": {
+      "identity": {
+       "runs": 2,
+       "steps": 980,
+       "loads": [
+        106,
+        106
+       ],
+       "counts": [
+        {
+         "promoted_into_place": 14,
+         "page_loads": 106,
+         "loaded_blocks": 1061,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 103,
+         "tier.page_stores": 723,
+         "tier.gated_loads": 106,
+         "tier.loads": 106,
+         "tier.loaded_blocks": 1061,
+         "tier.load_bytes": 2503213056,
+         "tier.fence": 106,
+         "tier.abandoned": 2,
+         "tier.write_backs": 614,
+         "tier.write_back_bytes": 1448607744,
+         "tier.level_reads": 687,
+         "tier.level_payload_reads": 0,
+         "tier.level_read_bytes": 1620836352,
+         "tier.load_enqueue_wait_s": 0.6867870688438416,
+         "tier.host_evicted_redundant": 419,
+         "tier.host_units.kv": 377,
+         "tier.level_units.kv": 614
+        },
+        {
+         "promoted_into_place": 14,
+         "page_loads": 106,
+         "loaded_blocks": 1061,
+         "aborted_gated": 8,
+         "tier.restored_blocks": 0,
+         "tier.gated_steps": 103,
+         "tier.page_stores": 723,
+         "tier.gated_loads": 106,
+         "tier.loads": 106,
+         "tier.loaded_blocks": 1061,
+         "tier.load_bytes": 2503213056,
+         "tier.fence": 106,
+         "tier.abandoned": 2,
+         "tier.write_backs": 614,
+         "tier.write_back_bytes": 1448607744,
+         "tier.level_reads": 687,
+         "tier.level_payload_reads": 0,
+         "tier.level_read_bytes": 1620836352,
+         "tier.load_enqueue_wait_s": 2.74428628385067,
+         "tier.host_evicted_redundant": 419,
+         "tier.host_units.kv": 377,
+         "tier.level_units.kv": 614
+        }
+       ],
+       "diffs": [],
+       "changed": 0,
+       "findings": {},
+       "moved_at_step": [
+        null,
+        null
+       ],
+       "verdict": "pass",
+       "failures": []
+      }
+     },
+     "verdict": "fired, changed nothing",
+     "tiers_off": {
+      "fired": {},
+      "changed": 0,
+      "verdict": "pass",
+      "moved_at_step": [
+       null
+      ]
+     }
+    }
+   },
+   "tiers_off": {
+    "clean": {
+     "runs": 1,
+     "steps": 905,
+     "loads": [
+      0
+     ],
+     "counts": [
+      {}
+     ],
+     "diffs": [],
+     "changed": 0,
+     "findings": {},
+     "verdict": "pass",
+     "failures": []
+    }
+   },
+   "passed": false,
+   "command": "CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge tiers --model Qwen/Qwen3-8B --prompts judge/prompts/v1.jsonl --sessions 16 --chunk-len 160 --engine-args \"--max-seqs 4 --max-model-len 2048 --max-step-tokens 2048 --state-memory 460000000 --host-memory 6442450944 --plugin-options state_tier.host.bytes=1300MiB state_tier.host.pages=1 state_tier.levels=ssd state_tier.ssd.dir=<dir> state_tier.ssd.bytes=8GiB\" --pressure-args \"--plugin-options state_tier.host.bytes=1160MiB state_tier.stall_bytes=0 state_tier.h2d_rate=1e9\" --plant-runs 2 --plant free-on-ticket --json <file>"
+  }
+ }
+}

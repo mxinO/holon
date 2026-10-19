@@ -447,7 +447,16 @@ def _tiers(a: argparse.Namespace) -> int:
               "streams": "holon_judge.deferred, seeds 0.." if cpu else f"unseeded sleeps up to {a.delay} s",
               "hardware": "cpu" if cpu else golden.hardware(torch.device("cuda")), "torch": torch.__version__,
               "checks": {k: tiers.strip(v) for k, v in clean.items()}, "wall_s": wall, "plants": {}}
-    loops = sorted({c for name in a.plant or () for c in TIER_PLANTS[name][1]} - set(clean) - {"invariance"})
+    ssd = config.plugin_options.get("state_tier.levels") == "ssd"
+    ssd_dir = pathlib.Path(str(config.plugin_options.get("state_tier.ssd.dir", "state_tier.ssd")))
+    restart_root = ssd_dir.with_name(ssd_dir.name + "-restart")       # its engines' own directories
+    if ssd:                                   # the level restored after a restart (3f's two engines)
+        start = time.monotonic()
+        clean["restart"] = tiers.restart(build, trace, streams, restart_root)
+        wall["restart"] = round(time.monotonic() - start, 1)
+        report["checks"]["restart"] = tiers.strip(clean["restart"])
+    loops = sorted({c for name in a.plant or () for c in TIER_PLANTS[name][1]} - set(clean) - {"invariance",
+                                                                                                "restart"})
     for name in loops:                        # the closed-loop variants the plants need (tiers.LOOPS)
         start = time.monotonic()
         clean[name] = tiers.identity(build, trace, streams, a.runs, loop=tiers.LOOPS[name], options=options,
@@ -460,6 +469,7 @@ def _tiers(a: argparse.Namespace) -> int:
             name: lambda name=name: tiers.identity(build, trace, streams, a.plant_runs, clean[name],
                                                    loop=tiers.LOOPS[name], options=options, **pressure)
             for name in ["identity", *loops]}
+        run["restart"] = lambda: tiers.restart(build, trace, streams, restart_root)
         off = tiers.identity(build, trace, streams, 1, tier=False, options=options, **pressure)
         report["tiers_off"] = {"clean": tiers.strip(off)}
         passed &= off["verdict"] == "pass"

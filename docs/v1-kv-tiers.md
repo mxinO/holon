@@ -1,8 +1,8 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 8.4, step-2 panel review, round 2** (2026-10-19): rev 8 (panel-clean), the lead's decisions on step
-0's measurements (§13 "Rev 8.1"), the panel's reviews of step 1 (§13 "Rev 8.2") and step 2 (§13 "Rev 8.3", "Rev
-8.4"); steps 1 and 2 are built (§13 "Step 1 as built", "Step 2 as built"). Every other number
+Status: **rev 8.4, step 3 built** (2026-10-19): rev 8 (panel-clean), the lead's decisions on step 0's measurements
+(§13 "Rev 8.1"), the panel's reviews of step 1 (§13 "Rev 8.2") and step 2 (§13 "Rev 8.3", "Rev 8.4"); steps 1–3 are
+built (§13 "Step 1 as built", "Step 2 as built", "Step 3 as built"). Every other number
 below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 4 measures it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
 performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
@@ -267,6 +267,13 @@ class Level(Protocol):     # std.state_tier's, below its host level; argument ty
     def restore(self) -> list[BlockRecord]: ...    # persistent levels; [] otherwise
     def close(self, records: Sequence[BlockRecord]) -> None: ...   # persistent levels write their manifest
 ```
+
+**As built (step 3; `std/holon_std/state_tier/level.py`).** The tier owns the I/O threads (D3's list above), so a
+level's `write`, `read` and `drop` are blocking calls the tier makes on them, not tickets; the tier never runs two calls
+on one copy at once and calls `drop` only when none is queued or running. `shapes` maps each host pool to (unit bytes,
+segments, share): the level's share of its storage for that pool, the tier's split of `host.bytes`, so the zlib level
+and the SSD level size alike. `src` and `dst` map a pool to the copy's units of it (a block's pages span every paged
+spec). Restored payloads carry their unit count (`Payload((0,) * n, pool)`). K binds one level below host.
 
 - `std.state_tier` decides every placement, refusal and eviction on logical unit counts. A level only moves bytes
   and reports rates. The determinism contract is therefore kept in one place (§4).
@@ -947,10 +954,12 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
       `host.pages`, the share of it for pages; each part is split over its pools by their unit bytes, so every
       paged spec, and every payload spec, gets the same number of units (rev 8.3);
     - `host.admit` = `publish` | `hit:<n>` | `evict` (pages only; payloads are always stored);
-    - `host.reserve`;
-    - `levels`;
+    - `host.reserve` (with a level: free units per host pool kept by writing leaves back; default one
+      `max_model_len` load's);
+    - `levels` (one in K: `ssd` or a level unit's `Ref`);
     - `ssd.dir`, `ssd.bytes`, `ssd.io_threads` (only these three are `planned = false`);
-    - `ssd.direct`, `ssd.persist` = `off` | `close`;
+    - `ssd.direct`, `ssd.persist` = `off` | `close`; `ssd.read`, `ssd.write`, `ssd.mixed` (the clock's rates, K-M4's
+      by default, tune's later);
     - the clock: `step_cost` (`a,b,c`), `h2d_rate`, `stall_bytes`; levels report their own rates (tune measures
       them).
   - Leaf-first LRU per level, with copies redundant with a faster level dropped first (A9), and payloads ordered by
@@ -1401,6 +1410,82 @@ Results against the predictions are in the evidence records (`evidence/k0_m1_rer
 RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
 shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.
 
+### Step 3 as built (2026-10-19)
+
+- **The `Level` protocol** (`std/holon_std/state_tier/level.py`; D3 "as built"). Deviations from rev 8's sketch, all
+  std's: the tier owns the I/O threads, so `write`, `read` and `drop` are blocking calls on them, not tickets; `bind`
+  gets each host pool's share of the level's bytes; `src` / `dst` map a pool to the copy's units of it; restored
+  payloads carry their unit count; **K binds one level below host** (`state_tier.levels` takes one name or `Ref`).
+- **The SSD level** (`ssd.py`, built-in `ssd`). One preallocated slot file per host pool shape, slots 4 KiB-aligned;
+  `flock` on the directory (a second engine is refused), a directory without the bytes refused; `O_DIRECT` for units
+  whose segments and offset are aligned, else buffered with `DONTNEED`; a crc32 per written unit. `persist = close`:
+  `fdatasync`, then the manifest written, `fsync`ed, renamed, the directory `fsync`ed; at bind the manifest is read and
+  unlinked (directory `fsync`ed) before any slot can be rewritten; restore keeps a record only with the same identity,
+  every slot inside the current geometry and holding its crc (verified on threads), and its parent kept. Persistence
+  needs the state identity (refused without it).
+- **The tier over a level** (`tier.py`). Host evictions write back (the copy is on the level from that call; its host
+  units free at once, their reuse waiting for the write), except tentative payloads and superseded ones (rev 8.1,
+  8.2), which are dropped; host victims are leaves of the host level; a copy on both levels leaves the host level
+  without a write; the level evicts redundant copies first, then least recently used leaves (a child copy on either
+  level keeps a page copy). The watermark (`host.reserve`, default one `max_model_len` load's units) writes host
+  leaves back in `before_launch`. A load of a level copy reads it into host units (one read per copy; later loads of
+  it wait for that read); its H2D is enqueued by an I/O thread once its reads are done, in decision order, unless it
+  was abandoned (abandonment completes the enqueue wait; `load_enqueue_wait_s`). Page host pools are unit-major with a
+  level (D10). Host-unit fences gain two ordered sources: the latest write-back from the unit (`io`) and the latest
+  level load that read it no step waited for (`level`, its own fence: enqueues keep decision order). I/O tickets
+  among a copy's `after` are waited for on the host (a stream cannot, and off CUDA waits for nothing).
+- **I/O and read priority** (`iothreads.py`; D4, D11 rev 8.3). Jobs run in decision order on `ssd.io_threads`; while
+  a read is queued no write starts but one a queued job depends on: a job submitted to the read queue takes the
+  queued writes it depends on (transitively) ahead of it. Level drops run once the copy's last job has. The clock
+  charges level reads at the read rate on the level's lane, behind the writes they depend on (at the write rate over
+  the mixed factor); other write-backs go on their own lane at the write rate.
+- **Found while building (GPU):** a read reusing host units freed by an earlier *background* write-back depended on
+  that write, which could not start while reads were queued; with both I/O threads holding such jobs the engine
+  waited forever for an enqueue (Qwen3-8B, the first invariance run). Only the writes freeing units inside the
+  read's own eviction had been moved ahead. Fixed in the dispatcher (every queued write a read-queue job depends on,
+  transitively), with a failing-without test (`test_a_read_reusing_units_a_queued_write_frees_takes_that_write_ahead`).
+- **`evict.root_pin`** (`plugins/holon_plugins/evict/root_pin/`, slot `eviction_policy`), options `root_pin.depth`
+  and `root_pin.hits`; its test binds it through an engine.
+- **The mixed factor under exactly this dispatch** (`spikes/k3_tiers/`, `evidence/k3_mixed_nvme_rtx-5080_2026-10-19.json`;
+  the RTX 5080 desktop's NVMe, outside the container: its `/tmp` is tmpfs, so a first run there was void and is not
+  recorded). Predicted 0.85–0.95, measured **0.79–0.82 with 2 threads and 0.73–0.74 with 3**: no better than step 2's
+  0.77–0.80. Reads beside background writes ran at 0.79–0.92 of the pure read rate for their share (predicted within
+  10%). A comparison arm that starts no write while a read is queued *or running* did worse (0.62–0.77, reads
+  0.67–0.80): the drive's own read/write interference, not the dispatch. The literal rule only bounds writes while a
+  read waits; with reads always in flight it rarely does (the 75/25 target reached 0.51). D4's "reads at the pure
+  read rate" therefore under-charges a read beside background writes by ≈ 10–20% on this drive: **for the owner
+  before step 4** (D4's 15% check). The engine loop's 3–5 ms host body beside 2 or 3 I/O threads: no slowdown (−3% to
+  +1%), as predicted.
+- **The judge.** `holon_judge tiers` with `state_tier.levels = ssd` adds the level's reads to its minimums (8 per
+  invariance run, 32 per run-identity run), unseeded sleeps before every level I/O job (the copy delays' bound on the
+  GPU, 5 ms on the CPU), and the **restart check** (3f's two engines, acceptance 2's "restored after a restart"): A
+  resumes parked sessions with no restart; B closes (`persist = close`) and B2, restored from B's directory, resumes
+  them with A's outputs and `cached_tokens`; then B2 stops without a snapshot (a crash) and B3 must restore nothing.
+  CPU: the tiny dense model through the level (invariance, run-identity, restart) and the tiny hybrid (invariance with
+  pages from the level and checkpoints written back; `branch` only: a dropped superseded `prompt_end` or tentative
+  checkpoint changes which requests hit in one order and not the other, so with them the comparison is refused).
+  A checkpoint read back from the level is the bare tier's test.
+- **Plants on the level** (CPU, caught): `read_unwaited` (the H2D enqueued at once), `torn_manifest` (the close's
+  data writes lost after the manifest; restore discards by crc, `cached_tokens` short) and its variant with the crc
+  check off (outputs differ), `stale_slot` (the manifest kept at startup: after a crash the next start restores
+  records naming rewritten slots). `free_on_ticket` (host units freed when the write completes) fires and changes
+  nothing on the CPU: the units are never back before the tier's next decision, in the same commit, so its extra
+  evictions repeat in every run; it changes nothing without the watermark either, nor on the A5000 (fired 1,228).
+  §6's prediction is not met: the window (a decision short of host units only because a write has not completed) did
+  not open in any configuration tried.
+- **Not built in step 3:** `adopt_source_reused` with a delayed I/O thread on the GPU, and core liveness cells with an
+  SSD load: the core does not tell a level load from a host one; the tier-side part (an abandoned level load is never
+  enqueued and never waited for) is `test_an_abandoned_load_is_never_enqueued_and_never_waited_for`.
+- **GPU (RTX A5000, Qwen3-8B; the level on the dev host's network filesystem, buffered: functional, not a rate;
+  `evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`):** invariance through the level passes (7,402 level reads,
+  44 blocks promoted into place); run-identity passes with 640 level reads per run once 16 sessions overflow device
+  and host (with 8, the closed loop fits them and reads nothing from the level); the restart check passes (338 and 434
+  blocks restored, nothing after a crash); `read_unwaited` (fired 133, changed 47), `torn_manifest` and its crc-off
+  variant (changed 8 each) and `stale_slot` (changed 1) are caught.
+- **Found while testing:** without the watermark (`host.reserve = 0`) a load's later read-back could make room by
+  evicting a copy the same load had just read back (a crash: the load then found it gone). The load's copies are now
+  marked loading before any read-back; `test_the_level_without_a_watermark_passes_run_identity` fails without it.
+
 ### Step 2 as built (2026-10-19)
 
 - **`state_copy@1` providers** (`kernels.state_copy`): loads by the SM gather (8 CTAs × 256 threads, unroll 2; rows over
@@ -1465,7 +1550,8 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
 | B (minor, decision): core back to +326 | done | `Fence.done()`, its platform implementation and `late_loads` are dropped (3a and 3b measure lateness directly); the gated counters move into std's tier, from its loads' due times and `before_launch`: `gated_loads` (due after the clock when issued) and `gated_steps` (launches while one is not due). `core/tests/test_tiers.py` asserts them no more; `test_page_loads_take_the_lane_and_payload_loads_do_not` does |
 | C (minor) | resolved by B's | |
 
-Core: +326 code lines over b5b1e7f; ABI 1.4's listing as at step 2's first commit.
+Core: +326 code lines over b5b1e7f; ABI 1.4's listing as at step 2's first commit. The full CI suite on b79fc15:
+1614 passed, 66 skipped.
 
 ### Rev 8.3 (2026-10-19): the panel's review of step 2
 

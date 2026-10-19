@@ -1,0 +1,515 @@
+{
+ "measurement": "K step 3 (docs/v1-kv-tiers.md rev 8.4, D4 / D11): the mixed factor under std.state_tier's own I/O dispatch (IoThreads over SsdLevel, 557,056 B units, O_DIRECT), a comparison arm that starts no write while a read is queued or running, and the engine loop's host time beside the I/O threads",
+ "date": "2026-10-19",
+ "hardware": "NVIDIA GeForce RTX 5080 desktop (the GPU idle; the drive under test is its local NVMe)",
+ "storage": "the desktop's local NVMe (ext4), from the node outside the container (the container's /tmp is tmpfs: a first run there measured memory, not the drive, and is not recorded)",
+ "command": "python spikes/k3_tiers/bench.py --tag rtx-5080 --dir <node-local dir> --seconds 6 --out <file>",
+ "commit": "b79fc15d68b8",
+ "dirty": true,
+ "o_direct": true,
+ "test_files_removed": true,
+ "predictions": {
+  "written": "2026-10-19, before any run of this script",
+  "mixed_factor": "0.85-0.95 at 50/50 and 75/25 with 2 and 3 threads: no write starts while a read is queued, so the drive sees mostly one kind at a time; the rest is its own read/write turnaround (step 2 measured 0.77-0.80 with one writer always in flight)",
+  "reads_beside_writes": "the read rate within 10% of the pure read rate at the same thread count (reads never wait behind background writes, only behind the one write in flight when they arrive)",
+  "strict_arm": "added after the tier arm's runs, no prediction",
+  "gil": "the 3 ms body slows < 3% beside 2 and 3 I/O threads (preadv / pwritev release the GIL; the dispatch is a deque and a condition)"
+ },
+ "unit_bytes": 557056,
+ "fill_gbps": {
+  "2": 1.7775308104998784,
+  "3": 1.7793061201342555
+ },
+ "rows": [
+  {
+   "threads": 2,
+   "arm": "tier",
+   "read_share_target": 0.5,
+   "dependent_share": 0.0,
+   "read_share": 0.4999704927707288,
+   "measured_gbps": 1.5726394802892427,
+   "model_gbps": 1.9783028031649603,
+   "mixed_factor": 0.7949437658245629,
+   "pure": {
+    "read": 1.7899908954682184,
+    "write": 2.2108642848263536
+   },
+   "window": {
+    "read": 0.7862733359109156,
+    "write": 0.7863661443783273,
+    "urgent": 0.0,
+    "seconds": 6.002210956998169,
+    "bytes": {
+     "read": 4719378432,
+     "write": 4719935488,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.8785740107789086
+  },
+  {
+   "threads": 2,
+   "arm": "tier",
+   "read_share_target": 0.5,
+   "dependent_share": 0.5,
+   "read_share": 0.42273936923164035,
+   "measured_gbps": 1.6394535023274355,
+   "model_gbps": 2.010978978018391,
+   "mixed_factor": 0.8152514373586068,
+   "pure": {
+    "read": 1.7899908954682184,
+    "write": 2.2108642848263536
+   },
+   "window": {
+    "read": 0.6930615394585036,
+    "write": 0.5959623738713626,
+    "urgent": 0.35042958899756915,
+    "seconds": 6.000881392508745,
+    "bytes": {
+     "read": 4158980096,
+     "write": 3576299520,
+     "urgent": 2102886400
+    }
+   },
+   "reads_vs_pure": 0.9159004699286998
+  },
+  {
+   "threads": 2,
+   "arm": "tier",
+   "read_share_target": 0.75,
+   "dependent_share": 0.0,
+   "read_share": 0.505709045731527,
+   "measured_gbps": 1.5689849427903415,
+   "model_gbps": 1.975917176620726,
+   "mixed_factor": 0.7940540025436024,
+   "pure": {
+    "read": 1.7899908954682184,
+    "write": 2.2108642848263536
+   },
+   "window": {
+    "read": 0.7934498781856381,
+    "write": 0.7755350646047036,
+    "urgent": 0.0,
+    "seconds": 6.001279751770198,
+    "bytes": {
+     "read": 4761714688,
+     "write": 4654202880,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.8765323593335557
+  },
+  {
+   "threads": 2,
+   "arm": "tier",
+   "read_share_target": 0.75,
+   "dependent_share": 0.5,
+   "read_share": 0.4222028985507246,
+   "measured_gbps": 1.60153364932596,
+   "model_gbps": 2.0112097321288567,
+   "mixed_factor": 0.7963036493616922,
+   "pure": {
+    "read": 1.7899908954682184,
+    "write": 2.2108642848263536
+   },
+   "window": {
+    "read": 0.6761721488719401,
+    "write": 0.5860220518577078,
+    "urgent": 0.3393394485963121,
+    "seconds": 6.000008806586266,
+    "bytes": {
+     "read": 4057038848,
+     "write": 3516137472,
+     "urgent": 2036039680
+    }
+   },
+   "reads_vs_pure": 0.8947160867581048
+  },
+  {
+   "threads": 3,
+   "arm": "tier",
+   "read_share_target": 0.5,
+   "dependent_share": 0.0,
+   "read_share": 0.4999746643020015,
+   "measured_gbps": 1.8320662504671235,
+   "model_gbps": 2.5270319745729033,
+   "mixed_factor": 0.7249873641890753,
+   "pure": {
+    "read": 2.3170022082344643,
+    "write": 2.7789065499397867
+   },
+   "window": {
+    "read": 0.9159867085563266,
+    "write": 0.9160795419107968,
+    "urgent": 0.0,
+    "seconds": 6.0006018653512,
+    "bytes": {
+     "read": 5496471552,
+     "write": 5497028608,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.7907054399672506
+  },
+  {
+   "threads": 3,
+   "arm": "tier",
+   "read_share_target": 0.5,
+   "dependent_share": 0.5,
+   "read_share": 0.43774785801713584,
+   "measured_gbps": 1.8956754205692927,
+   "model_gbps": 2.5558641673216984,
+   "mixed_factor": 0.7416964660355091,
+   "pure": {
+    "read": 2.3170022082344643,
+    "write": 2.7789065499397867
+   },
+   "window": {
+    "read": 0.8298278548499411,
+    "write": 0.6571984163060545,
+    "urgent": 0.4086491494132972,
+    "seconds": 6.002013148739934,
+    "bytes": {
+     "read": 4980637696,
+     "write": 3944513536,
+     "urgent": 2452717568
+    }
+   },
+   "reads_vs_pure": 0.8181586594230228
+  },
+  {
+   "threads": 3,
+   "arm": "tier",
+   "read_share_target": 0.75,
+   "dependent_share": 0.0,
+   "read_share": 0.5085691310247776,
+   "measured_gbps": 1.8469684200478131,
+   "model_gbps": 2.52310085786862,
+   "mixed_factor": 0.7320232222536014,
+   "pure": {
+    "read": 2.3170022082344643,
+    "write": 2.7789065499397867
+   },
+   "window": {
+    "read": 0.9393111244139228,
+    "write": 0.9076572956338904,
+    "urgent": 0.0,
+    "seconds": 6.00104642380029,
+    "bytes": {
+     "read": 5636849664,
+     "write": 5446893568,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.7971370996038831
+  },
+  {
+   "threads": 3,
+   "arm": "tier",
+   "read_share_target": 0.75,
+   "dependent_share": 0.5,
+   "read_share": 0.43663424697907455,
+   "measured_gbps": 1.8896290970055947,
+   "model_gbps": 2.5563861419638605,
+   "mixed_factor": 0.7391798390652942,
+   "pure": {
+    "read": 2.3170022082344643,
+    "write": 2.7789065499397867
+   },
+   "window": {
+    "read": 0.8250767778407865,
+    "write": 0.6508536805286979,
+    "urgent": 0.41369863863611045,
+    "seconds": 6.001466671936214,
+    "bytes": {
+     "read": 4951670784,
+     "write": 3906076672,
+     "urgent": 2482798592
+    }
+   },
+   "reads_vs_pure": 0.8155491135442101
+  },
+  {
+   "threads": 2,
+   "arm": "strict",
+   "read_share_target": 0.5,
+   "dependent_share": 0.0,
+   "read_share": 0.5,
+   "measured_gbps": 1.3147832405461133,
+   "model_gbps": 2.042324778452957,
+   "mixed_factor": 0.6437679522950557,
+   "pure": {
+    "read": 1.8974494467168033,
+    "write": 2.2111521491542563
+   },
+   "window": {
+    "read": 0.6573916202730566,
+    "write": 0.6573916202730566,
+    "urgent": 0.0,
+    "seconds": 6.000249188393354,
+    "bytes": {
+     "read": 3944513536,
+     "write": 3944513536,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.6929213544113707
+  },
+  {
+   "threads": 2,
+   "arm": "strict",
+   "read_share_target": 0.5,
+   "dependent_share": 0.5,
+   "read_share": 0.5,
+   "measured_gbps": 1.4813547859592964,
+   "model_gbps": 2.042324778452957,
+   "mixed_factor": 0.7253277253392624,
+   "pure": {
+    "read": 1.8974494467168033,
+    "write": 2.2111521491542563
+   },
+   "window": {
+    "read": 0.7406773929796482,
+    "write": 0.36736781699930654,
+    "urgent": 0.3733095759803416,
+    "seconds": 6.000173368491232,
+    "bytes": {
+     "read": 4444192768,
+     "write": 2204270592,
+     "urgent": 2239922176
+    }
+   },
+   "reads_vs_pure": 0.780708433904532
+  },
+  {
+   "threads": 2,
+   "arm": "strict",
+   "read_share_target": 0.75,
+   "dependent_share": 0.0,
+   "read_share": 0.7495720224993886,
+   "measured_gbps": 1.518308783430393,
+   "model_gbps": 1.967347245687246,
+   "mixed_factor": 0.7717543442108553,
+   "pure": {
+    "read": 1.8974494467168033,
+    "write": 2.2111521491542563
+   },
+   "window": {
+    "read": 1.1380817855745058,
+    "write": 0.3802269978558871,
+    "urgent": 0.0,
+    "seconds": 6.000892595387995,
+    "bytes": {
+     "read": 6829506560,
+     "write": 2281701376,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.800184050256282
+  },
+  {
+   "threads": 2,
+   "arm": "strict",
+   "read_share_target": 0.75,
+   "dependent_share": 0.5,
+   "read_share": 0.5695247368100773,
+   "measured_gbps": 1.5250498732557327,
+   "model_gbps": 2.0208696127888506,
+   "mixed_factor": 0.7546503067811118,
+   "pure": {
+    "read": 1.8974494467168033,
+    "write": 2.2111521491542563
+   },
+   "window": {
+    "read": 0.8685536276882129,
+    "write": 0.22198742145851108,
+    "urgent": 0.4345088241090087,
+    "seconds": 6.002493038773537,
+    "bytes": {
+     "read": 5213487104,
+     "write": 1332477952,
+     "urgent": 2608136192
+    }
+   },
+   "reads_vs_pure": 0.8037367614165207
+  },
+  {
+   "threads": 3,
+   "arm": "strict",
+   "read_share_target": 0.5,
+   "dependent_share": 0.0,
+   "read_share": 0.4999406809823229,
+   "measured_gbps": 1.5647936740480348,
+   "model_gbps": 2.530727018657229,
+   "mixed_factor": 0.6183178440471601,
+   "pure": {
+    "read": 2.3208281474628776,
+    "write": 2.782302567485597
+   },
+   "window": {
+    "read": 0.7823040150004057,
+    "write": 0.7824896590476293,
+    "urgent": 0.0,
+    "seconds": 6.001334363594651,
+    "bytes": {
+     "read": 4694867968,
+     "write": 4695982080,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.6742393553605693
+  },
+  {
+   "threads": 3,
+   "arm": "strict",
+   "read_share_target": 0.5,
+   "dependent_share": 0.5,
+   "read_share": 0.5,
+   "measured_gbps": 1.723072561657822,
+   "model_gbps": 2.5306998680099473,
+   "mixed_factor": 0.6808680015512014,
+   "pure": {
+    "read": 2.3208281474628776,
+    "write": 2.782302567485597
+   },
+   "window": {
+    "read": 0.861536280828911,
+    "write": 0.43202131785128234,
+    "urgent": 0.4295149629776286,
+    "seconds": 6.000950686633587,
+    "bytes": {
+     "read": 5170036736,
+     "write": 2592538624,
+     "urgent": 2577498112
+    }
+   },
+   "reads_vs_pure": 0.7424386693782044
+  },
+  {
+   "threads": 3,
+   "arm": "strict",
+   "read_share_target": 0.75,
+   "dependent_share": 0.0,
+   "read_share": 0.7498398462524023,
+   "measured_gbps": 1.7383840332624485,
+   "model_gbps": 2.4212916983648953,
+   "mixed_factor": 0.7179572929756394,
+   "pure": {
+    "read": 2.3208281474628776,
+    "write": 2.782302567485597
+   },
+   "window": {
+    "read": 1.3035096162291455,
+    "write": 0.43487441703330315,
+    "urgent": 0.0,
+    "seconds": 6.002570658922195,
+    "bytes": {
+     "read": 7824408576,
+     "write": 2610364416,
+     "urgent": 0
+    }
+   },
+   "reads_vs_pure": 0.7490360866067765
+  },
+  {
+   "threads": 3,
+   "arm": "strict",
+   "read_share_target": 0.75,
+   "dependent_share": 0.5,
+   "read_share": 0.6655501674748787,
+   "measured_gbps": 1.8567420857638501,
+   "model_gbps": 2.4571302109388475,
+   "mixed_factor": 0.7556547379938834,
+   "pure": {
+    "read": 2.3208281474628776,
+    "write": 2.782302567485597
+   },
+   "window": {
+    "read": 1.2357550061377862,
+    "write": 0.006868915380019243,
+    "urgent": 0.6141181642460447,
+    "seconds": 6.001259546726942,
+    "bytes": {
+     "read": 7416086528,
+     "write": 41222144,
+     "urgent": 3685482496
+    }
+   },
+   "reads_vs_pure": 0.8000342842246356
+  }
+ ],
+ "gil": {
+  "2": {
+   "body_iters": 131072,
+   "alone_ms_p50": 5.333520472049713,
+   "beside_ms_p50": 5.163745954632759,
+   "slowdown_p50": -0.03183160509210692,
+   "reads_beside": 638
+  },
+  "3": {
+   "body_iters": 131072,
+   "alone_ms_p50": 5.1909261383116245,
+   "beside_ms_p50": 5.081311333924532,
+   "slowdown_p50": -0.02111661801120235,
+   "reads_beside": 906
+  }
+ },
+ "verdicts": {
+  "mixed_factor": {
+   "tier": {
+    "2": [
+     0.794,
+     0.815
+    ],
+    "3": [
+     0.725,
+     0.742
+    ]
+   },
+   "strict": {
+    "2": [
+     0.644,
+     0.772
+    ],
+    "3": [
+     0.618,
+     0.756
+    ]
+   },
+   "prediction": "not met (0.85-0.95 predicted): no better than step 2's 0.77-0.80"
+  },
+  "reads_beside_writes": {
+   "tier": {
+    "2": [
+     0.877,
+     0.916
+    ],
+    "3": [
+     0.791,
+     0.818
+    ]
+   },
+   "strict": {
+    "2": [
+     0.693,
+     0.804
+    ],
+    "3": [
+     0.674,
+     0.8
+    ]
+   },
+   "prediction": "not met (within 10% predicted): reads at 0.79-0.92 of the pure rate for their share"
+  },
+  "gil": {
+   "2": -0.032,
+   "3": -0.021,
+   "prediction": "met (< 3% slowdown)"
+  },
+  "shares": "the 75/25 target reached 0.51 in the tier arm (a running read is not a queued one, so background writes start beside it) and 0.75 in the strict arm"
+ },
+ "findings": [
+  "The drive's own read/write interference sets the factor, not the dispatch: the strict arm serializes the kinds and moves less (0.62-0.77).",
+  "D4 rev 8.3 charges reads at the pure read rate; beside background writes they ran 8-21% slower on this drive. The owner hears before step 4 (D4's 15% check)."
+ ]
+}

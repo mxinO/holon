@@ -101,9 +101,9 @@ modules = ["holon_std.ops", "holon_std.blocks", "holon_std.ffn", "holon_std.moe"
 [[tool.importlinter.contracts]]
 name = "first-party plugins are selected or bound by Ref, never imported by each other"
 type = "independence"
-modules = ["holon_plugins.drafters.*", "holon_plugins.frontends.*", "holon_plugins.grammar.*",
-           "holon_plugins.kernels.*", "holon_plugins.models.*", "holon_plugins.placement.*",
-           "holon_plugins.tiers.*", "holon_plugins.transforms.*"]
+modules = ["holon_plugins.drafters.*", "holon_plugins.evict.*", "holon_plugins.frontends.*",
+           "holon_plugins.grammar.*", "holon_plugins.kernels.*", "holon_plugins.models.*", "holon_plugins.placement.*",
+           "holon_plugins.state_tiers.*", "holon_plugins.tiers.*", "holon_plugins.transforms.*"]
 
 [[tool.importlinter.contracts]]
 name = "production code never imports the test-only plugins"

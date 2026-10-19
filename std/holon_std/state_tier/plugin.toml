@@ -19,6 +19,16 @@ numerics = "exact"         # a hit's bytes are the same whichever level held the
 "state_tier.step_cost" = { help = "the clock's seconds per step: a,b,c for a + b·tokens + c·rows (tune measures them)", default = "0.015,0.0004,0.0005" }
 "state_tier.h2d_rate" = { help = "bytes per second the clock charges a load on the H2D lane", default = "43e9" }
 "state_tier.stall_bytes" = { help = "a load this small is due at once: its step waits for it", default = "32MiB" }
+"state_tier.host.reserve" = { help = "with a level: the free host units per pool the step hook keeps by writing host leaves back (default: one max_model_len load's)" }
+"state_tier.levels" = { help = "the level below host: ssd, or the Ref of a level unit (one in K)", default = "" }
+"state_tier.ssd.dir" = { help = "the SSD level's directory (its slot files, lock and manifest)", planned = false }
+"state_tier.ssd.bytes" = { help = "the SSD level's size, split over its shapes as host.bytes is", default = "64GiB", planned = false }
+"state_tier.ssd.io_threads" = { help = "the level's I/O threads", default = "2", planned = false }
+"state_tier.ssd.direct" = { help = "O_DIRECT for aligned units where the filesystem allows it (else buffered, DONTNEED)", default = "true" }
+"state_tier.ssd.persist" = { help = "off, or close: a snapshot at a clean close, restored at the next start of the same identity", default = "off" }
+"state_tier.ssd.read" = { help = "the level's read rate the clock charges, bytes/s (default K-M4's)" }
+"state_tier.ssd.write" = { help = "the level's write rate, bytes/s" }
+"state_tier.ssd.mixed" = { help = "the factor on a write a queued read waits for" }
 
 [dependencies]
 python = ["numpy", "torch"]

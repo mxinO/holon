@@ -1474,10 +1474,93 @@ def _load_no_after(fired):
     return [mock.patch.object(PrefixIndex, "promote", planted)]
 
 
+def _read_unwaited(fired):
+    """std.state_tier enqueues a level load's H2D at once, not once its reads are done. Fired: such enqueues with a
+    read not done."""
+    from holon_std.state_tier.tier import HostTier
+
+    def planted(self, load, jobs, after, written):
+        fired["fired"] += any(not f.done() for f in written if callable(getattr(f, "done", None)))
+        self._enqueue(load, jobs, after)
+    return [mock.patch.object(HostTier, "_after_reads", planted)]
+
+
+def _free_on_ticket(fired):
+    """std.state_tier frees a written-back copy's host units when the write completes, not when it is decided (its
+    next decisions then depend on I/O timing). Fired: such write-backs."""
+    import threading
+
+    from holon_std.state_tier.tier import HostTier
+
+    write_back = HostTier._write_back
+
+    def planted(self, k, urgent, dependent=None):
+        units = {name: list(us) for name, us in self.copies[k].items()}
+        write_back(self, k, urgent, dependent)
+        ticket = self.jobs[k].ticket
+        for name, us in units.items():
+            for u in us:
+                if u in self.free[name]:                     # (one still read sits in limbo instead)
+                    self.free[name].remove(u)
+        fired["fired"] += 1
+
+        def back():
+            ticket._event.wait()
+            for name, us in units.items():
+                self.free[name].extend(us)
+        threading.Thread(target=back, daemon=True).start()
+    return [mock.patch.object(HostTier, "_write_back", planted)]
+
+
+def _torn_manifest(checked: bool):
+    """At a persisting close the snapshot is renamed into place but the data writes of the close never land (killed
+    before the data `fdatasync`); `checked` False also disables restore's crc check. Fired: data writes lost."""
+    def make(fired):
+        from holon_std.state_tier.ssd import SsdLevel
+        from holon_std.state_tier.tier import HostTier
+
+        close = HostTier.close
+
+        def planted(self):
+            level = self.level
+            if isinstance(level, SsdLevel) and level.persist == "close":
+                io = level._io
+
+                def killed(name, slot, unit, write):
+                    if write:
+                        fired["fired"] += 1
+                        return None
+                    return io(name, slot, unit, write)
+                level._io = killed
+            return close(self)
+        return [mock.patch.object(HostTier, "close", planted)] + (
+            [] if checked else [mock.patch.object(SsdLevel, "_verify", lambda self, name, slot, crc: True)])
+    return make
+
+
+def _stale_slot(fired):
+    """The SSD level does not unlink the manifest at startup: a later crash leaves the old snapshot naming slots that
+    were rewritten since. Fired: manifests kept."""
+    from holon_std.state_tier.ssd import MANIFEST, SsdLevel
+
+    bind = SsdLevel.bind
+
+    def planted(self, ctx, shapes, identity):
+        path = self.root / MANIFEST
+        text = path.read_text() if path.exists() else None
+        out = bind(self, ctx, shapes, identity)
+        if text is not None:
+            path.write_text(text)
+            fired["fired"] += 1
+        return out
+    return [mock.patch.object(SsdLevel, "bind", planted)]
+
+
 # Tier plants (docs/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail; `reuse`
 # and `fork` are run-identity's closed-loop variants, `tiers.LOOPS`). Each yields its counter (`fired`).
 # tentative-shift is also a policy plant: here the audit (a payload filed away from its position) catches it. The SSD
-# ones (read_unwaited, free_on_ticket, torn_manifest, stale_slot and the delayed-I/O-thread cells) are step 3's.
+# level's (read-unwaited, free-on-ticket, torn-manifest, stale-slot) need `state_tier.levels = ssd`; `restart` is
+# the restart check.
 TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tuple[str, ...]]] = {
     name: (_tier(name, make), checks) for name, make, checks in [
         ("promote-unwaited", _promote_unwaited, ("invariance", "identity")),
@@ -1495,7 +1578,12 @@ TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tu
         ("adopt-source-reused-join", _adopt_source_reused_join, ("identity", "fork")),
         ("store-early", _store_early, ("invariance", "identity")),
         ("load-no-after", _load_no_after, ("invariance", "identity")),
-        ("tentative-shift", _filed_early(lambda seq, at, p, kind: p.tentative), ("identity",))]}
+        ("tentative-shift", _filed_early(lambda seq, at, p, kind: p.tentative), ("identity",)),
+        ("read-unwaited", _read_unwaited, ("invariance", "identity")),
+        ("free-on-ticket", _free_on_ticket, ("identity",)),
+        ("torn-manifest", _torn_manifest(checked=True), ("restart",)),
+        ("torn-manifest-unchecked", _torn_manifest(checked=False), ("restart",)),
+        ("stale-slot", _stale_slot, ("restart",))]}
 # The checkpoint policies' plants (`bounded --policies --plant`): a `branch` payload (at the request's branch point)
 # or an `answer` one (tentative) filed one block early.
 POLICY_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager]] = {

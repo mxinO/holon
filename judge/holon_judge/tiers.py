@@ -21,6 +21,11 @@
   loading blocks and sends a prefill-heavy request in the same round instead of resending it (the late copy may meet
   units the newcomer takes), and `fork` sends a fork (the finished prompt plus 128 tokens) in place of each
   regenerate (its adopt of the prompt's checkpoint runs in a long prefill step).
+- **With a level below host** (`state_tier.levels`): the level's reads count too (at least `MIN_LOADS` per
+  invariance run, `MIN_CONCURRENT_LOADS` per run-identity run), every level I/O job gets an unseeded sleep before it
+  (`Delayed`'s bound on the GPU, `Deferred.io_delay` on the CPU), and the **restart check** (`restart`, 3f's two
+  engines) runs: the level restored after a clean close gives the outputs and `cached_tokens` of an engine that never
+  restarted, and after a crash nothing is restored.
 - **Audit**, after every step of every run: resident blocks prefix-closed, each block's resident-children count
   (`kids`), every paged unit's references equal to its holders (requests and the index), admissions refused only with
   no slot free, the tier's own page drops leaf first (no child keeps a page copy below a dropped one), and every
@@ -36,7 +41,10 @@ from __future__ import annotations
 import collections
 import contextlib
 import gc
+import pathlib
 import random
+import shutil
+import time
 from collections.abc import Callable, Iterator
 from unittest import mock
 
@@ -59,7 +67,7 @@ class Delayed:
 
     def __init__(self, most: float) -> None:
         self.cycles = int(most * torch.cuda.get_device_properties(torch.cuda.current_device()).clock_rate * 1e3)
-        self.rng = random.SystemRandom()
+        self.rng, self.io_delay = random.SystemRandom(), most
 
     def wrap(self, make: Callable[[], object]) -> object:
         return _Sleepy(make(), self)
@@ -79,6 +87,8 @@ class _Sleepy:
 
 class Deferred:
     """The CPU: `holon_judge.deferred`'s streams (a copy lands 0 … `most` launches late unless waited for)."""
+
+    io_delay = 0.005                       # seconds: the level's I/O jobs, unseeded (up to)
 
     def __init__(self, seed: int, most: int = 2) -> None:
         self.streams = deferred.Deferred(seed, most=most)
@@ -106,7 +116,13 @@ def copy_streams(streams: Delayed | Deferred | None) -> Iterator[None]:
         make = ctx.stream
         ctx.stream = lambda: streams.wrap(make)
         return ctx
-    with mock.patch.object(Engine, "_tier_ctx", planted):
+    from holon_std.state_tier.iothreads import IoThreads
+
+    submit, rng = IoThreads.submit, random.SystemRandom()
+
+    def delayed(self, fn, deps=(), read=False):              # an unseeded sleep before each level I/O job
+        return submit(self, fn, [lambda: time.sleep(rng.uniform(0, streams.io_delay)), *deps], read)
+    with mock.patch.object(Engine, "_tier_ctx", planted), mock.patch.object(IoThreads, "submit", delayed):
         yield
 
 
@@ -154,8 +170,10 @@ class Probe:
                 streams.pump()
                 return launching(seqs)
             state.launching = pumped
+        self.leveled = False
         if index is None or index.tier is None:
             return
+        self.leveled = getattr(index.tier, "level", None) is not None
         tier, publish, promote, publishing = index.tier, state.publish, index.promote, [False]
         self.kernels = sorted({f"{getattr(op, '__module__', '')}.{getattr(op, '__qualname__', type(op).__qualname__)}"
                                for op in getattr(tier, "op", {}).values()})      # std.state_tier's copy ops
@@ -434,6 +452,9 @@ def invariance(build: Build, trace: Trace, streams: Callable[[], object]) -> dic
     if rp.counts["page_loads"]:
         failures.append(f"the reference loaded pages {rp.counts['page_loads']} times: the device pool cannot hold a "
                         "session")
+    if tp.leveled and tp.counts["tier.level_reads"] < MIN_LOADS:
+        failures.append(f"the tested run read {tp.counts['tier.level_reads']} copies from the level below host (at "
+                        f"least {MIN_LOADS}): the host level holds every return")
     findings = rp.findings + tp.findings
     failures += [f"audit: {k} ({n} steps)" for k, n in findings.items()]
     return {"hybrid": tp.hybrid, "tier_kernels": tp.kernels, "requests": len(ref),
@@ -467,6 +488,55 @@ def null_test(build: Build, trace: Trace) -> dict:
             "verdict": "refused" if cached and not findings else "fail" if failures else "pass"}
 
 
+def restart(build: Build, trace: Trace, streams: Callable[[int], object], root: pathlib.Path) -> dict:
+    """3f's two-engine restart (acceptance 2: the level restored after a restart; `ssd.persist = close`). Each
+    session's first turn is parked, the fillers after it, so its blocks go down to the level. Engine A then resumes
+    every session's second turn with no restart; engine B closes instead, and B2, started on B's directory, restores
+    and resumes them. B2's outputs and `cached_tokens` must be A's (a record restore discards shows as fewer cached
+    tokens), with blocks restored. Then B2 stops without its snapshot, as a crash would: B3, started on that directory,
+    must restore nothing."""
+    shutil.rmtree(root, ignore_errors=True)
+    opts = {k: {"state_tier.ssd.dir": str(root / k), "state_tier.ssd.persist": "close"} for k in ("a", "b")}
+    sessions, findings = range(len(trace.chunks)), collections.Counter()
+
+    def park(p):
+        out = {s: ask(p, list(trace.system) + trace.chunks[s][0], trace.max_tokens) for s in sessions}
+        for prompt in fillers(p, trace)[0]:
+            ask(p, prompt, 1)
+        return {s: list(trace.system) + trace.chunks[s][0] + out[s][0] for s in sessions}, out
+
+    def resume(p, history):
+        return {s: ask(p, history[s] + trace.chunks[s][1], trace.max_tokens) for s in sessions}
+
+    def crash(p, history):
+        out = resume(p, history)
+        p.engine.tier.level.persist = "off"                     # no snapshot at its close: a crash leaves none
+        return out
+
+    def run(body, key, i):
+        out, probe = _run(build, streams(i), body, options=opts[key])
+        findings.update(probe.findings)
+        return out, probe.counts
+    (parked_a, resumed_a), _ = run(lambda p: (lambda h: (h[1], resume(p, h[0])))(park(p)), "a", 0)
+    (history, parked_b), _ = run(park, "b", 1)
+    resumed_b, counts_b2 = run(lambda p: crash(p, history), "b", 2)
+    _, counts_b3 = run(lambda p: None, "b", 3)
+    keys = sorted(resumed_a)
+    cached = [s for s in keys if resumed_a[s][1] != resumed_b[s][1]]
+    outputs = [s for s in keys if resumed_a[s][0] != resumed_b[s][0]] + [s for s in keys if parked_a[s] != parked_b[s]]
+    restored, after_crash = counts_b2.get("tier.restored_blocks", 0), counts_b3.get("tier.restored_blocks", 0)
+    failures = ([f"cached_tokens differ for sessions {cached} after the restart"] if cached else []) + (
+        [f"outputs differ for sessions {outputs}"] if outputs else []) + (
+        ["nothing was restored"] if not restored else []) + (
+        [f"{after_crash} blocks restored after a crash"] if after_crash else [])
+    failures += [f"audit: {k} ({n} steps)" for k, n in findings.items()]
+    return {"sessions": len(keys), "restored_blocks": restored, "restored_after_crash": after_crash,
+            "level_reads_after_restart": counts_b2.get("tier.level_reads", 0),
+            "cached_tokens": sum(c or 0 for _, c in resumed_b.values()), "cached_differ": cached,
+            "outputs_differ": outputs, "changed": len(set(cached) | set(outputs)) + bool(after_crash),
+            "findings": dict(findings), "verdict": "fail" if failures else "pass", "failures": failures}
+
+
 def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs: int = 3, clean: dict | None = None,
              loop: dict | None = None, **overrides) -> dict:
     """Run-identity over `runs` fresh engines, `streams(i)` the i-th run's copy streams. With `clean` (a clean
@@ -478,6 +548,7 @@ def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs:
     for i in range(runs):
         trail, probe = _run(build, streams(i), lambda p: closed_loop(p, trace, **(loop or {})), **overrides)
         got.append((probe.steps, trail, dict(probe.counts), probe.findings))
+        leveled = probe.leveled
     diffs, changed, moved = [], 0, []
     for i, (steps, trail, _, _) in enumerate(got[1:], start=1):
         if steps != got[0][0] or trail != got[0][1]:
@@ -498,6 +569,9 @@ def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs:
     failures = diffs + [f"audit: {k} ({n} steps)" for k, n in findings.items()]
     if overrides.get("tier", True) and min(loads) < MIN_CONCURRENT_LOADS:
         failures.append(f"loads per run {loads}: at least {MIN_CONCURRENT_LOADS}")
+    level_reads = [c.get("tier.level_reads", 0) for _, _, c, _ in got]
+    if leveled and min(level_reads) < MIN_CONCURRENT_LOADS:
+        failures.append(f"level reads per run {level_reads}: at least {MIN_CONCURRENT_LOADS}")
     return {"runs": runs, "steps": len(got[0][0]), "loads": loads, "counts": [c for _, _, c, _ in got],
             "diffs": diffs, "changed": changed, "findings": dict(findings),
             **({"moved_at_step": moved} if clean else {}),

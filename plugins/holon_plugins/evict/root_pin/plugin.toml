@@ -1,0 +1,14 @@
+[plugin]
+name = "evict.root_pin"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "eviction_policy"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"
+
+[properties]
+numerics = "exact"         # which blocks stay cached, never the bytes of a hit
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"root_pin.depth" = { help = "pin entries at this depth or shallower (0: the first block of each chain)", default = "0" }
+"root_pin.hits" = { help = "... matched at least this many times", default = "2" }

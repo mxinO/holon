@@ -57,6 +57,20 @@ def dense(tiny_checkpoint):
 
 
 @pytest.fixture(scope="module")
+def dense_ssd(tiny_checkpoint, tmp_path_factory):
+    """The dense configuration with the SSD level under a host level at its floor: returns come from the level."""
+    root = tmp_path_factory.mktemp("ssd")
+    build = _builder(tiny_checkpoint, max_model_len=256, state_memory=17 * 16 * 512, plugin_options={
+        "state_tier.host.bytes": "520KiB", "state_tier.host.pages": "1", "state_tier.levels": "ssd",
+        "state_tier.ssd.dir": str(root / "level"), "state_tier.ssd.bytes": "8MiB"})
+    m = _setup(build, _trace(512, 12, 64, (10, 40), 8), PRESSURE)
+    deferred = lambda i=0: tiers.Deferred(i)                      # noqa: E731
+    m.clean["restart"] = tiers.restart(build, m.trace, deferred, root / "restart")
+    m.run["restart"] = lambda: tiers.restart(build, m.trace, deferred, root / "restart")
+    return m
+
+
+@pytest.fixture(scope="module")
 def tiny_hybrid(tmp_path_factory):
     """The tiny Qwen3.5 with its recurrent state decaying slowly (A_log -6: ≈ 0.85 over a 64-token block), so a
     checkpoint resumed at the wrong position shows in what follows (with the random A_log, the state of a block ago is
@@ -109,6 +123,50 @@ def test_a_tier_plant_is_caught(plant, dense):
     m = dense
     factory, checks = TIER_PLANTS[plant]
     result = tiers.judge_plant(plant, factory, ("tight",) if plant == "interior-drop" else checks, m.run, m.clean)
+    assert result["verdict"] == "caught", result
+
+
+def test_a_hybrid_resumes_through_the_level_bitwise(tiny_hybrid, tmp_path):
+    """Tier invariance with pages through the SSD level, and checkpoints written back to it: the host level at its
+    floor for pages and one unit over it for each payload pool (a checkpoint read back from the level is the bare
+    tier's test, plugins/tests/test_state_tier_level.py). `branch` only: a branch point's checkpoint is
+    never superseded, while a dropped `prompt_end` (superseded by the next turn's) or tentative one changes which
+    requests hit in one order and not the other (the hit sets, judged by `bounded`, not the bytes)."""
+    build = _builder(tiny_hybrid, max_model_len=512, state_memory=920 << 10, plugin_options={
+        "state_tier.host.bytes": "2177928", "state_tier.host.pages": str(2105344 / 2177928),
+        "recurrent.checkpoints": "6", "recurrent.policy": "branch", "state_tier.levels": "ssd",
+        "state_tier.ssd.dir": str(tmp_path / "level"), "state_tier.ssd.bytes": "32MiB"})
+    got = tiers.invariance(build, _trace(320, 8, 140, (20, 60), 8), lambda i=0: tiers.Deferred(i))
+    assert got["verdict"] == "pass", got["failures"]
+    assert got["tested"]["tier.level_reads"] >= tiers.MIN_LOADS and got["tested"]["payload_loads"] > 0
+    assert got["tested"]["tier.level_units.plugin.ssm_state.checkpoints"] > 0      # checkpoints written back too
+
+
+def test_the_level_below_host_passes_the_checks(dense_ssd):
+    clean = dense_ssd.clean
+    assert {c: clean[c]["verdict"] for c in ("invariance", "identity", "restart")} == dict.fromkeys(
+        ("invariance", "identity", "restart"), "pass"), {c: clean[c]["failures"] for c in clean}
+    assert clean["invariance"]["tested"]["tier.level_reads"] >= tiers.MIN_LOADS
+    assert min(c["tier.level_reads"] for c in clean["identity"]["counts"]) >= tiers.MIN_CONCURRENT_LOADS
+    assert clean["restart"]["restored_blocks"] > 0 and clean["restart"]["level_reads_after_restart"] > 0
+
+
+def test_the_level_without_a_watermark_passes_run_identity(tiny_checkpoint, tmp_path):
+    """No `host.reserve`: a load's read-backs make room in the host level themselves, and never by evicting what the
+    same load already read back."""
+    build = _builder(tiny_checkpoint, max_model_len=256, state_memory=17 * 16 * 512, plugin_options={
+        "state_tier.host.bytes": "520KiB", "state_tier.host.pages": "1", "state_tier.levels": "ssd",
+        "state_tier.ssd.dir": str(tmp_path / "level"), "state_tier.ssd.bytes": "8MiB", "state_tier.host.reserve": "0"})
+    got = tiers.identity(build, _trace(512, 12, 64, (10, 40), 8), lambda i=0: tiers.Deferred(i), 2, options=PRESSURE)
+    assert got["verdict"] == "pass", got["failures"]
+
+
+# free-on-ticket is not here: it fires and changes nothing, on the CPU (with or without the watermark) and on the
+# A5000 (docs/v1-kv-tiers.md §13, "Step 3 as built").
+@pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
+def test_a_level_plant_is_caught(plant, dense_ssd):
+    factory, checks = TIER_PLANTS[plant]
+    result = tiers.judge_plant(plant, factory, checks, dense_ssd.run, dense_ssd.clean)
     assert result["verdict"] == "caught", result
 
 

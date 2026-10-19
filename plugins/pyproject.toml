@@ -24,6 +24,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "kernels.ggml_cuda" = "holon_plugins.kernels.ggml_cuda"
 "kernels.expert_io" = "holon_plugins.kernels.expert_io"
 "kernels.state_copy" = "holon_plugins.kernels.state_copy"
+"evict.root_pin" = "holon_plugins.evict.root_pin"
 "kernels.cpu_task" = "holon_plugins.kernels.cpu_task"
 "kernels.ggml_cpu" = "holon_plugins.kernels.ggml_cpu"
 "kernels.promote" = "holon_plugins.kernels.promote"
