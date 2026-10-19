@@ -164,7 +164,7 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
                 if is_block and not all(isinstance(s.shape, Paged) for s in members):
                     raise PluginError(f"state group {group!r}: the block {ref.target} declares Slot state without "
                                       "a planner")
-                if cfg.cuda_graphs and ctx.device.type == "cuda":
+                if cfg.cuda_graphs and ctx.device.type == "cuda" and not plan_only:     # once: not per sub-step
                     print(f"holon: state group {group!r} has no planner: steps run without CUDA graphs",
                           file=sys.stderr, flush=True)
             planners[group] = (cls.planner(dict(ref.params), members, ctx) if hasattr(cls, "planner")
@@ -195,6 +195,8 @@ def prefix_index(spec: ModelSpec, bound: list[BoundSpec], enabled: bool, pools: 
     if not enabled or not bound:
         return None
     paged = [b for b in bound if isinstance(b.spec.shape, Paged)]
+    if len(aligns := {b.spec.alignment for b in bound if not isinstance(b.spec.shape, Paged)}) > 1:   # one lcm grid
+        print(f"holon: non-paged state of alignments {sorted(aligns)}: prefix hits need one", file=sys.stderr)
     block = math.lcm(*(b.spec.shape.tokens_per_unit for b in paged), *(b.spec.alignment for b in bound))
     # Model + recipe identity. Enough within one process; weight updates (v1) and persistent tiers must add the
     # checkpoint identity and weight version (design §6.3).

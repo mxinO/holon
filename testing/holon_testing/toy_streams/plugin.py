@@ -11,6 +11,7 @@
 - `toy.running_sum@1`: Slot state, a request's running sum of its token ids (int64, exact) under the `recurrent`
   kind, filled in-step on its `in_step` grid; every token's residual gets (sum mod 97) / 97, so a wrong state changes
   the logits. Verify rows keep the state before the step and `rewind` sets the sum after each row's accepted tokens.
+  As a block's `pre` it is spec `toy.sum`; as a layer's mixer (`name`), spec `toy.sum.<name>` in its own group.
 """
 from __future__ import annotations
 
@@ -22,7 +23,7 @@ from holon.api import Ref, Slot, StateSpec
 from holon_plugins.drafters.ngram.plugin import NGramDrafter
 from torch import nn
 
-GROUP = "toy.sum"
+GROUP = "toy.sum"                      # the spec (and group) of a running sum; a second one adds its own `name`
 
 
 class Plugin:
@@ -116,6 +117,9 @@ class SumMeta:
 class SumPlanner:
     mixes_row_kinds = True
 
+    def __init__(self, spec: str) -> None:
+        self.spec = spec
+
     def plan_bounds(self, batch: Any, pages: Any) -> SumMeta:
         plan = batch.plan
         lens = plan.n_query.tolist()
@@ -123,7 +127,7 @@ class SumPlanner:
         verify = bool(lens) and not decode and not plan.n_decode and bool((plan.n_logits == plan.n_query).all())
         key = ("toy.sum", len(lens)) if decode else ("toy.sum.verify", len(lens), lens[0]) if verify else None
         meta = SumMeta(key, batch.dev.slots, batch.dev.query_start, verify)
-        if pubs := [p for p in plan.publishes if p.spec == GROUP]:          # the sum after the first `offset` tokens
+        if pubs := [p for p in plan.publishes if p.spec == self.spec]:     # the sum after the first `offset` tokens
             starts, device = plan.n_query.cumsum() - plan.n_query, batch.dev.slots.device
             meta.publish = (pubs[0].payload.pool,
                             torch.tensor([int(starts[p.row]) + p.offset - 1 for p in pubs], device=device),
@@ -140,19 +144,22 @@ class RunningSum(nn.Module):
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx: Any) -> list[StateSpec]:
         if len(layers) != 1:
             raise ValueError("toy.running_sum: one layer")
-        return [StateSpec(GROUP, "recurrent@1", Slot(8), layers, "toy.sum.int64", alignment=params.get("alignment", 64),
-                          in_step=params.get("in_step", 64))]
+        return [StateSpec(_spec(params), "recurrent@1", Slot(8), layers, "toy.sum.int64",
+                          alignment=params.get("alignment", 64), in_step=params.get("in_step", 64))]
 
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx: Any) -> SumPlanner:
-        return SumPlanner()
+        return SumPlanner(_spec(params))
 
-    def __init__(self, ctx: Any, *, layer: int, hidden: int, alignment: int = 64, in_step: int = 64) -> None:
+    def __init__(self, ctx: Any, *, layer: int, hidden: int, name: str = "", alignment: int = 64,
+                 in_step: int = 64) -> None:
         super().__init__()
-        self.state = ctx.state(GROUP, layer)                   # None: a model-only build (sums from zero)
+        self.spec = _spec({"name": name})
+        self.state = ctx.state(self.spec, layer)               # None: a model-only build (sums from zero)
         if self.state is not None:
             tokens = ctx.options["max_seqs"] * (1 + ctx.options["max_draft_tokens"])
-            self.saved = ctx.static("toy.sum.saved", (max(tokens, ctx.options["max_step_tokens"]),), torch.int64)
+            tokens = max(tokens, ctx.options["max_step_tokens"])
+            self.saved = ctx.static(f"{self.spec}.saved", (tokens,), torch.int64)
 
     def _sums(self, pool: Any) -> torch.Tensor:
         return pool.view(torch.int64, (pool.capacity,))
@@ -164,7 +171,7 @@ class RunningSum(nn.Module):
             s0 = torch.zeros(len(qs) - 1, dtype=torch.int64, device=x.device)
             meta = None
         else:
-            meta = ctx.meta(GROUP)
+            meta = ctx.meta(self.spec)
             qs, sums = meta.query_start, self._sums(self.state[1])
             s0 = torch.where(meta.has_init, sums[meta.slots], 0)
         rows = torch.repeat_interleave(torch.arange(len(qs) - 1, device=x.device), qs.diff(), output_size=t)
@@ -181,7 +188,11 @@ class RunningSum(nn.Module):
         return x + (running % 97).to(x.dtype)[:, None] / 97
 
     def rewind(self, ctx: Any) -> None:
-        if self.state is None or not (meta := ctx.meta(GROUP)).verify:
+        if self.state is None or not (meta := ctx.meta(self.spec)).verify:
             return
         accepted = ctx.seq_table.n_accept[meta.slots]          # the row's first 1 + n tokens stand
         self._sums(self.state[1]).index_copy_(0, meta.slots.long(), self.saved[meta.query_start[:-1] + accepted])
+
+
+def _spec(params: dict) -> str:
+    return f"{GROUP}.{params['name']}" if params.get("name") else GROUP

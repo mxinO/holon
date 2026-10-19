@@ -84,7 +84,8 @@ class ModelSpec:
 @dataclasses.dataclass(frozen=True, slots=True)
 class AuxSpec:
     """A model built beside the target for a plugin (e.g. a draft head): `unit` builds it, given `layers` (numbered
-    from 0 within it; their mixers' state is bound under the aux model's namespace); `weights` loads it."""
+    from 0 within it; their mixers' state is bound under the aux model's namespace — only theirs: unlike the target's
+    `ModelSpec.block`, an aux unit declares none); `weights` loads it."""
 
     unit: Ref
     layers: tuple[LayerDecl, ...]

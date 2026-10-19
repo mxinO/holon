@@ -42,8 +42,8 @@ class AdoptsWeights(Protocol):
 class DeclaresState(Protocol):
     @classmethod
     def state_specs(cls, params: Mapping[str, Any], layers: tuple[int, ...], ctx: BuildCtx) -> list[StateSpec]:
-        """The state the mixer keeps for `layers`; without it, none. The model's block may declare it too, over all
-        layers (`ModelSpec.block`)."""
+        """The state the mixer keeps for `layers`; without it, none. The target's block may declare it too, over all
+        layers (`ModelSpec.block`); only the target's mixers and block, and auxiliary models' mixers, are bound."""
 
 
 class PlansState(Protocol):

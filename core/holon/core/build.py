@@ -277,6 +277,8 @@ class Model(nn.Module):
         self.lm_head = ctx.unit(spec.lm_head, vocab=spec.vocab, hidden=spec.hidden, embed=self.embed)
         self.taps = ctx.taps               # filled after the build, by a drafter (`BuildCtx.tap`)
         r = spec.residual                  # the trunk's width and dtype (`ModelSpec.residual`)
+        if r and not isinstance(getattr(torch, r.dtype, None), torch.dtype):
+            raise PluginError(f"ModelSpec.residual: {r.dtype!r} is not a torch dtype")
         self.residual = (r.width, getattr(torch, r.dtype)) if r else (spec.hidden, ctx.dtype)
 
     def forward(self, ctx: StepCtx) -> torch.Tensor:
@@ -285,8 +287,7 @@ class Model(nn.Module):
 
     def trunk(self, ctx: StepCtx) -> torch.Tensor:
         """Final hidden states of every token of the step, before the norm ([T, width] of `residual`); the residual
-        stream after each tapped
-        layer goes to its consumers on the way."""
+        stream after each tapped layer goes to its consumers on the way."""
         h = self.embed(ctx.batch.dev.input_ids)
         for i, layer in enumerate(self.layers):
             h = layer(h, ctx)

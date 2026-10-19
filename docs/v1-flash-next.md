@@ -1431,8 +1431,9 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
   `fn-core`; nothing is merged to main.
 - **ABI 1.5** (additive over K's 1.4): `Residual` and `ModelSpec.residual`; `BuildCtx.unit_class`. `core/abi.txt`
   is regenerated.
-- **Core code lines:** 4,963 against the base's 4,940, so **+23** of the ≤ +47 budget. If the owner drops K's
-  `SeqView.matched` (+6 at K's count), FN adds it in this round: about +29, still inside the budget.
+- **Core code lines:** 4,967 against the base's 4,940, so **+27** of the ≤ +47 budget (+23 before the panel's
+  round). If the owner drops K's `SeqView.matched` (+6 at K's count), FN adds it in this round: about +33, still
+  inside the budget.
 
 **The seams:**
 - **C1, residual width:** `ModelSpec.residual: Residual(width, dtype) | None`. The trunk, taps and `Drafter.run`
@@ -1455,7 +1456,7 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
   passing. A model declaring 3H while its trunk returns 2H fails at startup with the profile's message.
 - **C2 + C3:** the block forwards a nested Ref's hooks (`ctx.unit_class(pre)`): a Slot running sum of the token ids
   at layer 1 (`recurrent` kind, alignment 64, `in_step` 64), which adds (sum mod 97) / 97 to the residual, so a wrong
-  state changes the logits.
+  state changes the logits. Beside it, layer 0's mixer is a second running sum in its own group.
   - A 200-token prompt in steps of at most 100 tokens is cut at 64 and 128 (the budget rounded to the grid) and
     checkpointed at 192 in-step.
   - A second request with that prefix hits at 192 and adopts the payload.
@@ -1465,7 +1466,21 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
   - On the GPU, the decode and verify graphs are captured.
 - **The planner rule:** the plain wide block, which forwards specs but no planner, is refused at bind. A
   planner-less mixer group gets the default planner and the stderr line (a direct `_bind_layers` check).
-- **Deviation from §4's toy text:** the alignment-16 toy mixer beside the block is dropped. With one `recurrent`
-  policy for every spec, its cuts at 64 would end every step on the grid, and the block's checkpoint could never be
-  taken in-step. The mixer path's planner rule is checked directly instead, and today's mixers (GDN's `in_step`
-  state) already prove that path end to end.
+- **Deviation from §4's toy text:** the toy mixer beside the block has alignment 64, not 16 (panel A, below: one
+  alignment for every recurrent spec).
+
+**C2's alignment rule.** Every non-paged (recurrent) spec of a model must share one alignment. The prefix index files
+payloads per block of lcm(page, every alignment), and a kind checkpoints on its own lcm(page, alignment) grid, so a
+spec of a smaller alignment publishes off the block grid and no hit can use it. The core says so at startup
+(`prefix_index`, one stderr line); a mixer at alignment 16 beside the block's 64 shows it in the toy test.
+
+**The panel's review of step 1, dispositions:**
+
+| # | Finding | Disposition |
+|---|---|---|
+| A-1 | A mixer-declared recurrent spec beside the block's | **Done:** layer 0's mixer is a second running sum (`toy.sum.mixer`, its own group, alignment 64, `in_step` 64, in place of that layer's attention). Both sums publish in-step at 192, and b's hit is still 192. |
+| A-2 | Recurrent specs must share one alignment | **Recorded** (above); `prefix_index` warns when non-paged specs' alignments differ (+2 lines); tested at 16 beside 64. |
+| A-3 | Nits | **Done:** the planner-less warning is not repeated by `sub_planners` (`plan_only`: tested); `ModelSpec.residual.dtype` must name a torch dtype (a `PluginError` at build); the toy planner-less mixer uses `Paged`; `Model.trunk`'s docstring reflowed. |
+| B-1 | The startup assert on real engines | **Done:** before merge, D16's propagation starts every lock family's bf16 GPU engine, which runs the startup profile and its check; that is the startup-assert check of record. Run now on an RTX A5000: Qwen3.8-27B UD-IQ3_S (residual (5120, bf16), 9 graphs) and Qwen3-30B-A3B Q4_K_M ((2048, bf16), 9 graphs) start and decode. |
+| B-2 | Which state is bound | **Stated** in `AuxSpec`'s and `DeclaresState`'s docstrings: the target's mixers and block, and auxiliary models' mixers; an aux unit declares none. |
+| B-3 | The block's state through a tier | **Done:** with the `tier` slot (`testing.toy_tier`), a filler request pushes a's blocks off a tight device pool; b hits at 192, its blocks loaded from the tier and both sums' checkpoints adopted from the tier's copies; greedy output equals the model-only build's. |

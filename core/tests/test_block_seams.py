@@ -19,7 +19,7 @@ import types
 
 import pytest
 import torch
-from holon.api import Ref, Residual, SamplingParams, Slot, StateSpec
+from holon.api import Paged, Ref, Residual, SamplingParams, StateSpec
 from holon.core import assembly
 from holon.core.build import BuildContext, StepContext, build_model, load_weights
 from holon.core.engine import Engine, EngineConfig
@@ -46,11 +46,12 @@ def tiny(tmp_path_factory):
 
 @pytest.fixture
 def streams(monkeypatch):
-    """The Qwen3 recipe on two float32 streams with the running sum in its block; `streams.block` / `streams.width`
-    pick the block (planned or not) and the declared width (in hidden sizes)."""
+    """The Qwen3 recipe on two float32 streams, a running sum in its block (at layer 1) and another as layer 0's mixer
+    in place of its attention (its own group); `streams.block` / `streams.width` / `streams.align` pick the block
+    (planned or not), the declared width (in hidden sizes) and the mixer's alignment."""
     from holon_plugins.models.qwen3 import plugin as qwen3
 
-    recipe, knobs = qwen3.Plugin.recipe, types.SimpleNamespace(block="toy.planned_block@1", width=2)
+    recipe, knobs = qwen3.Plugin.recipe, types.SimpleNamespace(block="toy.planned_block@1", width=2, align=64)
 
     def move(target: str) -> str:                   # the toys wrap the units the rules fill
         return re.sub(r"^(embed|norm|layers\.\{i\})\.", r"\1.inner.", target)
@@ -58,11 +59,14 @@ def streams(monkeypatch):
     def wide(c, source):
         spec = recipe(c, source)
         rules = tuple(dataclasses.replace(r, target=move(r.target)) for r in spec.weights.rules)
+        skip = (*spec.weights.skip, "model.layers.0.self_attn.")                      # layer 0's mixer: the sum
+        mixer = Ref("toy.running_sum@1", name="mixer", alignment=knobs.align)
         return dataclasses.replace(
             spec, embed=Ref("toy.wide_embed@1", inner=spec.embed), norm=Ref("toy.wide_norm@1", inner=spec.norm),
             block=Ref(knobs.block, inner=spec.block, inner_norm=spec.norm, pre=Ref("toy.running_sum@1"), pre_at=(1,)),
+            layers=(dataclasses.replace(spec.layers[0], mixer=mixer), *spec.layers[1:]),
             residual=Residual(knobs.width * spec.hidden, "float32"),
-            weights=dataclasses.replace(spec.weights, rules=rules))
+            weights=dataclasses.replace(spec.weights, rules=rules, skip=skip))
 
     monkeypatch.setattr(qwen3.Plugin, "recipe", staticmethod(wide))
     return knobs
@@ -89,18 +93,27 @@ def _reference(engine: Engine, prompts: list[list[int]], device: str) -> list[li
     return out
 
 
-def _run(tiny, device: str, monkeypatch) -> tuple[Engine, list, list[list[int]], dict]:
-    """One engine with prefix caching and speculation: a, then b; the toy planner's in-step publishes and row
-    lengths recorded."""
-    plans, publishes = [], []
+def _record(monkeypatch) -> tuple[list, set]:
+    """The block's sum planner's row lengths per step, and every sum's in-step publishes as (spec, position)."""
+    plans, publishes = [], set()
     plan_bounds = toy.SumPlanner.plan_bounds
 
     def record(self, batch, pages):
-        plans.append(batch.plan.n_query.tolist())
-        publishes.extend(p.offset + int(batch.plan.start_upper[p.row]) for p in batch.plan.publishes)
+        if self.spec == toy.GROUP:
+            plans.append(batch.plan.n_query.tolist())
+        publishes.update((p.spec, p.offset + int(batch.plan.start_upper[p.row])) for p in batch.plan.publishes
+                         if p.spec == self.spec)
         return plan_bounds(self, batch, pages)
 
     monkeypatch.setattr(toy.SumPlanner, "plan_bounds", record)
+    return plans, publishes
+
+
+def _run(tiny, device: str, monkeypatch) -> tuple[Engine, list, list[list[int]], dict]:
+    """One engine with prefix caching and speculation: a, then b; the sums' in-step publishes and row lengths
+    recorded."""
+    plans, publishes = _record(monkeypatch)
+
     gpu = device == "cuda"
     engine = Engine(EngineConfig(str(tiny), device=device, dtype=torch.bfloat16 if gpu else torch.float32,
                                  page_size=16, max_seqs=3, max_step_tokens=100, max_model_len=320,
@@ -121,7 +134,8 @@ def test_streams_and_block_state_on_the_cpu(tiny, streams, monkeypatch):
     a, b = _prompts()
     assert out == _reference(engine, [a, b], "cpu")
     assert [64, 64, 72] == [p[0] for p in plans[:3]]          # a's prefill: cut at 64 and 128 (the step budget)
-    assert 192 in seen["publishes"] and seen["hit"] == 192    # in-step at 192, then b's hit adopts it
+    assert {(toy.GROUP, 192), (f"{toy.GROUP}.mixer", 192)} <= seen["publishes"]    # both sums in-step at 192 …
+    assert seen["hit"] == 192                                                         # … then b's hit adopts them
     assert any(seen["accepted"])                              # verify steps accepted drafts: the sum rewound
     width = (2 * engine.spec.hidden,)
     assert engine.executor.drafter.seen == {("run", width, torch.float32), ("tap", width, torch.float32)}
@@ -133,22 +147,48 @@ def test_streams_and_block_state_on_the_cpu(tiny, streams, monkeypatch):
     assert len(lp.token) == len(a) - 1 and all(x <= 0 for x in lp.token)
 
 
-def test_block_state_needs_a_planner_and_a_mixers_default_says_so(tiny, streams, capsys):
+def test_block_state_needs_a_planner_a_mixers_default_says_so_and_alignments_agree(tiny, streams, capsys,
+                                                                                   monkeypatch):
+    cfg = dict(model=str(tiny), device="cpu", dtype=torch.float32, max_model_len=128, state_memory=1 << 22)
+    streams.align = 16                                        # the mixer's sum off the block's grid: said at startup
+    Engine(EngineConfig(**cfg)).close()
+    assert "non-paged state of alignments [16, 64]: prefix hits need one" in capsys.readouterr().err
     streams.block = "toy.wide_block@1"                        # the block forwards its specs, not a planner
     with pytest.raises(PluginError, match="declares Slot state without a planner"):
-        Engine(EngineConfig(str(tiny), device="cpu", dtype=torch.float32, max_model_len=128, state_memory=1 << 22))
+        Engine(EngineConfig(**cfg))
 
     class Mixer:                                              # paged state, no planner: today's default
         @classmethod
         def state_specs(cls, params, layers, ctx):
-            return [StateSpec("kv", "paged@1", Slot(8), layers, "test")]
+            return [StateSpec("kv", "paged@1", Paged(8, 16), layers, "test")]
 
+    monkeypatch.setattr(assembly, "_bind", lambda *a: None)
     ctx = types.SimpleNamespace(unit_class=lambda ref: Mixer, device=torch.device("cuda"))
-    layers = (types.SimpleNamespace(mixer=Ref("toy.mixer@1")),)
-    _, planners = assembly._bind_layers(layers, ctx, None, None, types.SimpleNamespace(cuda_graphs=True),
-                                        plan_only=True)
+    layers, cuda = (types.SimpleNamespace(mixer=Ref("toy.mixer@1")),), types.SimpleNamespace(cuda_graphs=True)
+    _, planners = assembly._bind_layers(layers, ctx, None, None, cuda)
     assert isinstance(planners["kv"], assembly._PagesPlanner)
     assert "state group 'kv' has no planner: steps run without CUDA graphs" in capsys.readouterr().err
+    assembly._bind_layers(layers, ctx, None, None, cuda, plan_only=True)     # a drafter's sub-step planners: once
+    assert capsys.readouterr().err == ""
+
+
+def test_block_state_through_a_state_tier(tiny, streams):
+    """With the `tier` slot: a filler request pushes a's blocks off a tight device pool into the toy tier; b then hits
+    at 192, its blocks restored from the tier and both sums' checkpoints adopted from the tier's copies."""
+    engine = Engine(EngineConfig(str(tiny), device="cpu", dtype=torch.float32, page_size=16, max_seqs=1,
+                                 max_step_tokens=100, max_model_len=320, state_memory=24 * 16 * 512 + (1 << 12),
+                                 slots={"tier": "testing.toy_tier"}, host_memory=64 << 20))
+    a, b = _prompts()
+    out = [engine.generate([a], GREEDY)[0]]
+    engine.generate([torch.randint(1, 128, (230,), generator=torch.Generator().manual_seed(2)).tolist()], GREEDY)
+    rid, tokens, cached = engine.add(b, GREEDY), [], None
+    while engine.has_work():
+        for d in engine.step():
+            tokens += d.token_ids if d.rid == rid else []
+            cached = d.cached_tokens if d.rid == rid and d.cached_tokens is not None else cached
+    assert cached == 192 and engine.tier.counts["loaded_blocks"] > 0
+    assert out + [tokens] == _reference(engine, [a, b], "cpu")
+    engine.close()
 
 
 @CUDA
