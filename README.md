@@ -225,6 +225,10 @@ lock's is warned about and that lock not used.
   512 prompt tokens, so a long prompt does not stall the streams already decoding. Turn speculation on over such a
   lock (a drafter and `--max-draft-tokens N`) and the same setting instead alternates a prefill step of at most 512
   tokens with a verify step. `--chunk-with-decode 0` turns both off.
+- **Pinned host memory** is a host's, never a lock's: a lock whose plugins keep host pools (a state tier's host level,
+  an offloaded MoE's experts) starts only with `--host-memory BYTES`. Without it the start is refused with the bytes
+  the pools need; a state tier's refusal names the flag and value, e.g. for `state_tier.host.bytes=16GiB`:
+  `holon serve <model> --host-memory 17179869184`.
 - **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the
   server retries a start that fails other than with a plugin or memory error 4 times, each up to 600 s, before falling
   back to defaults.
