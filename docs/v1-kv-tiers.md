@@ -1479,6 +1479,10 @@ the `agent` trace's +3% (+0.04 ms per step) is inside it.
 
 The full CI suite with A, B and C: 1650 passed, 66 skipped; `run_all.sh` clean (15 checks; import contracts 8 kept).
 
+**The tag is not an ABI base** (reviewer B): `b596ba7` (`v1-kv-tiers-api`) is the held-out proof's baseline, not a
+release, and must not be used as `check_abi.py --base`. `SeqView.matched` inside K's unreleased 1.4 fails against it
+by design (an addition without a bump); CI's gate is `main` (`run_all.sh`'s default base), against which it passes.
+
 ### Step 5 (2026-10-19): the held-out policy, design.md, close prep
 
 **`policies.last_turn`** (`b4db4e9`, strictly after `b596ba7`): Maya KG2's checkpoint at the last turn's start, a
