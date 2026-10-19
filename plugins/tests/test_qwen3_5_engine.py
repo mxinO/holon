@@ -93,19 +93,21 @@ def test_without_checkpoint_units_nothing_is_reused(tiny, capsys):
         assert capsys.readouterr().err.count("got 0 units") == (2 if warned else 0)    # once per spec
 
 
-def test_a_branch_point_outlives_preemption(tiny):
-    """`branch_at` is the first admission's (as `cached_tokens` is): B leaves A's chain at m = 128; preempted with
-    its prefill past m, its payloads dropped, and re-admitted (now matching its own blocks past m, which have no
-    continuation), it still checkpoints at m."""
+@pytest.mark.parametrize("policy", ["branch", "policies.last_turn@1"])
+def test_a_branch_point_outlives_preemption(tiny, policy):
+    """`branch_at` and `matched` are the first admission's (as `cached_tokens` is): B leaves A's chain at m = 128;
+    preempted with its prefill past its own block at 192, its payloads dropped, and re-admitted (now matching its own
+    blocks to 192, which have no continuation), it still checkpoints at m."""
     _, path, _ = tiny
     gen = torch.Generator().manual_seed(4)
     system, x, y = (torch.randint(0, 320, (n,), generator=gen).tolist() for n in (128, 140, 150))
-    engine = _engine(path, overlap=False, max_model_len=512, plugin_options={"recurrent.policy": "prompt_end,branch"})
+    engine = _engine(path, overlap=False, max_model_len=512,
+                     plugin_options={"recurrent.policy": "prompt_end," + policy})
     _run(engine, system + x, SamplingParams(temperature=0.0, max_tokens=1))      # A: its prompt end at 256
     rid = engine.add(system + y, SamplingParams(temperature=0.0, max_tokens=1))
-    while not (seq := next(iter(engine._live.get(rid, ())), None)) or seq.num_computed <= 176:
+    while not (seq := next(iter(engine._live.get(rid, ())), None)) or seq.num_computed <= 200:
         engine.step()
-    assert seq.branch_at == 128 and seq.num_computed < seq.prompt_len
+    assert (seq.branch_at, seq.matched) == (128, 128) and seq.num_computed < seq.prompt_len
     engine.sched._preempt(seq)                                        # mid-prefill, between m and its prompt end
     idx = engine.state.index
     for pool in idx.payload_pools:

@@ -204,11 +204,11 @@ class Engine:
                                          if hasattr(o, "after_materialize")]
 
         self._hits: dict[Seq, int | None] = {}            # first admission's prefix hit, None once reported
-        self._first: dict[Seq, int] = {}                  # first admission's branch_at, kept across re-admissions
+        self._first: dict[Seq, tuple[int, int]] = {}      # first admission's branch_at and matched, kept likewise
 
         def admit(seq: Seq) -> None:
             self._hits.setdefault(seq, seq.num_computed)   # the prefix hit of its first admission only
-            seq.branch_at = self._first.setdefault(seq, seq.branch_at)
+            seq.branch_at, seq.matched = self._first.setdefault(seq, (seq.branch_at, seq.matched))
             sampler.admit(seq.slot, seq.params)
             if admit_draft is not None:
                 admit_draft(seq.slot, seq.tokens)

@@ -122,6 +122,8 @@ class SeqView(Protocol):
     branch_at: int               # where its first admission's matched prefix ends if that block has cached
                                  # continuations (the request leaves a cached chain there), else 0; kept when a
                                  # preempted request is admitted again
+    matched: int                 # where its first admission's matched prefix ends, before a kind trims the hit to
+                                 # a payload (a whole number of index blocks); kept likewise
 
     def units(self, spec: str) -> tuple[int, ...]: ...
 

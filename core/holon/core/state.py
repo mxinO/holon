@@ -86,6 +86,10 @@ class _View:
     def branch_at(self) -> int:
         return self._seq.branch_at
 
+    @property
+    def matched(self) -> int:
+        return self._seq.matched
+
     def units(self, spec: str) -> list[int]:
         per = self._slot_units.get(spec)
         if per is not None:                       # Slot state: the request's slot owns its units (api.Slot)
@@ -179,11 +183,12 @@ class StateManager:
             return False
         seq.slot = self._free_slots.pop()
         self.held[seq.slot], self.chain[seq.slot] = {}, []
-        entries, seq.branch_at, idx = [], 0, self.index
+        entries, seq.branch_at, seq.matched, idx = [], 0, 0, self.index
         if idx is not None and seq.params.prompt_logprobs is None:   # those need every position computed
             keys = idx.keys(seq.tokens, 0, (len(seq.tokens) - 1) // idx.block, None)
             entries = idx.match(keys, seq.tokens)
-            seq.branch_at = len(entries) * idx.block if entries and entries[-1].children else 0
+            seq.matched = len(entries) * idx.block
+            seq.branch_at = seq.matched if entries and entries[-1].children else 0
             entries = entries[:self._hit_blocks(seq, entries)]
             resident = [e for e in entries if e.key in idx.entries]          # a prefix: taken first (D7)
             for name in resident[0].units if resident else ():          # one incref per spec, not per block

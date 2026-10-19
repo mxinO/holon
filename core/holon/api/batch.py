@@ -94,6 +94,7 @@ class Seq:
     status: Status = Status.WAITING
     finish_reason: str | None = None
     branch_at: int = 0                   # set at first admission, kept on re-admissions (`SeqView.branch_at`)
+    matched: int = 0                     # likewise: its prefix match before any trim (`SeqView.matched`)
 
     def __post_init__(self) -> None:
         if not self.prompt_len:

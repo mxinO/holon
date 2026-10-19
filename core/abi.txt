@@ -366,6 +366,7 @@ dataclass Seq
   #12 status: Status = <Status.WAITING: 'waiting'>
   #13 finish_reason: str | None = None
   #14 branch_at: int = 0
+  #15 matched: int = 0
 dataclass SeqTable
   #0 num_computed: torch.Tensor
   #1 last_token: torch.Tensor
@@ -380,6 +381,7 @@ protocol SeqView() required, implemented by core
   tokens: tuple[int, ...]
   prompt_len: int
   branch_at: int
+  matched: int
 dataclass Slot frozen
   #0 unit_bytes: int
   #1 draft_slots: int = 0
