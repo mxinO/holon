@@ -75,8 +75,8 @@ class Scheduler:
         self._k = 0                               # the step being scheduled: its plan's draft_k
         self.waiting: collections.deque[Seq] = collections.deque()
         self.running: list[Seq] = []
-        self.preemptions = self.gated_requests = self.gated_steps = 0   # gated: admitted ahead of their loads' due
-        self._step = 0                                                   # time; steps that ran while one waited
+        self.preemptions = 0
+        self._step = 0
 
     def add(self, seq: Seq, front: bool = False) -> None:
         seq.status = Status.WAITING
@@ -136,15 +136,14 @@ class Scheduler:
         return rows, 0, len(rows)
 
     def _prefill(self, budget: int) -> list[tuple[Seq, int, int]]:
-        rows, ahead, now, held = [], None, self.clock(), 0
+        rows, ahead, now = [], None, self.clock()
         self._k = 0
         for seq in list(self.waiting):
             if seq.pending or seq.status is Status.BLOCKED:      # preempted while its decode was in flight: wait for
                 continue                                         # the commit; or its logits processor is not ready
-            if budget == 0 or ((fresh := seq.slot < 0) and not self._fit(seq, None)):
+            if budget == 0 or (seq.slot < 0 and not self._fit(seq, None)):
                 break
-            if self.state.due.get(seq.slot, now) > now:          # load-gated (counted once, at its admission)
-                self.gated_requests, held = self.gated_requests + fresh, held + 1
+            if self.state.due.get(seq.slot, now) > now:          # load-gated
                 continue
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
             n = self.state.cut(seq, n)                                 # end where a state kind publishes
@@ -158,7 +157,6 @@ class Scheduler:
             if last:                              # a row the drafter drafts after: the step speculates at k
                 self._k = k
             budget -= n
-        self.gated_steps += bool(held and rows)
         return rows
 
     def _ready(self) -> list[Seq]:

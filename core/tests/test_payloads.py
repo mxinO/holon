@@ -284,9 +284,6 @@ class _Done:
 
     synchronize = wait
 
-    def done(self) -> bool:
-        return True
-
 
 def _tiered(delay: int = 0, **kw):
     """`_state` with the toy tier, whose copies land only when waited for."""

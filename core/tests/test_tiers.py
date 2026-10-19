@@ -158,8 +158,6 @@ def test_steps_and_outputs_never_depend_on_when_copies_land(tiny, monkeypatch):
         assert counts["dropped"] and not engine.tier.untold()
         if delay:            # promotions trimmed short of units, recomputed blocks promoted into place; loads of
             assert min(engine.promoted(), counts["abandoned"], counts["waiterless"]) > 0    # aborted requests
-        stats = engine.stats()                      # requests admitted ahead of their loads, steps run meanwhile
-        assert (min(stats["gated_requests"], stats["gated_steps"]) > 0) == bool(delay)
         engine.close()
     assert runs[0] == runs[1] == runs[2]
     assert runs[3][0] != runs[0][0]                     # the gate (a due time two launches out) moved steps

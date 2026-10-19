@@ -1,10 +1,12 @@
 """std.state_tier's host level (docs/v1-kv-tiers.md §5) on a bare tier over CPU pools: leaf-first page eviction, the
 admission options, payload stores that always succeed, nothing being loaded evicted before `loaded`, the H2D lane and
-the clock, the payload share, the host units' fences and per-key records, and a load ordered after the store that wrote
-its host units (on deferred copy streams). Tier invariance on a hybrid model through this host level is the judge's
-(`judge/tests/test_judge_tiers.py`, `holon_judge tiers`)."""
+the clock, the payload share, the host units' fences and per-key records, a load ordered after the store that wrote
+its host units (on deferred copy streams), and a reused host unit waiting for its readers (on recording streams).
+Tier invariance on a hybrid model through this host level is the judge's (`judge/tests/test_judge_tiers.py`,
+`holon_judge tiers`)."""
 import types
 
+import numpy as np
 import pytest
 import torch
 from holon.api import BlockRecord, Payload
@@ -19,9 +21,6 @@ class _Done:
         pass
 
     synchronize = wait
-
-    def done(self) -> bool:
-        return True
 
 
 def _bare(admit: str = "publish", pages: int = 6, payloads: int = 3, stall: int = 0, wide: bool = False,
@@ -111,6 +110,9 @@ def test_page_loads_take_the_lane_and_payload_loads_do_not():
     assert tier.load([1], {"kv": [5]}, [], []).due == 0 and tier.lane == pytest.approx(64 / r)   # small: due now,
     assert tier.load([], {}, [(1, "c")], []).due == 0 and tier.lane == pytest.approx(64 / r)     # on the lane
     assert tier.load([1, 2], {"kv": [6, 7]}, [], []).due == pytest.approx(192 / r)             # queued behind it
+    for _ in range(2):                          # the first launch runs while that load is not due (the clock at 0)
+        tier.before_launch(types.SimpleNamespace(n_query=np.ones(1, np.int32), slots=[0]))
+    assert tier.stats()["gated_loads"] == tier.stats()["gated_steps"] == 1
 
 
 def test_the_payload_share_gives_each_payload_pool_as_many_units():
@@ -135,14 +137,57 @@ def test_host_units_keep_one_fence_per_source_and_keys_leave_no_records():
     assert not (tier.copies or tier.specs or tier.kids or tier.parent or tier.hits)
 
 
-def test_a_load_follows_the_store_of_its_host_units_and_counts_late():
+def test_a_load_follows_the_store_of_its_host_units():
     """On deferred copy streams (work runs only when waited for): a load issued right after the store that wrote its
-    host units, with nothing to wait for (`after` empty), still reads the stored bytes; a step that reads it before
-    its copy ran counts a late load."""
+    host units, with nothing to wait for (`after` empty), still reads the stored bytes."""
     deferred = Deferred(0, most=2)
     tier, kv, _ = _bare(stream=deferred.stream)
     _chain(tier, [1])
-    load = tier.load([1], {"kv": [5]}, [], [])
-    tier.loaded(load, _Done())
-    load.synchronize()
-    assert torch.equal(kv.units()[:, 5], kv.units()[:, 0]) and tier.stats()["late_loads"] == 1
+    tier.load([1], {"kv": [5]}, [], []).synchronize()
+    assert torch.equal(kv.units()[:, 5], kv.units()[:, 0])
+
+
+class _Recorded:
+    """Copy streams that run their work at once and record each fence they return with its `after`."""
+
+    def __init__(self) -> None:
+        self.after: dict[int, list] = {}
+
+    def stream(self):
+        return self
+
+    def run(self, fn, after=()):
+        fn()
+        fence = _Done()
+        self.after[id(fence)] = list(after)
+        return fence
+
+
+def test_a_reused_host_unit_waits_for_its_readers():
+    """A page copy's host unit, reused by a store once the copy is dropped, waits for the step that read it, and for
+    the newest load copy no step waited for, even when an older load reading it is abandoned after that one."""
+    streams = _Recorded()
+    tier, _, _ = _bare(pages=4, stream=streams.stream)                 # the floor: a freed unit is reused at once
+    _chain(tier, [1, 2, 3, 4])
+    step = _Done()
+    tier.loaded(tier.load([1], {"kv": [5]}, [], []), step)
+    tier.drop([1])
+    _, fence = tier.store([BlockRecord(9, None, (9,), {"kv": (0,)}, {})], [], False)
+    assert step in streams.after[id(fence)]
+    first, second = (tier.load([2], {"kv": [6]}, [], []) for _ in range(2))
+    tier.loaded(first, first)                                          # no step waited for them
+    tier.loaded(second, second)
+    tier.loaded(first, None)                                           # then the first is abandoned
+    tier.drop([2])
+    _, fence = tier.store([BlockRecord(10, None, (10,), {"kv": (0,)}, {})], [], False)
+    assert second.copy in streams.after[id(fence)]
+
+
+def test_a_payload_load_keeps_the_store_as_its_units_fence():
+    tier, _, _ = _bare()
+    _, stored = tier.store([BlockRecord(1, None, (1,), {}, {"c": Payload((0,), "plugin.ckpt")})], [], False)
+    load = tier.load([], {}, [(1, "c")], [])
+    tier.loaded(load, load)
+    tier.loaded(load, None)
+    (unit,) = load.reads
+    assert load.copy is None and tier.fences[unit] == {"store": stored}

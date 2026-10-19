@@ -52,9 +52,6 @@ class Fence(Protocol):
     def synchronize(self) -> None:
         """Wait for it on the host."""
 
-    def done(self) -> bool:
-        """Whether it has passed, without waiting (for statistics: no decision may read it)."""
-
 
 class Stream(Protocol):
     """A copy stream the core makes for a tier (`TierCtx.stream`); off the GPU its work runs at once, in order."""

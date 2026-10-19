@@ -1,8 +1,8 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 8.3, step-2 panel review** (2026-10-19): rev 8 (panel-clean), the lead's decisions on step 0's
-measurements (§13 "Rev 8.1"), the panel's reviews of step 1 (§13 "Rev 8.2") and step 2 (§13 "Rev 8.3"); steps 1 and 2
-are built (§13 "Step 1 as built", "Step 2 as built"). Every other number
+Status: **rev 8.4, step-2 panel review, round 2** (2026-10-19): rev 8 (panel-clean), the lead's decisions on step
+0's measurements (§13 "Rev 8.1"), the panel's reviews of step 1 (§13 "Rev 8.2") and step 2 (§13 "Rev 8.3", "Rev
+8.4"); steps 1 and 2 are built (§13 "Step 1 as built", "Step 2 as built"). Every other number
 below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 4 measures it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
 performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
@@ -1455,6 +1455,18 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
   children with page copies) with a regression test; the judge record above predates the fix, which only changes
   evictions under those admissions.
 
+### Rev 8.4 (2026-10-19): the panel's second round on step 2
+
+| Finding | Disposition | Where |
+|---|---|---|
+| A (major): a second `loaded(L, None)` replaced a unit's newer `load` fence with L's older copy (abort, re-promotion by L2, then L1's abandonment: a reuse waited on L1's copy while L2 still read) | fixed | `HostTier.loaded` records the readers' fence on a load's first call only: that call's `done`, or its copy, already covers a later abandonment. `plugins/tests/test_state_tier.py::test_a_reused_host_unit_waits_for_its_readers` fails on bd6142f |
+| A (minor): the host level's reuse fences had no tier-only tests | accepted | on recording streams that drive `HostTier` directly: after `loaded(L, step)`, a forced reuse's store has the step in its `after`; after `loaded(L1, L1)`, `loaded(L2, L2)`, `loaded(L1, None)`, it has L2's copy; a payload load leaves no `load` entry and keeps the store as the unit's fence |
+| A (minor): the plants' records | accepted | `load_reuse_unwaited`: the GPU cannot open this window; covered on the CPU (copies up to 8 launches late). `adopt_source_reused`'s main guard (a reading step's `done` kept for reuse) is covered by the tier-only tests above |
+| B (minor, decision): core back to +326 | done | `Fence.done()`, its platform implementation and `late_loads` are dropped (3a and 3b measure lateness directly); the gated counters move into std's tier, from its loads' due times and `before_launch`: `gated_loads` (due after the clock when issued) and `gated_steps` (launches while one is not due). `core/tests/test_tiers.py` asserts them no more; `test_page_loads_take_the_lane_and_payload_loads_do_not` does |
+| C (minor) | resolved by B's | |
+
+Core: +326 code lines over b5b1e7f; ABI 1.4's listing as at step 2's first commit.
+
 ### Rev 8.3 (2026-10-19): the panel's review of step 2
 
 The outputs were found correct; the findings are structure, performance and test gaps. Dispositions (the lead's
@@ -1467,7 +1479,7 @@ decisions):
 | C (major 3): the payload share split evenly over payload pools | accepted | split by unit bytes, as pages already were: every payload spec gets as many units (§5) |
 | A (major), C (minor 5): host fences and per-key records grow without bound | accepted | a host unit keeps at most one fence per ordered source, the latest store, reading step and unwaited load copy (D4); `loading` and `reading` entries go at 0; `hits` and `kids` are pruned when a key is dropped or its page copy released; copies are indexed by key, so `drop` reads only the key's |
 | C (minor 4): small loads off the lane | accepted | every page load occupies the lane; one of at most `stall_bytes` is still due at once (D4) |
-| C (minor 6): counters | accepted | std: `late_loads` (a non-blocking `Fence.done()` when a step first reads the load; ABI 1.4's `Fence` gains `done`, for statistics only) and `payload_load_bytes`; core: `gated_requests` (admitted ahead of their loads' due time) and `gated_steps` (steps run while one waited) in `Engine.stats()` |
+| C (minor 6): counters | accepted (rev 8.4: reworked, see there) | std: `late_loads` (a non-blocking `Fence.done()` when a step first reads the load; ABI 1.4's `Fence` gains `done`, for statistics only) and `payload_load_bytes`; core: `gated_requests` (admitted ahead of their loads' due time) and `gated_steps` (steps run while one waited) in `Engine.stats()` |
 | A, B (minor): a policy unit cannot keep tentatives | accepted | a unit may declare `keep`; `keep_tentative` is the largest over the policies, so the engine's refusal without a tier sees it; a keep-less unit's tentative positions are ordinary (D8, the kind's docstring) |
 | B (minors) | accepted | `TierCtx.pools`' key rule (a key equal to its pool's name is a payload pool); `StateTierPlugin.build`: kernel sites at `attach` only for kernels without a workspace; the hybrid engine test of `plugins/tests/test_state_tier.py` dropped (the judge's hybrid invariance is the same check) |
 | A (minor 3): plants | accepted | see below |
@@ -1512,7 +1524,7 @@ decisions):
   differ, as invariance does, and reports the paged pools; rerun alone on the 4B, it is refused.
 
 Core: +332 code lines over b5b1e7f, 6 over the lead's +326: `Fence.done` (1), its platform implementation (2), the
-scheduler's two counters (2) and their `stats()` entry (1), all item 6's. The lead decides.
+scheduler's two counters (2) and their `stats()` entry (1), all item 6's. Rev 8.4 took them out again (+326).
 
 ### Rev 8.2 (2026-10-18): the panel's review of step 1
 

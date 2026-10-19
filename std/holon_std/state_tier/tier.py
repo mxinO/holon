@@ -20,7 +20,8 @@ store that wrote it: a load's copy waits for it, and a payload load's fence is i
 The clock. Virtual seconds advanced at each launch by `step_cost` = a + b·tokens + c·rows. Page loads queue on the
 H2D lane at `h2d_rate`; a load is due once the lane has carried its pages (one of at most `stall_bytes` is due at once,
 its step waits, but it still occupies the lane), and `loaded` brings the clock up to the due time it waited for.
-Payload loads take no lane (their adopt reads the host copy in-step): due at once."""
+Payload loads take no lane (their adopt reads the host copy in-step): due at once. `stats` counts, besides stores,
+loads and evictions, the gated loads (due after the clock when issued) and the steps launched while one is not due."""
 from __future__ import annotations
 
 import collections
@@ -66,9 +67,6 @@ class HostLoad:
         for f in self.fences:
             f.synchronize()
 
-    def done(self) -> bool:
-        return all(f.done() for f in self.fences)
-
 
 class HostTier:
     def __init__(self, ctx: Any) -> None:
@@ -82,7 +80,7 @@ class HostTier:
         self.admit, self.min_hits = admit.split(":")[0], int(admit.split(":")[1]) if ":" in admit else 0
         self.a, self.b, self.c = (float(x) for x in str(get("step_cost", "0.015,0.0004,0.0005")).split(","))
         self.h2d_rate, self.stall = float(get("h2d_rate", "43e9")), nbytes(get("stall_bytes", "32MiB"))
-        self.t = self.lane = 0.0
+        self.t = self.lane = self.gated = 0.0       # the clock, the H2D lane's end, the latest gated load's due
         self.copies: dict[tuple[int, str | None], dict[str, list[int]]] = {}   # (key, None | spec) -> pool -> units
         self.specs: dict[int, set[str | None]] = {}                  # key -> its copies' (None: pages, spec)
         self.lru: dict[bool, collections.OrderedDict] = {True: collections.OrderedDict(),   # pages, payloads:
@@ -190,11 +188,14 @@ class HostTier:
             self.lru[k[1] is None].move_to_end(k)
         if pages:                                             # D4: queued on the H2D lane behind earlier loads
             self.lane = max(self.lane, self.t) + pages / self.h2d_rate
+        due = self.lane if pages > self.stall else self.t
+        if due > self.t:                                      # its readers wait for the clock: gated
+            self.counts["gated_loads"] += 1
+            self.gated = max(self.gated, due)
         self.counts["loads"] += 1
         self.counts["loaded_blocks"] += len(keys)
         self.counts["load_bytes"] += pages
-        return HostLoad([copy] if copy is not None else written, self.lane if pages > self.stall else self.t, out,
-                        copies, reads, copy)
+        return HostLoad([copy] if copy is not None else written, due, out, copies, reads, copy)
 
     def loaded(self, load: HostLoad, done) -> None:
         kind = "abandoned" if done is None else "fence"
@@ -210,13 +211,13 @@ class HostTier:
                 if r in self.limbo and not self.reading[r]:
                     self.limbo.discard(r)
                     self.free[r[0]].append(r[1])
-            if done is not None and done is not load and load.copy is not None:   # a step read it: was it in?
-                self.counts["late_loads"] += not load.copy.done()
+            # Its readers' fence, from the first call only: a later abandonment adds nothing (the first `done`, or
+            # its copy, already covers it) and must not replace a newer load's fence on a unit reused since.
+            step = done is not None and done is not load
+            if (fence := done if step else load.copy) is not None:   # a payload load's fences: the stores, held
+                for r in load.reads:
+                    self.fences[r]["step" if step else "load"] = fence
         load.told.add(kind)
-        step = done is not None and done is not load
-        if (fence := done if step else load.copy) is not None:       # a payload load's fences: the stores, held
-            for r in load.reads:
-                self.fences[r]["step" if step else "load"] = fence
         self.t = max(self.t, load.due)
         self.counts[kind] += 1
 
@@ -253,6 +254,7 @@ class HostTier:
 
     # -- step hooks, stats ---------------------------------------------------------------------------------------
     def before_launch(self, plan):
+        self.counts["gated_steps"] += self.t < self.gated                 # launched while a gated load waits
         self.t += self.a + self.b * int(plan.n_query.sum()) + self.c * len(plan.slots)
         return [], []
 

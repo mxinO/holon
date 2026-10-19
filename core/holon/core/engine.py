@@ -434,7 +434,6 @@ class Engine:
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
-               "gated_requests": self.sched.gated_requests, "gated_steps": self.sched.gated_steps,
                "mixed_steps": self.mixed_steps, "dropped_publishes": self.state.dropped_publishes,
                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}

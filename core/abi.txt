@@ -98,7 +98,6 @@ const FINISH_REASONS = ('stop', 'length', 'abort', 'error')
 protocol Fence() required, implemented by plugins
   wait(self) -> 'None'
   synchronize(self) -> 'None'
-  done(self) -> 'bool'
 dataclass Fingerprint frozen
   #0 gpu: str
   #1 sm: int
