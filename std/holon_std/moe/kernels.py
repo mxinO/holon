@@ -40,7 +40,8 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   after the work enqueued before the call; one `scratch` may serve the successive calls of a pass (gate/up, then
   down); `out` must not overlap `scratch` or `x`. A short, misaligned or overlapping buffer is refused (ValueError)
   before anything is launched. The results are bitwise those of the call without them, wherever they live. Without
-  `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the graph's: static).
+  `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the graph's: static);
+  with it, it may still use its own persistent workspaces (its calls run in order on the stream).
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
