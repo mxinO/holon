@@ -98,8 +98,8 @@ caches on an agent trace, with outputs that do not depend on where state was kep
        - Expected diff: ≈ 120 lines plus tests, in its own directory, binding through `state_tier.levels`.
      - Rev 8.5: `state_tiers.zlib` landed after the first tag (af0672d) and passes tier invariance; its `write` took
        the `slots` argument when rev 8.5 moved the tag. Step 5: `policies.last_turn` landed plugin-only and the
-       prediction held: it needs the untrimmed match length (`SeqView.matched`), K's proof finding; the minor is
-       for the lead (§13, "Step 5").
+       prediction held: it needs the untrimmed match length (`SeqView.matched`), K's proof finding; the minor landed
+       inside ABI 1.4 as a post-tag core follow-up, pending the owner (§13, "Step 5: the panel's review").
    - Every core seam (§4) is proven first with a toy kind and a toy tier in `core/tests`.
 2. **Exactness** (D4, §6).
    - **Tier invariance.** The reference is the same configuration with each session's turns run back to back and no
@@ -1456,6 +1456,29 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### Step 5: the panel's review (2026-10-19)
+
+| Finding | Disposition | Where |
+|---|---|---|
+| A: `branch_at` changed when a preempted request was admitted again (its own blocks past the branch point then end the match, with no continuation, so 0) | fixed (`39abbcb`, core post-tag follow-up) | the engine keeps the first admission's `branch_at` (beside `cached_tokens`' first hit, dropped at finish): +5 core code lines. `test_a_branch_point_outlives_preemption`: B leaves A's chain at m = 128, is preempted with its prefill past its own block at 192, loses its payloads, is admitted again and still checkpoints at m (fails without it) |
+| B: `SeqView.matched` (pending the owner) | landed (`e1ae0f7`, core post-tag follow-up, revertable alone) | `Seq.matched` / `SeqView.matched`, the first admission's untrimmed match length, kept likewise: +6 core code lines, **+337 over b5b1e7f** (+326 before A and B; the owner decides whether K's cap covers them). Inside ABI 1.4: K is unmerged, so `run_all.sh`'s bump check against `main` (1.3) passes; against the tag `b596ba7` it is an addition without a bump, as a post-tag follow-up is. `policies.last_turn` drops its field probe (its manifest range `>=1.4` holds), and its engine test checkpoints a turn at 192 where its admission matched 192, trimmed to 128, with `branch_at` 0; the preemption test covers it too (fails without `matched` kept). If the owner says no: that commit reverts alone, the deferral goes to FN, and `last_turn`'s floor becomes `>=1.5` |
+| B (record) | corrected | the step-5 record's "1.5 / 1.6" reasoning |
+| C: tiers-off host time (a close item) | measured | below |
+
+**C.** Engine-loop CPU per decode step with tiers off, b5b1e7f (`main`'s checkout and venv) against K (`e1ae0f7`), interleaved
+base, K, K, base in one session, `--blocking-sync`, Qwen3-8B Q4_K_M at the rtx-3090 class's lock 4 (the same
+`[engine]` in both trees), on the RTX A5000 (`evidence/k5_host_time_rtx-a5000_2026-10-19.json`):
+
+| trace | base (p50, ms) | K (p50, ms) | K / base (geomean of the ABBA pairs) |
+|---|---|---|---|
+| `decode_b64` (48 rows) | 1.722, 1.638 | 1.650, 1.680 | 0.991 |
+| `agent` | 1.324, 1.238 | 1.317, 1.329 | 1.033 |
+
+Within the runs' own spread (base's two `agent` runs differ by 7%): K adds no measurable host time with tiers off;
+the `agent` trace's +3% (+0.04 ms per step) is inside it.
+
+The full CI suite with A, B and C: 1650 passed, 66 skipped; `run_all.sh` clean (15 checks; import contracts 8 kept).
+
 ### Step 5 (2026-10-19): the held-out policy, design.md, close prep
 
 **`policies.last_turn`** (`b4db4e9`, strictly after `b596ba7`): Maya KG2's checkpoint at the last turn's start, a
@@ -1474,15 +1497,12 @@ kind; untentative) is tested on a view carrying the length, and the unit refuses
 field. The workaround that stays plugin-only does not exist: a kind's `hit_length` sees the matched chain but not
 which request it belongs to, and a policy unit sees only the `SeqView`.
 
-**The minor it needs** (not landed; for the lead): `Seq.matched` and `SeqView.matched`, the untrimmed match length
-set at admission beside `branch_at` (`core/holon/core/state.py`'s `admit`, the `_View` property, `holon.api.batch.Seq`
-and the `SeqView` protocol): ≈ 5 core code lines, over the lead's +326 cap, and an ABI addition, which needs a minor
-bump: K's ABI is 1.4 with the tag fixed at `b596ba7`, and D14 gives 1.5 to whichever of K and FN merges second. With
-it, `policies.last_turn` builds with no change of its own (its check reads the protocol's fields). As X's F10 was, it
-can be scheduled: K's close (as ABI 1.5, FN then taking 1.6) or the next core round.
-
-Core is unchanged in step 5. The full CI suite with `policies.last_turn`: 1646 passed, 66 skipped; `run_all.sh` clean (the ABI
-listing and the plugins' contracts line included).
+**The minor it needs:** `Seq.matched` and `SeqView.matched`, the untrimmed match length set at admission beside
+`branch_at`. *Correction (the step-5 panel):* this record first said the field needed a 1.5 bump, with FN then
+taking 1.6. That was wrong: K is not merged, so its ABI 1.4 is not released and an addition inside it needs no bump
+against `main` (1.3); only against the fixed tag `b596ba7` is it an addition without a bump, which makes it a
+post-tag core follow-up, recorded as such. D14's 1.4 / 1.5 order between K and FN is unchanged. Landed pending the
+owner (see "Step 5: the panel's review").
 
 **design.md's edit list (§11)**, checked against `docs/design.md` and the API docstrings: every item landed in step 1
 with the seams, none is outstanding.
@@ -1787,6 +1807,8 @@ b596ba7 as a plugin-only diff, verified with `scripts/ci/check_core_diff.sh` and
 | The panel (step 4, A-1 + B-2; the lead's decision): a checkpoint pool without a tier still fell to 0 units silently | `std.state.recurrent` requests a set `recurrent.checkpoints` as `min_units` too, so the ledger refuses a start that cannot hold them (as pinned pools are refused); left unset, the default (`max_seqs` units) stays best effort as before step 4: 0 units means no cuts and no publishes, and the kind says so once per checkpoint pool on stderr (`holon: plugin.….checkpoints got 0 units …`). The warning comes at the first request: the kind learns its final units only after the engine's last materialize, which no hook a kind sees marks (the start-up profile's materialize gives every best-effort pool 0). `test_without_checkpoint_units_nothing_is_reused`: set and short is refused; `0` and unset run without reuse, with the warning only for unset; it fails on the pre-step-4 kind (no refusal, no warning) |
 | The panel (step 4, C-2): the default read rate | `ssd.RATES["read"]` 2.24e9 (step 4's `tune --ssd-rates` on the RTX 5080's drive; was 2.55e9); `write` stays 1.77e9 (sustained). Tune's write window is now sustained: 60 s of writes, the rate over the last 30 s (past the drive's write cache) |
 | The lead (step 4, item 3): `--host-memory` at launch, as X's offload lock | a tier refused host memory names the flag and the bytes its pools take (`launch with --host-memory N`; tested in the attach test above); README "Options". A lock has no notes field: the refusal and the README carry it |
+| The step-5 panel (A): `branch_at` re-computed at every admission | core: the engine keeps the first admission's `branch_at` across re-admissions (`39abbcb`, +5 core code lines; "Step 5: the panel's review") |
+| The step-5 panel (B), pending the owner: `SeqView.matched`, `policies.last_turn`'s field | core: `Seq.matched` / `SeqView.matched` inside ABI 1.4, kept likewise (`e1ae0f7`, +6 core code lines; against the tag an addition without a bump) |
 
 Step 3 closed panel-clean (A, B and C, 2026-10-19). The full CI suite at its close: 1641 passed, 66 skipped.
 
