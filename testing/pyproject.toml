@@ -14,6 +14,7 @@ dependencies = ["holonlm", "holonlm-std", "holonlm-judge",  # qwen4exp_files: th
 "testing.gguf_dense" = "holon_testing.gguf_dense"
 "testing.toy_mask" = "holon_testing.toy_mask"
 "testing.toy_tier" = "holon_testing.toy_tier"
+"testing.toy_streams" = "holon_testing.toy_streams"
 
 [build-system]
 requires = ["hatchling"]

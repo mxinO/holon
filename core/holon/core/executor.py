@@ -230,6 +230,10 @@ class Executor:
         ctx = self._context(plan)
         self._prepare(ctx)
         h = self.model.trunk(ctx)
+        width, dtype = self.model.residual
+        if h.shape[1:] != (width,) or h.dtype != dtype:     # what taps and the drafter are built for (below)
+            raise ValueError(f"the trunk returns [T, {h.shape[1]}] {h.dtype}, not the [T, {width}] {dtype} the model "
+                             "declares (ModelSpec.residual)")
         self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
         if self.drafter is not None:                 # its pass over the step's tokens
             self._run_drafter(ctx, h)
@@ -263,7 +267,7 @@ class Executor:
             self.verifier.verify(torch.zeros(int(width.sum()), self.vocab, device=self.device), ctx)
             for rewind in self.rewinders:
                 rewind(ctx)
-            self._run_drafter(ctx, torch.zeros(int(width.sum()), self.model.spec.hidden, dtype=self.cfg.dtype,
+            self._run_drafter(ctx, torch.zeros(int(width.sum()), self.model.residual[0], dtype=self.model.residual[1],
                                                device=self.device))
         if self.processor is not None:
             r = n * (1 + self.cfg.max_draft_tokens)

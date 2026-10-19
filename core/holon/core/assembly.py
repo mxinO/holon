@@ -9,6 +9,7 @@ import dataclasses
 import fnmatch
 import math
 import pathlib
+import sys
 from typing import Any
 
 import torch
@@ -88,8 +89,8 @@ class _PagesPlanner:
 
 def bind_state(spec: ModelSpec, ctx: BuildContext, plugins: PluginSet, ledger: Ledger, cfg: Any
                ) -> tuple[list[BoundSpec], dict[str, Any]]:
-    """Each mixer group's state specs → pools and bound state kinds; one planner per state group."""
-    return _bind_layers(spec.layers, ctx, plugins, ledger, cfg)
+    """Each mixer group's and the block's state specs → pools and bound state kinds; one planner per state group."""
+    return _bind_layers(spec.layers, ctx, plugins, ledger, cfg, block=spec.block)
 
 
 class AuxModels:
@@ -137,16 +138,19 @@ class AuxModels:
 
 
 def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cfg: Any, namespace: str = "",
-                 plan_only: bool = False) -> tuple[list[BoundSpec], dict[str, Any]]:
-    """Bind the state the layers' mixers declare (`namespace`: under `<namespace>.`); `plan_only`: no binding, new
-    planners only."""
+                 plan_only: bool = False, block: Ref | None = None) -> tuple[list[BoundSpec], dict[str, Any]]:
+    """Bind the state the layers' mixers declare, and the `block`'s over all layers (`namespace`: under
+    `<namespace>.`); `plan_only`: no binding, new planners only. A group without a planner gets the default one,
+    which no step's graph can capture: the block's Slot state is refused for it, a mixer's says so."""
     by_mixer: dict[Ref, list[int]] = collections.defaultdict(list)
     for i, layer in enumerate(layers):
         by_mixer[layer.mixer].append(i)
     bound, planners = [], {}
-    for ref, at in by_mixer.items():
-        cls = ctx.unit_factory(ref)
-        specs = cls.state_specs(dict(ref.params), tuple(at), ctx) if hasattr(cls, "state_specs") else []
+    owners = [(ref, tuple(at), False) for ref, at in by_mixer.items()] + ([(block, tuple(range(len(layers))), True)]
+                                                                         if block is not None else [])
+    for ref, at, is_block in owners:
+        cls = ctx.unit_class(ref)
+        specs = cls.state_specs(dict(ref.params), at, ctx) if hasattr(cls, "state_specs") else []
         if namespace:                      # e.g. "kv" → "draft.kv": its own pools, tables and planners
             specs = [dataclasses.replace(s, name=f"{namespace}.{s.name}",
                                          page_group=s.page_group and f"{namespace}.{s.page_group}") for s in specs]
@@ -154,8 +158,15 @@ def _bind_layers(layers: tuple, ctx: Any, plugins: PluginSet, ledger: Ledger, cf
             bound += [_bind(s, getattr(ctx, "parent", ctx), plugins, ledger, cfg) for s in specs]
         for group in dict.fromkeys(s.group for s in specs):
             if group in planners:
-                raise PluginError(f"state group {group!r} declared by two mixers")
+                raise PluginError(f"state group {group!r} declared twice (by two mixers, or a mixer and the block)")
             members = [s for s in specs if s.group == group]
+            if not hasattr(cls, "planner"):
+                if is_block and not all(isinstance(s.shape, Paged) for s in members):
+                    raise PluginError(f"state group {group!r}: the block {ref.target} declares Slot state without "
+                                      "a planner")
+                if cfg.cuda_graphs and ctx.device.type == "cuda":
+                    print(f"holon: state group {group!r} has no planner: steps run without CUDA graphs",
+                          file=sys.stderr, flush=True)
             planners[group] = (cls.planner(dict(ref.params), members, ctx) if hasattr(cls, "planner")
                                else _PagesPlanner())
     return bound, planners

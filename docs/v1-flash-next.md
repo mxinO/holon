@@ -1423,3 +1423,49 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | C (follow-up) | The band's projection point; the gate's form | **Done:** N3 adds ≈ 22 (layer-weighted) as the projection point, 24 the band's upper end; the gate is ≤ 768 launches per decode token (48 × 16); QSA's projections in one call named as an FN step-7 fusion. |
 | A-1 | PLE's kernels | **Moved** to `kernels.ple_triton` (cuda, `bounded`); the model plugin keeps the contracts and oracles, numerics undeclared. |
 | A-2 | Model constants in std | **Removed** (`RATIO`, `BUDGET`, `SUB_BATCH`). |
+
+## 15. Step 1 record: the core seams (2026-10-19)
+
+**Status: built, for the panel's code review.**
+- **Base:** milestone K's head (0aad1ab, ABI 1.4), with FN's committed work merged on top (561e3e7). The branch is
+  `fn-core`; nothing is merged to main.
+- **ABI 1.5** (additive over K's 1.4): `Residual` and `ModelSpec.residual`; `BuildCtx.unit_class`. `core/abi.txt`
+  is regenerated.
+- **Core code lines:** 4,963 against the base's 4,940, so **+23** of the ≤ +47 budget. If the owner drops K's
+  `SeqView.matched` (+6 at K's count), FN adds it in this round: about +29, still inside the budget.
+
+**The seams:**
+- **C1, residual width:** `ModelSpec.residual: Residual(width, dtype) | None`. The trunk, taps and `Drafter.run`
+  carry `[T, width]` of that dtype; the final norm returns `[T, hidden]`. The startup profile checks the trunk's real
+  output against the declaration (a mismatch fails there) and feeds the drafter's profile pass the declared shape.
+- **C2, state declared by the block:** `bind_state` asks `ModelSpec.block`'s class too, over all layers, through the
+  same `state_specs` / `planner` hooks as a mixer's.
+  - On this new path, a group of Slot state without a planner is refused at bind.
+  - A mixer's planner-less group keeps today's default planner, plus one stderr line when CUDA graphs are on: its
+    steps run without them.
+  - A group declared twice (two mixers, or a mixer and the block) is refused.
+- **C3:** `BuildCtx.unit_class(ref)` returns the registered class serving a Ref. The core's internal `unit_factory`
+  is renamed to it, so it adds no lines.
+- **Denylist:** `check_core_denylist.py` gains `qsa|ngram|indexer`.
+
+**Toy proofs** (`core/tests/test_block_seams.py`, toys in `holon_testing.toy_streams`, on a tiny Qwen3):
+- **C1:** two float32 streams `[T, 2H]` (a wide embed, a wide block, a collapsing norm). On the CPU, eager:
+  greedy output equals a model-only build's; prompt logprobs come back; the drafter and a layer-0 tap see
+  `[T, 128]` float32. On the GPU: the same from CUDA graphs, decode and verify steps graphed, the startup profile
+  passing. A model declaring 3H while its trunk returns 2H fails at startup with the profile's message.
+- **C2 + C3:** the block forwards a nested Ref's hooks (`ctx.unit_class(pre)`): a Slot running sum of the token ids
+  at layer 1 (`recurrent` kind, alignment 64, `in_step` 64), which adds (sum mod 97) / 97 to the residual, so a wrong
+  state changes the logits.
+  - A 200-token prompt in steps of at most 100 tokens is cut at 64 and 128 (the budget rounded to the grid) and
+    checkpointed at 192 in-step.
+  - A second request with that prefix hits at 192 and adopts the payload.
+  - Speculative verify steps (prompt lookup) accept drafts, and `rewind` restores the sum after the accepted tokens.
+  - On the CPU, greedy output equals the model-only build's. Three plants fail it: no rewind, no in-step publish,
+    and `has_init` ignored.
+  - On the GPU, the decode and verify graphs are captured.
+- **The planner rule:** the plain wide block, which forwards specs but no planner, is refused at bind. A
+  planner-less mixer group gets the default planner and the stderr line (a direct `_bind_layers` check).
+- **Deviation from §4's toy text:** the alignment-16 toy mixer beside the block is dropped. With one `recurrent`
+  policy for every spec, its cuts at 64 would end every step on the grid, and the block's checkpoint could never be
+  taken in-step. The mixer path's planner rule is checked directly instead, and today's mixers (GDN's `in_step`
+  state) already prove that path end to end.

@@ -42,13 +42,15 @@ class AdoptsWeights(Protocol):
 class DeclaresState(Protocol):
     @classmethod
     def state_specs(cls, params: Mapping[str, Any], layers: tuple[int, ...], ctx: BuildCtx) -> list[StateSpec]:
-        """The state the mixer keeps for `layers`; without it, none."""
+        """The state the mixer keeps for `layers`; without it, none. The model's block may declare it too, over all
+        layers (`ModelSpec.block`)."""
 
 
 class PlansState(Protocol):
     @classmethod
     def planner(cls, params: Mapping[str, Any], specs: list[StateSpec], ctx: BuildCtx) -> Planner:
-        """The group's planner (without it, the core's `Pages`). With the deployment option `planner.device_lens` (a
+        """The group's planner (without it, the core's `Pages`, whose steps no CUDA graph captures; a block's Slot
+        state must have one). With the deployment option `planner.device_lens` (a
         drafter's sub-steps) every batch it plans has its lengths on the device only: it must choose kernels that read
         them there, or declare `needs_host_lens` (the build then fails)."""
 
