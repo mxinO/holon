@@ -447,11 +447,19 @@ def _tiers(a: argparse.Namespace) -> int:
               "streams": "holon_judge.deferred, seeds 0.." if cpu else f"unseeded sleeps up to {a.delay} s",
               "hardware": "cpu" if cpu else golden.hardware(torch.device("cuda")), "torch": torch.__version__,
               "checks": {k: tiers.strip(v) for k, v in clean.items()}, "wall_s": wall, "plants": {}}
+    loops = sorted({c for name in a.plant or () for c in TIER_PLANTS[name][1]} - set(clean) - {"invariance"})
+    for name in loops:                        # the closed-loop variants the plants need (tiers.LOOPS)
+        start = time.monotonic()
+        clean[name] = tiers.identity(build, trace, streams, a.runs, loop=tiers.LOOPS[name], options=options,
+                                     **pressure)
+        wall[name] = round(time.monotonic() - start, 1)
+        report["checks"][name] = tiers.strip(clean[name])
     passed = all(r["verdict"] == "pass" for r in clean.values())
     if a.plant:
-        run = {"invariance": lambda: tiers.invariance(build, trace, streams),
-               "identity": lambda: tiers.identity(build, trace, streams, a.plant_runs, clean["identity"],
-                                                  options=options, **pressure)}
+        run = {"invariance": lambda: tiers.invariance(build, trace, streams)} | {
+            name: lambda name=name: tiers.identity(build, trace, streams, a.plant_runs, clean[name],
+                                                   loop=tiers.LOOPS[name], options=options, **pressure)
+            for name in ["identity", *loops]}
         off = tiers.identity(build, trace, streams, 1, tier=False, options=options, **pressure)
         report["tiers_off"] = {"clean": tiers.strip(off)}
         passed &= off["verdict"] == "pass"

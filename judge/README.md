@@ -138,6 +138,10 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge tiers --model Qwen/Qwen3-8B --p
 Each plant runs the checks `TIER_PLANTS` names for it and once more with tiers off. It is caught when it fired (its
 broken path ran where the bug can matter: a copy not yet landed, a block promoted, ...), changed an outcome against
 the clean runs (a request's output or `cached_tokens`, a step, an audit finding) and a check failed; with tiers off it
-must change nothing. The checkpoint policies' plants (`branch-off-by-one`, `tentative-shift`) are judged by
-`bounded --policies`, which adds sessions starting in the second and third waves so `branch` checkpoints are taken and
-adopted.
+must change nothing. Two plants need run-identity's closed-loop variants (`tiers.LOOPS`), run clean first when they
+are named: `reuse` (`load-reuse-unwaited`: the gated request with the most loading blocks is aborted for good and a
+prefill-heavy request sent in the same round) and `fork` (`adopt-source-reused`: each regenerate becomes a fork, the
+prompt plus 128 tokens; give the host payload level its floor in `--pressure-args`). The checkpoint policies' plants
+(`branch-off-by-one`, `tentative-shift`) are judged by `bounded --policies`, which adds sessions starting in the second
+and third waves so `branch` checkpoints are taken and adopted; `tentative-shift` is also a tier plant, which the audit
+catches (a payload filed away from its position) when the policy is `answer:1` alone.

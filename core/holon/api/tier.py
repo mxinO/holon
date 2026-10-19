@@ -52,6 +52,9 @@ class Fence(Protocol):
     def synchronize(self) -> None:
         """Wait for it on the host."""
 
+    def done(self) -> bool:
+        """Whether it has passed, without waiting (for statistics: no decision may read it)."""
+
 
 class Stream(Protocol):
     """A copy stream the core makes for a tier (`TierCtx.stream`); off the GPU its work runs at once, in order."""
@@ -70,7 +73,9 @@ class Load(Fence, Protocol):
 class TierCtx(Protocol):
     """What `StateTier.attach` gets."""
 
-    pools: Mapping[str, Pool]     # the device pools it copies: each paged spec's (by spec name), each payload pool
+    pools: Mapping[str, Pool]     # the device pools it copies: each paged spec's by its spec's name (never its
+                                  # pool's), each payload pool by its own name; a key equal to its pool's `name` is
+                                  # a payload pool
     identity: str | None          # the engine's state identity (`plans.state_identity`); None if it has no plan
     max_seqs: int
     max_model_len: int

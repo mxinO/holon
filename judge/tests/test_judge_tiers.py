@@ -36,12 +36,13 @@ def _builder(path, **base):
     return build
 
 
-def _setup(build, trace, pressure, tight=None):
+def _setup(build, trace, pressure, tight=None, loops=("identity",)):
     deferred = lambda i=0: tiers.Deferred(i)                      # noqa: E731
-    clean = {"invariance": tiers.invariance(build, trace, deferred),
-             "identity": tiers.identity(build, trace, deferred, options=pressure)}
-    run = {"invariance": lambda: tiers.invariance(build, trace, deferred),
-           "identity": lambda: tiers.identity(build, trace, deferred, 3, clean["identity"], options=pressure)}
+    clean = {"invariance": tiers.invariance(build, trace, deferred)} | {
+        name: tiers.identity(build, trace, deferred, loop=tiers.LOOPS[name], options=pressure) for name in loops}
+    run = {"invariance": lambda: tiers.invariance(build, trace, deferred)} | {
+        name: lambda name=name: tiers.identity(build, trace, deferred, 3, clean[name], loop=tiers.LOOPS[name],
+                                               options=pressure) for name in loops}
     if tight is not None:                     # a host level at its floor (interior-drop's), publish admission
         clean["tight"] = tiers.identity(build, trace, deferred, 1, options=tight)
         run["tight"] = lambda: tiers.identity(build, trace, deferred, 1, clean["tight"], options=tight)
@@ -95,14 +96,13 @@ def test_the_clean_checks_pass(model, request):
 
 
 # Tier plants caught on the CPU. Not here (the evidence records each; the GPU judges the stream-timing ones):
-# - load-before-store: the next launch's wait on freed units runs a deferred store before any later load reads its
-#   host units, so the window is one schedule wide;
-# - load-reuse-unwaited: the late copy lands before the units' next writer, since a launch waiting on any later load
-#   runs the copy stream in order;
+# - load-before-store: a redundant guard for the host level (D4's free rule and a load's `after` order the read after
+#   the store); plugins/tests/test_state_tier.py holds the tier's own ordering on deferred streams;
+# - load-reuse-unwaited: with copies at most 2 launches late, the late copy lands before the units' next writer (its
+#   own test below defers them up to 8);
 # - swap-onto-lower: recomputed and cached bytes give the same greedy outputs on the tiny fp32 model;
-# - adopt-source-reused (`loaded` ignoring the reading step's end): a CPU step's adopt has run by the end of its launch;
-# - adopt-source-reused-join: the earlier load's host units outlive the joining adopt here (no payload is evicted and
-#   restored in between).
+# - adopt-source-reused and its join variant: a CPU step's adopt has run by the end of its launch (the GPU judges them
+#   in the `fork` loop).
 @pytest.mark.parametrize("plant", ["promote-unwaited", "waiter-unref", "store-unwaited", "promote-wrong-unit",
                                    "gate-on-landing", "promote-preempts", "kids-any-level", "interior-drop"])
 def test_a_tier_plant_is_caught(plant, dense):
@@ -110,6 +110,38 @@ def test_a_tier_plant_is_caught(plant, dense):
     factory, checks = TIER_PLANTS[plant]
     result = tiers.judge_plant(plant, factory, ("tight",) if plant == "interior-drop" else checks, m.run, m.clean)
     assert result["verdict"] == "caught", result
+
+
+def test_a_late_copy_onto_reused_units_is_caught(tiny_checkpoint):
+    """load-reuse-unwaited in the `reuse` loop (an aborted gated request's loading blocks evictable at once, a heavy
+    newcomer) with copies landing up to 8 launches late and answers long enough to read the reused pages back."""
+    build = _builder(tiny_checkpoint, max_model_len=512, state_memory=34 * 16 * 512, max_step_tokens=256,
+                     plugin_options={"state_tier.host.bytes": "4MiB", "state_tier.host.pages": "1"})
+    trace, loop = _trace(512, 12, 64, (10, 40), 32), tiers.LOOPS["reuse"]
+    deferred = lambda i=0: tiers.Deferred(i, most=8)              # noqa: E731
+    clean = tiers.identity(build, trace, deferred, 1, loop=loop, options=PRESSURE)
+    factory, _ = TIER_PLANTS["load-reuse-unwaited"]
+    result = tiers.judge_plant("load-reuse-unwaited", factory, ("reuse",), {"reuse": lambda: tiers.identity(
+        build, trace, deferred, 2, clean, loop=loop, options=PRESSURE)}, {"reuse": clean})
+    assert clean["verdict"] == "pass" and clean["counts"][0]["aborted_gated"] > 0
+    assert result["verdict"] == "caught", result
+
+
+def test_the_audit_catches_a_tentative_filed_a_block_early(tiny_hybrid):
+    """`answer:1` alone, answers crossing aligned positions: the block before each tentative's holds no checkpoint, so
+    tentative-shift files there, and the audit (every payload at (depth + 1) × block) fails run-identity. With
+    `prompt_end` or an earlier answer there, the shifted one finds the block taken and is only lost."""
+    build = _builder(tiny_hybrid, max_model_len=512, state_memory=920 << 10, plugin_options={
+        "state_tier.host.bytes": "24MiB", "state_tier.host.pages": "0.5", "recurrent.checkpoints": "6",
+        "recurrent.policy": "answer:1"})
+    trace, options = _trace(320, 8, 140, (20, 60), 80, turns=2), PRESSURE | {"state_tier.h2d_rate": "2e6"}
+    deferred = lambda i=0: tiers.Deferred(i)                      # noqa: E731
+    clean = tiers.identity(build, trace, deferred, 1, options=options)
+    factory, checks = TIER_PLANTS["tentative-shift"]
+    result = tiers.judge_plant("tentative-shift", factory, checks, {"identity": lambda: tiers.identity(
+        build, trace, deferred, 2, clean, options=options)}, {"identity": clean})
+    assert clean["verdict"] == "pass" and result["verdict"] == "caught", result
+    assert result["checks"]["identity"]["findings"]["a payload filed away from its position"] > 0
 
 
 @pytest.mark.parametrize("plant, broken", [("branch-off-by-one", {"branch, tier"}),

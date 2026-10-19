@@ -1,8 +1,8 @@
 # v1 — milestone K: KV and checkpoint tiers under the prefix index
 
-Status: **rev 8.2, step-1 panel review** (2026-10-18): rev 8 (panel-clean), the lead's decisions on step 0's
-measurements (§13 "Rev 8.1") and the panel's review of step 1 (§13 "Rev 8.2"); step 1's core seams are built (§13
-"Step 1 as built"). Every other number
+Status: **rev 8.3, step-2 panel review** (2026-10-19): rev 8 (panel-clean), the lead's decisions on step 0's
+measurements (§13 "Rev 8.1"), the panel's reviews of step 1 (§13 "Rev 8.2") and step 2 (§13 "Rev 8.3"); steps 1 and 2
+are built (§13 "Step 1 as built", "Step 2 as built"). Every other number
 below is a CPU-side estimate from earlier evidence (cited), fixed as a prediction before step 4 measures it. Rev 2 answered the three-reviewer panel (A correctness, B architecture, C numerics and
 performance); revs 3 to 8 answer its re-reviews. The finding-by-finding dispositions are in §13.
 
@@ -325,13 +325,16 @@ Plugin kinds:
     decided, and the read or copy that reuses it waits on the write's ticket.
   - **Fences on host units** (A-1, B-N1, C-1). A host unit is touched by device copies on the tier's streams, by a
     step's own `pre_forward` adopt on the compute stream, and by CPU I/O on the levels' threads. The tier keeps each
-    unit's **set of outstanding fences**, not only the latest (round 7). A fence is added, never replacing one,
-    by:
-    - the end event of the store that wrote the unit;
-    - the `done` of every step that read it, from `loaded(load, done)`;
-    - the load's own fence, from a waiterless or abandoned `loaded`.
+    unit's **set of outstanding fences**, not only the latest (round 7). **Rev 8.3:** at most one per ordered
+    source, since a later fence of one source implies its earlier ones (and a fence of one source never replaces
+    another's, so round 7's case, an abandonment told after a reading step, keeps both):
+    - the end event of the latest store that wrote the unit (the D2H stream);
+    - the `done` of the latest step that read it, from `loaded(load, done)` (steps end in launch order, and `launched`
+      tells in launch order);
+    - the latest load copy that read it, from a waiterless or abandoned `loaded` (the H2D stream). A payload load's
+      own fence is the store already kept.
 
-    Fences are pruned as they complete. Any reuse of the unit waits for all the outstanding ones first:
+    Any reuse of the unit waits for all of them first:
     - stream-side (`Fence.wait`) for a copy into it;
     - host-side (`Fence.synchronize`, on the I/O thread) for a level's `read` into it, or a `write` from it.
 
@@ -360,8 +363,13 @@ Plugin kinds:
     **Rev 8.1:** it was not (0.84× at 50/50, 0.76× at 75/25 on the RTX 5080's drive), so while both reads and writes
     are queued on the lane, each is charged at its rate divided by the measured mixed factor (tune measures it per
     host, K-M4's method); with only one kind queued, reads go at `read_rate` and writes at `write_rate`.
+    **Rev 8.3 (read priority, C):** reads are charged at the pure `read_rate` always. While any read is queued, no
+    write starts except one that frees units a queued read needs (D11), and only such dependent writes are charged
+    at `write_rate` divided by the mixed factor; other writes wait and go at `write_rate`. Step 3 re-measures the
+    mixed factor under exactly that dispatch.
   - Every load is charged to the lanes, promote-into-place loads included, though those are never gated (A-7).
-  - A load of at most `stall_bytes` is due now: the step waits for it.
+  - A load of at most `stall_bytes` is due now: the step waits for it. It still occupies the lanes (rev 8.3).
+  - A payload load takes no H2D lane: the kind's adopt reads the host copy inside the step (rev 8.3).
   - A request with loads is runnable at the first step whose clock is ≥ its due time (KS2). A 512-token prefill step
     advances the clock by its own cost (≈ 0.22 s on the 27B), so a resume behind prefill-heavy steps is not
     penalised in decode steps.
@@ -628,7 +636,10 @@ go before live KV.
 *Policies are std's; a new one is a plugin.* `recurrent.policy` is a comma list of built-in names or `Ref`s to
 plugins with the structural `next(view) → (at, tentative) | None`. Plugins cannot import std
 (`pyproject.toml:85-89`, `:93-99`), so the protocol is duck-typed and documented in std. The kind takes the earliest position
-over its policies.
+over its policies. **Rev 8.3:** a unit may declare `keep` (default 0), the tentative payloads a request keeps for it;
+the kind's `keep_tentative` is the largest `keep` over its policies (`answer:<k>` has k), so the engine's refusal of
+tentatives without a tier sees a plugin's too. A position a unit without `keep` calls tentative is not (nothing would
+keep it).
 
 **D9 — No `HitLen.cost`: the deepest hit wins; the rate check is tune's.** X's outline lists `HitLen.cost`
 (`docs/v1-offload.md:599`). A cost changes a decision only where loading a deeper hit is slower than recomputing the
@@ -654,8 +665,8 @@ per second. A remote tier slower than recompute would bring back `HitLen.cost`; 
   34,816 B, and a fragmented 32K load is 32,768 chunks. Today's per-run loop (`memory.py:141-149`) would spend
   ≈ 0.3 s of host time on that.
 - The std copier builds the chunk address lists vectorised and issues them through a kernel op, `state_copy@1`,
-  bound like any site. K adds providers in `kernels.expert_io`, which already has both paths
-  (`plugins/holon_plugins/kernels/expert_io/plugin.py:84-110`):
+  bound like any site. K adds providers in a plugin of their own, `kernels.state_copy` (rev 8.3: first planned in
+  `kernels.expert_io`, which already has both paths for experts, `docs/v1-offload.md` X step 0):
   - one `cudaMemcpyBatchAsync` per batch;
   - the SM scatter/gather kernel, 0.97–1.02× DMA in X's M1 (`docs/v1-offload.md:645`).
 
@@ -699,7 +710,10 @@ two engines on one host would otherwise overwrite each other's slots, and runtim
 - **Rev 8.2: reads go first on the SSD** (panel C). While a read is queued, at most one write job is in flight, and a
   read never overtakes the write that frees its own host units. "Both kinds queued" in D4's mixed charge means the
   virtual lane's state, not the threads'. Step 2 re-measures the mixed factor under exactly this dispatch (one writer,
-  two or three readers).
+  two or three readers). **Rev 8.3 (read priority):** step 2 measured 0.77–0.80 under it, no better than without, so
+  the dispatch tightens: while any read is queued, no write starts except one that frees units a queued read needs
+  (a dependent write). Reads are charged at the pure read rate, the mixed factor only on dependent writes (D4). Step 3
+  re-measures exactly this dispatch.
 - An entry being written back is logically on SSD. A hit on it is an SSD read with an SSD due time, and its load
   reads the slot. The rev 2 shortcut of reusing host bytes still physically there is dropped (A-5). It raced with a
   reallocation of the logically free unit, and keeping it would need a second fence for a rare case.
@@ -884,9 +898,10 @@ additive minor when ARC is built. K does not add them.
   copy or I/O completion;
 - payload stores are accepted (D5);
 - reuse of its own storage waits on its own tickets, and reuse of a host unit, or CPU I/O on it, waits on all the
-  unit's outstanding fences: stores' ends, and every `done` given to `loaded`, which add and never replace (D4);
-- I/O jobs are dispatched in the order they were decided, reads before writes that do not free their units (D11,
-  rev 8.2); abandonment completes a pending enqueue as a no-op
+  unit's outstanding fences, the latest of each ordered source: the store that wrote it, the step that read it (a
+  `done` given to `loaded`), the load copy no step waited for (D4, rev 8.3);
+- I/O jobs are dispatched in the order they were decided; while a read is queued no write starts but one that frees
+  units a queued read needs (D11, rev 8.3); abandonment completes a pending enqueue as a no-op
   and wakes its waiters (D7);
 - every device read of a host unit follows the unit's last write fence: in the `after` of the tier's H2D, and inside
   the `Load` fence for host payloads a kind's adopt reads (D4);
@@ -929,6 +944,8 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
     built-in `ssd` is the first (D11).
   - Options:
     - `host.bytes`: planned, pinned by the lock; `attach` refuses if `host_memory` cannot give it (B-N3);
+      `host.pages`, the share of it for pages; each part is split over its pools by their unit bytes, so every
+      paged spec, and every payload spec, gets the same number of units (rev 8.3);
     - `host.admit` = `publish` | `hit:<n>` | `evict` (pages only; payloads are always stored);
     - `host.reserve`;
     - `levels`;
@@ -946,8 +963,8 @@ Seam names, from X's outline (`docs/v1-offload.md:599-600`):
   - New built-ins `branch` and `answer:<k>` (which sets `keep_tentative`).
   - The pool becomes staging when a tier is bound (§7's formula sets its size).
   - ≈ 70 lines.
-- **`kernels.expert_io`**: `state_copy@1` providers (batched DMA and SM gather over chunk address lists), ≈ 80 lines
-  with the kernel's existing code.
+- **`kernels.state_copy`** (rev 8.3: its own plugin, not `kernels.expert_io`): `state_copy@1` providers (batched DMA
+  and SM gather over chunk address lists), ≈ 150 lines of CUDA and its build glue.
 - **`evict.root_pin`** (`plugins/holon_plugins/evict/root_pin/`, slot `eviction_policy`): skips candidates with
   `depth ≤ d` and `hits ≥ h` while others exist. ≈ 40 lines.
 - **Held-out (after the tag):** `policies.last_turn` (≈ 40 lines) and `state_tiers.zlib`, a `Level` (≈ 120 lines
@@ -981,10 +998,10 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | Plant | Where | Breaks | Predicted |
 |---|---|---|---|
 | `promote_unwaited` | CPU + GPU | a launch does not wait on its rows' loads | tier invariance fails (stale bytes) |
-| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own. The second variant also counts SSD reads, which must be one per payload (round 6). It also runs the abandon-while-waited cell with its delayed I/O thread (round 7), and the call order where G is aborted and J is due in the same step, and G's `loaded` is processed second; with a replace-the-latest fence rule, J's fence would be overwritten (round 7) | the adopted recurrent state is corrupt; tier invariance fails, in both variants. A second read of the same payload fails the count |
-| `load_reuse_unwaited` (round 4) | CPU + GPU | units of an evicted loading entry are reused without the next launch waiting on the load's fence; the H2D delayed | the late H2D overwrites the new owner's bytes; tier invariance fails |
+| `adopt_source_reused` (A-1, B-N1, C-1; extended in round 5) | CPU + GPU (rev 8.3: the GPU in run-identity's `fork` loop: the host payload level at its floor, `answer:1`, a fork resending a prompt plus 128 tokens) | `loaded` ignores `done`: a host payload unit a step's adopt reads is reused by a later store or an SSD read without waiting for that step's end (deferred stream, plus an I/O thread delayed into the window). Second variant: a request that joins a loading entry later adopts the payload through the earlier load instead of its own. The second variant also counts SSD reads, which must be one per payload (round 6). It also runs the abandon-while-waited cell with its delayed I/O thread (round 7), and the call order where G is aborted and J is due in the same step, and G's `loaded` is processed second; with a replace-the-latest fence rule, J's fence would be overwritten (round 7) | the adopted recurrent state is corrupt; tier invariance fails, in both variants. A second read of the same payload fails the count |
+| `load_reuse_unwaited` (round 4) | CPU + GPU | units of an evicted loading entry are reused without the next launch waiting on the load's fence; the H2D delayed. Rev 8.3: run-identity's `reuse` loop aborts the gated request with the most loading blocks, with no resend, and sends a prefill-heavy request in the same round | the late H2D overwrites the new owner's bytes; run-identity fails. **Rev 8.3:** caught on the CPU with copies deferred up to 8 launches and 32-token answers (deferred up to 2, the copy has landed by the abort); on the A5000 it fires (14 at 0.05 s delays, 40 at 0.5 s) and changes nothing |
 | `waiter_unref` (round 4) | CPU | a request joining a loading entry's wait set by `_swap` takes no reference | the loading entry is evicted under a live waiter: the property test fails (`could_fit` counts held units) and tier invariance fails |
-| `load_before_store` (round 3, A-1) | CPU + GPU | the tier omits a host unit's write fence from the reading H2D's `after` and from the `Load`'s fence; the D2H stream deferred; eviction then promotion within 1–2 steps, plus a sibling request adopting the same host payload | the promoted pages or the adopted state read the unit before its store lands; tier invariance fails |
+| `load_before_store` (round 3, A-1) | CPU + GPU | the tier omits a host unit's write fence from the reading H2D's `after` and from the `Load`'s fence; the D2H stream deferred; eviction then promotion within 1–2 steps, plus a sibling request adopting the same host payload | the promoted pages or the adopted state read the unit before its store lands; tier invariance fails. **Rev 8.3:** end to end the core's own ordering (D4's free rule, a load's `after`) already covers it, so for the host level it is a redundant guard; the tier-only test (a store, then at once a load with an empty `after`, on deferred streams) holds it |
 | `store_early` (A2) | GPU | a paged store is issued after the committed step, not the last launched | host copies stale; tier invariance fails on a trace where the in-flight step completes published blocks |
 | `store_unwaited` | CPU + GPU | reuse of a unit freed while its store reads it does not wait | host copy corrupt; tier invariance fails under pressure |
 | `load_no_after` (C10) | GPU | a promotion's copy ignores `after` (the finished request's extra row overwrites it) | tier invariance fails |
@@ -997,7 +1014,7 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | `kids_any_level` | CPU | VRAM eligibility counts non-resident children | the property test fails (`could_fit` yes, eviction short) |
 | `interior_drop` | CPU (std) | the host level evicts interior copies first | std's property test fails (subtrees lost); outputs unchanged |
 | `branch_off_by_one` (C10) | CPU | the `branch` payload is filed one block early | bounded check fails (KL) |
-| `tentative_shift` | CPU | an `answer` payload is filed one block early | bounded check fails |
+| `tentative_shift` | CPU | an `answer` payload is filed one block early | bounded check fails. **Rev 8.3:** the judge's audit checks every payload at its position ((depth + 1) × block, the position the kind published it at); with `answer:1` alone the block before holds no checkpoint, so the plant misfiles and the audit fails run-identity |
 | `torn_manifest` (C4) | CPU | the manifest is renamed into place before the data `fdatasync`, with the data write killed | restore discards by crc: `cached_tokens` short of the no-restart engine; with the crc check also disabled, outputs differ |
 | `stale_slot` (A7) | CPU | the manifest is not unlinked at startup; a slot is rewritten; kill; restart | crc mismatch discards: `cached_tokens` short; with the crc check disabled, outputs differ |
 
@@ -1384,12 +1401,13 @@ Results against the predictions are in the evidence records (`evidence/k0_m1_rer
 RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
 shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.
 
-### Step 2 as built (in progress)
+### Step 2 as built (2026-10-19)
 
-- **`state_copy@1` providers** (`kernels.expert_io`): loads by the SM gather (8 CTAs × 256 threads, unroll 2; rows over
+- **`state_copy@1` providers** (`kernels.state_copy`): loads by the SM gather (8 CTAs × 256 threads, unroll 2; rows over
   64 KiB tiled across the CTAs), stores by one `cudaMemcpyBatchAsync` merging consecutive rows; the fact `copy`
-  overrides either. L0 bitwise against the oracle on sm_86 and sm_120 (16 cells), memcheck clean. `expert_io`'s source
-  moves, so the two Qwen3-30B-A3B rtx-5080 locks pinning it are owed a propagation (D14's single round).
+  overrides either. L0 bitwise against the oracle on sm_86 and sm_120 (16 cells), memcheck clean. First built in
+  `kernels.expert_io` (the step-2 measurements below ran there); rev 8.3 moved them, unchanged, to a plugin of their
+  own, so `expert_io` is byte-identical to step 1's and no expert lock needs a propagation.
 - **Measured on the RTX 5080** (`evidence/k2_state_copy_rtx-5080_2026-10-18.json`,
   `evidence/k2_mixed_nvme_rtx-5080_2026-10-18.json`, `spikes/k2_tiers/`):
   - the gather beside compute-bound prefill (27B, 512-token chunks): a 0.57 or 1.29 GB load per step costs nothing
@@ -1418,12 +1436,15 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
   - `load_before_store` and `load_reuse_unwaited` never change an outcome: D4's free-rule wait at the next launch and
     a load's `after` (the last launched step) already order the read after the store, and a late copy into an evicted
     loading block drains, in stream order, before the next writer. The tier's write fences are the second guard; no
-    configuration reached a window where only they matter;
+    configuration reached a window where only they matter (rev 8.3: `load_reuse_unwaited` is caught on the CPU with
+    copies up to 8 launches late; `load_before_store` is a redundant guard with a tier-only test);
   - `tentative_shift` fails the bounded check on the tiny hybrid but not on the 27B at 8 + 4 sessions (fired 288, KL
     inside 2× the floor): a decode-produced checkpoint one block early is within the bounded class there. Step 4's
-    lock trace is larger; the doc's prediction stands open;
+    lock trace is larger; the doc's prediction stands open (rev 8.3: the shifted payload mostly finds its block taken
+    and is lost; where it misfiles, the judge's audit catches it);
   - `adopt_source_reused` (both variants) cannot change an outcome on the CPU (a step's adopt has finished by its
-    launch): it moves to step 3's delayed-I/O-thread cells and the GPU;
+    launch): it moves to step 3's delayed-I/O-thread cells and the GPU (rev 8.3: on the A5000 the join variant is
+    caught, the other still changes nothing);
   - the hybrid invariance trace opens with two warm-up requests that make the system prompt's end a branch point:
     otherwise back-to-back and interleaved orders place `branch` checkpoints differently and the judge, rightly,
     refuses to compare (`cached_tokens` differ);
@@ -1433,6 +1454,65 @@ shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× media
   under write-back or `hit:<n>` admission (leaves stored first) a parent could be evicted as a leaf. Fixed (a set of
   children with page copies) with a regression test; the judge record above predates the fix, which only changes
   evictions under those admissions.
+
+### Rev 8.3 (2026-10-19): the panel's review of step 2
+
+The outputs were found correct; the findings are structure, performance and test gaps. Dispositions (the lead's
+decisions):
+
+| Finding | Disposition | Where |
+|---|---|---|
+| B (major): `state_copy@1` in `kernels.expert_io` | accepted | its own plugin, `kernels.state_copy` (`k_rows`, the DMA path, `StateCopy`, a copy of the build glue); `expert_io` byte-identical to step 1's (3a5719d), so no expert lock is owed a propagation; the L0 cells moved to `plugins/tests/test_state_copy.py` (16 / 16 on sm_86); D10 and the as-built note |
+| C (major 2): payload-only loads charged to the H2D lane | accepted | only page bytes go on the lane; a payload-only load is due at once (its adopt reads the host copy in-step; D4) |
+| C (major 3): the payload share split evenly over payload pools | accepted | split by unit bytes, as pages already were: every payload spec gets as many units (§5) |
+| A (major), C (minor 5): host fences and per-key records grow without bound | accepted | a host unit keeps at most one fence per ordered source, the latest store, reading step and unwaited load copy (D4); `loading` and `reading` entries go at 0; `hits` and `kids` are pruned when a key is dropped or its page copy released; copies are indexed by key, so `drop` reads only the key's |
+| C (minor 4): small loads off the lane | accepted | every page load occupies the lane; one of at most `stall_bytes` is still due at once (D4) |
+| C (minor 6): counters | accepted | std: `late_loads` (a non-blocking `Fence.done()` when a step first reads the load; ABI 1.4's `Fence` gains `done`, for statistics only) and `payload_load_bytes`; core: `gated_requests` (admitted ahead of their loads' due time) and `gated_steps` (steps run while one waited) in `Engine.stats()` |
+| A, B (minor): a policy unit cannot keep tentatives | accepted | a unit may declare `keep`; `keep_tentative` is the largest over the policies, so the engine's refusal without a tier sees it; a keep-less unit's tentative positions are ordinary (D8, the kind's docstring) |
+| B (minors) | accepted | `TierCtx.pools`' key rule (a key equal to its pool's name is a payload pool); `StateTierPlugin.build`: kernel sites at `attach` only for kernels without a workspace; the hybrid engine test of `plugins/tests/test_state_tier.py` dropped (the judge's hybrid invariance is the same check) |
+| A (minor 3): plants | accepted | see below |
+| C (major 1): read priority | carried into step 3 | D4, D11: while any read is queued no write starts but one that frees units a queued read needs; reads at the pure read rate, the mixed factor only on dependent writes; step 3 re-measures exactly that dispatch |
+
+**The plants (A, minor 3)** (`evidence/k2_review_plants_rtx-a5000_2026-10-19.json`, the CPU cells in
+`judge/tests/test_judge_tiers.py` and `plugins/tests/test_state_tier.py`):
+- `load_before_store`: a redundant guard for the host level. End to end the core's ordering (D4's free rule, a load's
+  `after`) already puts the read after the store: on the A5000 it never fired, on the CPU it fired without a change.
+  The tier-only test (a store, then at once a load with an empty `after`, on deferred streams) fails without the
+  tier's write fence;
+- `load_reuse_unwaited`: run-identity's `reuse` loop is A's configuration (the gated request with the most loading
+  blocks aborted with no resend, a prefill-heavy request in the same round). On the A5000 (Qwen3-8B) it fires 14
+  times at 0.05 s delays and 40 at 0.5 s, and changes nothing. On the CPU the configuration alone does not do it:
+  with copies at most 2 launches late, the copy has landed by the abort. With copies up to 8 launches late and
+  32-token answers it is caught, in the plain loop too. An eviction policy taking the most recent blocks first (the
+  loading ones) was tried and is not needed;
+- `adopt_source_reused`: run-identity's `fork` loop on Qwen3.5-4B bf16 (A5000) in A's window (the host payload level
+  at 6 units per pool, its floor 5; `answer:1`; forks of a prompt plus 128 tokens). The join variant is caught
+  (fired 98, 72 outputs changed); the variant where `loaded` ignores the reading step fires 108 times and changes
+  nothing. **Open:** its window needs a store to reuse an adopted host unit while the adopting step still runs, but
+  the adopted copy is the payload level's most recent (the load and `hit` move it to the end), so floor-many other
+  stores must land within that one step;
+- `tentative_shift`: the audit now checks every payload at (depth + 1) × block. One block back of an `answer`
+  position there is normally `prompt_end`'s or the previous answer's checkpoint, so the shifted payload finds the
+  block taken and is only lost; that is why the 27B's bounded check passed. With `answer:1` alone the block is bare:
+  the plant misfiles (30 in a CPU run) and the audit fails run-identity; without the audit nothing changes.
+
+**The clean checks after these changes:**
+- Qwen3-8B (A5000):
+  - invariance passes (140 page loads, 44 blocks promoted into place);
+  - run-identity passes (133 loads per run, 123 of them late when their step first read them);
+  - the `reuse` loop passes (111 loads, 7 aborts);
+  - promote_unwaited 389 / 140, store_early 275 / 16, store_unwaited 503 / 107, load_no_after 301 / 25 and
+    swap_onto_lower 44 / 17 (fired / changed) are still caught.
+- Qwen3.5-4B (A5000, 555 MB state memory):
+  - run-identity and the `fork` loop pass (112 and 140 loads per run; 86 and 98 payload evictions);
+  - invariance is refused (6 regenerates' `cached_tokens` differ).
+- **Found:** the null test failed there. With 16 checkpoint units the ledger gave the KV pool 567 units against 174:
+  a state memory too small for 16 units shrinks the checkpoint pool and grows paged state, so page evictions move
+  too. The CPU's pools differ as well (51 / 43 units) with equal hits. The null test now refuses when `cached_tokens`
+  differ, as invariance does, and reports the paged pools; rerun alone on the 4B, it is refused.
+
+Core: +332 code lines over b5b1e7f, 6 over the lead's +326: `Fence.done` (1), its platform implementation (2), the
+scheduler's two counters (2) and their `stats()` entry (1), all item 6's. The lead decides.
 
 ### Rev 8.2 (2026-10-18): the panel's review of step 1
 

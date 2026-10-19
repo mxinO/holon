@@ -13,7 +13,11 @@ Where checkpoints are taken is a list of policies, from the deployment's plugin 
   - `answer:<k>`: a tentative checkpoint at each aligned position a decode row reaches; the request keeps its last k
     (`keep_tentative`; the core drops older ones). It needs a state tier (the engine refuses it without one);
   - a `Ref` (`name@major`) to a unit with `next(view) -> (at, tentative) | None`: the next position after
-    `view.num_computed` it checkpoints at, and whether that payload is tentative. Plugins implement it structurally.
+    `view.num_computed` it checkpoints at, and whether that payload is tentative; and `keep` (optional, default 0),
+    the tentative payloads a request keeps for it. Positions a unit without `keep` calls tentative are not (nothing
+    would keep them). Plugins implement it structurally.
+  The kind keeps a request's last `keep_tentative` = the largest `keep` of its policies (the engine refuses one above
+  0 without a state tier).
 - `recurrent.checkpoints`: units of the checkpoint pool (default: one per request slot; 0: no checkpoints, no cuts).
   With a state tier the pool only stages payloads between a step and its commit (D7).
 
@@ -77,7 +81,7 @@ class Recurrent:
         opts = ctx.options.get("plugins", {})
         self.policies = [self._policy(name.strip(), ctx) for name in
                          str(opts.get("recurrent.policy", "prompt_end")).split(",") if name.strip()]
-        self.keep_tentative = max((p.keep for p in self.policies if isinstance(p, Answer)), default=0)
+        self.keep_tentative = max((getattr(p, "keep", 0) for p in self.policies), default=0)
         units = int(opts.get("recurrent.checkpoints", ctx.options["max_seqs"]))
         self.payloads = ctx.pool(f"{spec.name}.checkpoints", unit_bytes=spec.shape.unit_bytes, segments=spec.segments,
                                  pref_units=units)
@@ -101,7 +105,8 @@ class Recurrent:
         """The earliest position after the computed tokens (or `start`) a policy names, and whether its payload is
         tentative (only when every policy naming it says so)."""
         view = seq if start is None else _At(seq, start)
-        found = [r for p in self.policies if (r := p.next(view)) is not None and r[0] > view.num_computed]
+        found = [(r[0], r[1] and getattr(p, "keep", 0) > 0) for p in self.policies
+                 if (r := p.next(view)) is not None and r[0] > view.num_computed]
         if not found:
             return None
         at = min(a for a, _ in found)

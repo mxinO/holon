@@ -5,7 +5,7 @@ and the mixed NVMe factor under "reads go first" (c).
         --nvme-dir <node-local dir> [--l0 <l0 summary json>] [--clock-screen <clock_check json>]
 
 Writes `evidence/k2_state_copy_<tag>_<date>.json` (L0 summary, a, b) and `evidence/k2_mixed_nvme_<tag>_<date>.json`
-(c). The copies go through the engine's plugin set (`kernels.expert_io`'s `state_copy@1`), as std.state_tier binds
+(c). The copies go through the engine's plugin set (`kernels.state_copy`'s `state_copy@1`), as std.state_tier binds
 them; pools are the core's `memory.Pool` (host pools: `platform.host_memory`, mapped).
 """
 from __future__ import annotations

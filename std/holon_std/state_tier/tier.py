@@ -12,13 +12,15 @@ calls received and the step hooks, never of when a copy lands. Pages are evicted
 `loaded`. Page stores follow `host.admit` (`publish`: every block; `hit:<n>`: blocks matched n times; `evict`: only at
 eviction); payload stores always succeed, evicting other payloads (the attach-time floor makes that possible).
 
-Fences. A host unit keeps the fences that must pass before it is reused: the store that wrote it and every reader's
-(`loaded`'s `done`, or the load itself when no step read it); a reuse waits for them all on the copy stream. A device
-read of a host unit follows the store that wrote it: a load's copy waits for it, and a payload load's fence is it.
+Fences. A host unit keeps what must pass before it is reused, one fence per ordered source (a later one implies the
+earlier): the latest store that wrote it, the latest step that read it (`loaded`'s `done`) and the latest load copy
+that read it no step waited for; a reuse waits for them on the copy stream. A device read of a host unit follows the
+store that wrote it: a load's copy waits for it, and a payload load's fence is it.
 
-The clock. Virtual seconds advanced at each launch by `step_cost` = a + b·tokens + c·rows; a load is due once the H2D
-lane has carried its bytes at `h2d_rate` after what was queued before it (a load of at most `stall_bytes` is due at
-once: its step waits), and `loaded` brings the clock up to the due time it waited for."""
+The clock. Virtual seconds advanced at each launch by `step_cost` = a + b·tokens + c·rows. Page loads queue on the
+H2D lane at `h2d_rate`; a load is due once the lane has carried its pages (one of at most `stall_bytes` is due at once,
+its step waits, but it still occupies the lane), and `loaded` brings the clock up to the due time it waited for.
+Payload loads take no lane (their adopt reads the host copy in-step): due at once."""
 from __future__ import annotations
 
 import collections
@@ -53,6 +55,7 @@ class HostLoad:
     payloads: dict
     keys: list                  # the copies it reads: (key, None) pages, (key, spec) payloads
     reads: list                 # the host units it reads: (pool, unit)
+    copy: Any                   # its copy into device units (page loads), else None
     told: set = dataclasses.field(default_factory=set)
 
     def wait(self) -> None:
@@ -62,6 +65,9 @@ class HostLoad:
     def synchronize(self) -> None:
         for f in self.fences:
             f.synchronize()
+
+    def done(self) -> bool:
+        return all(f.done() for f in self.fences)
 
 
 class HostTier:
@@ -78,14 +84,15 @@ class HostTier:
         self.h2d_rate, self.stall = float(get("h2d_rate", "43e9")), nbytes(get("stall_bytes", "32MiB"))
         self.t = self.lane = 0.0
         self.copies: dict[tuple[int, str | None], dict[str, list[int]]] = {}   # (key, None | spec) -> pool -> units
+        self.specs: dict[int, set[str | None]] = {}                  # key -> its copies' (None: pages, spec)
         self.lru: dict[bool, collections.OrderedDict] = {True: collections.OrderedDict(),   # pages, payloads:
                                                          False: collections.OrderedDict()}  # least recent first
         self.parent: dict[int, int | None] = {}
-        self.kids: dict[int, set[int]] = collections.defaultdict(set)   # key -> its children with a page copy
+        self.kids: dict[int | None, set[int]] = {}                   # key -> its children with a page copy
         self.loading: collections.Counter = collections.Counter()    # copy -> loads not yet `loaded`
         self.reading: collections.Counter = collections.Counter()    # host unit -> loads not yet `loaded`
         self.limbo: set[tuple[str, int]] = set()                     # released while still read
-        self.fences: dict[tuple[str, int], list] = collections.defaultdict(list)
+        self.fences: dict[tuple[str, int], dict[str, Any]] = collections.defaultdict(dict)   # -> source -> fence
         self.written: dict[tuple[str, int], Any] = {}
         self.hits: collections.Counter = collections.Counter()
         self.tentative: set[tuple[int, str]] = set()
@@ -100,7 +107,8 @@ class HostTier:
         self.pages = set(pages)
         share = {k: self.host_bytes * self.page_share * p.unit_bytes / sum(q.unit_bytes for q in pages.values())
                  for k, p in pages.items()}
-        share |= {k: self.host_bytes * (1 - self.page_share if pages else 1) / len(payloads) for k in payloads}
+        share |= {k: self.host_bytes * (1 - self.page_share if pages else 1) * p.unit_bytes / sum(
+            q.unit_bytes for q in payloads.values()) for k, p in payloads.items()}     # as many units per spec
         floor = {k: ctx.max_seqs * (ctx.max_model_len // self.block) * max(1, self.block // self.page_size)
                  for k in pages} | {k: ctx.max_seqs + 1 for k in payloads}
         short = {k: (int(share[k] // p.unit_bytes), floor[k]) for k, p in self.dev.items()
@@ -151,57 +159,64 @@ class HostTier:
                     self.counts["payload_stores"] += 1
                 (self.tentative.add if p.tentative else self.tentative.discard)(k)
                 accepted.add(k)
-        reuse = [f for name, _, hu in jobs for u in hu for f in self.fences.pop((name, u), [])]
-        fence = self.d2h.run(lambda: self._copy(jobs, "d2h"), [*after, *reuse])
+        reuse = {id(f): f for name, _, hu in jobs for u in hu for f in self.fences.pop((name, u), {}).values()}
+        fence = self.d2h.run(lambda: self._copy(jobs, "d2h"), [*after, *reuse.values()])
         for name, _, hu in jobs:
             for u in hu:
-                self.written[name, u] = fence
-                self.fences[name, u].append(fence)
+                self.written[name, u] = self.fences[name, u]["store"] = fence
         return accepted, fence
 
     def load(self, keys, units, payloads, after):
-        jobs, reads, out, copies, nbytes_ = [], [], {}, [], 0
+        jobs, reads, out, copies, pages = [], [], {}, [], 0
         for i, key in enumerate(keys):
             host = self.copies[key, None]                 # a copy the core loads is one the tier still holds
             for spec, us in units.items():
                 per = len(us) // len(keys)
                 jobs.append((spec, us[i * per:(i + 1) * per], host[spec]))
-                nbytes_ += per * self.dev[spec].unit_bytes
+                pages += per * self.dev[spec].unit_bytes
             copies.append((key, None))
         for key, spec in payloads:
             (pool, hu), = self.copies[key, spec].items()
             out[key, spec] = Payload(tuple(hu), self.host[pool].name)
             reads += [(pool, u) for u in hu]
-            nbytes_ += len(hu) * self.dev[pool].unit_bytes
+            self.counts["payload_load_bytes"] += len(hu) * self.dev[pool].unit_bytes
             copies.append((key, spec))
         reads += [(name, u) for name, _, hu in jobs for u in hu]
         written = list({id(f): f for r in reads if (f := self.written.get(r)) is not None}.values())
-        fences = [self.h2d.run(lambda: self._copy(jobs, "h2d"), [*after, *written])] if jobs else written
+        copy = self.h2d.run(lambda: self._copy(jobs, "h2d"), [*after, *written]) if jobs else None
         self.loading.update(copies)
         self.reading.update(reads)
         for k in copies:
             self.lru[k[1] is None].move_to_end(k)
-        if nbytes_ > self.stall:                              # D4: queued on the H2D lane behind earlier loads
-            self.lane = max(self.lane, self.t) + nbytes_ / self.h2d_rate
+        if pages:                                             # D4: queued on the H2D lane behind earlier loads
+            self.lane = max(self.lane, self.t) + pages / self.h2d_rate
         self.counts["loads"] += 1
         self.counts["loaded_blocks"] += len(keys)
-        self.counts["load_bytes"] += nbytes_
-        return HostLoad(fences, self.lane if nbytes_ > self.stall else self.t, out, copies, reads)
+        self.counts["load_bytes"] += pages
+        return HostLoad([copy] if copy is not None else written, self.lane if pages > self.stall else self.t, out,
+                        copies, reads, copy)
 
     def loaded(self, load: HostLoad, done) -> None:
         kind = "abandoned" if done is None else "fence"
         if kind in load.told:
             raise RuntimeError(f"state_tier: loaded(…, {kind}) twice for one load")
         if not load.told:
-            self.loading.subtract(load.keys)
+            for counter, items in ((self.loading, load.keys), (self.reading, load.reads)):
+                for x in items:
+                    counter[x] -= 1
+                    if not counter[x]:
+                        del counter[x]
             for r in load.reads:
-                self.reading[r] -= 1
-                if not self.reading[r] and r in self.limbo:
+                if r in self.limbo and not self.reading[r]:
                     self.limbo.discard(r)
                     self.free[r[0]].append(r[1])
+            if done is not None and done is not load and load.copy is not None:   # a step read it: was it in?
+                self.counts["late_loads"] += not load.copy.done()
         load.told.add(kind)
-        for r in load.reads:
-            self.fences[r].append(done if done is not None else load)
+        step = done is not None and done is not load
+        if (fence := done if step else load.copy) is not None:       # a payload load's fences: the stores, held
+            for r in load.reads:
+                self.fences[r]["step" if step else "load"] = fence
         self.t = max(self.t, load.due)
         self.counts[kind] += 1
 
@@ -219,9 +234,10 @@ class HostTier:
 
     def drop(self, keys, spec: str | None = None) -> None:
         for key in keys:
-            for k in [(key, s) for s in [None, *self._specs(key)] if spec is None or s == spec]:
-                if k in self.copies:
-                    self._release(k)
+            for s in [s for s in self.specs.get(key, ()) if spec is None or s == spec]:
+                self._release((key, s))
+            if spec is None:
+                self.hits.pop(key, None)
 
     def dropped(self):
         out, self.pending = self.pending, []
@@ -230,6 +246,7 @@ class HostTier:
     def clear(self) -> None:
         for k in list(self.copies):
             self._release(k)
+        self.hits.clear()
 
     def close(self) -> None:
         pass
@@ -249,15 +266,13 @@ class HostTier:
             return self.hits[key] >= self.min_hits
         return evicting or self.admit == "publish"
 
-    def _specs(self, key: int) -> list[str]:
-        return [s for (k, s) in self.copies if k == key and s is not None]
-
     def _add(self, k, host: dict[str, list[int]], parent: int | None) -> None:
         self.copies[k] = host
+        self.specs.setdefault(k[0], set()).add(k[1])
         self.lru[k[1] is None][k] = None
         if k[1] is None:
             self.parent[k[0]] = parent
-            self.kids[parent].add(k[0])           # also before its parent's (write-back stores leaves first)
+            self.kids.setdefault(parent, set()).add(k[0])   # also before its parent's (write-back stores leaves first)
 
     def _room(self, need: dict[str, int], pages: bool) -> dict[str, list[int]] | None:
         """Host units for one copy, evicting its kind's least recently used copies (pages: leaves only) that no load
@@ -281,8 +296,15 @@ class HostTier:
                     self.free[name].append(u)
         del self.lru[k[1] is None][k]
         self.tentative.discard(k)
+        self.specs[k[0]].discard(k[1])
+        if not self.specs[k[0]]:
+            del self.specs[k[0]]
         if k[1] is None:
-            self.kids[self.parent.pop(k[0])].discard(k[0])
+            parent = self.parent.pop(k[0])
+            self.kids[parent].discard(k[0])
+            if not self.kids[parent]:
+                del self.kids[parent]
+            self.hits.pop(k[0], None)
 
     def _copy(self, jobs: list, direction: str) -> None:
         """Every job's units, row by row: one op call per device pool (D10)."""

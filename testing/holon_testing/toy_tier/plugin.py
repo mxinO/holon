@@ -52,6 +52,9 @@ class ToyLoad:
     def synchronize(self) -> None:
         self.fence.synchronize()
 
+    def done(self) -> bool:
+        return self.fence.done()
+
 
 class ToyTier:
     def __init__(self, options: dict) -> None:

@@ -3,7 +3,7 @@
 ## Question
 
 Step 2 builds std.state_tier's copier on `state_copy@1` (`docs/v1-kv-tiers.md` D10). This directory answers:
-- whether `kernels.expert_io`'s providers meet the contract (L0);
+- whether the `state_copy@1` providers meet the contract (L0);
 - three numbers the rev 8.2 design leaves to step 2, on the RTX 5080 desktop:
 
 | # | Measure | Feeds |
@@ -12,7 +12,10 @@ Step 2 builds std.state_tier's copier on `state_copy@1` (`docs/v1-kv-tiers.md` D
 | b | The host cost per load of a fragmented 16K / 32K load of the 27B: the row-list build in numpy as the tier does it, plus the provider's submit | the engine-loop cost of a resume |
 | c | The mixed NVMe factor under rev 8.2's dispatch ("reads go first", D11): one writer, two or three readers, 557,056 B units, O_DIRECT, 50/50 and 75/25 read shares by bytes | D4's mixed charge |
 
-## The providers (`plugins/holon_plugins/kernels/expert_io`)
+## The providers (`plugins/holon_plugins/kernels/state_copy`)
+
+Measured while they lived in `kernels.expert_io`; they moved unchanged to `kernels.state_copy` afterwards
+(docs/v1-kv-tiers.md rev 8.3). The commands below name the new plugin.
 
 The provider is `state_copy@1` with facts `direction`, `chunk` and an optional `copy`. It is supported when
 `chunk % 16 == 0`.
@@ -49,7 +52,7 @@ The provider is `state_copy@1` with facts `direction`, `chunk` and an optional `
 - **Desktop.** The RTX 5080 desktop: one allocation and one CUDA 13.0 container, with a uv-synced venv of the K
   worktree. `kernels.expert_io` and `kernels.ggml_cuda` were prebuilt for sm_120 in the fresh container. The clock
   screen (`bench/clock_check.py`, rtx-5080 lock) was steady: SM p10 / p50 2,640 / 2,647 MHz, no slowdown samples.
-- **L0** (`plugins/tests/test_expert_io.py::test_state_copy_moves_the_listed_rows_exactly`).
+- **L0** (now `plugins/tests/test_state_copy.py::test_state_copy_moves_the_listed_rows_exactly`).
   - Copies go between a device pool and a mapped host pool's device view, through the engine's plugin selection, on
     a stream of their own.
   - Each cell copies half of 128 rows (16 for 3 MiB chunks), scattered plus a run of three rows consecutive in both
@@ -86,8 +89,8 @@ The provider is `state_copy@1` with facts `direction`, `chunk` and an optional `
   - The test files were removed (`test_file_removed: true`).
 
 ```bash
-python -m holon_plugins.kernels.expert_io.prebuild --sm 120
-python -m pytest plugins/tests/test_expert_io.py -k state_copy
+python -m holon_plugins.kernels.state_copy.prebuild --sm 120
+python -m pytest plugins/tests/test_state_copy.py
 cd spikes/k2_tiers
 CUDA_VISIBLE_DEVICES=0 python bench.py --tag rtx-5080 --only b,a,c --model <Qwen3.8-27B-UD-IQ3_S.gguf> \
     --lock <repo>/plans/unsloth/Qwen3.8-27B-GGUF/<file>/rtx-5080/cu130-torch2.11/10.lock \

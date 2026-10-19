@@ -10,16 +10,21 @@
   with at least `MIN_LOADS` loads and a block promoted into place. Runs whose `cached_tokens` differ are not compared
   (the hit sets differ: a capacity question, judged by `bounded`).
 - **Null test** (hybrids). Tiers off, `prompt_end` checkpoints only, a checkpoint pool of 4 vs 16 units on the
-  back-to-back trace: equal `cached_tokens` and identical outputs (the pool's size alone moves no byte).
+  back-to-back trace: identical outputs (the pool's size alone moves no byte); refused, as invariance, when
+  `cached_tokens` differ (a state memory too small for 16 units also shrinks the paged pools).
 - **Run-identity.** A concurrent closed-loop trace (every session sends its next turn, and a regenerate of its last
   prompt, once its requests are done; the first requests found waiting for their loads are aborted and sent again a
   few steps later) on fresh engines, each with the tier's copies
   delayed: on the GPU an unseeded sleep before each copy on the tier's streams, on the CPU `holon_judge.deferred`
   with a seed per run. Step lists (slots and query tokens per step) and outputs must be identical, with at least
-  `MIN_CONCURRENT_LOADS` loads.
+  `MIN_CONCURRENT_LOADS` loads. Two variants open a plant's window: `reuse` aborts the gated request with the most
+  loading blocks and sends a prefill-heavy request in the same round instead of resending it (the late copy may meet
+  units the newcomer takes), and `fork` sends a fork (the finished prompt plus 128 tokens) in place of each
+  regenerate (its adopt of the prompt's checkpoint runs in a long prefill step).
 - **Audit**, after every step of every run: resident blocks prefix-closed, each block's resident-children count
   (`kids`), every paged unit's references equal to its holders (requests and the index), admissions refused only with
-  no slot free, and the tier's own page drops leaf first (no child keeps a page copy below a dropped one).
+  no slot free, the tier's own page drops leaf first (no child keeps a page copy below a dropped one), and every
+  payload filed at its position (the block it ends: (depth + 1) × block, the position the kind published it at).
 
 Planted bugs (`planted.TIER_PLANTS`) run the same checks; each counts how often it fired and the checks count how
 many outcomes it changed against the clean runs (requests, steps, audit findings the clean runs do not have), each of
@@ -43,6 +48,7 @@ from . import deferred
 from .bounded import Trace
 
 MIN_LOADS = 8                    # tier invariance: loads of the tested run (acceptance 2)
+LOOPS = {"identity": {}, "reuse": {"heavy": True}, "fork": {"fork": 128}}   # run-identity's closed-loop variants
 MIN_CONCURRENT_LOADS = 32        # run-identity: loads per run
 STALL_STEPS = 2000               # steps in a row without a token: the engine makes no progress
 
@@ -72,10 +78,10 @@ class _Sleepy:
 
 
 class Deferred:
-    """The CPU: `holon_judge.deferred`'s streams (a copy lands 0–2 launches late unless a launch waits for it)."""
+    """The CPU: `holon_judge.deferred`'s streams (a copy lands 0 … `most` launches late unless waited for)."""
 
-    def __init__(self, seed: int) -> None:
-        self.streams = deferred.Deferred(seed, most=2)
+    def __init__(self, seed: int, most: int = 2) -> None:
+        self.streams = deferred.Deferred(seed, most=most)
 
     def wrap(self, make: Callable[[], object]) -> object:
         return self.streams.stream()
@@ -132,6 +138,15 @@ class Probe:
                 self.findings["admission refused with a slot free"] += 1
             return ok
         state.admit = admitting
+        register = state.register
+
+        def registering(seq, spec, at, payload, done=None):
+            bare = [e for key in state.chain.get(seq.slot, ()) if (e := index.get(key)) is not None and
+                    spec not in e.payloads]
+            register(seq, spec, at, payload, done)
+            if any(spec in e.payloads and (e.depth + 1) * index.block != at for e in bare):   # where it was filed
+                self.findings["a payload filed away from its position"] += 1
+        state.register = registering
         if streams is not None:                      # a launch went by: copies due by now land
             launching = state.launching
 
@@ -308,15 +323,23 @@ def serial(probe: Probe, trace: Trace, interleaved: bool, filler: list[list[list
     return out
 
 
-def closed_loop(probe: Probe, trace: Trace, aborts: int = 8, resend: int = 3) -> list[tuple]:
+def closed_loop(probe: Probe, trace: Trace, aborts: int = 8, resend: int = 3, heavy: bool = False,
+                fork: int = 0) -> list[tuple]:
     """Every session at once; once a session's requests are done it sends its next turn (history resent plus its
     chunk) together with a regenerate of its previous prompt cut to whole blocks (the two share blocks the tier may
-    hold: one promotes what the other recomputes). The first `aborts` requests found waiting for their loads are
-    aborted and sent again `resend` steps later (their loading blocks meanwhile held by the index alone, so
-    evictable). Every output delta in order, as (steps scheduled by then, session, kind, turn, tokens)."""
+    hold: one promotes what the other recomputes), or with `fork`, a fork: that prompt plus `fork` random tokens. The
+    first `aborts` requests found waiting for their loads are aborted and sent again `resend` steps later (their
+    loading blocks meanwhile held by the index alone, so evictable); with `heavy`, the one with the most loading blocks
+    is aborted and not sent again, and a prefill-heavy request (session -1: random tokens, as long as a filler) is sent
+    in the same round. Every output delta in order, as (steps scheduled by then, session, kind, turn, tokens)."""
     engine, block, sessions = probe.engine, probe.engine.state.index.block, range(len(trace.chunks))
-    answers: dict[int, dict] = {s: {} for s in sessions}
+    answers: dict[int, dict] = {s: {} for s in [*sessions, -1]}
     live, left, later, tick, trail = {}, [aborts], [], [0], []
+    heavies = _random(trace, aborts, len(fillers(probe, trace)[0][0]), seed=3) if heavy else []
+
+    def loading(rid) -> int:
+        return sum(len(engine.state.index.loads.get(id(load), (None, ()))[1]) for q in engine._live[rid]
+                   for load in engine.state.waits.get(q.slot, ()))
 
     def send(s: int, kind: str, t: int, prompt: list[int]) -> None:
         answers[s][kind, t] = []
@@ -331,8 +354,13 @@ def closed_loop(probe: Probe, trace: Trace, aborts: int = 8, resend: int = 3) ->
         if left[0] and gated:
             left[0] -= 1
             probe.counts["aborted_gated"] += 1
-            engine.abort(gated[0])
-            later.append((tick[0] + resend, live.pop(gated[0])))
+            rid = max(gated, key=loading) if heavy else gated[0]
+            engine.abort(rid)
+            if heavy:
+                live.pop(rid)
+                send(-1, "heavy", left[0], heavies[left[0]])
+            else:
+                later.append((tick[0] + resend, live.pop(rid)))
 
     def take(d):
         if d.rid not in live:
@@ -344,7 +372,8 @@ def closed_loop(probe: Probe, trace: Trace, aborts: int = 8, resend: int = 3) ->
             return
         del live[d.rid]
         if kind == "turn" and t + 1 < len(trace.chunks[s]):
-            send(s, "regenerate", t + 1, prompt[:len(prompt) // block * block])
+            send(s, *(("fork", t + 1, prompt + _random(trace, 1, fork, seed=100 * s + t)[0]) if fork else
+                      ("regenerate", t + 1, prompt[:len(prompt) // block * block])))
             send(s, "turn", t + 1, prompt + answers[s][kind, t] + trace.chunks[s][t + 1])
     for s in sessions:
         send(s, "turn", 0, list(trace.system) + trace.chunks[s][0])
@@ -416,31 +445,38 @@ def invariance(build: Build, trace: Trace, streams: Callable[[], object]) -> dic
 
 
 def null_test(build: Build, trace: Trace) -> dict:
-    """Tiers off, `prompt_end` only, a checkpoint pool of 4 vs 16 units, back to back (hybrids only)."""
-    runs, findings = {}, collections.Counter()
+    """Tiers off, `prompt_end` only, a checkpoint pool of 4 vs 16 units, back to back (hybrids only): outputs identical
+    where the hits are. Refused, as invariance, when `cached_tokens` differ: the ledger gives paged state what the
+    checkpoint pool does not take, so a state memory too small for 16 units moves page evictions too (`paged_units`)."""
+    runs, paged, findings = {}, {}, collections.Counter()
+
+    def body(p):
+        return serial(p, trace, interleaved=False), {n: q.capacity for n, q in p.engine.ledger.pools.items()
+                                                     if q.tokens_per_unit}
     for units in (4, 16):
-        runs[units], probe = _run(build, None, lambda p: serial(p, trace, interleaved=False), tier=False,
-                                  options={"recurrent.policy": "prompt_end", "recurrent.checkpoints": str(units)})
+        (runs[units], paged[units]), probe = _run(build, None, body, tier=False, options={
+            "recurrent.policy": "prompt_end", "recurrent.checkpoints": str(units)})
         findings += probe.findings
     cached = sorted(_key(k) for k in runs[4] if runs[4][k][1] != runs[16][k][1])
     outputs = sorted(_key(k) for k in runs[4] if runs[4][k][0] != runs[16][k][0])
-    failures = ([f"cached_tokens differ for {len(cached)} requests (first {cached[:3]})"] if cached else []) + (
-        [f"outputs differ for {len(outputs)} requests (first {outputs[:3]})"] if outputs else [])
+    failures = ([f"cached_tokens differ for {len(cached)} requests (first {cached[:3]}): not compared"] if cached else
+                [f"outputs differ for {len(outputs)} requests (first {outputs[:3]})"] if outputs else [])
     failures += [f"audit: {k} ({n} steps)" for k, n in findings.items()]
-    return {"requests": len(runs[4]), "tokens_saved": sum(c or 0 for _, c in runs[4].values()),
-            "cached_differ": cached, "outputs_differ": outputs, "verdict": "fail" if failures else "pass",
-            "failures": failures}
+    return {"requests": len(runs[4]), "tokens_saved": sum(c or 0 for _, c in runs[4].values()), "paged_units": paged,
+            "cached_differ": cached, "outputs_differ": outputs, "failures": failures,
+            "verdict": "refused" if cached and not findings else "fail" if failures else "pass"}
 
 
 def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs: int = 3, clean: dict | None = None,
-             **overrides) -> dict:
+             loop: dict | None = None, **overrides) -> dict:
     """Run-identity over `runs` fresh engines, `streams(i)` the i-th run's copy streams. With `clean` (a clean
     report: a plant's runs), each run is also held to the clean outputs on the clean schedule: up to the first step
     that differs, a run's outputs must be the clean run's (the same steps compute the same bytes); a schedule that
-    moves (`moved`) is reported, and judged only by the runs' identity with each other."""
+    moves (`moved`) is reported, and judged only by the runs' identity with each other. `loop`: closed_loop's
+    variant (`LOOPS`)."""
     got = []
     for i in range(runs):
-        trail, probe = _run(build, streams(i), lambda p: closed_loop(p, trace), **overrides)
+        trail, probe = _run(build, streams(i), lambda p: closed_loop(p, trace, **(loop or {})), **overrides)
         got.append((probe.steps, trail, dict(probe.counts), probe.findings))
     diffs, changed, moved = [], 0, []
     for i, (steps, trail, _, _) in enumerate(got[1:], start=1):

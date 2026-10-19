@@ -199,6 +199,9 @@ class Event:
         if self._event is not None:
             torch.cuda.current_stream().wait_event(self._event)
 
+    def done(self) -> bool:
+        return self._event is None or self._event.query()
+
 
 class Stream:
     """A stream beside the step's (the core's copies); off CUDA, work runs at once, in order."""

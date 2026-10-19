@@ -1474,13 +1474,14 @@ def _load_no_after(fired):
     return [mock.patch.object(PrefixIndex, "promote", planted)]
 
 
-# Tier plants (docs/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail). Each
-# yields its counter (`fired`). The SSD ones (read_unwaited, free_on_ticket, torn_manifest, stale_slot and the
-# delayed-I/O-thread cells) are step 3's.
+# Tier plants (docs/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail; `reuse`
+# and `fork` are run-identity's closed-loop variants, `tiers.LOOPS`). Each yields its counter (`fired`).
+# tentative-shift is also a policy plant: here the audit (a payload filed away from its position) catches it. The SSD
+# ones (read_unwaited, free_on_ticket, torn_manifest, stale_slot and the delayed-I/O-thread cells) are step 3's.
 TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tuple[str, ...]]] = {
     name: (_tier(name, make), checks) for name, make, checks in [
         ("promote-unwaited", _promote_unwaited, ("invariance", "identity")),
-        ("load-reuse-unwaited", _freed_unwaited(loading=True), ("invariance", "identity")),
+        ("load-reuse-unwaited", _freed_unwaited(loading=True), ("identity", "reuse")),
         ("waiter-unref", _waiter_unref, ("identity",)),
         ("load-before-store", _load_before_store, ("invariance", "identity")),
         ("store-unwaited", _freed_unwaited(loading=False), ("invariance", "identity")),
@@ -1490,10 +1491,11 @@ TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tu
         ("promote-preempts", _promote_preempts, ("identity",)),
         ("kids-any-level", _kids_any_level, ("identity",)),
         ("interior-drop", _interior_drop, ("identity",)),
-        ("adopt-source-reused", _adopt_source_reused, ("invariance", "identity")),
-        ("adopt-source-reused-join", _adopt_source_reused_join, ("invariance", "identity")),
+        ("adopt-source-reused", _adopt_source_reused, ("identity", "fork")),
+        ("adopt-source-reused-join", _adopt_source_reused_join, ("identity", "fork")),
         ("store-early", _store_early, ("invariance", "identity")),
-        ("load-no-after", _load_no_after, ("invariance", "identity"))]}
+        ("load-no-after", _load_no_after, ("invariance", "identity")),
+        ("tentative-shift", _filed_early(lambda seq, at, p, kind: p.tentative), ("identity",))]}
 # The checkpoint policies' plants (`bounded --policies --plant`): a `branch` payload (at the request's branch point)
 # or an `answer` one (tentative) filed one block early.
 POLICY_PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager]] = {

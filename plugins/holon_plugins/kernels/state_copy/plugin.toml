@@ -1,0 +1,20 @@
+[plugin]
+name = "kernels.state_copy"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]
+provides = ["kernel.state_copy@1"]
+requires = ["op.state_copy@1"]
+
+[properties]
+numerics = "exact"
+
+[support]
+platforms = ["cuda"]
+
+[build]
+module = "prebuild"

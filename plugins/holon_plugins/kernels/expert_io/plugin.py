@@ -3,10 +3,8 @@ expert id, slots for every entry), its variants `moe_resolve.lfu@1` (F11) and `m
 first updates the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather
 of missed units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1,
 docs/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
-rows, the CPU's output rows into the experts' output). And std.state_tier's `state_copy@1` (row copies between device
-pools and mapped host pools, docs/v1-kv-tiers.md D10): loads by the SM gather, stores by one `cudaMemcpyBatchAsync`
-(K step 0's K-M2 and K-M3), either path by the fact `copy`. Op contracts: std.moe.kernels, std.state_tier.kernels, and
-the placement plugins' (placement.lfu, placement.lru). A variant's `lend`
+rows, the CPU's output rows into the experts' output). Op contracts: std.moe.kernels, and the placement plugins'
+(placement.lfu, placement.lru). A variant's `lend`
 runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
 plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
 variant ships its own CUDA provider, docs/v1-offload.md D3).
@@ -23,8 +21,6 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
-STATE_COPY = "state_copy"
-COPY = {"h2d": "sm", "d2h": "dma"}         # state_copy@1's default path per direction (fact `copy` overrides)
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
@@ -133,18 +129,6 @@ class MoeTiers:
                        owner, capacity, heat, io, moves, n_moves)
 
 
-class StateCopy:
-    """`state_copy@1`. "sm": the SM gather (8 CTAs, no copy engine, so an engine step's own copies never queue behind a
-    load: K-M3's head-of-line blocking); "dma": one batch of copy-engine DMA (faster for stores into host memory)."""
-
-    def __init__(self, modules: Modules, ctx, *, direction: str, chunk: int, copy: str | None = None) -> None:
-        lib = modules(ctx.fingerprint.sm)
-        self.copy = lib.state_copy_sm if (copy or COPY[direction]) == "sm" else lib.state_copy_dma
-
-    def __call__(self, src: torch.Tensor, src_rows: torch.Tensor, dst: torch.Tensor, dst_rows: torch.Tensor) -> None:
-        self.copy(src, src_rows, dst, dst_rows)
-
-
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
@@ -168,11 +152,6 @@ class Plugin:
             op=PREFETCH, provider="kernels.expert_io", impl=functools.partial(ExpertPrefetch, modules),
             requires=requires, props=frozenset({"deterministic"}), priority=10,
             supports=lambda f: f["copy"] in ("sm", "dma")))
-        regs.kernels.add(STATE_COPY, KernelSpec(
-            op=STATE_COPY, provider="kernels.expert_io", impl=functools.partial(StateCopy, modules), requires=requires,
-            props=frozenset({"deterministic"}), priority=10,
-            supports=lambda f: f["chunk"] % 16 == 0 and f["direction"] in COPY and f.get("copy", "sm") in ("sm", "dma"),
-        ))
         regs.kernels.add(FETCH, KernelSpec(
             op=FETCH, provider="kernels.expert_io", impl=functools.partial(ExpertFetch, modules), requires=requires,
             supports=lambda f: f["unit_bytes"] % 16 == 0, props=props, priority=10))

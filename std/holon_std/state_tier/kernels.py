@@ -1,5 +1,5 @@
 """The op contract std.state_tier owns (docs/v1-kv-tiers.md D10). Its oracle is in `reference.py`; kernels come from
-kernel plugins (`kernels.expert_io`); without one the tier runs the oracle, which is correct on every device, only
+kernel plugins (`kernels.state_copy`); without one the tier runs the oracle, which is correct on every device, only
 slower.
 
 - `state_copy@1`: instance `(src [Rs, C] uint8, src_rows [n] int64, dst [Rd, C] uint8, dst_rows [n] int64) -> None`:

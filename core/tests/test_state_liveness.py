@@ -39,6 +39,9 @@ class _Done:
 
     synchronize = wait
 
+    def done(self) -> bool:
+        return True
+
 
 class _ShallowFirst:
     """An eviction policy keeping the first two blocks of every chain while others can go (a root pin)."""

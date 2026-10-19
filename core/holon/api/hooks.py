@@ -152,8 +152,9 @@ class Rewindable(Protocol):
 
 class StateTierPlugin(Protocol):
     def build(self, ctx: BuildCtx) -> StateTier:
-        """On the `tier` slot's plugin: the engine's tier, built with the engine (it may bind kernel sites; its
-        storage comes at `attach`). Required for that slot."""
+        """On the `tier` slot's plugin: the engine's tier, built with the engine (it may bind kernel sites here; at
+        `attach` only kernels without a workspace, which is planned before the pools materialize; its storage comes at
+        `attach`). Required for that slot."""
 
 
 class EvictionPolicyPlugin(Protocol):
