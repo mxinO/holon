@@ -1,7 +1,9 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building: steps 0–2 done** (§2.1–§2.2, §7.1). Step 0 tripped no decision rule;
-C-M6's fallback is taken (J against T up to 64 tokens).
+Status: **design rev 6 (2026-10-18); building: steps 0–3, 3b and 3c done** (§2.1–§2.2, §7.1). Step 0 tripped no
+decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
+keep rule on both lock classes** (reverted by the rule; the revert waits for the lead), and the 5090 4K row stays under
+its bar with every item (O2).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -813,6 +815,76 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
     - D2 realised 80–90% of §2.2's band at its low end: 5090 −17 / −142 ms at 4K / 32K against −19…−22 /
       −155…−179; 5080 −41 / −335 against −46…−52 / −368…−411.
     - The 5080 4K row already meets its bar.
+
+**Step 3 (D5, D3, D4; 2026-10-19).**
+- **What landed.**
+  - D5 (`aded4cd`): `qlinear`'s mmq calls take whole `CHUNK`s up to `call_rows` (the step budget), its workspace sized
+    for them; the judge's fixup plants (`qlinear-partials-bf16` near, `qlinear-large-no-fixup` far) through an mmq plant
+    hook that counts the fixed-up tiles.
+  - D3 (`0488063`): `moe_router@1` serves calls of ≥ `CHUNK` rows with its own router GEMM (f32 fma chains over fixed
+    parts of hidden from x's bf16 values, the parts added in order: a row's logits do not depend on the call), then
+    `moe_topk`'s selection; plants `router-prefill-bf16-logits` (near) and `router-prefill-short-k` (far).
+  - D4 (`996eaf6`): SwiGLU in mmq's store for merged gate/up stacks where `mmq_glu` holds (the stack's rows in whole
+    128-row tiles, MMA layouts): a tile loads gate rows in its upper half and the matching up rows (`split` rows on) in
+    its lower half, the halves meet in shared memory, and the store applies `swiglu_f32`'s expression; an mmq
+    instance of its own; every loader takes `split`. N5 plants the unfused path.
+  - `e9048de`: B-dec's threshold (16; 64 on sm_89). The merges: step 3c (`2dc93fc`: IQ1_M's loader takes `split`),
+    step 3b (`26fb532`: D10's `scratch` has no gate/up output where D4's store applies).
+- **L2 on the A5000** (Tier B prefill floor, `--max-step-tokens 4096 --max-seqs 4`; the predictions above held):
+  - D5 passes (ΔPPL +0.019…+0.371% against a ≤ 0.539% budget; KL p99 ≤ 9.75e-2). `qlinear-partials-bf16` passes
+    (24 fixed-up calls planted): L2 is blind at that scale. `qlinear-large-no-fixup` fails (NaN logits in the chat
+    class, top-1 87.0%).
+  - D3 passes (ΔPPL +0.004…+0.370% against ≤ 0.538%). `router-prefill-bf16-logits` passes (3,408 chunks planted): L2
+    is blind at that scale. `router-prefill-short-k` fails (top-1 93.4%, KL p99 0.957, |ΔPPL| 1.80%).
+  - Bounded `--chunked 512`: the D5 tree and the integrated tree (`af3322d`) pass (top-1 98.46% / 98.35%, KL p99
+    4.26e-2 / 4.58e-2).
+- **Bitwise** (D4, and steps 3b / 3c on top): the `prompt_logprobs` hashes of the D3 tree (D4's parent), the D4 tree
+  and the integrated tree are identical at 1,027 / 4,096 tokens, each run-identical ×2: sm_86 resident and natural;
+  sm_120: the 5090 resident, the 5080 natural fit (at the A/B pin, below) and capped F5b. Against main they differ, as D3 / D5 are bounded.
+- **L0 and sanitizers at the integrated tree** (`af3322d`):
+  - sm_86: 295 passed, 8 skipped; memcheck 0 errors; the skip-tail mutation fails 62 tests, the forced fixup aborts.
+  - sm_120: 5090 and 5080: 308 passed, 1 skipped (IQ1_M and Q2_0 included: B-dev5's sm_120 half holds); memcheck 0 errors; racecheck 0 hazards; the skip-tail mutation fails 68 tests, the forced fixup aborts.
+- **Per call.**
+  - D4, gate/up at layers 0 / 6, fused store over mmq + SwiGLU (5090): 0.999 at 64 tokens, 0.97 at 512, 0.93 at 1,024,
+    0.88 at 2,048, 0.84–0.85 at 4,096 (the fused call is no slower than mmq alone); the A5000 0.95 at 4,096.
+  - D3, the router at 512 rows (5090): E = 128, hidden 2,048: 28.4 → 17.3 µs; E = 512, hidden 2,560: 85.3 → 66.3 µs.
+- **Time to the first token, each item alone** (§5.2's method with C2's warm-up; 3 interleaved rounds, arm order
+  reversed on odd rounds; the fixed prompt set; no repetition flagged; each cell the median over rounds of the round
+  geomeans, speed over the previous tree; sd over rounds):
+
+  | Card, configuration | D5 (over step 2) | D3 (over D5) | D4 (over D3) | 3b + 3c (over D4) | all (over step 2) |
+  |---|---|---|---|---|---|
+  | 5090 resident 1K | 1.026 (0.001) | 1.003 (0.004) | 1.022 (0.003) | 0.999 (0.004) | 1.054 |
+  | 5090 resident 4K | 1.054 (0.001) | 1.005 (0.004) | 1.052 (0.003) | 0.997 (0.003) | 1.114 |
+  | 5090 resident 32K | 1.023 (0.003) | 1.002 (0.003) | 1.023 (0.004) | 0.998 (0.003) | 1.046 |
+  | 5080 natural fit 1K | 1.000 (0.008) | 1.000 (0.002) | 1.003 (0.001) | 0.999 (0.000) | 1.002 |
+  | 5080 natural fit 4K | 1.029 (0.001) | 1.004 (0.000) | 1.054 (0.001) | 0.998 (0.001) | 1.087 |
+  | 5080 natural fit 32K | 1.013 (0.000) | 1.002 (0.000) | 1.023 (0.000) | 0.999 (0.000) | 1.037 |
+
+  - Medians (ms), step 2 → the integrated tree: 5090 55.0 → 52.1, 196.0 → 176.2, 3,404 → 3,249; 5080 206.3 → 205.9,
+    365.8 → 336.4, 6,502 → 6,269. The 5080 arms pin the re-fill's counts (below), the same for every tree.
+  - **D5 is kept** (≥ max(0.5%, 3 sd) on every 4K / 32K row). **D3 fails M0.7's rule on every row of both lock
+    classes** (best: +0.51% at 5090 4K with sd 0.42%; 5080 4K +0.42% with sd 0.04%, under 0.5%): by the rule it is
+    reverted. It is not reverted here: the decision goes to the lead (stopped and reported).
+  - 3b + 3c cost 0.1–0.3% (consistent on the 5080, sd ≤ 0.1%): D10's per-pass `scratch` in place of the persistent
+    workspace is the only change on these paths.
+  - Against step 0's FreeToken medians (a different session; step 4 measures both in one): 5090 1K 0.971×, 4K
+    0.972×, 32K 0.997× gated (0.930× default); 5080 1K 1.82×, 4K 1.13×, 32K 1.000× gated (0.954× default). The 5090 4K
+    row is under its bar with every item (O2, as C1 predicted), and both 32K gated rows sit at their bars.
+- **The 5080 re-fill (C4; scratch, not committed).** The natural fill at the A/B's flags (`max_model_len` 33,792, one
+  seat) gives gate/up / down Q6_K / down Q4_K cache slots: step 2 3,223 / 1,694 / 1,529; D5 3,217 / 1,688 / 1,529; D3
+  and D4 3,229 / 1,700 / 1,529; the integrated tree 3,235 / 1,706 / 1,529 (52.65% of the experts, against the lock's
+  3,236 / 1,618 / 1,618, 52.7%). D5's workspace costs 6 gate/up and 6 down slots; D3 returns 12 + 12, D10 6 + 6.
+  The A/B pins the minimum, 3,217 / 1,688 / 1,529, which starts and steps on every tree.
+- **Step 3b's perf check** (RTX 5080, the integrated tree at that pin; `spikes/moe_prefill/tail.py`, `coldest` and
+  `tail` alternating ×2; 3 prompts after a warm-up, then 64 decode tokens): the tail is gate/up's last 252 slots.
+  - Every borrowing step is a ring step with `ring_ok` (4K: 3 of 3; 32K: 24 of 24) and no `SHORT`, in both modes.
+  - Prefill: 4K 336.4 ms both; 32K 6,268 ms (`tail`) against 6,276 (`coldest`).
+  - Miss bytes per decode token: 4K 120.9 against 121.3 MB; 32K 57.5 against 58.6 MB.
+- **Suite time** (acceptance 7; `test_ggml_cuda_moe.py` + `test_ggml_cuda.py` + `test_moe_engine.py`, sm_86, two
+  interleaved runs each on the shared host): main 387.5 / 331.6 s (278 tests), the integrated tree 383.9 / 371.5 s
+  (331 tests: the two new types, D2–D4's and 3b's tests). ≈ +5% at the medians, inside the host's run-to-run spread
+  (56 s on main).
 
 **Step 3b (D10, D11).**
 - **What landed.**
