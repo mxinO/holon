@@ -9,6 +9,8 @@ whose kernels are attributed to regions by NVTX ranges pushed around each engine
   length, or one per length: the fixed prompt set of docs/v1-moe-prefill.md §5.2 is `--reps 5 5 3` at 1K / 4K / 32K),
   then with `--profile` one more request per length between
   cudaProfilerStart/Stop, each inside an NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
+- Allocator work per timed prompt (both engines): `torch.cuda.memory_stats`' `num_alloc_retries`, `num_device_alloc`
+  and `num_device_free` deltas.
 - Memory (Holon): the KV tokens the paged pools hold at startup, the startup profile's peak (the worst step's
   allocation peak plus the graphs' pool, what `state_memory` subtracts), and over the timed requests the allocation
   peak and the reserved bytes beyond what was allocated after startup. `--ctx` / `--max-seqs` set the engine's
@@ -163,11 +165,19 @@ def worker(a: argparse.Namespace) -> None:
     base, startup_peak = torch.cuda.memory_allocated(), torch.cuda.max_memory_allocated()
     torch.cuda.reset_peak_memory_stats()
     times = {str(c): [] for c in a.lengths}
+    # the caching allocator's work per timed prompt: retries (a full free-and-retry), device allocations and frees
+    # (cudaMalloc / cudaFree, or expandable segments' maps): steady state is zero (docs/v1-moe-prefill.md §10 L3-2)
+    counters = ("num_alloc_retries", "num_device_alloc", "num_device_free")
+    alloc = {str(c): {k: [] for k in counters} for c in a.lengths}
     for rep in range(max(reps.values())):
         for c in a.lengths:
             if rep < reps[c]:
                 torch.cuda.synchronize()
+                before = torch.cuda.memory_stats()
                 times[str(c)].append(request(prompt(corpus, c, rep)))
+                after = torch.cuda.memory_stats()
+                for k in counters:
+                    alloc[str(c)][k].append(after.get(k, 0) - before.get(k, 0))
     torch.cuda.synchronize()
     if memory:
         memory |= {"allocated_after_start_gib": round(base / 2**30, 3),
@@ -182,7 +192,8 @@ def worker(a: argparse.Namespace) -> None:
             torch.cuda.synchronize()
             torch.cuda.nvtx.range_pop()
         torch.cuda.profiler.stop()
-    out = {c: {"s": [round(t, 4) for t in ts], "tok_s": [round(int(c) / t, 1) for t in ts]} for c, ts in times.items()}
+    out = {c: {"s": [round(t, 4) for t in ts], "tok_s": [round(int(c) / t, 1) for t in ts], "alloc": alloc[c]}
+           for c, ts in times.items()}
     out["peak_alloc_gib"] = round(max(startup_peak, torch.cuda.max_memory_allocated()) / 2**30, 2)
     out["memory"] = memory
     close()

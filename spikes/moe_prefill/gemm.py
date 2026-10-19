@@ -106,6 +106,7 @@ def j_check(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
     from holon_plugins.kernels.ggml_cuda import extension
     from holon_plugins.kernels.ggml_cuda import plugin as ggml
     lib = extension.load(torch.cuda.get_device_capability()[0] * 10 + torch.cuda.get_device_capability()[1])
+    jt = ggml.IDS_J_TOKENS.get(torch.cuda.get_device_capability()[0] * 10 + torch.cuda.get_device_capability()[1], ggml.IDS_J_TOKENS_DEFAULT)   # D2's batched-decode rule
     k, slots, prec = a.top_k, e + a.top_k, ggml.PREC["q8_1"]
     errors = torch.zeros(1, dtype=torch.int32, device=dev)
     rows = []
@@ -115,7 +116,7 @@ def j_check(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
         def call(x, ids, typ=typ, flat=flat, n_in=n_in, n_out=n_out):
             y = torch.empty(len(ids), k, n_out, device=dev)
             ws = torch.empty(lib.workspace_bytes_id(0, n_in, len(ids), k, slots), dtype=torch.uint8, device=dev)
-            lib.mmq_id(typ, prec, flat, x, ids, y, ws, slots, errors)
+            lib.mmq_id(typ, prec, flat, x, ids, y, ws, slots, errors, jt)
             return y
         for t in a.tokens:
             ids = routing(t, e, k, a.skew, gen).to(dev)
@@ -134,6 +135,7 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
     from holon_plugins.kernels.ggml_cuda import extension
     from holon_plugins.kernels.ggml_cuda import plugin as ggml
     lib = extension.load(torch.cuda.get_device_capability()[0] * 10 + torch.cuda.get_device_capability()[1])
+    jt = ggml.IDS_J_TOKENS.get(torch.cuda.get_device_capability()[0] * 10 + torch.cuda.get_device_capability()[1], ggml.IDS_J_TOKENS_DEFAULT)   # D2's batched-decode rule
     k, slots, prec = a.top_k, e + a.top_k, ggml.PREC["q8_1"]
     errors = torch.zeros(1, dtype=torch.int32, device=dev)
     rows = []
@@ -149,16 +151,16 @@ def holon(a, stacks: dict, e: int, gen: torch.Generator, dev) -> list[dict]:
             if t * k <= ggml.ID_PAIRS:
                 y = torch.empty(t, k, n_out, device=dev)
                 ws = torch.empty(lib.workspace_bytes_id(0, n_in, t, k, slots), dtype=torch.uint8, device=dev)
-                mmq_id = timed(functools.partial(lib.mmq_id, typ, prec, flat, x, ids, y, ws, slots, errors), a.iters)
+                mmq_id = timed(functools.partial(lib.mmq_id, typ, prec, flat, x, ids, y, ws, slots, errors, jt), a.iters)
                 if name == "gate_up" and hasattr(lib, "mmq_id_glu"):          # D4: SwiGLU in mmq's store
                     yg = torch.empty(t, k, n_out // 2, device=dev)
 
                     def unfused():
-                        lib.mmq_id(typ, prec, flat, x, ids, y, ws, slots, errors)
+                        lib.mmq_id(typ, prec, flat, x, ids, y, ws, slots, errors, jt)
                         lib.swiglu(y, yg, None, None, None)
                     glu = {"glu_unfused_ms": round(timed(unfused, a.iters), 4),
                            "glu_fused_ms": round(timed(functools.partial(lib.mmq_id_glu, typ, prec, flat, x, ids, yg, ws,
-                                                                         slots, errors, None, None), a.iters), 4)}
+                                                                         slots, errors, None, None, jt), a.iters), 4)}
                 del y, ws
             xd = torch.randn(t * k, n_in, device=dev, dtype=torch.bfloat16)
             yd = torch.empty(t * k, n_out, device=dev)

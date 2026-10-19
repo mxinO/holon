@@ -59,6 +59,7 @@ def main() -> None:
     dev = torch.device("cuda")
     major, minor = torch.cuda.get_device_capability()
     lib = extension.load(10 * major + minor)
+    jt = ggml.IDS_J_TOKENS.get(torch.cuda.get_device_capability()[0] * 10 + torch.cuda.get_device_capability()[1], ggml.IDS_J_TOKENS_DEFAULT)   # D2's batched-decode rule
     e, k, n_in, n_out = a.experts, a.top_k, a.hidden, 2 * a.inter
     slots, prec = e + k, ggml.PREC["q8_1"]
     errors = torch.zeros(1, dtype=torch.int32, device=dev)
@@ -77,7 +78,7 @@ def main() -> None:
         for t in a.tokens:
             for name in a.types:
                 x, ids, y, ws = work[t]
-                fn = functools.partial(lib.mmq_id, ggml.TYPES[name], prec, stacks[name], x, ids, y, ws, slots, errors)
+                fn = functools.partial(lib.mmq_id, ggml.TYPES[name], prec, stacks[name], x, ids, y, ws, slots, errors, jt)
                 ms[name, t].append(timed(fn, a.iters))
     assert int(errors.item()) == 0, int(errors.item())
     rows = []
