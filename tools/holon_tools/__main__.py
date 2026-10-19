@@ -149,6 +149,16 @@ def _tune(a: argparse.Namespace) -> int:
             f"{record['cpu_split']['gain']:+.1%}: " + (f"taken ({extra})" if extra else "F5a stays"))
         base = dataclasses.replace(base, plugin_options=base.plugin_options | extra)
 
+    if a.clock:                                      # the tier's clock, on the settings the lock will run
+        if not base.slots.get("tier"):
+            raise SystemExit("--clock: the engine flags must bind a tier (--slots tier=std.state_tier)")
+        samples = tune.step_times(base)
+        cost = ",".join(f"{v:.6g}" for v in tune.clock(samples))
+        record["clock"] = {"samples": samples, "step_cost": cost}
+        print("clock: " + ", ".join(f"{t} tok × {r} rows {s * 1e3:.1f} ms" for t, r, s in samples)
+              + f"; step_cost {cost}")
+        base = dataclasses.replace(base, plugin_options=base.plugin_options | {"state_tier.step_cost": cost})
+
     def rate(trial: dict[str, str]) -> float:
         return tune.decode_rate(dataclasses.replace(base, kernels=trial), a.batch, tokens=a.tokens)
 
@@ -203,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--batch", type=int, default=8)
             p.add_argument("--tokens", type=int, default=64)
             p.add_argument("--cpu-split", action="store_true", help="decide F5b (an offloaded MoE's CPU share) first")
+            p.add_argument("--clock", action="store_true",
+                           help="fit a tier's state_tier.step_cost to this engine's timed steps first")
             p.add_argument("--no-lock", action="store_true", help="measure and report only; write no lock")
             p.add_argument("--json", help="write the measured rates here")
 

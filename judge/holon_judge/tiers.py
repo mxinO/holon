@@ -64,11 +64,12 @@ STALL_STEPS = 2000               # steps in a row without a token: the engine ma
 
 # -- the tier's copy streams under test ---------------------------------------------------------------------------
 class Delayed:
-    """The GPU: an unseeded sleep of up to `most` seconds on the tier's stream before each of its copies."""
+    """The GPU: an unseeded sleep of up to `most` seconds on the tier's stream before each of its copies, and before
+    each level I/O job (`io_sleep`: instead, 0 or `io_sleep` seconds, even odds: a job lands at once or steps late)."""
 
-    def __init__(self, most: float) -> None:
+    def __init__(self, most: float, io_sleep: float | None = None) -> None:
         self.cycles = int(most * torch.cuda.get_device_properties(torch.cuda.current_device()).clock_rate * 1e3)
-        self.rng, self.io_delay = random.SystemRandom(), most
+        self.rng, self.io_delay, self.io_sleep = random.SystemRandom(), most, io_sleep
 
     def wrap(self, make: Callable[[], object]) -> object:
         return _Sleepy(make(), self)
@@ -154,8 +155,12 @@ def copy_streams(streams: Delayed | Deferred | None) -> Iterator[None]:
 
     submit, rng = IoThreads.submit, random.SystemRandom()
 
-    def delayed(self, fn, deps=(), read=False):              # an unseeded sleep before each level I/O job
-        return submit(self, fn, [lambda: time.sleep(rng.uniform(0, streams.io_delay)), *deps], read)
+    def pause() -> None:                                     # an unseeded sleep before each level I/O job
+        bimodal = getattr(streams, "io_sleep", None)
+        time.sleep(rng.choice((0.0, bimodal)) if bimodal else rng.uniform(0, streams.io_delay))
+
+    def delayed(self, fn, deps=(), read=False):
+        return submit(self, fn, [pause, *deps], read)
     with contextlib.ExitStack() as stack:
         stack.enter_context(mock.patch.object(Engine, "_tier_ctx", planted))
         stack.enter_context(mock.patch.object(IoThreads, "submit", delayed))
@@ -597,7 +602,8 @@ def restart(build: Build, trace: Trace, streams: Callable[[int], object], root: 
 
 def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs: int = 3, clean: dict | None = None,
              loop: dict | None = None, **overrides) -> dict:
-    """Run-identity over `runs` fresh engines, `streams(i)` the i-th run's copy streams. With `clean` (a clean
+    """Run-identity over `runs` fresh engines, `streams(i)` the i-th run's copy streams: the same steps, outputs and
+    counts (all but wall times: the tier's decisions, where copies sit, are I/O-timing free, D4). With `clean` (a clean
     report: a plant's runs), each run is also held to the clean outputs on the clean schedule: up to the first step
     that differs, a run's outputs must be the clean run's (the same steps compute the same bytes); a schedule that
     moves (`moved`) is reported, and judged only by the runs' identity with each other. `loop`: closed_loop's
@@ -608,10 +614,15 @@ def identity(build: Build, trace: Trace, streams: Callable[[int], object], runs:
         got.append((probe.steps, trail, dict(probe.counts), probe.findings))
         leveled = probe.leveled
     diffs, changed, moved = [], 0, []
+    decided = [{k: v for k, v in c.items() if not k.endswith("_s")} for _, _, c, _ in got]   # all but wall times
     for i, (steps, trail, _, _) in enumerate(got[1:], start=1):
         if steps != got[0][0] or trail != got[0][1]:
             changed += 1
             diffs.append(f"run {i} differs from run 0: {_differs(got[0], (steps, trail))}")
+        elif moved_counts := sorted(k for k in decided[0].keys() | decided[i].keys()
+                                    if decided[0].get(k) != decided[i].get(k)):
+            changed += 1                     # the tier decided differently (where copies sit) under other I/O timing
+            diffs.append(f"run {i} differs from run 0: the tier's counts {moved_counts}")
     for i, (steps, trail, _, _) in enumerate(got if clean else []):
         base_steps, base_trail = clean["_runs"][0][:2]
         same = next((k for k, (a, b) in enumerate(zip(steps, base_steps, strict=False)) if a != b),
@@ -673,5 +684,6 @@ def judge_plant(name: str, plant: Callable[[], contextlib.AbstractContextManager
 
 def strip(report: dict) -> dict:
     """A report without its raw runs (for JSON)."""
-    return {k: strip(v) if isinstance(v, dict) else v for k, v in report.items() if not k.startswith("_")}
+    return {k: strip(v) if isinstance(v, dict) else v for k, v in report.items()
+            if not (isinstance(k, str) and k.startswith("_"))}            # (the null test's pools are keyed by units)
 

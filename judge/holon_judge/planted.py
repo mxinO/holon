@@ -1116,6 +1116,10 @@ def _landed(fence) -> bool:
     `HostLoad`, the toy tier's)."""
     if hasattr(fence, "ran"):
         return fence.ran
+    if callable(getattr(fence, "done", None)):              # a level I/O job's ticket
+        return fence.done()
+    if getattr(fence, "level", False):                     # a load reading the level: its copy, once enqueued
+        return fence.enqueued and (fence.copy is None or _landed(fence.copy))
     if isinstance(getattr(fence, "fences", None), list):
         return all(_landed(f) for f in fence.fences)
     if hasattr(fence, "fence"):
@@ -1485,6 +1489,24 @@ def _read_unwaited(fired):
     return [mock.patch.object(HostTier, "_after_reads", planted)]
 
 
+def _store_no_after(fired):
+    """A page store's D2H is not ordered after the last launched step (which may still write the published
+    blocks). Fired: stores issued with that step not landed."""
+    from holon.core.prefix import PrefixIndex
+
+    store = PrefixIndex.store
+
+    def planted(self, entries, evicting=False):
+        last = self.last
+        fired["fired"] += last is not None and not _landed(last)
+        self.last = None
+        try:
+            return store(self, entries, evicting)
+        finally:
+            self.last = last
+    return [mock.patch.object(PrefixIndex, "store", planted)]
+
+
 def _slot_reuse_unwaited(fired):
     """std.state_tier writes a copy into a level slot without waiting for the last job of the copy that held it (a
     write still running there lands after, over it). Fired: writes into such slots."""
@@ -1601,6 +1623,7 @@ TIER_PLANTS: dict[str, tuple[Callable[[], contextlib.AbstractContextManager], tu
         ("read-unwaited", _read_unwaited, ("invariance", "identity")),
         ("free-on-ticket", _free_on_ticket, ("identity",)),
         ("slot-reuse-unwaited", _slot_reuse_unwaited, ("identity",)),
+        ("store-no-after", _store_no_after, ("invariance", "identity")),
         ("torn-manifest", _torn_manifest(checked=True), ("restart",)),
         ("torn-manifest-unchecked", _torn_manifest(checked=False), ("restart",)),
         ("stale-slot", _stale_slot, ("restart",))]}

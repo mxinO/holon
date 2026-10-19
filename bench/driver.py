@@ -75,7 +75,7 @@ def replay(backend: Backend, sessions: list[dict], salt: str,
     clients: dict[int, list[int]] = {}                # client -> its sessions, served round-robin
     for s in sessions:
         clients.setdefault(s.get("client"), []).append(s["id"])
-    clients.pop(None)
+    clients.pop(None, None)                          # sessions without a client run on their own
     ready = [(s["arrival"], s["id"], 0, []) for s in sessions if "after" not in s     # (release, sid, turn, history)
              and ("client" not in s or clients[s["client"]][0] == s["id"])]
     followers = {s["after"]: s for s in sessions if "after" in s}

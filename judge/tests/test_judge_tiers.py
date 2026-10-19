@@ -105,6 +105,7 @@ def test_the_clean_checks_pass(model, request):
         assert inv["tested"]["payload_loads"] > 0
         null = tiers.null_test(request.getfixturevalue(model).build, request.getfixturevalue(model).trace)
         assert null["verdict"] == "pass" and null["tokens_saved"] > 0
+        assert tiers.strip(null)["paged_units"] == null["paged_units"]      # keyed by units: the report's JSON
     else:                                     # the host level at its floor evicts, leaf first
         assert clean["tight"]["verdict"] == "pass" and clean["tight"]["counts"][0].get("tier.evicted_pages", 0) > 0
 

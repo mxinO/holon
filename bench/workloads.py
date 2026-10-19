@@ -167,6 +167,8 @@ def main() -> None:
     # sessions of 11-17 turns (≥ 200 requests), run by two clients one after another, so two overlap on every card;
     # replayed on natural text (--corpus) at Claude Code's temperature.
     traces["claude_code"] = lanes(agent(16, 0.025, args.seed, system=16384, later=(10, 16)), 2, args.seed)
+    # Milestone K's 3e: each session's first two turns (its first request's TTFT, `branch` on vs off).
+    traces["claude_code_2turns"] = [s | {"turns": s["turns"][:2]} for s in traces["claude_code"]]
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
     # Milestone K's gate trace: 12 parked conversations over 4 clients (docs/v1-kv-tiers.md §8).

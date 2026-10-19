@@ -430,7 +430,7 @@ def _tiers(a: argparse.Namespace) -> int:
     trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions, turns=a.turns,
                                        system_len=a.system_len, chunk_len=a.chunk_len, max_tokens=a.max_tokens)
     cpu = config.device == "cpu"
-    streams = (lambda i=0: tiers.Deferred(i)) if cpu else (lambda i=0: tiers.Delayed(a.delay))
+    streams = (lambda i=0: tiers.Deferred(i)) if cpu else (lambda i=0: tiers.Delayed(a.delay, a.io_sleep))
     clean, wall = {}, {}
     for name, check in (("invariance", lambda: tiers.invariance(build, trace, streams)),
                         ("identity", lambda: tiers.identity(build, trace, streams, a.runs, options=options,
@@ -665,6 +665,7 @@ def main(argv: list[str] | None = None) -> int:
     ti.add_argument("--runs", type=int, default=3, help="run-identity: fresh engines")
     ti.add_argument("--plant-runs", type=int, default=3, help="run-identity runs per plant (at least 2)")
     ti.add_argument("--delay", type=float, default=0.05, help="GPU: the longest sleep before a tier copy (seconds)")
+    ti.add_argument("--io-sleep", type=float, help="GPU: each level I/O job sleeps 0 or this long first (seconds)")
     ti.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     ti.add_argument("--plant", nargs="+", choices=sorted(TIER_PLANTS), help="tier plants to judge (each must be "
                     "caught, and change nothing with tiers off)")

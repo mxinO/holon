@@ -9,6 +9,9 @@ are tuned: a decode benchmark says nothing about prefill kernels.
 benchmark: the CPU worker's thread count at half the misses, then the share at that count (M2 found plan[n] ≈ n / 2 and
 flat within ±1, so a share of the misses per miss count is the table); the lock takes the best only if it gains at
 least `GAIN` over F5a, with the CPU tier it was measured on.
+
+`clock` fits a tier's `state_tier.step_cost` (docs/v1-kv-tiers.md D4: a + b·tokens + c·rows seconds per step) to timed
+steps of this lock's engine: prefill steps of one row at several chunk sizes and decode steps at every row count.
 """
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ import statistics
 import time
 from collections.abc import Callable, Mapping
 
+import numpy as np
 from holon.api import SamplingParams, parse_versioned
 from holon.core.engine import Engine, EngineConfig
 
@@ -102,3 +106,39 @@ def decode_rate(config: EngineConfig, batch: int = 8, prompt_len: int = 32, toke
         engine.generate(prompts, params)
         times.append(time.perf_counter() - t0)
     return batch * tokens / statistics.median(times)
+
+
+def step_times(config: EngineConfig, chunks: tuple[int, ...] = (256, 512, 1024, 2048), decode: int = 32,
+               repeats: int = 3) -> list[tuple[int, int, float]]:
+    """(tokens, rows, seconds) per step: a prefill of each of `chunks` (capped by the step budget) as one row, and a
+    decode step at each row count up to `max_seqs`, timed as `decode` more tokens; medians of `repeats` after a
+    warm-up. Prompts are fresh, so nothing hits the prefix cache."""
+    gc.collect()
+    engine = Engine(config)
+    gen = random.Random(0)
+
+    def prompt(n: int) -> list[int]:
+        return [gen.randrange(engine.spec.vocab) for _ in range(n)]
+
+    def timed(prompts: list[list[int]], tokens: int) -> float:
+        t0 = time.perf_counter()
+        engine.generate(prompts, SamplingParams(temperature=0.0, max_tokens=tokens, ignore_eos=True))
+        return time.perf_counter() - t0
+    timed([prompt(8)], 4)
+    out = []
+    for n in sorted({min(c, config.max_step_tokens) for c in chunks}):
+        out.append((n, 1, statistics.median(timed([prompt(n)], 1) for _ in range(repeats))))
+    for rows in range(1, config.max_seqs + 1):
+        step = statistics.median((timed([prompt(32) for _ in range(rows)], decode + 1)
+                                  - timed([prompt(32) for _ in range(rows)], 1)) / decode for _ in range(repeats))
+        out.append((rows, rows, step))
+    engine.close()
+    return out
+
+
+def clock(samples: list[tuple[int, int, float]]) -> tuple[float, float, float]:
+    """`step_cost`'s a, b, c: the fit of seconds to a + b·tokens + c·rows least in relative error (a plain fit lets
+    the long prefill steps decide and misses decode steps by half), each at least 0."""
+    x = np.array([[1.0, t, r] for t, r, _ in samples])
+    y = np.array([s for _, _, s in samples])
+    return tuple(max(0.0, float(v)) for v in np.linalg.lstsq(x / y[:, None], np.ones_like(y), rcond=None)[0])
