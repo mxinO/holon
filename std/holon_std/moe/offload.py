@@ -103,8 +103,6 @@ class Offload(nn.Module):
         return stack
 
     def bind_kernels(self, ctx) -> None:
-        if self._resolver is not None:                # once (the layer's MoE binds its store first)
-            return
         self._resolver = self.store.resolver(self.layer)
         self.store.tail_bytes.append(self._tail_bytes)           # read at materialize, its stacks' kernels bound
         if self._cpu is not None:
@@ -143,8 +141,7 @@ class Offload(nn.Module):
 
     def pass_buffers(self, tokens: int) -> tuple | None:
         """D10's buffers of a pass of `tokens` in the step's lent tail (D11: (gate/up's out, down's out, scratch),
-        None for a kernel that takes none); None where the step lends no tail (the pass takes the layer's persistent
-        scratch)."""
+        None for a kernel that takes none); None where the step lends no tail (the pass allocates them)."""
         tail = self.store.tail_view()
         if tail is None:
             return None
@@ -152,7 +149,7 @@ class Offload(nn.Module):
         for nbytes in self._layout(tokens):
             views.append(tail[at:at + nbytes] if nbytes else None)
             at += -(-nbytes // ALIGN) * ALIGN
-        if at > len(tail):                       # past the bound configuration's pass (never): the fallback instead
+        if at > len(tail):                       # past the bound configuration's pass (never): allocated instead
             return None
         scratch, *outs = views
         k = self.store.top_k
@@ -199,8 +196,6 @@ class ArenaExperts(nn.Module):
         return self._facts(ctx)["layout"]
 
     def bind_kernels(self, ctx) -> None:
-        if self._kernel is not None:                  # once (the layer's MoE binds its stacks first)
-            return
         facts = self._facts(ctx) | {"out": self.out, "glu": self.glu, "slots": self.cls.max_slots}
         self._kernel = bind_experts(ctx, facts, kernels.LINEAR_EXPERTS_ARENA, "std.moe.arena")
         self._store.watch(self._kernel.errors)

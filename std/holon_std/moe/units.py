@@ -120,10 +120,10 @@ class ExpertLinear(nn.Module):
         return merged
 
     def bind_kernels(self, ctx) -> None:
-        # once (the layer's MoE binds its stacks first): `prepare` replaces the layout the facts are read from, so a
-        # second bind would select for its output
-        if self.weight is None or self._kernel is not None:       # merged away, or bound
+        if self.weight is None:                                   # merged away
             return
+        # once: `prepare` replaces the layout the facts are read from (a second bind would select for its output)
+        assert self._kernel is None, "ExpertLinear.bind_kernels runs once"
         self._kernel = bind_experts(ctx, self.facts(ctx))
         if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/m06-lowp.md D4
             q = QTensor(self.layout, (self.experts, self.out_features, self.in_features), self.parts)
@@ -160,15 +160,13 @@ def passed(kernel, **given) -> dict:
     return {k: v for k, v in given.items() if v is not None} if takes_buffers(kernel) else {}
 
 
-def pass_scratch(ctx, stacks) -> torch.Tensor | None:
-    """D10's fallback where no tail is lent: one persistent workspace of the larger of the stacks' kernels'
-    `scratch_bytes` at their largest pass (`pass_rows`), for both calls of every pass and step (gate/up, then down; the
-    layers of one size share it: passes run one at a time on the stream); None where none needs any."""
-    rows = pass_rows(stacks)
-    nbytes = max((s.kernel.scratch_bytes(rows) for s in stacks if takes_buffers(s.kernel)), default=0)
+def pass_scratch(stacks, tokens: int, device: torch.device) -> torch.Tensor | None:
+    """D10's allocating fallback, where no tail is lent: one buffer for a pass of `tokens`, of the larger of its
+    stacks' kernels' `scratch_bytes`, for both calls (gate/up, then down); None where none needs any."""
+    nbytes = max((s.kernel.scratch_bytes(tokens) for s in stacks if takes_buffers(s.kernel)), default=0)
     if not nbytes:
         return None
-    buf = ctx.workspace(f"std.moe.scratch[{nbytes}]", nbytes + ALIGN - 1)
+    buf = torch.empty(nbytes + ALIGN - 1, dtype=torch.uint8, device=device)
     at = -buf.data_ptr() % ALIGN
     return buf[at:at + nbytes]
 
@@ -227,7 +225,7 @@ class Resident:
 
     @staticmethod
     def pass_buffers(tokens: int) -> None:
-        """No lent memory: the pass takes D10's fallback (the layer's persistent scratch)."""
+        """No lent memory: the pass allocates its buffers (D10's fallback)."""
         return None
 
     @staticmethod
@@ -265,7 +263,6 @@ class MoE(nn.Module):
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
         self._down: ExpertLinear | None = None
-        self._scratch: torch.Tensor | None = None       # D10's fallback (`bind_kernels`)
         dtype = _dtype(ctx.dtype)
         topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}
         site = f"std.moe[experts={experts},top_k={top_k}]"
@@ -286,14 +283,6 @@ class MoE(nn.Module):
             raise ValueError(f"layer {self.layer}: gate and up experts must share a layout to merge "
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
         self._down = self._store.stack(self.down)
-
-    def bind_kernels(self, ctx) -> None:
-        """Its store's and stacks' kernels in the core's order (before the core reaches them: the stacks size D10's
-        fallback; each binds once), then the fallback."""
-        for unit in (self._store, self._gate_up, self._down):
-            if hasattr(unit, "bind_kernels"):
-                unit.bind_kernels(ctx)
-        self._scratch = pass_scratch(ctx, (self._gate_up, self._down))
 
     def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """(weights, ids, the gate/up input) for up to CHUNK tokens: the router's route_prepare where it has one, else
@@ -331,8 +320,9 @@ class MoE(nn.Module):
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a, xc)
-            # D10's buffers: the step's lent tail (D11), else the persistent scratch for both calls
-            out_h, out_y, scratch = self._store.pass_buffers(b - a) or (None, None, self._scratch)
+            # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
+            out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
+                None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
             h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
             y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
             if residual is None:

@@ -118,9 +118,9 @@ def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, mo
     the smaller of the two stacks' `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in
     whole chunks, and the step's last partial chunk is a pass of its own, so every row's chunk and kernel path are a
     chunk's: calls of 512 then 88 rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up
-    then down in every layer. D10's fallback: one persistent `scratch` of the larger of the kernels' `scratch_bytes` at
-    their `pass_rows`, passed to both calls of every pass and step (no `out`: no lent memory); a kernel that does not
-    define `scratch_bytes` is called without the keywords."""
+    then down in every layer. D10's fallback: each pass allocates one `scratch` of the larger of its kernels'
+    `scratch_bytes`, passed to both calls (no `out`: no lent memory); a kernel that does not define `scratch_bytes` is
+    called without the keywords."""
     checkpoint, _ = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}}
@@ -144,9 +144,9 @@ def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, mo
         assert sizes == [n for n in passes for _ in range(2)] * layers, (tokens, sizes)
         if hasattr(LinearExperts, "scratch_bytes"):
             moe = next(m for m in engine.executor.model.modules() if hasattr(m, "_down"))
-            want = max(s.kernel.scratch_bytes(4096) for s in (moe._gate_up, moe._down))
+            want = [max(moe._gate_up.kernel.scratch_bytes(n), moe._down.kernel.scratch_bytes(n)) for n in passes]
             assert [kw for kw, _ in buffers] == [["scratch"]] * len(buffers)
-            assert {b[1] for b in buffers} == {(moe._scratch.data_ptr(), want)}       # one buffer, every call
+            assert [b[1][1] for b in buffers[::2]] == want * layers and buffers[::2] == buffers[1::2]   # one a pass
             monkeypatch.delattr(LinearExperts, "scratch_bytes")       # the last prompt: a kernel without buffers
         else:
             assert buffers == [([], None)] * len(buffers)
