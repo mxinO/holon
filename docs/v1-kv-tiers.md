@@ -387,9 +387,10 @@ Plugin kinds:
     the background write lane is busy (`wlane > now`) is charged at `read_rate` times the measured read-side factor
     (`read_beside`: reads beside background writes ran at 0.79–0.92 of their pure rate; 0.80 at 3 threads), not the
     throughput factor, and pushes the background lane back by its charged time; dependent writes stay as built.
-    The SSD level's defaults are one 3-thread set (the default `io_threads`) from K-M4 and step 3 on the RTX 5080's
-    drive: read 2.55 GB/s, write 1.77 GB/s (sustained), mixed 0.74, `read_beside` 0.80; **tune measures them per
-    host** (`ssd.read`, `ssd.write`, `ssd.mixed`, `ssd.read_beside`).
+    The SSD level's defaults are one 3-thread set (the default `io_threads`) on the RTX 5080's drive: read 2.24 GB/s
+    (step 4's `tune --ssd-rates`; rev 8.5 had 2.55), write 1.77 GB/s (sustained, K-M4), mixed 0.74, `read_beside`
+    0.80; **tune measures them per host** (`tune --ssd-rates`: `ssd.read`, `ssd.write`, `ssd.mixed`,
+    `ssd.read_beside`).
   - Every load is charged to the lanes, promote-into-place loads included, though those are never gated (A-7).
   - A load of at most `stall_bytes` is due now: the step waits for it. It still occupies the lanes (rev 8.3).
   - A payload load takes no H2D lane: the kind's adopt reads the host copy inside the step (rev 8.3).
@@ -1453,6 +1454,67 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### Step 4: the panel's review (2026-10-19)
+
+| Finding | Disposition | Where |
+|---|---|---|
+| A-1 + B-2: a checkpoint pool without a tier still fell to 0 units silently (the lead's decision) | fixed | a set `recurrent.checkpoints` is required (`min_units`: the ledger refuses the start); the unset default stays best effort, takes no checkpoints and cuts nothing at 0 units, and says so once per pool on stderr, at the first request (the kind learns its final units only after the engine's last materialize). Post-tag std follow-up ("After the tag"); `test_without_checkpoint_units_nothing_is_reused` |
+| A-1 (doc) | done | the tier's staging refusal at `max_seqs` + 1 is a floor, not a guarantee against drops ("After the tag") |
+| B-1: `tune --ssd-rates` used a 27B unit | fixed | its I/O unit is the tuned engine's largest page unit (the level's unit-major page), or `--ssd-unit`; 557,056 B appears only in the 27B's evidence and tests |
+| C-1 (major): 3a's SSD cells beside decoders on lock 11's clock | rerun; **the 32K cell misses** | below |
+| C-2: the default read rate; tune's write not sustained | fixed | `RATES["read"]` 2.24e9, `write` stays 1.77e9 (post-tag std follow-up); tune writes for 60 s and takes the rate of the last 30 s |
+| C-3: 3f on one resume | fixed | the median of 5 resumes per engine (`--resumes`) |
+| C-4: the bounded KL p99 by wave | done; noise established | below; lock 11 stands |
+
+**C-1.** 3a beside three decoders on lock 11 (its tuned clock, the SSD level's read rate now 2.24 GB/s), with each resume's
+tier counts (`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `panel_review`):
+
+| length | VRAM | RAM (bar) | SSD (bar) | SSD gated steps | write-backs during the resume | `load_enqueue_wait_s` |
+|---|---|---|---|---|---|---|
+| 4K | 161.5 | 178.8 (188.3) | 325.6 (359.2) | 9 | 0 | 0 |
+| 16K | 195.7 | 209.0 (236.0) | 641.2 (646.3), pass by 0.8% | 22 | 0 | 0 |
+| 32K | 242.3 | 276.1 (300.6) | **1,050.2 (1,030.2): misses by 1.9%** | 39 | 0 | 0 |
+
+The gated steps are the same in every rep, no write-back runs during a resume and the engine never waited for a
+level read's enqueue: the reads land before the step that needs them, and the request waits on the clock alone. The
+clock's arithmetic accounts for the 39 steps at 32K: the bench's `down()` (the parking's write-backs, drained before
+the resume) charged 1.29 GB to the background write lane at 1.77 GB/s while the loop was blocked in the drain, so no
+launch advanced the clock and that lane was still ahead of it (`wlane > now`) when the resume was decided. The read is
+then charged as beside background writes: 1.29 GB / (2.24 GB/s × `read_beside` 0.80) = 0.72 s, plus 0.03 s of H2D,
+over 18.8 ms per 3-row decode step as the tuned clock charges it = 40 steps (39 measured), each ≈ 20.4 ms of wall
+time beside the decoders. With rev 8.5's read rate (2.55 GB/s) and the default clock (17.7 ms per such step) the same
+arithmetic gives ≈ 37 steps, and that run passed (987.6 ms). Idle, nothing else runs, so the gated request runs at
+once and its step waits for the copies themselves (the scheduler's rule), which the clock does not lengthen. So the miss is the clock's: a write lane charged while the loop was blocked stays busy in virtual time
+after the real writes finished, and the read rate is 12% lower than before. In serving the loop keeps launching
+during write-backs, so the lane drains with the clock; the bench blocks it. **For the lead:** whether the clock's
+lanes should catch up on wall time when the loop has not launched (a std change), or the bench should keep stepping
+the decoders while it parks, or both. The bar's SSD rate (the drive's 2.68 GB/s) is unchanged.
+
+**C-3.** 3f on lock 11, five parked 16K conversations resumed by each engine: restarted median 450.4 ms (570.4, then
+447.2–450.6), no restart 448.3 ms; `cached_tokens` and outputs identical for all five; bar 608.0 ms: pass.
+
+**C-2.** `tune --ssd-rates` with the sustained write, on the RTX 5080's drive: read 2.20 GB/s; writes 3 deep held
+2.35 GB/s over the first 30 s and 2.26 GB/s over the last 30 s (138 GB written, no cache cliff at this depth);
+mixed 0.857, `read_beside` 0.872. The default write stays 1.77 GB/s (K-M4's sustained rate), as decided.
+
+**C-4.** `bounded --policies`, KL p99 by wave (the late sessions, second and third waves, are the ones that meet the
+system prompt's end as a branch point and adopt the `branch` checkpoints):
+
+| sessions | arm | all | first wave (positions) | late (positions) |
+|---|---|---|---|---|
+| 8 | baseline | 0.0195 | 0.0166 (4,096) | 0.0259 (2,048) |
+| 8 | `branch`, tier | 0.0432 (failed) | 0.0504 | 0.0337 |
+| 8 | `answer:1`, tier | 0.0350 | 0.0371 | 0.0213 |
+| 16 | baseline | 0.0236 | 0.0281 (8,192) | 0.0139 (4,096) |
+| 16 | `branch`, tier | 0.0226 | 0.0273 | 0.0136 |
+| 16 | `answer:1`, tier | 0.0310 | 0.0455 | 0.0145 |
+
+The late sessions are in line in both runs (8: 1.30× the baseline's late p99, inside the rule's 2×; 16: 0.98×). The
+8-session excess sits in the first-wave sessions, which never adopt a `branch` checkpoint, and is gone at 16. Noise,
+as established; lock 11 stands and the fired-row analysis was not needed.
+
+Core is unchanged. The full CI suite with these fixes: 1643 passed, 66 skipped; `run_all.sh` clean.
+
 ### Step 4 (2026-10-19): the gate
 
 Same-session interleaved runs (the MoE prefill track's §5.2 method): 3a and 3b interleave their arms per rep in one
@@ -1485,6 +1547,7 @@ staging 5, `prompt_end,branch,answer:1`, the tuned clock; UD-Q4_K_M on the RTX 5
 | 3a beside 3 decoders, 4K | VRAM 161.4, RAM 178.4, SSD 325.1 ms | RAM ≤ 188.2, SSD ≤ 359.1 | pass |
 | 3a beside, 16K | VRAM 195.5, RAM 208.4, SSD 620.4 ms | RAM ≤ 235.9, SSD ≤ 646.2 | pass (SSD by 4%) |
 | 3a beside, 32K | VRAM 242.7, RAM 275.8, SSD 987.6 ms | RAM ≤ 301.1, SSD ≤ 1,030.6 | pass (SSD by 4%) |
+| 3a beside, rerun on lock 11 (panel C-1) | 4K SSD 325.6, 16K 641.2, 32K **1,050.2** ms | SSD ≤ 359.2 / 646.3 / 1,030.2 | **32K misses** ("the panel's review") |
 | 3b (32K from RAM, 30 resumes, 285 gated gaps) | gated median 20.27 vs 20.27 ms (1.000×), p90 23.58 vs 23.07 (1.022×); append step 1.001× | ≤ 1.1×, p90 ≤ 1.2× | pass |
 | 3b-SSD (report) | 1,020 gated gaps (34 per resume): 1.000× median, 1.000× p90; append 1.001× | reported | — |
 | 3c (2 rounds) | tier 265 ms p50 against VRAM-only 5,597 ms: **0.047×** (geomean of pairs 0.059×; turns 1–5 0.078×, 6+ 0.045×); throughput **2.26×** (124.0 vs 54.9 tok/s, both rounds) | TTFT p50 ≤ 0.25×, throughput ≥ 1.2× | pass |
@@ -1532,7 +1595,8 @@ let the prefill steps decide and missed 1-row decode by 37% (a = 0); `tools/test
 samples.
 
 **The SSD level's rates** (`tune --ssd-rates DIR`, new: through the tier's `IoThreads` over its `SsdLevel`, 3 threads,
-`O_DIRECT` 557,056 B units, as step 3's spike; taken into the lock only when its flags bind the level): on the RTX
+`O_DIRECT` units of the tuned engine's largest page unit, or `--ssd-unit`: 557,056 B for the 27B at q8_0; taken into
+the lock only when its flags bind the level): on the RTX
 5080 desktop's drive, twice: read 2.24 / 2.24 GB/s, write 2.57 / 2.60 GB/s (3 deep for 12 s; one at a time 2.73),
 mixed 0.776 / 0.773, `read_beside` 0.841 / 0.845. Against the defaults (2.55, 1.77, 0.74, 0.80): reads 12% slower,
 writes 45% faster here (the default is K-M4's one-deep sustained rate), the factors within 5%. A first run measured
@@ -1587,8 +1651,9 @@ own rule (the larger pool keeps other checkpoints in the reference, so `cached_t
   pool keeps its minimum, else the minimum, 0. Lock 10's settings plus the tier sit ≈ 90 MB above that cliff on the
   RTX 5080 (3.34 GB state budget against 3.25 GB for staging 5 beside the paged floor); 160 MB less free memory gave
   0 staging units, no payload stores, `dropped_publishes` 0, and every hybrid hit trimmed to 0, with no error
-  (3f's first run; the 27B pair's 16-unit null run the same way). Fixed as post-tag std follow-ups (the lead,
-  item 2; "After the tag"): with a tier the attach refuses it, and without one the drops are counted.
+  (3f's first run; the 27B pair's 16-unit null run the same way). Fixed as post-tag std follow-ups ("After the
+  tag"): with a tier the attach refuses a staging pool below `max_seqs` + 1 (a floor, not a guarantee against
+  drops); without one, a set `recurrent.checkpoints` is required at start and the unset default warns at 0 units.
 - `bench/driver.py` refused traces where every session has a client (`agent_park`: `clients.pop(None)`); fixed.
 - `holon_judge tiers`' JSON report failed on the null test's pools keyed by units; fixed (the clean-checks test
   asserts it).
@@ -1612,7 +1677,9 @@ b596ba7 as a plugin-only diff, verified with `scripts/ci/check_core_diff.sh` and
 | A (rev 8.5's review): the slot-ordering guard (a write into a level slot waits for the last job of the copy that held it) had no test that bites | `test_a_write_into_a_level_slot_waits_for_its_last_copy`: a level storing by (shape, slot) at its floor (one page slot), two I/O threads; the watermark writes X back, its write held, then writes Y back into X's slot (X evicted at once); released, Y reads back bitwise and the level saw X's write first. Y is a background write-back here; the urgent path (a read's dependent write ordered after the queued write it needs) is covered together with `test_a_read_reusing_units_a_queued_write_frees_takes_that_write_ahead`. The plant `slot-reuse-unwaited` (the guard dropped) fails it; deleting the line fails the clean cell |
 | Found by that test: `IoThreads.drain` waited for queued jobs only, not running ones | it waits for every job taken and not done (std, post-tag; `close` was unaffected: it joins the threads) |
 | A (rev 8.5's review): `free_on_ticket` had no configuration that bites; the rationale given ("never needed before the next commit") was false: the watermark frees units for the same commit's stores | the judge's lagged I/O also completes deferred jobs at each commit's start and each `Engine.step` on a seeded coin per job. On the tiny hybrid with the page and payload host pools **at their floors**, `host.reserve` one load, run-identity across 3 seeds: the plant fires 40 times and **bites as a refusal**: the units it holds back are the floor's, so a read-back finds no host unit (`no host units to read … back`), a crash, which the judge's rule does not count as caught (a crash is not an outcome). **One or more units over the floors** (1 page + 1 payload unit, 4 + 2): it fires 120 times and the three seeds' runs are step- and output-identical, to each other and to the clean run: no decision in that trace needed the units it held back by the time it decided. **Recorded (the lead, on A):** caught at the floors by the tier's internal check (`RuntimeError` from `_read_back`); above the floors the window did not open on this trace; the guard (host units free when the write is decided) stays required, it is not redundant. Step 4 tries the GPU with sleeps of 0 or ≥ 2 steps |
-| The lead (step 4, item 2): a payload staging pool that the ledger shrank to 0 units dropped every hybrid hit with `dropped_publishes` 0 | `std.state_tier` refuses at attach when a payload staging pool has fewer units than its demand, `max_seqs` + 1 (§7's formula with `p` = 1: the tier sees neither the overlap nor the step budget; the 27B locks' staging 5 meets it), naming each pool's shortfall in bytes (`test_attach_refuses_a_payload_level_below_the_payloads_in_flight`). `std.state.recurrent` cuts for and publishes its checkpoints whenever `recurrent.checkpoints` asks for units, so a pool given none drops them and counts each (`test_without_checkpoint_units_nothing_is_reused[budget-short]`, which reads 0 drops without it); `recurrent.checkpoints` 0 still takes none and cuts nothing. Two judge tests that ran a tier at staging = `max_seqs` now give it `max_seqs` + 1 |
+| The lead (step 4, item 2): a payload staging pool that the ledger shrank to 0 units dropped every hybrid hit with `dropped_publishes` 0 | `std.state_tier` refuses at attach when a payload staging pool has fewer units than `max_seqs` + 1 (§7's formula with `p` = 1: the tier sees neither the overlap nor the step budget; the 27B locks' staging 5 meets it), naming each pool's shortfall in bytes (`test_attach_refuses_a_payload_level_below_the_payloads_in_flight`). **That refusal is a floor, not a guarantee against drops:** a step that publishes for more rows than the pool has free units still drops (counted in `dropped_publishes`), and `max_seqs` + 1 does not cover two prefill rows publishing in consecutive steps. Two judge tests that ran a tier at staging = `max_seqs` now give it `max_seqs` + 1. (Its first version also made `std.state.recurrent` cut for and publish into a 0-unit pool, to count the drops; replaced by the panel's A-1 + B-2 row below.) |
+| The panel (step 4, A-1 + B-2; the lead's decision): a checkpoint pool without a tier still fell to 0 units silently | `std.state.recurrent` requests a set `recurrent.checkpoints` as `min_units` too, so the ledger refuses a start that cannot hold them (as pinned pools are refused); left unset, the default (`max_seqs` units) stays best effort as before step 4: 0 units means no cuts and no publishes, and the kind says so once per checkpoint pool on stderr (`holon: plugin.….checkpoints got 0 units …`). The warning comes at the first request: the kind learns its final units only after the engine's last materialize, which no hook a kind sees marks (the start-up profile's materialize gives every best-effort pool 0). `test_without_checkpoint_units_nothing_is_reused`: set and short is refused; `0` and unset run without reuse, with the warning only for unset; it fails on the pre-step-4 kind (no refusal, no warning) |
+| The panel (step 4, C-2): the default read rate | `ssd.RATES["read"]` 2.24e9 (step 4's `tune --ssd-rates` on the RTX 5080's drive; was 2.55e9); `write` stays 1.77e9 (sustained). Tune's write window is now sustained: 60 s of writes, the rate over the last 30 s (past the drive's write cache) |
 | The lead (step 4, item 3): `--host-memory` at launch, as X's offload lock | a tier refused host memory names the flag and the bytes its pools take (`launch with --host-memory N`; tested in the attach test above); README "Options". A lock has no notes field: the refusal and the README carry it |
 
 Step 3 closed panel-clean (A, B and C, 2026-10-19). The full CI suite at its close: 1641 passed, 66 skipped.

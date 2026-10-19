@@ -727,6 +727,424 @@
     "plant": null,
     "fired": null,
     "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 16 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+   },
+   "bounded_by_wave": {
+    "8": {
+     "sessions": 12,
+     "turns": 4,
+     "system_len": 512,
+     "max_tokens": 128,
+     "results": {
+      "baseline": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": false,
+        "overlap": false
+       },
+       "top1": {
+        "value": 0.9938151041666666,
+        "se": 0.0012909383351791686,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9978515947777227,
+        "se": 0.0006207182695094511,
+        "n": 6051
+       },
+       "regret": {
+        "value": 0.0009110979832864056,
+        "se": 0.00029461184797361615,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0014428809389696944,
+         "se": 0.00022526433482822271,
+         "n": 6144
+        },
+        "p50": 8.40981466260346e-05,
+        "p99": 0.019497267023612413,
+        "p50_se": 1.5461466750904565e-05,
+        "p99_se": 0.004156112587405364,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 8.771523290184108e-05,
+          "p99": 0.016608677104443574
+         },
+         "late": {
+          "n": 2048,
+          "p50": 7.779938348471114e-05,
+          "p99": 0.02587260732802172
+         }
+        }
+       },
+       "tokens_saved": 0,
+       "mixed_steps": 69,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [],
+       "passed": true
+      },
+      "branch, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,branch"
+        }
+       },
+       "top1": {
+        "value": 0.9918619791666666,
+        "se": 0.0010973305053112662,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9958718626155878,
+        "se": 0.0008265626406112012,
+        "n": 6056
+       },
+       "regret": {
+        "value": 0.003032489689455057,
+        "se": 0.0010881782096915915,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0028142191493460912,
+         "se": 0.0007440780472414862,
+         "n": 6144
+        },
+        "p50": 0.00010729960581969521,
+        "p99": 0.043213843310231995,
+        "p50_se": 3.116887764900733e-05,
+        "p99_se": 0.01593509805787949,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 0.0001309285381751736,
+          "p99": 0.05044652376644063
+         },
+         "late": {
+          "n": 2048,
+          "p50": 7.75720196086367e-05,
+          "p99": 0.033655301349671284
+         }
+        }
+       },
+       "tokens_saved": 31552,
+       "mixed_steps": 5,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [
+        "kl_p99 0.04321 beyond 0.0195 of the baseline"
+       ],
+       "passed": false
+      },
+      "answer:1, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,answer:1"
+        }
+       },
+       "top1": {
+        "value": 0.9913736979166666,
+        "se": 0.0012366286759234086,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9957031895554453,
+        "se": 0.0008044433771741853,
+        "n": 6051
+       },
+       "regret": {
+        "value": 0.0027733026266408465,
+        "se": 0.001184650986650841,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0029288232435837557,
+         "se": 0.0006532390853932592,
+         "n": 6144
+        },
+        "p50": 0.00010436210043963972,
+        "p99": 0.03498616278193989,
+        "p50_se": 1.7169453080666245e-05,
+        "p99_se": 0.01610665865040013,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 0.00012269305990032667,
+          "p99": 0.037071794713912164
+         },
+         "late": {
+          "n": 2048,
+          "p50": 8.2678521241115e-05,
+          "p99": 0.021307574953652948
+         }
+        }
+       },
+       "tokens_saved": 34176,
+       "mixed_steps": 3,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [],
+       "passed": true
+      }
+     },
+     "passed": false,
+     "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+     "dtype": "bfloat16",
+     "graphs_vs_eager": false,
+     "spec_vs_plain": false,
+     "mixed": null,
+     "policies": true,
+     "late": 4,
+     "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+     "hardware": "NVIDIA GeForce RTX 5080",
+     "torch": "2.11.0+cu130",
+     "plant": null,
+     "fired": null,
+     "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 8 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+    },
+    "16": {
+     "sessions": 24,
+     "turns": 4,
+     "system_len": 512,
+     "max_tokens": 128,
+     "results": {
+      "baseline": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": false,
+        "overlap": false
+       },
+       "top1": {
+        "value": 0.9927571614583334,
+        "se": 0.0008100783806626257,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.99694618686035,
+        "se": 0.0004765557141028428,
+        "n": 12116
+       },
+       "regret": {
+        "value": 0.002087614576642712,
+        "se": 0.000608571729240261,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0024098371389699633,
+         "se": 0.00046976309417623104,
+         "n": 12288
+        },
+        "p50": 9.81559143668669e-05,
+        "p99": 0.02355637989307308,
+        "p50_se": 1.3481798411224509e-05,
+        "p99_se": 0.004904875681661467,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 9.224991993479856e-05,
+          "p99": 0.02811680979067156
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011007468125036869,
+          "p99": 0.013878020392865847
+         }
+        }
+       },
+       "tokens_saved": 0,
+       "mixed_steps": 159,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      },
+      "branch, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,branch"
+        }
+       },
+       "top1": {
+        "value": 0.9905598958333334,
+        "se": 0.0009599085687167782,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.9962785312603374,
+        "se": 0.0005888421591049194,
+        "n": 12092
+       },
+       "regret": {
+        "value": 0.0024582316885547093,
+        "se": 0.0006292407479936349,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0021989140386648467,
+         "se": 0.0005124292808714805,
+         "n": 12288
+        },
+        "p50": 0.00011058948729876988,
+        "p99": 0.022615080794635478,
+        "p50_se": 1.7087946134167422e-05,
+        "p99_se": 0.00472474412716433,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 0.0001100191676868132,
+          "p99": 0.027329440303951222
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011277235325441343,
+          "p99": 0.01359852461578681
+         }
+        }
+       },
+       "tokens_saved": 67456,
+       "mixed_steps": 16,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      },
+      "answer:1, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,answer:1"
+        }
+       },
+       "top1": {
+        "value": 0.9927571614583334,
+        "se": 0.0010145954313108348,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.9971079160469344,
+        "se": 0.0006084189388844291,
+        "n": 12102
+       },
+       "regret": {
+        "value": 0.0016925173646692808,
+        "se": 0.0006292927816465885,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.002635411995869882,
+         "se": 0.0006302413752618846,
+         "n": 12288
+        },
+        "p50": 0.00011513944268273796,
+        "p99": 0.03100033429507746,
+        "p50_se": 1.2823053540940852e-05,
+        "p99_se": 0.009241083338939624,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 0.00011693109107281516,
+          "p99": 0.04552461003063551
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011240808605674185,
+          "p99": 0.014503104322577726
+         }
+        }
+       },
+       "tokens_saved": 69312,
+       "mixed_steps": 7,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      }
+     },
+     "passed": true,
+     "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+     "dtype": "bfloat16",
+     "graphs_vs_eager": false,
+     "spec_vs_plain": false,
+     "mixed": null,
+     "policies": true,
+     "late": 8,
+     "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+     "hardware": "NVIDIA GeForce RTX 5080",
+     "torch": "2.11.0+cu130",
+     "plant": null,
+     "fired": null,
+     "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 16 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+    }
    }
   }
  }
