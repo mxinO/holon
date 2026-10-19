@@ -623,13 +623,10 @@ class MoeTopk:
 class MoeRouter:
     """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
     through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
-    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile.
-    Prompt chunks (calls of at least CHUNK rows, experts a multiple of 64; docs/v1-moe-prefill.md D3): our router
-    GEMM, per logit a fixed number of f32 fma chains (2,048 / experts) over equal parts of hidden ascending, added in
-    order, from x's values as given (`moe_router_logits`, no f32 copy), then `moe_topk`'s selection; calls between, as
-    `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its call's path, as `qlinear`'s mmvq /
-    mmq: batched decode and verify keep their bits). Its logits scratch is a workspace, its tile counters a static
-    buffer each call leaves zeroed."""
+    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile;
+    larger calls (prompt chunks) as `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its
+    call's path, as `qlinear`'s mmvq / mmq). Its logits scratch is a workspace, its tile counters a static buffer each
+    call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
                  dtype: str) -> None:
@@ -638,12 +635,8 @@ class MoeRouter:
         self.rows = self.lib.moe_router_rows()
         self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
         self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
-        # the router GEMM's expert tile and hidden steps
-        self.prefill = experts % 64 == 0 and hidden % (32 * self.lib.moe_router_partials(experts)) == 0
 
     def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
-        if len(x) >= CHUNK and self.prefill:
-            return self.topk(self._logits(x, router))
         if not 0 < len(x) <= self.rows:
             return self.topk(torch.nn.functional.linear(x.float(), router))
         x = x.contiguous()
@@ -654,13 +647,6 @@ class MoeRouter:
         logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
         self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
         return weights, ids
-
-    def _logits(self, x: torch.Tensor, router: torch.Tensor) -> torch.Tensor:
-        """A prompt chunk's f32 logits [T, E] (the router GEMM, D3)."""
-        logits = torch.empty(len(x), router.shape[0], device=x.device)
-        partials = torch.empty(self.lib.moe_router_partials(len(router)), *logits.shape, device=x.device)
-        self.lib.moe_router_logits(x.contiguous(), router.contiguous(), partials, logits)
-        return logits
 
     def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
         """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance

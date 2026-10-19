@@ -116,106 +116,6 @@ ggml_tensor with_prec(ggml_tensor dst, const int prec) {
 // A per-tensor (dense) or per-expert scale for mmvq's fused epilogue: `n` f32 values, or none.
 ggml_tensor scale_vector(const float * scale, const int64_t n) { return matrix(GGML_TYPE_F32, scale, n, 1); }
 
-// moe_router@1's logits on prompt chunks (docs/v1-moe-prefill.md D3): logits[t, e] = sum over h of x[t, h] *
-// router[e, h] from x's exact values (bf16 or f32), in an order fixed per logit: ks chains of f32 fma, chain g over
-// hidden values [g, g + 1) * hidden / ks ascending, then the chains' sums added in g order, ks = router_chains(experts)
-// (more chains for fewer experts, to fill the GPU without moving more partial sums than logits need). So a row's
-// logits do not depend on the call's rows nor on where its tile falls. router_partials runs the chains, a block of 64
-// threads per (64 rows, 64 experts, chain): each thread stages one row of x and one of the router, ROUTER_BK hidden
-// values at a time (the next stage's loads in flight meanwhile), and computes an 8 x 8 corner of the tile from shared
-// memory; router_sum adds the chains.
-constexpr int ROUTER_BM = 64, ROUTER_BN = 64, ROUTER_BK = 32, ROUTER_THREADS = 64;
-
-static int router_chains(const int64_t experts) { return (int) std::max<int64_t>(1, 2048 / experts); }
-
-// ROUTER_BK consecutive values of x as f32
-static __device__ __forceinline__ void router_load(const nv_bfloat16 * p, float * v) {
-#pragma unroll
-    for (int q = 0; q < ROUTER_BK/8; ++q) {
-        const uint4 w = ((const uint4 *) p)[q];
-        const __nv_bfloat162 * b = (const __nv_bfloat162 *) &w;
-#pragma unroll
-        for (int i = 0; i < 4; ++i) {
-            v[8*q + 2*i] = __low2float(b[i]);
-            v[8*q + 2*i + 1] = __high2float(b[i]);
-        }
-    }
-}
-
-static __device__ __forceinline__ void router_load(const float * p, float * v) {
-#pragma unroll
-    for (int q = 0; q < ROUTER_BK/4; ++q) {
-        const float4 w = ((const float4 *) p)[q];
-        v[4*q] = w.x; v[4*q + 1] = w.y; v[4*q + 2] = w.z; v[4*q + 3] = w.w;
-    }
-}
-
-template <typename T>
-__global__ void __launch_bounds__(ROUTER_THREADS) router_partials(
-        const T * __restrict__ x, const float * __restrict__ router, float * __restrict__ partials, const int tokens,
-        const int hidden, const int experts, const int ks) {
-    __shared__ __align__(16) float xs[ROUTER_BK][ROUTER_BM];
-    __shared__ __align__(16) float rs[ROUTER_BK][ROUTER_BN];
-    const int tid = threadIdx.x, tx = tid % 8, ty = tid / 8;
-    const int t0 = blockIdx.x * ROUTER_BM, e0 = blockIdx.y * ROUTER_BN, g = blockIdx.z;
-    const int k0 = g * (hidden / ks), k1 = k0 + hidden / ks;
-    const T * xp = x + (int64_t) min(t0 + tid, tokens - 1)*hidden;              // rows past the call: unused
-    const float * rp = router + (int64_t) (e0 + tid)*hidden;
-    float xv[ROUTER_BK], rv[ROUTER_BK];
-    router_load(xp + k0, xv);
-    router_load(rp + k0, rv);
-    float acc[8][8] = {{0.0f}};
-    for (int h0 = k0; h0 < k1; h0 += ROUTER_BK) {
-#pragma unroll
-        for (int k = 0; k < ROUTER_BK; ++k) {
-            xs[k][tid] = xv[k];
-            rs[k][tid] = rv[k];
-        }
-        __syncthreads();
-        if (h0 + ROUTER_BK < k1) {                                          // the next stage's, in flight meanwhile
-            router_load(xp + h0 + ROUTER_BK, xv);
-            router_load(rp + h0 + ROUTER_BK, rv);
-        }
-#pragma unroll
-        for (int k = 0; k < ROUTER_BK; ++k) {
-            const float4 a0 = *(const float4 *) &xs[k][8*ty], a1 = *(const float4 *) &xs[k][8*ty + 4];
-            const float4 b0 = *(const float4 *) &rs[k][8*tx], b1 = *(const float4 *) &rs[k][8*tx + 4];
-            const float a[8] = {a0.x, a0.y, a0.z, a0.w, a1.x, a1.y, a1.z, a1.w};
-            const float b[8] = {b0.x, b0.y, b0.z, b0.w, b1.x, b1.y, b1.z, b1.w};
-#pragma unroll
-            for (int i = 0; i < 8; ++i) {
-#pragma unroll
-                for (int j = 0; j < 8; ++j) {
-                    acc[i][j] = fmaf(a[i], b[j], acc[i][j]);
-                }
-            }
-        }
-        __syncthreads();
-    }
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        const int t = t0 + 8*ty + i;
-        if (t < tokens) {
-            float * out = partials + ((int64_t) g*tokens + t)*experts + e0 + 8*tx;
-            ((float4 *) out)[0] = make_float4(acc[i][0], acc[i][1], acc[i][2], acc[i][3]);
-            ((float4 *) out)[1] = make_float4(acc[i][4], acc[i][5], acc[i][6], acc[i][7]);
-        }
-    }
-}
-
-__global__ void router_sum(const float * __restrict__ partials, float * __restrict__ logits, const int64_t n,
-                           const int ks) {
-    const int64_t i = (int64_t) blockIdx.x*blockDim.x + threadIdx.x;
-    if (i >= n) {
-        return;
-    }
-    float sum = partials[i];
-    for (int g = 1; g < ks; ++g) {
-        sum += partials[g*n + i];
-    }
-    logits[i] = sum;
-}
-
 // SwiGLU after mmq, computed as llama.cpp's fused mmvq gate computes it: up * silu(gate), ggml_cuda_op_silu_single;
 // with `ids`, each half first scaled by its row's expert scale (NVFP4's scale2, as mmvq's x_scale and gate_scale).
 __global__ void swiglu_f32(const float * __restrict__ x, const float * __restrict__ gate_scale,
@@ -479,26 +379,6 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
     args.softmax = true;
     ggml_cuda_op_topk_moe(c.ctx, &logits_t, &weights_t, &ids_t, renormalize ? &clamp : nullptr, nullptr, nullptr, args);
 }
-
-void holon_ggml_moe_router_logits(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
-                                  int64_t experts, float * partials, float * logits, void * stream) {
-    const int ks = router_chains(experts);
-    GGML_ASSERT(hidden % (ks*ROUTER_BK) == 0 && experts % ROUTER_BN == 0 && tokens > 0);
-    GGML_ASSERT((uintptr_t) x % 16 == 0 && (uintptr_t) router % 16 == 0 && (uintptr_t) partials % 16 == 0);
-    const dim3 grid((tokens + ROUTER_BM - 1)/ROUTER_BM, experts/ROUTER_BN, ks);
-    if (x_bf16) {
-        router_partials<<<grid, ROUTER_THREADS, 0, (cudaStream_t) stream>>>(
-            (const nv_bfloat16 *) x, router, partials, tokens, hidden, experts, ks);
-    } else {
-        router_partials<<<grid, ROUTER_THREADS, 0, (cudaStream_t) stream>>>(
-            (const float *) x, router, partials, tokens, hidden, experts, ks);
-    }
-    const int64_t n = tokens*experts;
-    router_sum<<<(n + 255)/256, 256, 0, (cudaStream_t) stream>>>(partials, logits, n, ks);
-    CUDA_CHECK(cudaGetLastError());
-}
-
-int64_t holon_ggml_moe_router_partials(int64_t experts) { return router_chains(experts); }
 
 int64_t holon_ggml_moe_router_rows(void) { return HOLON_ROUTER_MAX_ROWS; }
 

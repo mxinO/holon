@@ -130,15 +130,6 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
 // zeroed counters, zeroed again on return. `x_q8_1`, if not NULL, receives x as holon_ggml_quantize_q8_1 writes it,
 // in the same launch.
 int64_t holon_ggml_moe_router_rows(void);
-
-// moe_router@1's logits for prompt chunks (docs/v1-moe-prefill.md D3): logits [tokens, experts] f32 = x · router.T,
-// x [tokens, hidden] bf16 (x_bf16) or f32, router [experts, hidden] f32; each logit
-// holon_ggml_moe_router_partials(experts) f32 fma chains over equal parts of hidden ascending, added in order (a row's
-// logits are the same at any tokens), `partials` [that many, tokens, experts] f32 scratch; hidden a multiple of 32
-// times that many, experts a multiple of 64.
-void holon_ggml_moe_router_logits(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
-                                  int64_t experts, float * partials, float * logits, void * stream);
-int64_t holon_ggml_moe_router_partials(int64_t experts);
 int64_t holon_ggml_moe_router_tiles(int64_t tokens);
 void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
                            int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,

@@ -266,25 +266,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                             ids.data_ptr<int32_t>(), stream());
     });
     m.def("moe_router_rows", [] { return holon_ggml_moe_router_rows(); });
-    m.def("moe_router_partials", [](int64_t experts) { return holon_ggml_moe_router_partials(experts); });
-    m.def("moe_router_logits", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & partials,
-                                  at::Tensor & logits) {
-        const c10::cuda::CUDAGuard guard(x.device());
-        TORCH_CHECK(x.dim() == 2 && router.dim() == 2, "x, router: 2 dimensions");
-        const int64_t tokens = x.size(0), hidden = x.size(1), experts = router.size(0);
-        check(x, x, {tokens, hidden}, "x");
-        check(router, x, {experts, hidden}, "router");
-        check(partials, x, {holon_ggml_moe_router_partials(experts), tokens, experts}, "partials");
-        check(logits, x, {tokens, experts}, "logits");
-        check_f32(router, "router");
-        check_f32(partials, "partials");
-        check_f32(logits, "logits");
-        TORCH_CHECK(x.scalar_type() == at::kBFloat16 || x.scalar_type() == at::kFloat, "x: bf16 or f32");
-        TORCH_CHECK(tokens > 0 && hidden % (32*holon_ggml_moe_router_partials(experts)) == 0 && experts % 64 == 0,
-                    "tokens > 0; hidden a multiple of 32 x the chains, experts of 64");
-        holon_ggml_moe_router_logits(x.data_ptr(), x.scalar_type() == at::kBFloat16, router.data_ptr<float>(), tokens,
-                                     hidden, experts, partials.data_ptr<float>(), logits.data_ptr<float>(), stream());
-    });
     m.def("moe_router_tiles", [](int64_t tokens) { return holon_ggml_moe_router_tiles(tokens); });
     m.def("moe_router", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & logits, at::Tensor & done,
                            at::Tensor & weights, at::Tensor & ids, bool renormalize,

@@ -14,8 +14,6 @@
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
-- The router on prompt chunks (docs/v1-moe-prefill.md D3): its logits rounded to bf16 before the selection (near
-  the bound), or summed over hidden less its last 256 values (far); each counts the chunks it changed.
 - Dense mmq calls past one 512-row chunk (docs/v1-moe-prefill.md D5): the stream-k partials rounded to bf16 before
   the fixup (near the bound), or the fixup skipped (far); each counts the fixups it saw and planted.
 - FP4 in `kernels.ggml_cuda` (docs/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
@@ -368,27 +366,6 @@ def qlinear_fixup(bits: int, name: str) -> Iterator[None]:
         lib.mmq_plant(before)
         launched, planted = lib.mmq_fixups()
         print(f"plant {name} fired: {{'fixups': {launched}, 'planted': {planted}}}", file=sys.stderr)
-
-
-@contextlib.contextmanager
-def router_prefill(name: str) -> Iterator[None]:
-    """docs/v1-moe-prefill.md D3 (`moe_router@1` on prompt chunks, kernels.ggml_cuda's router GEMM): `router-prefill-
-    bf16-logits` rounds a chunk's f32 logits to bf16 before the selection (near the bound: ties and near-ties move);
-    `router-prefill-short-k` sums them over hidden less its last 256 values (far). Reports the chunks it changed."""
-    from holon_plugins.kernels.ggml_cuda import plugin
-
-    logits, fired = plugin.MoeRouter._logits, collections.Counter()
-
-    def planted(self, x, router):
-        fired["chunks"] += 1
-        if name == "router-prefill-short-k":
-            x = x.clone()
-            x[:, -256:] = 0
-            return logits(self, x, router)
-        return logits(self, x, router).bfloat16().float()
-    with mock.patch.object(plugin.MoeRouter, "_logits", planted):
-        yield
-    print(f"plant {name} fired: {dict(fired)}", file=sys.stderr)
 
 
 @contextlib.contextmanager
@@ -1215,8 +1192,6 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     **hf_quant_plants(18), **fp4_plants(18), **fp8_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
-    "router-prefill-bf16-logits": lambda: router_prefill("router-prefill-bf16-logits"),
-    "router-prefill-short-k": lambda: router_prefill("router-prefill-short-k"),
     "qlinear-partials-bf16": lambda: qlinear_fixup(1, "qlinear-partials-bf16"),
     "qlinear-large-no-fixup": lambda: qlinear_fixup(2, "qlinear-large-no-fixup"),
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
