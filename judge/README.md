@@ -123,7 +123,7 @@ On matmul (K = 1 … 14336), softmax, silu·mul and rmsnorm, on CPU and sm_86, l
 `tiers.py`'s docstring). `--engine-args` is the tested configuration: a device pool (`--state-memory`) that holds about
 one session, so the filler before every interleaved return takes it all, host memory and the tier's options;
 `--pressure-args` overrides it for run-identity and the plants (loads due a step or more out, write-back admission,
-a host level near its floor). On the CPU the tier's copies run on `holon_testing.deferred` streams (seeds 0, 1, 2), on
+a host level near its floor). On the CPU the tier's copies run on `holon_judge.deferred` streams (seeds 0, 1, 2), on
 the GPU after an unseeded sleep of up to `--delay` seconds. Hybrids get the `prompt_end,branch,answer:1` policies
 unless the engine args set `recurrent.policy`, and the null test.
 

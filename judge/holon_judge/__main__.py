@@ -444,7 +444,7 @@ def _tiers(a: argparse.Namespace) -> int:
               "dtype": a.dtype, "engine_args": a.engine_args, "pressure_args": a.pressure_args, "tier": a.tier,
               "trace": {"sessions": a.sessions, "turns": a.turns, "system_len": a.system_len,
                         "chunk_len": a.chunk_len, "max_tokens": a.max_tokens},
-              "streams": "holon_testing.deferred, seeds 0.." if cpu else f"unseeded sleeps up to {a.delay} s",
+              "streams": "holon_judge.deferred, seeds 0.." if cpu else f"unseeded sleeps up to {a.delay} s",
               "hardware": "cpu" if cpu else golden.hardware(torch.device("cuda")), "torch": torch.__version__,
               "checks": {k: tiers.strip(v) for k, v in clean.items()}, "wall_s": wall, "plants": {}}
     passed = all(r["verdict"] == "pass" for r in clean.values())

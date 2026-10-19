@@ -14,7 +14,7 @@
 - **Run-identity.** A concurrent closed-loop trace (every session sends its next turn, and a regenerate of its last
   prompt, once its requests are done; the first requests found waiting for their loads are aborted and sent again a
   few steps later) on fresh engines, each with the tier's copies
-  delayed: on the GPU an unseeded sleep before each copy on the tier's streams, on the CPU `holon_testing.deferred`
+  delayed: on the GPU an unseeded sleep before each copy on the tier's streams, on the CPU `holon_judge.deferred`
   with a seed per run. Step lists (slots and query tokens per step) and outputs must be identical, with at least
   `MIN_CONCURRENT_LOADS` loads.
 - **Audit**, after every step of every run: resident blocks prefix-closed, each block's resident-children count
@@ -39,6 +39,7 @@ import numpy as np
 import torch
 from holon.api import Paged, SamplingParams
 
+from . import deferred
 from .bounded import Trace
 
 MIN_LOADS = 8                    # tier invariance: loads of the tested run (acceptance 2)
@@ -71,12 +72,10 @@ class _Sleepy:
 
 
 class Deferred:
-    """The CPU: `holon_testing.deferred`'s streams (a copy lands 0–2 launches late unless a launch waits for it)."""
+    """The CPU: `holon_judge.deferred`'s streams (a copy lands 0–2 launches late unless a launch waits for it)."""
 
     def __init__(self, seed: int) -> None:
-        from holon_testing.deferred import Deferred as Streams
-
-        self.streams = Streams(seed, most=2)
+        self.streams = deferred.Deferred(seed, most=2)
 
     def wrap(self, make: Callable[[], object]) -> object:
         return self.streams.stream()

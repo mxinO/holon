@@ -1,6 +1,6 @@
 """A toy state tier (slot `tier`) that proves the core's tier seams (docs/v1-kv-tiers.md §4) before std's does: host
 copies of blocks in host pools shaped like the device pools it copies, its stores and loads on two streams the core
-gives it (deferred under `holon_testing.deferred`, which its `before_launch` pumps), a clock of one per launch, seeded
+gives it (deferred under `holon_judge.deferred`, which its `before_launch` pumps), a clock of one per launch, seeded
 page refusals and own drops (interior blocks included), persistence to a file at close keyed by the engine's identity.
 It keeps the determinism contract and checks the core's side of it: `loaded` at most once with a fence and once with
 None, nothing loaded or dropped that it must still hold.

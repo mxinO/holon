@@ -17,7 +17,7 @@ from holon.core.memory import Ledger
 from holon.core.prefix import PrefixIndex
 from holon.core.sched import Scheduler
 from holon.core.state import BoundSpec, StateManager, _View
-from holon_testing.deferred import Deferred
+from holon_judge.deferred import Deferred
 from holon_testing.toy_tier.plugin import bind
 
 PAGE, MAX_LEN = 4, 40

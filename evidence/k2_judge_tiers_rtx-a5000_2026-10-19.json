@@ -539,7 +539,7 @@
     "chunk_len": 40,
     "max_tokens": 8
    },
-   "streams": "holon_testing.deferred, seeds 0..",
+   "streams": "holon_judge.deferred, seeds 0..",
    "hardware": "cpu",
    "torch": "2.11.0+cu130",
    "wall_s": {
@@ -996,7 +996,7 @@
     "chunk_len": 40,
     "max_tokens": 8
    },
-   "streams": "holon_testing.deferred, seeds 0..",
+   "streams": "holon_judge.deferred, seeds 0..",
    "hardware": "cpu",
    "torch": "2.11.0+cu130",
    "wall_s": {
@@ -1152,7 +1152,7 @@
     "chunk_len": 40,
     "max_tokens": 8
    },
-   "streams": "holon_testing.deferred, seeds 0..",
+   "streams": "holon_judge.deferred, seeds 0..",
    "hardware": "cpu",
    "torch": "2.11.0+cu130",
    "wall_s": {
@@ -1270,7 +1270,7 @@
     "chunk_len": 60,
     "max_tokens": 8
    },
-   "streams": "holon_testing.deferred, seeds 0..",
+   "streams": "holon_judge.deferred, seeds 0..",
    "hardware": "cpu",
    "torch": "2.11.0+cu130",
    "wall_s": {
@@ -1902,9 +1902,9 @@
  },
  "inputs": {
   "tiny dense": "Qwen3ForCausalLM(Qwen3Config(vocab_size=512, hidden_size=64, intermediate_size=128, num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16, tie_word_embeddings=False, eos_token_id=None)) after torch.manual_seed(0) (judge/tests/conftest.py's tiny_checkpoint)",
-  "tiny hybrid": "holon_testing.qwen3_5_files.tiny_hf(4, seed=1) with every A_log set to -6 (the recurrent state decays ~0.85 per 64-token block; judge/tests/test_tiers.py's tiny_hybrid)",
+  "tiny hybrid": "holon_testing.qwen3_5_files.tiny_hf(4, seed=1) with every A_log set to -6 (the recurrent state decays ~0.85 per 64-token block; judge/tests/test_judge_tiers.py's tiny_hybrid)",
   "tiny prompts": "49 rows from random.Random(0): row 0 the system prompt (64 tokens dense, 140 hybrid), rows 1-48 of 10..39 (dense) / 10..59 (hybrid) tokens below the vocabulary (512 / 320)",
-  "cpu streams": "the tier's copy streams on holon_testing.deferred (seeds 0, 1, 2 per run; a copy lands 0-2 launches late unless a launch waits)",
+  "cpu streams": "the tier's copy streams on holon_judge.deferred (seeds 0, 1, 2 per run; a copy lands 0-2 launches late unless a launch waits)",
   "gpu streams": "an unseeded torch.cuda._sleep of up to --delay seconds (0.05 s; 0.3 s in the second pass) before every copy on the tier's two streams"
  },
  "verdicts": {
@@ -1918,7 +1918,7 @@
   "plant rule": "caught = fired > 0 and a check failed (invariance: a request's output or cached_tokens differs between the planted reference and the planted tested run; identity: the planted runs differ from each other, or their outputs differ from the clean run's on the clean schedule, or a new audit finding); tiers off, the plant must change nothing (same steps, same outputs)",
   "policy plants": {
    "qwen3.8-27b": "branch-off-by-one fired 70, fails exactly `branch, tier` (KL p50 4.39e-4 vs 1.99e-4, p99 0.112 vs 0.036): CAUGHT. tentative-shift fired 288, `answer:1, tier` PASSES (KL p50 3.32e-4 within 2x 1.99e-4, p99 0.061 within 2x 0.036; top-1 98.98% vs 99.04%): NOT caught at this trace size",
-   "tiny hybrid (CPU, judge/tests/test_tiers.py)": "branch-off-by-one fails exactly `branch, tier`; tentative-shift fails exactly `answer:1, tier` (both fired > 0)"
+   "tiny hybrid (CPU, judge/tests/test_judge_tiers.py)": "branch-off-by-one fails exactly `branch, tier`; tentative-shift fails exactly `answer:1, tier` (both fired > 0)"
   }
  },
  "findings": [
