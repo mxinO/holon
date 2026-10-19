@@ -1,5 +1,5 @@
-"""Our Triton kernels for Qwen3.8-Flash-Next's PLE ops (`qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`; contracts in
-`kernels.py`). The block is float32 throughout with every reduction per token in a fixed tile order, so a row split
+"""Our Triton kernels for Qwen3.8-Flash-Next's PLE ops (`qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`; contracts:
+models.qwen4_exp). The block is float32 throughout with every reduction per token in a fixed tile order, so a row split
 into chunks is bitwise one shot. Correct and graph-safe; tuned in FN's step 7."""
 from __future__ import annotations
 

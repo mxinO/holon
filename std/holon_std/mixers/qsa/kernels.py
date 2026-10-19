@@ -16,8 +16,9 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
 
 - `qsa_index@1`: instance `(k [T, Dk], raw, pooled, table, seq, positions, weight [Dk], cos_sin) -> None`: stores each
   token's k into `raw` at its position, then, for every token that completes a block (p % ratio = ratio − 1), pools that
-  block **from the stored raw keys** (never in-register values, so a block completed by rejected drafts is rewritten
-  when its positions are appended again): `pooled[b] = rope(norm(bf16(mean_f32(raw[ratio·b … ratio·b + ratio − 1]))))`:
+  block **from the raw keys as stored after the call** (a position the call stores reads the value it stores; never
+  values kept from an earlier step, so a block completed by rejected drafts is rewritten when its positions are
+  appended again): `pooled[b] = rope(norm(bf16(mean_f32(raw[ratio·b … ratio·b + ratio − 1]))))`:
   the mean in float32 rounded once to the model dtype, then a zero-centred RMSNorm (x · rsqrt(mean(x²) + eps) ·
   (1 + weight)) and a neox rotation of the first `rotary_dim` dims at position ratio·b (`cos_sin`: `rope@1`'s table),
   both in float32, stored float32. Facts: head_dim, ratio, page, rotary_dim, max_positions, eps, dtype.
@@ -26,10 +27,14 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
   `s_b = Σ_h relu(⟨q_h, pooled_b⟩) / √Dk` in float32 with IEEE products, and its top min(budget / ratio, n) blocks, ties
   to the lower block (D2's rule); written ascending, then the open block n when there is one, then −1. A query with
   n ≤ budget / ratio thus selects every block (dense). Rows of padding tokens are all −1. Score workspaces are
-  sub-batched (at most 512 queries per pass). Facts: heads, head_dim, ratio, budget, page.
-- `qsa_attend@1` (prefill, decode and verify rows alike): instance `(q [T, Hq, D], kv, blocks, table, seq, positions)
-  -> [T, Hq, D]` of q's dtype: per query, softmax(q k^T / √D) v over exactly the tokens of its `blocks` (all `ratio` of
-  a complete block; the open block's up to p), kv heads shared by Hq / Hkv query heads, float32 softmax and sums.
+  sub-batched (at most 512 queries per pass). **Shape-invariant:** a query's scores, and so its selection, are the same
+  bits alone and inside any call, whatever its other rows and their number. Facts: heads, head_dim, ratio, budget,
+  page.
+- `qsa_attend@1` (prefill, decode and verify rows alike): instance `(q [T, Hq, D], kv, blocks, table, seq, positions,
+  gate [T, Hq, D] | None) -> [T, Hq, D]` of q's dtype: per query, softmax(q k^T / √D) v over exactly the tokens of its
+  `blocks` (all `ratio` of a complete block; the open block's up to p), kv heads shared by Hq / Hkv query heads,
+  float32 softmax and sums; with `gate` (the attention's output gate, any row and head strides), times σ(gate) in
+  float32 before the one rounding, so the gate costs no launch of its own.
   **Every `kv` layout of `std.mixers.gqa` is read in the kernel**, `kv.hnd.q8_0` (values int8 and fp16 scales per 32)
   included, so a q8_0 deployment never dequantizes the cache first (panel C, step 0). A padding token's output is 0.
   Facts: heads, kv_heads, head_dim, ratio, width (budget / ratio + 1), page, layout, q_dtype, kv_dtype.
@@ -40,8 +45,6 @@ instead (D6).
 from __future__ import annotations
 
 INDEX, SELECT, ATTEND = "qsa_index@1", "qsa_select@1", "qsa_attend@1"
-RATIO, BUDGET = 4, 2048           # Qwen3.8-Flash-Next's indexer: 4-token blocks, a 2,048-token budget (512 blocks)
-SUB_BATCH = 512                   # queries per scoring pass (D6, St sel_batch)
 
 
 def width(budget: int, ratio: int) -> int:

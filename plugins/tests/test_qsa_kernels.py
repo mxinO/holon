@@ -2,16 +2,20 @@
 Qwen3.8-Flash-Next's shapes (indexer 4 × 128, rotary 64 at θ 1e7; attention 24 q / 2 kv heads of 256; ratio 4,
 budget 2,048), through the build context.
 
-- `qsa_index@1`: prefill in two chunks per sequence, the second starting inside a block (its pooled keys read raw keys
-  of the first chunk), and padding tokens. `raw` bitwise; `pooled` within `l0.check(f32, Dk)`; slots no token writes
-  stay untouched.
+- `qsa_index@1` (one launch): prefill in two chunks per sequence, the second starting inside a block (its pooled keys
+  read raw keys of the first chunk and of its own), and padding tokens. `raw` bitwise; `pooled` within
+  `l0.check(f32, Dk)`; slots no token writes stay untouched.
 - `qsa_select@1`, exactly equal to the oracle where its float32 scores have no near-ties: pooled keys drawn from six
-  vectors, so every boundary is a large tie that D2's lower-block rule decides. Rows: 32K-token queries (8,192 blocks,
-  and 8,195: past the kernel's in-register row), queries just above, at and below the budget, open blocks, padding.
-  With continuous keys, a valid top-k of the oracle's scores within float32 rounding. Sub-batching changes no bit.
+  vectors, one of them zero, so every boundary is a large tie that D2's lower-block rule decides, a tie at ReLU's 0.0
+  among them (asserted). Rows: 32K-token queries (8,192 blocks, and 8,195: past the kernel's in-register row), queries
+  just above, at and below the budget, open blocks, padding. With continuous keys, a valid top-k of the oracle's
+  scores within float32 rounding. Shape invariance (B-1): a query's scores and selection are the same bits alone and
+  in a 128-row call; sub-batching changes no bit.
 - `qsa_attend@1` for prefill, decode and verify rows (sparse past 2,051 tokens, dense below, padding) in bf16 and fp16,
   and from the q8_0 and fp8 caches (fp8 from sm_89), within the attention budget of test_attention_kernels against the
-  oracle reading the same stored cache; batches whose shapes split the selected tokens 32, 8, 4 ways and not at all.
+  oracle reading the same stored cache, with and without the output gate (a strided view, as gqa's gated q layout
+  gives it); batches whose shapes split the selected tokens 32, 8, 4 ways and not at all. A plant must fail: the open
+  block reading one token more.
 
 Skips without a GPU.
 """
@@ -30,7 +34,7 @@ from .test_attention_kv_quant import empty_cache, fp8_device, usage
 
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
-PAGE, SLOTS, RATIO, BUDGET = 16, 8, qsa_kernels.RATIO, qsa_kernels.BUDGET
+PAGE, SLOTS, RATIO, BUDGET = 16, 8, 4, 2048          # Qwen3.8-Flash-Next's indexer: 4-token blocks, 2,048 tokens
 HI, DK, ROT, THETA = 4, 128, 64, 1e7
 HQ, HKV, D = 24, 2, 256
 WIDTH = qsa_kernels.width(BUDGET, RATIO)
@@ -82,17 +86,27 @@ def test_index():
 
 
 SELECT_ROWS = [(2, 32 * 1024 - 1, 3), (3, 32 * 1024 + 12, 1), (5, 2048, 1), (1, 2047, 2), (4, 2043, 1), (7, 100, 2),
-               (-1, 0, 2), (6, 0, 1), (0, 2052, 4)]      # 8,192 blocks from registers, 8,195 re-read per round
+               (-1, 0, 2), (6, 0, 1), (0, 2052, 4), (1, 2400, 1)]
+# 8,192 blocks from registers, 8,195 re-read per round; at 600 blocks the k-th score is ReLU's 0.0, tied many times
 
 
 def _pooled(table: torch.Tensor, palette: int | None, seed: int) -> torch.Tensor:
-    """Pooled keys for every unit; from `palette` distinct vectors when given."""
+    """Pooled keys for every unit; with a palette, from that many distinct vectors, the first a zero vector (score
+    0.0) drawn for 85% of the blocks."""
     g = torch.Generator().manual_seed(seed)
     shape = (int(table.max()) + 1, PAGE // RATIO, DK)
     if palette is None:
         return torch.randn(shape, generator=g)
-    vectors = torch.randn(palette, DK, generator=g)
-    return vectors[torch.randint(palette, shape[:2], generator=g)]
+    vectors = torch.cat((torch.zeros(1, DK), torch.randn(palette - 1, DK, generator=g)))
+    weights = torch.tensor([0.85] + [0.15 / (palette - 1)] * (palette - 1))
+    return vectors[torch.multinomial(weights, shape[0] * shape[1], replacement=True, generator=g).view(shape[:2])]
+
+
+def _oracle_scores(q, pooled, table, seq: int, n: int) -> torch.Tensor:
+    """The oracle's scores of a query's n blocks, in float64."""
+    first = torch.arange(n) * RATIO
+    keys = pooled[table[seq, first // PAGE].long(), (first % PAGE) // RATIO].double()
+    return (keys @ q.double().T).relu().sum(-1) / DK ** 0.5
 
 
 def _select(palette: int | None, seed: int = 0):
@@ -106,10 +120,35 @@ def _select(palette: int | None, seed: int = 0):
 
 
 def test_select_ties():
-    ours, oracle, _, args = _select(palette=6)
+    ours, oracle, (q, pooled, table), args = _select(palette=6)
     assert torch.equal(ours, oracle)
     small = qsa_kernel.qsa_select(*args, RATIO, BUDGET, sub_batch=3)
     assert torch.equal(small.cpu(), ours)
+    seq, pos = _addresses(SELECT_ROWS)                   # a boundary tie at 0.0 occurs, many keys deep
+    k, t = BUDGET // RATIO, len(seq) - 1
+    scores = _oracle_scores(q[t], pooled, table, int(seq[t]), (int(pos[t]) + 1) // RATIO).sort(descending=True).values
+    assert scores[k - 1] == 0.0 == scores[k] and (scores[:k] > 0).sum() < k - 10
+
+
+def test_select_shape_invariant():
+    """A query's scores (and selection) are the same bits alone and in a 128-row call of mixed sequences."""
+    g = torch.Generator().manual_seed(7)
+    table = _table(32 * 1024 + 8, 7).cuda()
+    pooled = _pooled(table, None, 7).cuda()
+    seq = torch.randint(SLOTS, (128,), generator=g).int().cuda()
+    pos = torch.randint(100, 32 * 1024, (128,), generator=g).cuda()
+    q = torch.randn(128, HI, DK, generator=g).bfloat16().cuda()
+    width = table.shape[1] * PAGE // RATIO
+    together = torch.full((128, width), float("nan"), device="cuda")
+    qsa_kernel.scores(q, pooled, table, seq, pos, RATIO, together)
+    blocks = qsa_kernel.qsa_select(q, pooled, table, seq, pos, RATIO, BUDGET, 512)
+    for t in range(0, 128, 9):
+        alone = torch.full((1, width), float("nan"), device="cuda")
+        qsa_kernel.scores(q[t:t + 1], pooled, table, seq[t:t + 1], pos[t:t + 1], RATIO, alone)
+        n = (int(pos[t]) + 1) // RATIO
+        assert torch.equal(alone[0, :n], together[t, :n])
+        assert torch.equal(qsa_kernel.qsa_select(q[t:t + 1], pooled, table, seq[t:t + 1], pos[t:t + 1], RATIO,
+                                                 BUDGET, 512)[0], blocks[t])
 
 
 def test_select_continuous():
@@ -123,9 +162,7 @@ def test_select_continuous():
         assert torch.equal(ours[t, k:k + 1], oracle[t, k:k + 1]) and (ours[t, k + 1:] == -1).all()
         assert (chosen.diff() > 0).all() and (chosen < n).all()
         if n > top:                                      # the oracle's scores of every block, in float64
-            idx = torch.arange(n) * RATIO
-            keys = pooled[table[int(seq[t]), idx // PAGE].long(), (idx % PAGE) // RATIO].double()
-            scores = (keys @ q[t].double().T).relu().sum(-1) / DK ** 0.5
+            scores = _oracle_scores(q[t], pooled, table, int(seq[t]), n)
             mask = torch.zeros(n, dtype=torch.bool)
             mask[chosen] = True
             assert scores[mask].min() >= scores[~mask].max() - 1e-5 * scores.abs().max()
@@ -170,10 +207,16 @@ def test_attend(layout, dtype):
             blocks[t, :len(chosen)] = chosen.int()
             if (int(pos[t]) + 1) % RATIO:
                 blocks[t, len(chosen)] = n
-        q = torch.randn(len(seq), HQ, D, generator=g).to(dtype)
-        ours = kernel(q.cuda(), kv, blocks.cuda(), table.cuda(), seq.cuda(), pos.cuda()).cpu()
-        oracle = ref.qsa_attend(q, stored, blocks, table, seq, pos, RATIO)
-        assert (ours[seq < 0] == 0).all()
-        worst = usage(ours, oracle)
-        print(f"\n{layout} {dtype}, {splits} splits: worst use of the attention budget {worst:.3f}")
-        assert worst <= 1.0
+        qg = torch.randn(len(seq), HQ, 2 * D, generator=g).to(dtype)        # gqa's gated layout: q, then gate
+        q, gate = qg[..., :D].contiguous(), qg[..., D:]
+        for gated in (False, True):
+            ours = kernel(q.cuda(), kv, blocks.cuda(), table.cuda(), seq.cuda(), pos.cuda(),
+                          qg.cuda()[..., D:] if gated else None).cpu()
+            oracle = ref.qsa_attend(q, stored, blocks, table, seq, pos, gate if gated else None, RATIO)
+            assert (ours[seq < 0] == 0).all()
+            worst = usage(ours, oracle)
+            print(f"\n{layout} {dtype}, {splits} splits{', gated' if gated else ''}: attention budget {worst:.3f}")
+            assert worst <= 1.0
+        if splits == 32:                                 # a plant: the open block reading one token more (p + 1)
+            mutated = ref.qsa_attend(q, stored, blocks, table, seq, pos + 1, gate, RATIO)
+            assert usage(ours, mutated) > 1.0

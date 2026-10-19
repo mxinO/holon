@@ -1,8 +1,8 @@
 """Qwen3.8-Flash-Next's PLE op contracts (docs/v1-flash-next.md D4, D13′: in the model plugin until a second user
-appears, prefixed like the unit). Oracles in `reference.py`, kernels in `kernel.py` (registered by this plugin). Kernel
-instances are stateless across steps and safe to call inside CUDA graphs. Per-request state lives in units addressed by
-`slots` (one per batch row); `has_init[r]` False: row r starts its sequence and reads no state. Rows are given by
-`query_start` [R+1] (int32 prefix sums of each row's token count); T = query_start[-1].
+appears, prefixed like the unit). Oracles in `reference.py`; kernels come from kernel plugins (`kernels.ple_triton`).
+Kernel instances are stateless across steps and safe to call inside CUDA graphs. Per-request state lives in units
+addressed by `slots` (one per batch row); `has_init[r]` False: row r starts its sequence and reads no state. Rows are
+given by `query_start` [R+1] (int32 prefix sums of each row's token count); T = query_start[-1].
 
 - `qwen4_exp.ple_rows@1`: instance `(ids [T] int64, history [units, 2] int64, slots [R], query_start [R+1],
   has_init [R], multipliers [ngram] int64, sizes [heads] int64, offsets [heads] int64) -> rows [T, heads] int64`: each

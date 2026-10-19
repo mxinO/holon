@@ -30,6 +30,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "kernels.fla" = "holon_plugins.kernels.fla"
 "kernels.gdn_triton" = "holon_plugins.kernels.gdn_triton"
 "kernels.hc_triton" = "holon_plugins.kernels.hc_triton"
+"kernels.ple_triton" = "holon_plugins.kernels.ple_triton"
 "kernels.qsa_triton" = "holon_plugins.kernels.qsa_triton"
 "drafters.mtp" = "holon_plugins.drafters.mtp"
 "drafters.dflash" = "holon_plugins.drafters.dflash"

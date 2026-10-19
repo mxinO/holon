@@ -34,8 +34,8 @@ class Attend:
                  layout: str, q_dtype: str, kv_dtype: str) -> None:
         self.ratio = ratio
 
-    def __call__(self, q, kv, blocks, table, seq, positions):
-        return qsa_attend(q, kv, blocks, table, seq, positions, self.ratio)
+    def __call__(self, q, kv, blocks, table, seq, positions, gate=None):
+        return qsa_attend(q, kv, blocks, table, seq, positions, gate, self.ratio)
 
 
 def _pow2(n: int) -> bool:

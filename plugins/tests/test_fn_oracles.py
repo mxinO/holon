@@ -62,7 +62,7 @@ def test_hc(setup):
         out = gr(r)
         inject = gr.block_inject_weight.weight if combine else None
         x, w = ref.hc_gr_mix(r, gr.hc_norm.weight, gr.input_mix_weight_down.weight, gr.input_mix_weight_up.weight,
-                             inject, n, cfg.rms_norm_eps, torch.float32)
+                             inject, None, None, n, cfg.rms_norm_eps, torch.float32)
         _check(x, out[0] if combine else out, n * h, "mix x")
         if combine:
             _check(w, out[2], n * h, "mix w")
@@ -185,7 +185,7 @@ def test_qsa(setup):
     kv = torch.zeros(pages + 3, 2, hkv, page, d)
     for t in range(L):
         kv[table[0, t // page], :, :, t % page] = torch.stack((ka[t], va[t]))
-    attended = ref.qsa_attend(qa, kv, blocks, table, seq, pos, ratio)
+    attended = ref.qsa_attend(qa, kv, blocks, table, seq, pos, None, ratio)
 
     class Module:
         num_key_value_groups, training = hq // hkv, False

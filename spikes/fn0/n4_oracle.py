@@ -6,6 +6,10 @@ attention runs out of memory at this length, the record says so: D2's query-bloc
 
     python spikes/fn0/n4_oracle.py --gguf <...-00001-of-00002.gguf> --config <Qwen3.8-Flash-Next snapshot> \\
         --prompt recall-32k --threads 32 --out <record.json>       # in the golden venv, under systemd-run MemoryMax
+
+`--capture <file> --stop-after <layer>` (FN step 4's `qsa_select` bench, panel C-m1): the real indexer inputs of every
+QSA layer up to `layer`, then stop: per layer, the raw index keys of every position, the last 8 positions' queries
+(normed and rotated, as the unit hands them to `qsa_select@1`) and the key norm's weight, saved with torch.save.
 """
 from __future__ import annotations
 
@@ -31,6 +35,8 @@ def main() -> None:
     ap.add_argument("--prompt", default="recall-32k")
     ap.add_argument("--threads", type=int, default=32)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--capture", help="save the QSA layers' indexer inputs here (see above)")
+    ap.add_argument("--stop-after", type=int, help="stop after this layer (with --capture)")
     a = ap.parse_args()
     torch.set_num_threads(a.threads)
     rows = [json.loads(x) for x in (ROOT / "judge/prompts/v1-long.jsonl").read_text().splitlines() if x]
@@ -62,14 +68,40 @@ def main() -> None:
         print(times[-1], flush=True)
         save()
         t0[0] = time.perf_counter()
+    captured = {}
+
+    class Stop(Exception):
+        pass
+
+    def capture(indexer, args, i: int) -> None:
+        hidden, (cos, sin) = args[0], args[1]
+        q, k = torch.split(indexer.index_qk_proj(hidden), [indexer.index_n_heads * indexer.index_head_dim,
+                                                            indexer.index_kv_heads * indexer.index_head_dim], dim=-1)
+        q = indexer.q_layernorm(q.reshape(*hidden.shape[:2], -1, indexer.index_head_dim))
+        n = hidden.shape[1]
+        q = transformers.models.qwen4_exp.modeling_qwen4_exp.apply_rotary_pos_emb(
+            q, cos=cos[:, -n:], sin=sin[:, -n:], unsqueeze_dim=2)
+        before = captured.get(i, {}).get("raw", k[0, :0])                  # the prompt may arrive in blocks
+        captured[i] = {"raw": torch.cat((before, k[0])), "q": q[0, -8:].clone(),
+                       "weight": indexer.k_layernorm.weight.clone()}
+
+    def after(module, i: int) -> None:
+        stamp(module, i)
+        if a.capture and a.stop_after is not None and i >= a.stop_after:
+            torch.save({"prompt": a.prompt, "layers": captured}, a.capture)
+            raise Stop
     for i, layer in enumerate(model.model.layers):
-        layer.register_forward_hook(lambda m, a_, o, i=i: stamp(m, i))
+        layer.register_forward_hook(lambda m, a_, o, i=i: after(m, i))
+        if a.capture and layer.layer_type == "indexed_attention":
+            layer.self_attn.indexer.register_forward_pre_hook(lambda m, args, i=i: capture(m, args, i))
     save()
     start = time.perf_counter()
     try:
         out, wall = golden._streamed(model, lambda select: dict(gguf.hf_state(path, select)), "blk.", prompts, 20,
                                      torch.float32, "cpu", False, lambda m, p: None)
         record |= {"status": "done", "wall_s": round(wall, 1), "target_lp_mean": round(out[0][2].mean().item(), 4)}
+    except Stop:
+        record |= {"status": f"captured up to layer {a.stop_after}"}
     except (RuntimeError, MemoryError) as e:
         record |= {"status": f"failed: {type(e).__name__}: {str(e)[:200]}"}
     record["total_s"] = round(time.perf_counter() - start, 1)

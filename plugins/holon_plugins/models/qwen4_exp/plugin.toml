@@ -7,14 +7,7 @@ license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
 [resources]
-provides = ["op.qwen4_exp.ple_rows@1", "op.qwen4_exp.ple_block@1",
-            "kernel.qwen4_exp.ple_rows@1", "kernel.qwen4_exp.ple_block@1"]
-
-[properties]
-numerics = "exact"
-
-[dependencies]
-python = ["triton"]
+provides = ["op.qwen4_exp.ple_rows@1", "op.qwen4_exp.ple_block@1"]
 
 [reference]
 module = "reference"

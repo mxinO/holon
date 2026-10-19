@@ -355,8 +355,8 @@ class HcMix:
     def __init__(self, ctx, *, streams: int, hidden: int, rank: int, eps: float, dtype: str, inject: bool) -> None:
         self.streams, self.eps, self.dtype = streams, eps, getattr(torch, dtype)
 
-    def __call__(self, r, norm, down, up, inject):
-        return hyper.hc_gr_mix(r, norm, down, up, inject, self.streams, self.eps, self.dtype)
+    def __call__(self, r, norm, down, up, inject, y=None, w=None):
+        return hyper.hc_gr_mix(r, norm, down, up, inject, y, w, self.streams, self.eps, self.dtype)
 
 
 class HcCombine:
@@ -389,8 +389,8 @@ class QsaAttend:
                  layout: str, q_dtype: str, kv_dtype: str) -> None:
         self.ratio = ratio
 
-    def __call__(self, q, kv, blocks, table, seq, positions):
-        return qsa.qsa_attend(q, kv, blocks, table, seq, positions, self.ratio)
+    def __call__(self, q, kv, blocks, table, seq, positions, gate=None):
+        return qsa.qsa_attend(q, kv, blocks, table, seq, positions, gate, self.ratio)
 
 
 class PleRows:

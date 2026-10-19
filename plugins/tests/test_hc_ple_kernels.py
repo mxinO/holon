@@ -1,10 +1,11 @@
 """L0 for Qwen3.8-Flash-Next's hyper-connection kernels (`kernels.hc_triton`: `hc_gr_mix@1`, `hc_gr_combine@1`) and
-PLE kernels (`models.qwen4_exp`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`) against their oracles
+PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`) against their oracles
 (docs/v1-flash-next.md acceptance 2, 3), on FN's shapes (4 streams of 2,560, rank 320; 16 hash heads, trigram, EOS
 248044; conv 4 taps at dilation 3), through the build context.
 
 - `hc_gr_mix@1` within `l0.check` of the oracle (x at its dtype, w in float32, over n·H terms), with and without
-  `inject`, for 0, 1, 7 and 77 tokens; `hc_gr_combine@1` within float32's elementwise budget.
+  `inject` (f32 beside bf16 `down`), with and without a pending combine, for 0, 1, 7 and 77 tokens; the residual a
+  pending combine leaves bitwise what `hc_gr_combine@1` leaves, and that within float32's elementwise budget.
 - `qwen4_exp.ple_rows@1` bitwise (rows and history), with wrapping int64 products, EOS at a row's start, inside it and
   in the history, decode rows, a zero-token row and rows without has_init.
 - `qwen4_exp.ple_block@1` within `l0.check(f32, H)` of the oracle (r and state); state units of rows without has_init
@@ -49,24 +50,31 @@ def test_hc(inject):
     norm = (torch.randn(width, generator=g) * 0.1).bfloat16()
     down = (torch.randn(RANK, width, generator=g) / width ** 0.5).bfloat16()
     up = (torch.randn(width, RANK, generator=g) / RANK ** 0.5).bfloat16()
-    gate = (torch.randn(STREAMS, width, generator=g) / width ** 0.5).bfloat16() if inject else None
+    gate = torch.randn(STREAMS, width, generator=g) / width ** 0.5 if inject else None   # f32 beside bf16 down
     weights = [x.cuda() if x is not None else None for x in (norm, down, up, gate)]
     mix = _kernel(hc_kernels.MIX, "kernels.hc_triton", streams=STREAMS, hidden=HIDDEN, rank=RANK, eps=EPS,
                   dtype="bfloat16", inject=inject)
     combine = _kernel(hc_kernels.COMBINE, "kernels.hc_triton", streams=STREAMS, hidden=HIDDEN, dtype="bfloat16")
     for t in (0, 1, 7, 77):
         r = torch.randn(t, width, generator=g) * torch.linspace(0.5, 4.0, STREAMS).repeat_interleave(HIDDEN)
-        x, w = mix(r.cuda(), *weights)
-        x_ref, w_ref = hc.hc_gr_mix(r, norm, down, up, gate, STREAMS, EPS, torch.bfloat16)
-        assert x.dtype == torch.bfloat16 and x.shape == (t, HIDDEN) and (w is None) == (not inject)
-        _check(x, x_ref, torch.bfloat16, width, f"mix x, {t} tokens")
-        if inject:
-            _check(w, w_ref, torch.float32, width, f"mix w, {t} tokens")
-            y = torch.randn(t, HIDDEN, generator=g).bfloat16()
+        y = torch.randn(t, HIDDEN, generator=g).bfloat16()
+        w_prev = 2 * torch.rand(t, STREAMS, generator=g)
+        for pending in (False, True):                    # a pending combine (the previous block's) rides along
+            extra = (y, w_prev) if pending else (None, None)
             ours = r.cuda()
-            combine(ours, y.cuda(), w_ref.cuda())
-            hc.hc_gr_combine(r, y, w_ref)
-            _check(ours, r, torch.float32, 1, f"combine, {t} tokens")
+            x, w = mix(ours, *weights, *[e.cuda() if e is not None else None for e in extra])
+            r_ref = r.clone()
+            x_ref, w_ref = hc.hc_gr_mix(r_ref, norm, down, up, gate, *extra, STREAMS, EPS, torch.bfloat16)
+            what = f"{t} tokens{', pending' if pending else ''}"
+            assert x.dtype == torch.bfloat16 and x.shape == (t, HIDDEN) and (w is None) == (not inject)
+            _check(x, x_ref, torch.bfloat16, width, f"mix x, {what}")
+            _check(ours, r_ref, torch.float32, 1, f"mix r, {what}")
+            if inject:
+                _check(w, w_ref, torch.float32, width, f"mix w, {what}")
+            if pending:                                  # R as hc_gr_combine leaves it, bit for bit
+                alone = r.cuda()
+                combine(alone, y.cuda(), w_prev.cuda())
+                assert torch.equal(alone, ours)
 
 
 # (slot, has_init, tokens): a prefill, decode rows, a zero-token row, rows with and without has_init
@@ -93,7 +101,7 @@ def test_ple_rows():
     multipliers = torch.randint(1 << 62, (NGRAM,), generator=g) * 2 + 1            # products wrap int64
     sizes = torch.randint(10 ** 7, 3 * 10 ** 7, (heads,), generator=g)
     offsets = torch.cat((torch.zeros(1, dtype=torch.long), sizes.cumsum(0)[:-1]))
-    kernel = _kernel(ple_kernels.ROWS, "models.qwen4_exp", ngram=NGRAM, heads_per_ngram=HEADS_PER, eos=EOS)
+    kernel = _kernel(ple_kernels.ROWS, "kernels.ple_triton", ngram=NGRAM, heads_per_ngram=HEADS_PER, eos=EOS)
     ours_history = history.cuda()
     ours = kernel(ids.cuda(), ours_history, slots.cuda(), query_start.cuda(), has_init.cuda(), multipliers.cuda(),
                   sizes.cuda(), offsets.cuda())
@@ -115,7 +123,7 @@ def _block_inputs(t: int, seed: int):
 
 
 def _block_kernel():
-    return _kernel(ple_kernels.BLOCK, "models.qwen4_exp", streams=STREAMS, hidden=HIDDEN, kernel=TAPS,
+    return _kernel(ple_kernels.BLOCK, "kernels.ple_triton", streams=STREAMS, hidden=HIDDEN, kernel=TAPS,
                    dilation=DILATION, eps=EPS, dtype="bfloat16")
 
 

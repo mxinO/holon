@@ -79,7 +79,7 @@ def _kv(kv) -> torch.Tensor:
 
 
 def qsa_attend(q: torch.Tensor, kv, blocks: torch.Tensor, table: torch.Tensor, seq: torch.Tensor,
-               positions: torch.Tensor, ratio: int) -> torch.Tensor:
+               positions: torch.Tensor, gate: torch.Tensor | None, ratio: int) -> torch.Tensor:
     cache = _kv(kv)                                                  # [units, 2, Hkv, page, D]
     page, rep = cache.shape[3], q.shape[1] // cache.shape[2]
     out = torch.zeros_like(q)
@@ -93,5 +93,6 @@ def qsa_attend(q: torch.Tensor, kv, blocks: torch.Tensor, table: torch.Tensor, s
         k = cache[units, 0, :, offsets].repeat_interleave(rep, dim=1)                # [n, Hq, D]
         v = cache[units, 1, :, offsets].repeat_interleave(rep, dim=1)
         scores = torch.einsum("hd,nhd->hn", q[t].float(), k) / math.sqrt(q.shape[-1])
-        out[t] = torch.einsum("hn,nhd->hd", scores.softmax(-1), v).to(q.dtype)
+        o = torch.einsum("hn,nhd->hd", scores.softmax(-1), v)
+        out[t] = (o if gate is None else o * torch.sigmoid(gate[t].float())).to(q.dtype)
     return out

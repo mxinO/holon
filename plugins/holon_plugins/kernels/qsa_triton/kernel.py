@@ -1,16 +1,21 @@
-"""Triton kernels for QSA (`qsa_index@1`, `qsa_select@1`, `qsa_attend@1`; std.mixers.qsa).
+"""Triton kernels for QSA (`qsa_index@1`, `qsa_select@1`, `qsa_attend@1`; std.mixers.qsa): one launch for the index,
+two for the selection, one for the attention (two when its shape splits the tokens), the output gate included.
 
 `_attend` and `_merge` adapted from FreeToken 21d9578 (python/freetoken/kernel/triton/qsa/attend.py, itself adapted
 from vLLM's qwen4_exp QSA kernel), Apache-2.0. They follow that kernel's structure: one program per (query, kv head,
 split of the selected tokens), the query heads of the group stacked as a tile, the tokens gathered through the page
 table tile by tile with an online softmax, the splits (by shape only: many for decode, none for prefill) merged by
-their log-sum-exp. Here the selection is in blocks and the KV cache in gqa's HND layouts, q8_0 (decoded to fp16, as
-triton_attn does) and fp8 dequantized as they are loaded.
+their log-sum-exp in a second launch. (Merging in the last split to finish saves that launch but cost 24 µs of one
+program's serial reads at decode on sm_86: measured, rejected.) The selection is in blocks and the KV cache in gqa's HND
+layouts, q8_0 (decoded to fp16, as triton_attn does) and fp8 dequantized as they are loaded; the output gate is applied
+where the output is stored.
 
-The selection is ours. `_score`: each key chunk is loaded once for four indexer heads and the products summed within a
-thread (IEEE float32 products, no TF32). `_topk`: the k-th largest score found exactly from its float bits, a bit a
-round with an early exit, over keys held in registers up to 8,192 blocks; then one scan writes the chosen blocks in
-index order, which gives D2's lower-block ties exactly. Correct and graph-safe; tuned further in FN's step 7.
+The index and the selection are ours. `_index` stores a token's raw key and pools the block it completes. `_score`:
+one program per (query, tile of 64 blocks), the same for every shape (shape invariance), each key chunk loaded once
+for four indexer heads and its products summed within a thread (IEEE float32 products, no TF32). `_topk`: the k-th
+largest score found exactly from its float bits, a bit a round with an early exit, over keys held in registers up to
+8,192 blocks; then one scan writes the chosen blocks in index order, which gives D2's lower-block ties exactly.
+Correct and graph-safe; tuned further in FN's step 7.
 """
 from __future__ import annotations
 
@@ -21,49 +26,49 @@ import triton
 import triton.language as tl
 
 TOPK_CHUNK = 8192                  # a row of up to 8,192 blocks (32K tokens) selects from registers
+SCORE_BLOCKS, SCORE_CHUNK = 64, 8  # fixed for every shape (shape invariance); one warp per program
 
 
 @triton.jit
-def _write_raw(k_ptr, raw_ptr, table_ptr, seq_ptr, pos_ptr, stride_k, stride_table, PAGE: tl.constexpr,
-               D: tl.constexpr):
-    t = tl.program_id(0).to(tl.int64)
-    s = tl.load(seq_ptr + t)
-    if s >= 0:
-        p = tl.load(pos_ptr + t)
-        unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + p // PAGE).to(tl.int64)
-        d = tl.arange(0, D)
-        tl.store(raw_ptr + (unit * PAGE + p % PAGE) * D + d, tl.load(k_ptr + t * stride_k + d))
-
-
-@triton.jit
-def _pool(raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_ptr, eps, stride_table,
-          PAGE: tl.constexpr, D: tl.constexpr, RATIO: tl.constexpr, ROT: tl.constexpr):
-    """The block a token completes, pooled from the stored raw keys: mean (f32, rounded to raw's dtype), norm, rope."""
+def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_ptr, eps, stride_k, stride_table,
+           PAGE: tl.constexpr, D: tl.constexpr, RATIO: tl.constexpr, ROT: tl.constexpr):
+    """One token: store its raw key; when it completes a block, pool the block: mean (f32, rounded to raw's dtype),
+    norm, rope. The block's keys are what the cache holds after this call: a position this call stores is read from
+    k (the value it stores; its row is t − (p − position) when the call carries it), any other from `raw`."""
     t = tl.program_id(0).to(tl.int64)
     s = tl.load(seq_ptr + t)
     p = tl.load(pos_ptr + t)
-    if (s >= 0) & (p % RATIO == RATIO - 1):
-        start = p - RATIO + 1
-        unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + start // PAGE).to(tl.int64)
-        base = raw_ptr + (unit * PAGE + start % PAGE) * D
-        d = tl.arange(0, D)
-        half: tl.constexpr = ROT // 2
-        partner = tl.where(d < half, d + half, tl.where(d < ROT, d - half, d))
-        x = tl.zeros((D,), tl.float32)
-        y = tl.zeros((D,), tl.float32)
-        for i in range(RATIO):
-            x += tl.load(base + i * D + d).to(tl.float32)
-            y += tl.load(base + i * D + partner).to(tl.float32)
-        x = (x / RATIO).to(raw_ptr.dtype.element_ty).to(tl.float32)
-        y = (y / RATIO).to(raw_ptr.dtype.element_ty).to(tl.float32)
-        rstd = tl.rsqrt(tl.sum(x * x) / D + eps)
-        x = x * rstd * (1.0 + tl.load(w_ptr + d).to(tl.float32))
-        y = y * rstd * (1.0 + tl.load(w_ptr + partner).to(tl.float32))
-        j = tl.where(d < half, d, d - half)
-        cos = tl.load(cs_ptr + start * ROT + j, mask=d < ROT, other=1.0)
-        sin = tl.load(cs_ptr + start * ROT + half + j, mask=d < ROT, other=0.0)
-        out = tl.where(d < half, x * cos - y * sin, tl.where(d < ROT, x * cos + y * sin, x))
-        tl.store(pooled_ptr + (unit * (PAGE // RATIO) + (start % PAGE) // RATIO) * D + d, out)
+    d = tl.arange(0, D)
+    if s >= 0:
+        unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + p // PAGE).to(tl.int64)
+        tl.store(raw_ptr + (unit * PAGE + p % PAGE) * D + d, tl.load(k_ptr + t * stride_k + d))
+        if p % RATIO == RATIO - 1:
+            start = p - RATIO + 1                   # page % RATIO == 0: the block is in one page
+            unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + start // PAGE).to(tl.int64)
+            base = raw_ptr + (unit * PAGE + start % PAGE) * D
+            half: tl.constexpr = ROT // 2
+            partner = tl.where(d < half, d + half, tl.where(d < ROT, d - half, d))
+            x = tl.zeros((D,), tl.float32)
+            y = tl.zeros((D,), tl.float32)
+            for i in tl.static_range(RATIO):
+                j = tl.maximum(t - (RATIO - 1 - i), 0)
+                mine = (t >= RATIO - 1 - i) & (tl.load(seq_ptr + j) == s) & (tl.load(pos_ptr + j) == start + i)
+                kx = tl.load(k_ptr + j * stride_k + d, mask=(d < D) & mine, other=0.0)
+                ky = tl.load(k_ptr + j * stride_k + partner, mask=(d < D) & mine, other=0.0)
+                rx = tl.load(base + i * D + d, mask=(d < D) & ~mine, other=0.0)
+                ry = tl.load(base + i * D + partner, mask=(d < D) & ~mine, other=0.0)
+                x += tl.where(mine, kx, rx).to(tl.float32)
+                y += tl.where(mine, ky, ry).to(tl.float32)
+            x = (x / RATIO).to(raw_ptr.dtype.element_ty).to(tl.float32)
+            y = (y / RATIO).to(raw_ptr.dtype.element_ty).to(tl.float32)
+            rstd = tl.rsqrt(tl.sum(x * x) / D + eps)
+            x = x * rstd * (1.0 + tl.load(w_ptr + d).to(tl.float32))
+            y = y * rstd * (1.0 + tl.load(w_ptr + partner).to(tl.float32))
+            c = tl.where(d < half, d, d - half)
+            cos = tl.load(cs_ptr + start * ROT + c, mask=d < ROT, other=1.0)
+            sin = tl.load(cs_ptr + start * ROT + half + c, mask=d < ROT, other=0.0)
+            out = tl.where(d < half, x * cos - y * sin, tl.where(d < ROT, x * cos + y * sin, x))
+            tl.store(pooled_ptr + (unit * (PAGE // RATIO) + (start % PAGE) // RATIO) * D + d, out)
 
 
 @triton.jit
@@ -182,13 +187,16 @@ def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.co
 
 
 @triton.jit
-def _attend(q_ptr, k_ptr, v_ptr, ks_ptr, vs_ptr, blocks_ptr, table_ptr, seq_ptr, pos_ptr, out_ptr, part_ptr, lse_ptr,
-            stride_q, stride_q_head, stride_blocks, stride_table, stride_out, stride_out_head, unit_stride,
+def _attend(q_ptr, k_ptr, v_ptr, ks_ptr, vs_ptr, blocks_ptr, table_ptr, seq_ptr, pos_ptr, gate_ptr, out_ptr, part_ptr,
+            lse_ptr, stride_q, stride_q_head, stride_gate, stride_gate_head, stride_blocks, stride_table, stride_out,
+            stride_out_head, unit_stride,
             kv_head_stride, scale_unit_stride, scale_kv_head_stride, scale_log2, rows,
             HKV: tl.constexpr, G: tl.constexpr, GP: tl.constexpr, D: tl.constexpr, PAGE: tl.constexpr,
-            RATIO: tl.constexpr, WIDTH: tl.constexpr, BN: tl.constexpr, SPLITS: tl.constexpr, Q8: tl.constexpr):
+            RATIO: tl.constexpr, WIDTH: tl.constexpr, BN: tl.constexpr, SPLITS: tl.constexpr, Q8: tl.constexpr,
+            GATED: tl.constexpr):
     """One query, one kv head, one split of the selected tokens: its G query heads, an online softmax. One split
-    writes the output; more write each split's normalized partial and log2-sum-exp for `_merge`."""
+    writes the output (times σ(gate) with GATED); more write each split's normalized partial and log2-sum-exp for
+    `_merge`."""
     t = tl.program_id(0).to(tl.int64)
     kvh = tl.program_id(1)
     split = tl.program_id(2)
@@ -203,7 +211,9 @@ def _attend(q_ptr, k_ptr, v_ptr, ks_ptr, vs_ptr, blocks_ptr, table_ptr, seq_ptr,
     p = tl.load(pos_ptr + t)
     q = tl.load(q_ptr + t * stride_q + heads[:, None] * stride_q_head + d[None, :], mask=(h < G)[:, None],
                 other=0.0)
-    if Q8:      # q8_0 decodes to fp16, whose 11-bit significand holds int8 × scale (triton_attn); q pre-scaled into it
+    # As triton_attn: q8_0 decodes to fp16 (values × scale, rounded once), whose 11-bit significand holds int8 × scale
+    # far closer than bf16's 8; q joins it there, pre-scaled by the score scale, so |K|, |V| must stay below 65504.
+    if Q8:
         q = (q.to(tl.float32) * scale_log2).to(tl.float16)
         scale_log2 = 1.0
     m = tl.full((GP,), -1.0e30, tl.float32)
@@ -238,6 +248,9 @@ def _attend(q_ptr, k_ptr, v_ptr, ks_ptr, vs_ptr, blocks_ptr, table_ptr, seq_ptr,
             m = m_new
     o = acc / tl.where(den > 0, den, 1.0)[:, None]
     if SPLITS == 1:
+        if GATED:
+            o *= tl.sigmoid(tl.load(gate_ptr + t * stride_gate + heads[:, None] * stride_gate_head + d[None, :],
+                                    mask=(h < G)[:, None], other=0.0).to(tl.float32))
         out = out_ptr + t * stride_out + heads[:, None] * stride_out_head + d[None, :]
         tl.store(out, o.to(out_ptr.dtype.element_ty), mask=(h < G)[:, None])
     else:
@@ -247,9 +260,10 @@ def _attend(q_ptr, k_ptr, v_ptr, ks_ptr, vs_ptr, blocks_ptr, table_ptr, seq_ptr,
 
 
 @triton.jit
-def _merge(part_ptr, lse_ptr, out_ptr, stride_out, stride_out_head, rows, HQ: tl.constexpr, D: tl.constexpr,
-           SPLITS: tl.constexpr):
-    """The splits of one query head, weighted by their sums (a padding token's, all empty: 0)."""
+def _merge(part_ptr, lse_ptr, gate_ptr, out_ptr, stride_gate, stride_gate_head, stride_out, stride_out_head, rows,
+           HQ: tl.constexpr, D: tl.constexpr, SPLITS: tl.constexpr, GATED: tl.constexpr):
+    """The splits of one query head, weighted by their sums (a padding token's, all empty: 0), times σ(gate) with
+    GATED."""
     t = tl.program_id(0).to(tl.int64)
     head = tl.program_id(1)
     sp = tl.arange(0, SPLITS)
@@ -260,40 +274,45 @@ def _merge(part_ptr, lse_ptr, out_ptr, stride_out, stride_out_head, rows, HQ: tl
     w = tl.where(lse > float("-inf"), tl.math.exp2(lse - tl.where(top > float("-inf"), top, 0.0)), 0.0)
     o = tl.sum(tl.load(part_ptr + at[:, None] * D + d[None, :]) * w[:, None], 0)
     total = tl.sum(w, 0)
-    tl.store(out_ptr + t * stride_out + head * stride_out_head + d,
-             (o / tl.where(total > 0, total, 1.0)).to(out_ptr.dtype.element_ty))
+    o = o / tl.where(total > 0, total, 1.0)
+    if GATED:
+        o *= tl.sigmoid(tl.load(gate_ptr + t * stride_gate + head * stride_gate_head + d).to(tl.float32))
+    tl.store(out_ptr + t * stride_out + head * stride_out_head + d, o.to(out_ptr.dtype.element_ty))
 
 
 def qsa_index(k, raw, pooled, table, seq, positions, weight, cos_sin, ratio: int, eps: float) -> None:
     t, d = k.shape
-    if t == 0:
-        return
-    page = raw.shape[1]
-    _write_raw[(t,)](k, raw, table, seq, positions, k.stride(0), table.stride(0), page, d)
-    _pool[(t,)](raw, pooled, table, seq, positions, weight, cos_sin, eps, table.stride(0), page, d, ratio,
-                cos_sin.shape[1])
+    if t:
+        _index[(t,)](k, raw, pooled, table, seq, positions, weight, cos_sin, eps, k.stride(0), table.stride(0),
+                     raw.shape[1], d, ratio, cos_sin.shape[1])
+
+
+def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor) -> None:
+    """Every query's block scores into `ws` [T, blocks]: one program per (query, tile of SCORE_BLOCKS), the same tile,
+    chunk and warps for every shape, so a query's bits never depend on the call's other rows or its row count."""
+    t, heads, d = q.shape
+    page = pooled.shape[1] * ratio
+    _score[(t, triton.cdiv(ws.shape[1], SCORE_BLOCKS))](
+        q, pooled, table, seq, positions, ws, q.stride(0), table.stride(0), ws.stride(0), 1.0 / math.sqrt(d), heads,
+        d, page, ratio, SCORE_BLOCKS, SCORE_CHUNK, num_warps=1)
 
 
 def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_batch: int) -> torch.Tensor:
     t, heads, d = q.shape
     top = budget // ratio
     out = torch.empty(t, top + 1, dtype=torch.int32, device=q.device)
-    page = pooled.shape[1] * ratio
-    blocks = table.shape[1] * page // ratio                    # the most complete blocks a query can see
+    blocks = table.shape[1] * pooled.shape[1]                  # the most complete blocks a query can see
     q = q.contiguous()
-    tile = 64 if t <= 2 else 128                               # by shape: fewer programs once rows share the key reads
     for a in range(0, t, sub_batch):
         rows = min(sub_batch, t - a)
         ws = torch.empty(rows, blocks, dtype=torch.float32, device=q.device)
-        _score[(rows, triton.cdiv(blocks, tile))](
-            q[a:], pooled, table, seq[a:], positions[a:], ws, q.stride(0), table.stride(0), ws.stride(0),
-            1.0 / math.sqrt(d), heads, d, page, ratio, tile, 8, num_warps=2)
+        scores(q[a:a + rows], pooled, table, seq[a:], positions[a:], ratio, ws)
         _topk[(rows,)](ws, seq[a:], positions[a:], out[a:], ws.stride(0), out.stride(0), ratio, top, TOPK_CHUNK,
                        triton.next_power_of_2(top + 1), num_warps=8)
     return out
 
 
-def qsa_attend(q, kv, blocks, table, seq, positions, ratio: int) -> torch.Tensor:
+def qsa_attend(q, kv, blocks, table, seq, positions, gate, ratio: int) -> torch.Tensor:
     t, hq, d = q.shape
     out = torch.empty_like(q)
     if t == 0:
@@ -304,17 +323,22 @@ def qsa_attend(q, kv, blocks, table, seq, positions, ratio: int) -> torch.Tensor
     g = hq // hkv
     k, v = values[:, 0], values[:, 1]
     ks, vs = (scales[:, 0], scales[:, 1]) if q8 else (k, v)
+    gated = gate is not None
+    if gated and gate.stride(2) != 1:
+        raise ValueError("qsa_attend: the gate's last dim must be contiguous")
+    gate = gate if gated else q
     programs = t * hkv          # split the tokens across programs while there are few (decode, verify): by shape only
     tokens, splits = ((32, 32) if programs <= 8 else (32, 8) if programs <= 32 else (64, 4) if programs <= 256
                       else (64, 1))
     part = torch.empty(splits, t, hq, d, dtype=torch.float32, device=q.device) if splits > 1 else out
     lse = torch.empty(splits, t, hq, dtype=torch.float32, device=q.device) if splits > 1 else out
     _attend[(t, hkv, splits)](
-        q, k, v, ks, vs, blocks, table, seq, positions, out, part, lse, q.stride(0), q.stride(1), blocks.stride(0),
-        table.stride(0), out.stride(0), out.stride(1), values.stride(0), values.stride(2),
-        scales.stride(0) if q8 else 0, scales.stride(2) if q8 else 0, 1.4426950408889634 / math.sqrt(d), t,
-        hkv, g, max(16, triton.next_power_of_2(g)), d, page, ratio, blocks.shape[1], tokens, splits, q8,
-        num_warps=4)
+        q, k, v, ks, vs, blocks, table, seq, positions, gate, out, part, lse, q.stride(0), q.stride(1),
+        gate.stride(0), gate.stride(1), blocks.stride(0), table.stride(0), out.stride(0), out.stride(1),
+        values.stride(0), values.stride(2), scales.stride(0) if q8 else 0, scales.stride(2) if q8 else 0,
+        1.4426950408889634 / math.sqrt(d), t, hkv, g, max(16, triton.next_power_of_2(g)), d, page, ratio,
+        blocks.shape[1], tokens, splits, q8, gated, num_warps=4)
     if splits > 1:
-        _merge[(t, hq)](part, lse, out, out.stride(0), out.stride(1), t, hq, d, splits)
+        _merge[(t, hq)](part, lse, gate, out, gate.stride(0), gate.stride(1), out.stride(0), out.stride(1), t, hq, d,
+                        splits, gated)
     return out

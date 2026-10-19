@@ -12,6 +12,8 @@ pack, the MTP rows with it; and, for the RTX 5080, step 7's target (≥ 8.2 GB w
   GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;
 - hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode
   routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);
+- QSA (the 12 layers' selection and sparse attention): measured per layer in FN's step 4 on the RTX A5000 (real
+  indexer inputs, cold caches; `QSA_US`), carried as is; 0.03 ms dense below 2,052 tokens;
 - BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B
   lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,
   scaled from X's ~11 to FN's 16 launches per layer).
@@ -67,6 +69,11 @@ X_ROWS = {"lfu": {"ms": 1e3 / 119.1672, "miss_mb": 169.7687, "hit": 0.8478},
           "static": {"ms": 1e3 / 83.6541, "miss_mb": 321.0333, "hit": 0.7072}}
 X_DENSE_GB, X_ROUTED, X_EXPERT_MB, X_BW = 1.0, 384, 2.857, 960 * 0.85
 X_LAUNCHES, FN_LAUNCHES = 11, 16
+# QSA per layer, `qsa_select` + `qsa_attend` (bf16 KV, gated), measured (FN step 4) on real indexer inputs with cold
+# caches on the RTX A5000 (evidence/fn4_qsa_rtx-a5000_2026-10-19.json, fn4_qsa_4k_rtx-a5000_2026-10-19.json) and
+# carried to the 50-series cards as is; by (context, query rows of one sequence): a decode token, a 4-row verify pass
+QSA_LAYERS, QSA_US = 12, {(4096, 1): 23.43 + 18.22, (4096, 4): 22.15 + 34.50,
+                          (32768, 1): 25.34 + 18.68, (32768, 4): 28.81 + 37.12}
 # Holon's cost per Strata prefill phase (central, low, high)
 F = {"hc read": (1.5, 1.0, 2.0), "gdn": (1.1, 0.9, 1.5), "gdn conv+gates": (1.1, 0.9, 1.5),
      "gdn recurrence": (1.1, 0.9, 1.5), "gdn out proj": (1.0, 1.0, 1.0), "qsa attn": (1.2, 1.0, 1.6),
@@ -85,9 +92,14 @@ def x_fit() -> tuple[float, float]:
     return 1 / slope, over
 
 
+def qsa_ms(context: int, rows: int) -> float:
+    """The QSA layers' selection and attention per pass (dense below 2,052 tokens: D6's rule)."""
+    return QSA_LAYERS * QSA_US[(context, rows)] / 1e3 if context > 2051 else 0.03
+
+
 def decode_ms(card: dict, hit: float, pcie: float, over: float, context: int) -> float:
     routed = LAYERS * TOPK * card["expert_mb"] / 1e3                     # GB per token
-    qsa = 0.24 if context > 2051 else 0.03                               # ms: sparse reads + selection at 32K
+    qsa = qsa_ms(context, 1)
     return ((card["dense_gb"] + GDN_STATE_GB + hit * routed) / card["bw"] * 1e3 + (1 - hit) * routed * 1e3 / pcie
             + over + qsa)
 
@@ -124,7 +136,7 @@ def routed_share(trace: str, profile: str, slots: int, window: int) -> float:
 def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, context: int) -> float:
     """A verify pass of WINDOW rows (`union` distinct experts per layer, `hit` of them resident), and its drafts."""
     experts = LAYERS * union * card["expert_mb"] / 1e3
-    qsa = 0.24 if context > 2051 else 0.03
+    qsa = qsa_ms(context, WINDOW)
     verify = ((card["dense_gb"] + GDN_STATE_GB + hit * experts) / card["bw"] * 1e3 + (1 - hit) * experts * 1e3 / pcie
               + over + qsa)
     draft = (MTP_DENSE_GB + card["head_gb"] + TOPK * MTP_EXPERT_MB / 1e3) / card["bw"] * 1e3 + over / LAYERS
