@@ -86,7 +86,7 @@ PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest 
 # chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
 # classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
 # (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
-_FN_TYPES = ("iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs")
+_FN_TYPES = ("iq1_m", "iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs", "q2_0")
 PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
                         | {(89, t, "q8_1") for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
                         | {(120, t, "q8_1") for t in ("q4_k", "q5_k", "q6_k", *_FN_TYPES)})
@@ -94,10 +94,11 @@ PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots
              "columns": 4}      # a slot with more pairs than mmq's column tiles (an id repeated in a row)
-# Supported ggml types (design §4.6) and their ggml type ids.
+# Supported ggml types (design §4.6) and their ggml type ids. IQ1_M's mmq is vendor.patch's tile loader
+# (docs/v1-moe-prefill.md D9).
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
-         "iq4_xs": 23, "mxfp4": 39, "nvfp4": 40}
+         "iq4_xs": 23, "iq1_m": 29, "mxfp4": 39, "nvfp4": 40, "q2_0": 42}
 FP4 = ("mxfp4", "nvfp4")
 # ggml type -> (values per block, block bytes)
 BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}

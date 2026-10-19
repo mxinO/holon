@@ -12,7 +12,8 @@
   output equals its f32 output cast (docs/m07-perf.md D4: the fixup's partials stay f32 until one rounding), and
   NVFP4's `scale2` multiplies the f32 sum before that rounding (`torch.equal`, the fixup forced; native W4A4 too on
   sm_120).
-- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize`: bit-identical for every type. FMA
+- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize` (Q2_0, which gguf-py 0.19 lacks: against
+  `dequantize`'s reading of its block): bit-identical for every type. FMA
   decision, measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches
   gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
   `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
@@ -76,9 +77,12 @@ NMSE = 5e-4                     # llama.cpp test-backend-ops MUL_MAT threshold
 OUTLIER = 1000.0
 GGUF_DIR = pathlib.Path(HF_HUB_CACHE) / "models--unsloth--Qwen3-8B-GGUF" / "snapshots"
 FILES = sorted(GGUF_DIR.glob("*/*.gguf"))
-# Byte offsets of each block's fp16 scales (d, and dmin / m where the type has one); d at 0 otherwise.
+# Byte offsets of each block's fp16 scales (d, and dmin / m where the type has one); d at 0 otherwise. IQ1_M's d is
+# the top nibbles of the four uint16 scales at 48.
 SCALES = {"q4_1": (0, 2), "q5_1": (0, 2), "q2_k": (80, 82), "q3_k": (108,), "q4_k": (0, 2), "q5_k": (0, 2),
-          "q6_k": (208,)}
+          "q6_k": (208,), "iq1_m": (48,)}
+# The (values, bytes) per block of the types gguf-py 0.19 lacks: Q2_0 (ggml-common.h's block_q2_0).
+BLOCK_SIZES = {"q2_0": (64, 18)}
 
 
 @pytest.fixture(scope="module")
@@ -151,8 +155,7 @@ def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
     """Random bytes, with every fp16 scale realistic: |d| log-uniform in [1e-6, 1] (fp16 subnormals below 6e-5),
     random sign, 3 % exact zeros; FP4 scales as `fp4_scales`."""
     rng = np.random.default_rng(seed)
-    qtype = gguf.GGMLQuantizationType[name.upper()]
-    block, size = gguf.GGML_QUANT_SIZES[qtype]
+    block, size = BLOCK_SIZES.get(name) or gguf.GGML_QUANT_SIZES[gguf.GGMLQuantizationType[name.upper()]]
     b = rng.integers(0, 256, size=(rows, k // block, size), dtype=np.uint8)
     if name in FP4:
         n = 4 if name == "nvfp4" else 1
@@ -161,7 +164,13 @@ def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
     for off in SCALES.get(name, (0,)):
         d = rng.choice([-1.0, 1.0], size=b.shape[:2]) * 10 ** rng.uniform(-6, 0, size=b.shape[:2])
         d[rng.random(d.shape) < 0.03] = 0
-        b[..., off:off + 2] = d.astype(np.float16).view(np.uint8).reshape(*b.shape[:2], 2)
+        h = d.astype(np.float16).view(np.uint16)
+        if name == "iq1_m":
+            sc = b[..., off:off + 8].copy().view(np.uint16)
+            sc[:] = sc & 0x0FFF | (h[..., None] >> 4 * np.arange(4) & 0xF) << 12
+            b[..., off:off + 8] = sc.view(np.uint8)
+        else:
+            b[..., off:off + 2] = h.view(np.uint8).reshape(*b.shape[:2], 2)
     return b.reshape(rows, -1)
 
 
@@ -217,6 +226,13 @@ def device_blocks(blocks: np.ndarray) -> torch.Tensor:
 
 
 def dequantize(name: str, blocks: np.ndarray) -> torch.Tensor:
+    """gguf-py's dequantization; Q2_0's, which gguf-py 0.19 lacks, as ggml-cuda's `dequantize_q2_0` reads the block:
+    fp16 d, then 2-bit codes c (4 per byte, from the low bits), value (c − 1)·d."""
+    if name == "q2_0":
+        b = blocks.reshape(len(blocks), -1, 18)
+        d = b[..., :2].copy().view(np.float16).astype(np.float32)
+        c = b[..., 2:, None] >> np.arange(0, 8, 2, dtype=np.uint8) & 3
+        return torch.from_numpy(((c.reshape(*b.shape[:2], 64) - 1.0).astype(np.float32) * d).reshape(len(b), -1)).cuda()
     return torch.from_numpy(gguf.quants.dequantize(blocks, gguf.GGMLQuantizationType[name.upper()])).cuda()
 
 

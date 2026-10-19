@@ -1,0 +1,133 @@
+{
+ "name": "mp3c_checks",
+ "gpu": "RTX A5000",
+ "date": "2026-10-18",
+ "method": "docs/v1-moe-prefill.md \u00a77.1 step 3c; plugins/tests/test_ggml_cuda.py, test_ggml_cuda_moe.py, memcheck_ggml_cuda.py, memcheck_ggml_cuda_moe.py; spikes/moe_prefill/loader_speed.py",
+ "commits": {
+  "before": "7cd24de",
+  "step3c": "d4e11f4"
+ },
+ "l0": {
+  "command": "pytest -q --durations=15 plugins/tests/test_ggml_cuda.py plugins/tests/test_ggml_cuda_moe.py",
+  "before": {
+   "passed": 266,
+   "skipped": 8,
+   "seconds": 291.6
+  },
+  "after": {
+   "passed": 294,
+   "skipped": 8,
+   "seconds": 335.6
+  },
+  "new_type_cases": 28
+ },
+ "mutation": {
+  "what": "the loader's 8\u00b7delta offsets swapped (-7 where -9, and back)",
+  "command": "pytest ... -k iq1_m",
+  "failed": 7,
+  "passed": 7,
+  "failing": "every IQ1_M mmq path: dense qlinear at in 768 / 2304 / 4096 / 12288, mmq schedules, linear_experts every type and at prefill chunks"
+ },
+ "memcheck": {
+  "moe": {
+   "command": "cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_ggml_cuda_moe",
+   "errors": 0,
+   "layouts_and_modes": 26
+  },
+  "dense": {
+   "command": "cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_ggml_cuda",
+   "errors": 0,
+   "types": 22
+  }
+ },
+ "loader_speed": {
+  "command": "python spikes/moe_prefill/loader_speed.py --tokens 512 1024 2048 3072 --rounds 5",
+  "experts": 512,
+  "top_k": 10,
+  "in": 2560,
+  "out": 1280,
+  "stack": "gate_up (merged)",
+  "rows": [
+   {
+    "tokens": 512,
+    "iq1_m_ms": 2.8124,
+    "iq2_s_ms": 3.2205,
+    "iq1_m_rounds": [
+     2.8386,
+     2.7889,
+     2.7976,
+     2.8124,
+     2.814
+    ],
+    "iq2_s_rounds": [
+     3.2553,
+     3.1375,
+     3.1918,
+     3.2205,
+     3.2256
+    ],
+    "ratio": 0.873
+   },
+   {
+    "tokens": 1024,
+    "iq1_m_ms": 3.7181,
+    "iq2_s_ms": 4.1769,
+    "iq1_m_rounds": [
+     3.8851,
+     3.716,
+     3.7181,
+     3.7499,
+     3.7172
+    ],
+    "iq2_s_rounds": [
+     4.1974,
+     4.1769,
+     4.1185,
+     4.1595,
+     4.1774
+    ],
+    "ratio": 0.89
+   },
+   {
+    "tokens": 2048,
+    "iq1_m_ms": 5.9387,
+    "iq2_s_ms": 5.7713,
+    "iq1_m_rounds": [
+     5.9366,
+     5.9387,
+     5.9474,
+     5.9571,
+     5.9356
+    ],
+    "iq2_s_rounds": [
+     5.7242,
+     5.7707,
+     5.7774,
+     5.7713,
+     5.8286
+    ],
+    "ratio": 1.029
+   },
+   {
+    "tokens": 3072,
+    "iq1_m_ms": 6.873,
+    "iq2_s_ms": 7.2602,
+    "iq1_m_rounds": [
+     6.87,
+     6.9314,
+     6.872,
+     6.8741,
+     6.873
+    ],
+    "iq2_s_rounds": [
+     7.1214,
+     7.2602,
+     7.2606,
+     7.2602,
+     7.2576
+    ],
+    "ratio": 0.947
+   }
+  ]
+ }
+}
