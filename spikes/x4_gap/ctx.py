@@ -217,6 +217,8 @@ def freetoken_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
 
 def worker(a: argparse.Namespace) -> None:
     corpus = workloads.corpus(offload_ctx.CORPUS)
+    if a.prompt_shift:                  # another prompt per context: its start moved by prompt_shift · 7,919 tokens
+        offload_ctx.OFFSETS = {c: offload_ctx.OFFSETS.get(c, 0) + a.prompt_shift * 7919 for c in a.contexts}
     fn = {"holon": holon_worker, "freetoken": freetoken_worker, "llama": offload_ctx.llama_worker}[a.engine]
     print("RESULT " + json.dumps(fn(a, corpus)), flush=True)
 
@@ -249,7 +251,7 @@ def orchestrate(a: argparse.Namespace) -> None:
                    "worker",
                    "--engine", arm["engine"], "--model", a.model, "--ctx", str(arm.get("ctx", a.ctx)),
                    "--flags", arm["flags"], "--contexts", *map(str, arm.get("contexts", a.contexts)),
-                   "--nsys-context", str(arm.get("nsys_context", 0))]
+                   "--nsys-context", str(arm.get("nsys_context", 0)), "--prompt-shift", str(arm.get("prompt_shift", 0))]
             if arm["engine"] == "llama":
                 cmd += ["--server", a.server, "--log", str(log.with_suffix(".server.log")),
                         "--wrap", arm.get("server_wrap", "")]
@@ -291,6 +293,7 @@ def main() -> None:
     w.add_argument("--wrap", default="")
     w.add_argument("--trace", help="holon: the decode routing per context (.npz)")
     w.add_argument("--nsys-context", type=int, default=0)
+    w.add_argument("--prompt-shift", type=int, default=0, help="another prompt per context (arm key prompt_shift)")
     w.add_argument("--chunk", type=int, default=0, help="holon: tokens per expert-path pass (std.moe CHUNK; 0: 512)")
     w.add_argument("--kernel-chunk", type=int, default=0, help="holon: kernels.ggml_cuda's mmq rows per call (0: 512)")
     o = sub.add_parser("run")

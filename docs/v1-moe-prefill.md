@@ -1155,7 +1155,8 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
   - With D6: ≈ 1.00–1.02× against the default, at ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K. The FreeToken
     decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin. Taking D6
     there **waives acceptance 5's decode tolerance** (≤ max(0.5%, 2 sd)) on that lock.
-- **O2: the bars and arms.**
+- **O2: the bars and arms.** **Closed at step 4** (the lead): the 5090 resident 4K row met its bar, 1.008× FreeToken
+  gated by more than 2 sd, in one session with every other prefill bar (§7.1, step 4).
   - Confirm acceptance 1–2, with FreeToken's gated arm at the lock's step budget and its default reported only.
   - Rows at or under their bar in §1.1:
     - 5090 1K and 4K, without D4;
