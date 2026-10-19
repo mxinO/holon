@@ -236,6 +236,29 @@ def test_host_evictions_go_to_the_level_and_come_back_bitwise(tmp_path):
     assert load.due == pytest.approx(tier.lane) and tier.lane > tier.nvme > 0     # the level's lane, then H2D
 
 
+def test_the_clock_lanes_move_with_launches_never_with_wall_time(tmp_path):
+    """D4's determinism: a read decided while the background write lane is ahead of the clock is charged beside those
+    writes even when they finished in wall time long ago (the lanes move only with launches); once launches carry the
+    clock past the lane, a read is charged at the pure rate. (K step 4's 3a bench keeps the loop stepping while it
+    parks, as serving does; it changed the bench, not this charge.)"""
+    tier, _, _ = _tier(tmp_path)
+    _pages(tier, [1, 2, 3, 4, 5, 6])                                  # 4, then 3, written back
+    tier.io.drain()
+    time.sleep(0.05)                                                   # the writes are done; the clock has not moved
+    assert tier.wlane > tier.t
+    wlane, read0 = tier.wlane, tier.counts["level_read_bytes"]
+    tier.load([3], {"kv": [10]}, [], []).synchronize()
+    beside = (tier.counts["level_read_bytes"] - read0) / (tier.read_rate * tier.read_beside)
+    assert beside > 0 and tier.wlane == pytest.approx(wlane + beside)     # charged beside: it pushes their lane
+    for _ in range(int(tier.wlane) + 2):                               # step_cost 1 s per launch
+        tier.before_launch(types.SimpleNamespace(n_query=np.ones(1, np.int32), slots=[0]))
+    assert tier.t > tier.wlane
+    wlane, read0 = tier.wlane, tier.counts["level_read_bytes"]
+    tier.load([4], {"kv": [11]}, [], []).synchronize()
+    assert tier.counts["level_read_bytes"] > read0 and tier.wlane == wlane            # at the pure rate
+    tier.close()
+
+
 def test_what_the_level_never_takes_and_what_it_gives_up_first(tmp_path):
     tier, _, _ = _tier(tmp_path, pages=4, payloads=3)
     _pages(tier, [1, 2, 3, 4])                                        # 1 -> 2 -> 3 -> 4

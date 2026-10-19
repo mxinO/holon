@@ -130,10 +130,16 @@ class Bench:
             self.index.evict(name, pool.capacity, pure=True)
 
     def down(self) -> None:
-        """Every evictable host copy written back to the level, and the writes done."""
+        """Every evictable host copy written back to the level, and the writes done. With decoders running, the loop
+        keeps stepping them while the writes run, as serving does (the clock's lanes move with launches only: a loop
+        blocked in a drain leaves the write lane ahead of the clock, and the next read is charged beside writes that
+        have finished, D4); with none, the drain."""
         for name, pool in self.tier.host.items():
             self.tier._room({name: pool.capacity}, pages=name in self.tier.pages, take=False)
-        self.tier.io.drain()
+        io = self.tier.io
+        while self.decoders and (io.reads or io.writes or io.running):
+            self.step()
+        io.drain()
 
     def resume(self, prompt: list[int], append: list[int] | None = None,
                params: SamplingParams = GREEDY) -> tuple[float, int]:
