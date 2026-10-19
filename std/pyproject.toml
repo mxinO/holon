@@ -15,6 +15,8 @@ dependencies = ["holonlm", "gguf>=0.17", "safetensors>=0.5", "huggingface-hub>=1
 "std.tiered" = "holon_std.tiered"
 "std.mixers.gqa" = "holon_std.mixers.gqa"
 "std.mixers.gdn" = "holon_std.mixers.gdn"
+"std.mixers.qsa" = "holon_std.mixers.qsa"
+"std.hyper" = "holon_std.hyper"
 "std.state.paged" = "holon_std.state.paged"
 "std.state.recurrent" = "holon_std.state.recurrent"
 "std.sampling" = "holon_std.sampling"

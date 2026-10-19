@@ -1,0 +1,62 @@
+{
+ "gpu": "NVIDIA RTX A5000",
+ "calls": 100,
+ "results": [
+  {
+   "rows": 1,
+   "sequences": 1,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 21.4,
+   "qsa_attend_us": 15.59
+  },
+  {
+   "rows": 2,
+   "sequences": 1,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 23.87,
+   "qsa_attend_us": 24.62
+  },
+  {
+   "rows": 2,
+   "sequences": 2,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 42.38,
+   "qsa_attend_us": 25.28
+  },
+  {
+   "rows": 4,
+   "sequences": 1,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 27.03,
+   "qsa_attend_us": 42.2
+  },
+  {
+   "rows": 4,
+   "sequences": 4,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 58.33,
+   "qsa_attend_us": 44.36
+  },
+  {
+   "rows": 8,
+   "sequences": 1,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 32.31,
+   "qsa_attend_us": 57.33
+  },
+  {
+   "rows": 8,
+   "sequences": 8,
+   "ctx": 32768,
+   "blocks": 8192,
+   "qsa_select_us": 96.75,
+   "qsa_attend_us": 64.19
+  }
+ ]
+}

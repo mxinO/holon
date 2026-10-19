@@ -1275,3 +1275,67 @@ Steps 1 and 3 wait for milestone K's core seams.
 | A-R2-m | The Q2_0 release item; the judge's std dependency; `stable_topk`'s home | **Accepted.** Plan §10 has the release item. `judge/pyproject.toml` declares `holonlm-std` (pre-existing: the judge imports `holon_std` at 40 sites; relocked). `stable_topk` moves to `std.mixers.qsa`'s reference in step 3. |
 | B-R2-n | The mirror test should show the shared term is nonzero | **Accepted:** it asserts `shared.abs().max() > 1e-4`. |
 | C-m | N1's no-approx arms ran with the CPU share on | **Accepted, noted.** N1 ran with Strata's CPU share on (the as-run arms, with their environments, are inside each `evidence/fn0_n1_*` record's `arms`). It measured as immaterial (`evidence/fn0_n1_cpu_share_<card>`). The committed `spikes/fn0/arms_*` files now set it off. |
+
+## 14. Step 4 record: the kernel batch before the core seams (2026-10-19)
+
+**Status: done on sm_86. Deferred:** the sm_89 / sm_120 L0 runs and the `qsa_select` target on the RTX 5080 (one
+cluster session); the MoE pieces (IQ1_M, Q2_0 on the GPU, lending); and anything that needs C1–C3 or the unit (PLE's
+in-step payloads and replay rewind, the launch count per layer). No core edits.
+
+**What landed:**
+- Op contracts with their oracles (`reference.py`) and CPU providers (`testing.ref_kernels`):
+  - `std.hyper`: `hc_gr_mix@1`, `hc_gr_combine@1`. They are named for the gated-residual form, so GLM's mHC adds
+    siblings.
+  - `std.mixers.qsa`: `qsa_index@1`, `qsa_select@1`, `qsa_attend@1`. `qsa_attend` reads every gqa layout in the
+    kernel, q8_0 included.
+  - `models.qwen4_exp`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`.
+  - GDN: `gated_rmsnorm`'s `out_gate` fact (committed first).
+- Triton kernels: `kernels.hc_triton`, `kernels.qsa_triton`, and PLE's kernels in `models.qwen4_exp` (D13′).
+  `qsa_attend` and its split merge are adapted from FreeToken 21d9578 (Apache-2.0), with provenance and notices. The
+  rest is ours, written after reading FreeToken's and Strata's kernels.
+
+**Checks, all passing:**
+- The oracles against HF's modules, in float32 on the tiny shapes, in the golden venv
+  (`plugins/tests/test_fn_oracles.py`):
+  - the gated residual, both mixers;
+  - PLE's rows bitwise, including EOS cases and chunks;
+  - PLE's block, dilation 3;
+  - the indexer's mask under D2's tie rule, with ties occurring;
+  - the attention under that mask.
+- L0 on the RTX A5000 (`test_qsa_kernels.py`, `test_hc_ple_kernels.py`):
+  - HC mix within `l0` at bf16 / f32 over n·H terms, at 0–77 tokens;
+  - PLE rows bitwise;
+  - the PLE block within `l0(f32, H)`, plus acceptance 2's GPU unit test (chunked and 1-token steps bitwise one shot;
+    replay rewind waits for C2);
+  - `qsa_index` (raw keys bitwise, pooled within `l0`);
+  - `qsa_select` exactly equal to the oracle on tie-heavy keys, a valid top-k on continuous keys, 8,192 and 8,195
+    blocks, sub-batching bit-neutral;
+  - `qsa_attend` within the attention budget for bf16 / fp16 / q8_0 (fp8 from sm_89) at 32, 8, 4 and 1 splits.
+- Memcheck is clean (`tests.memcheck_fn_kernels`).
+
+**Choices made while tuning:**
+- **Scores.** `qsa_select`'s scores use float32 elementwise products summed within a thread, not `tl.dot(ieee)`: the
+  same contract (IEEE products, no TF32) at 5.2 µs instead of 28 µs per 32K row.
+- **Top-k.** The top-k finds the k-th key exactly, one bit per round, with an early exit, from registers up to 8,192
+  blocks. Triton's `tl.histogram` and `tl.topk` both measured slower.
+- **Attend.** `qsa_attend` splits the selected tokens by shape alone: 32 ways for decode, none for prefill.
+
+**`qsa_select` latency** (`evidence/fn4_qsa_rtx-a5000_2026-10-19.json`; CUDA-graph replay, 32K context, 8,192
+blocks). The target, ≤ 20 µs per layer, is set for the RTX 5080. It is not yet measured there.
+
+| Query rows | One sequence (decode + drafts) | One per sequence |
+|---|---|---|
+| 1 | 21.4 µs | — |
+| 2 | 23.9 µs | 42.4 µs |
+| 4 | 27.0 µs | 58.3 µs |
+| 8 | 32.3 µs | 96.8 µs |
+
+- **Where the time goes:** the top-k takes ≈ 14–19 µs, about 31 dependent block reductions at ≈ 0.45 µs each on this
+  card. The scores take ≈ 5 µs for each sequence's 4 MB of fp32 pooled keys, which is DRAM-bound.
+- **Rows from distinct sequences:** these read 4 MB of keys each, so 8 of them cannot meet 20 µs at the RTX 5080's
+  bandwidth. The target is read for one sequence's rows, FN's batch-1 decode with drafts.
+- **Levers if the RTX 5080 misses:**
+  - a top-k with fewer rounds (a CUDA radix select, as a kernel plugin);
+  - the score epilogue narrowing the top bits;
+  - tensor-core scores over a 3-way bf16 split of the keys (exact products).
+- **Attend.** `qsa_attend` takes 15.6 µs for 1 row (2,052 tokens, bf16 KV). It is tuned in step 7.
