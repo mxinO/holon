@@ -7,7 +7,8 @@ id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is 
 32K row and the 5080's 4K row (not on every row). The 5090 4K row stays under its bar with every item (O2, with the
 owner); the sm_89 record is a gate before step 5 (§10 L3-4). **Step 4:** every prefill bar is met in one session
 (5090 4K 1.008×, 32K 1.016× gated; 5080 4K 1.141×, 32K 1.006× gated); the 5080 offload lock's 4K decode row misses
-acceptance 5's tolerance by 0.05 pp (§7.1).
+acceptance 5's tolerance by 0.05 pp on its single prompt: routing, not cost (over six prompts 1.011×; at main's
+numerics 1.0002×; §7.1).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -956,8 +957,23 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
   - 5080 offload, the re-filled lock against main's lock (`ctx.py`, 256 decode tokens, 3 rounds; repeated in a
     second session): 1.0065 / **0.9942** / 1.0028× at 1K / 4K / 32K (second session 1.0062 / 0.9945 / 1.0029). **The
     4K row misses the tolerance by 0.05 pp** (sd < 0.001). The re-fill's down split is not the cause: at main's split
-    (3,229 / 1,618 / 1,618) the row is 0.9891×. The 5090's resident batch-1 row at 4K (0.9976×) suggests a small
-    decode cost at that depth in the code, not the lock: for the lead.
+    (3,229 / 1,618 / 1,618) the row is 0.9891×. Diagnosed below (the decode split): neither the cache nor the code;
+    the row's single prompt measures the bounded items' routing.
+- **The decode split** (the lead's 2×2 on the 5080, one session; `evidence/mp4_decode_split_rtx-5080_2026-10-19.json`):
+  - Main's code cannot start at the re-fill's counts (they hold 15 MB more than main's fill), so the 2×2 has three
+    cells. At main's counts the step-4 code decodes 0.990× main at 4K, and the re-fill gains it back 0.45%: the cache
+    share is not the loss.
+  - Decode speed follows the miss bytes per token one for one, and those depend on the prompt: over six prompts at
+    4K, the step-4 code at main's counts against main is 0.96–1.12× (geomean 1.005, median 0.988, sd 5.6%), and
+    the re-filled lock against main's lock 0.966–1.121× (geomean **1.011**, median 0.994, sd 5.5%).
+  - **No code cost.** The step-4 code run with main's prefill numerics (dense calls at `CHUNK` rows, the router's
+    composition: bitwise main's `prompt_logprobs`) misses the same bytes as main on all six prompts and decodes
+    0.999–1.001× (geomean 1.0002). The cache state after the prompt, so decode's misses, follows the prefill's routes,
+    which D3′ and D5 move within their bounds.
+  - So acceptance 5's offload rows, one prompt per context, measure routing, not cost, at ±5% per prompt. Proposed
+    (no code change; the lead's call): measure them over a prompt set (six per context, geomean), where the re-fill
+    stands at 1.011×, and check code cost at main's numerics (1.0002×). The 5090's resident batch-1 4K row (0.9976×,
+    one prompt) is likely the same effect (resident decode's L2 reuse follows the routes); not separated there.
 - **Memory** (acceptance 6):
   - startup KV, main → the step-4 tree: 5090 resident (33,792, one seat) 122,528 → 121,184 tokens; 5080 offload lock
     33,792 → 33,808; the 16 GB lock 18,752 (step 0) → 18,416 (≥ its 16,384).
