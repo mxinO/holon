@@ -191,11 +191,13 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
    | Against | Card, file | Decode | Prefill |
    |---|---|---|---|
    | Strata, no approximation | RTX 5080 IQ2_XS; RTX 5090 IQ3_S | ≥ 1.0× | ≥ 0.9× |
-   | Strata defaults vs Holon + A1 | same | ≥ 1.0× | ≥ 0.9× |
+   | Strata defaults vs Holon + A1 (**reported, not gated**: owner decision 2026-10-20) | same | 1.0× | 0.9× |
 
    - Each row is gated twice: drafting off, and MTP matched. Contexts are 1K / 4K / 32K.
    - Holon runs **its lock's configuration**. F5b rows that differ from the lock are reported separately.
    - Holon exact vs Strata's defaults is reported, not gated.
+   - **The gated rows are the no-approx and MTP-matched ones** (owner decision, 2026-10-20). The Strata-defaults rows
+     are reported against their 1.0× / 0.9× marks, not gated.
    - FreeToken (`models/qwen4_exp`) and llama.cpp (`qwen4exp`) are reported only: one arm each, 3 rounds.
    - Plan §9's kill line (< 0.8×) applies to the like-for-like rows.
 6. **Memory** (§7):
@@ -1216,10 +1218,10 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
   - Record: `evidence/fn0_n4_oracle_cpu_2026-10-18.json`.
 
 **Lead decisions on the stop (2026-10-18):**
-1. **Owner item; the lead recommends report-only for the Strata defaults rows.** Gate the no-approx and MTP-matched
-   rows, which compare engine with engine. Report the defaults rows without gating them: they measure features outside
-   FN's scope (the suffix drafter is a non-goal, and int8 KV is a format choice). Pending the owner's answer; work does
-   not block on it.
+1. **Decided by the owner (2026-10-20): the Strata defaults rows are reported, not gated.** The gated rows are the
+   no-approx and MTP-matched ones, which compare engine with engine; the defaults rows measure features outside FN's
+   scope (the suffix drafter is a non-goal, and int8 KV is a format choice). (Was: the lead's recommendation, pending
+   the owner.)
 2. **The memory fit becomes a perf-closure target (step 7)**, restated after panel C (M1):
    - **The target:** ≥ 23% (≈ 8.2 GB) of the experts cached on the RTX 5080 with the MTP pack resident. It is set
      against Strata's MTP arm (7,016 slots, 28.5%), not its drafting-off arm's 31%.
