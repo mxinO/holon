@@ -403,6 +403,18 @@ def test_convert_and_get_rows_match_gguf(ctx, sm, name):
             assert same_bits(got, ref[ids]), f"{name}: get_rows ({dtype}) differs from gguf-py"
 
 
+@pytest.mark.parametrize("name", ["iq4_nl", "q4_0", "q5_0", "q8_0"])
+def test_get_rows_of_rows_narrower_than_256(ctx, name):
+    """Holon: `qembedding` at a row of whole blocks narrower than QK_K (160: PLE's IQ4_NL rows, FN) is gguf-py's."""
+    blocks = random_blocks(name, OUT, 160, seed=9)
+    ref, w = dequantize(name, blocks), device_blocks(blocks)
+    facts = {"layout": f"ggml.{name}/gguf.native", "vocab": OUT, "hidden": 160}
+    ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
+    for dtype in ("float32", "bfloat16"):
+        got = ctx.select_kernel("qembedding@1", site="l0", dtype=dtype, **facts).impl(ctx, dtype=dtype, **facts)(ids, w)
+        assert same_bits(got, ref[ids]), f"{name}: get_rows ({dtype}) differs from gguf-py"
+
+
 def test_qembedding_real_table(ctx):
     path = next((p for p in FILES if p.name.endswith("Q4_K_M.gguf")), None)
     if path is None:
