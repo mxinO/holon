@@ -1,18 +1,19 @@
-"""models.qwen4_exp: Qwen3.8-Flash-Next (docs/v1-flash-next.md): its recipe over llama.cpp's `qwen4exp` GGUF
-(`recipe.py`), its PLE unit (`units.py`, D4), and PLE's op contracts (`kernels.py`) with their oracles
-(`reference.py`); the kernels are `kernels.ple_triton`'s."""
+"""models.qwen4_exp: Qwen3.8-Flash-Next (docs/v1-flash-next.md): its recipe over llama.cpp's `qwen4exp` GGUF and its
+MTP draft head (`recipe.py`, D9), its PLE unit (`units.py`, D4), and PLE's op contracts (`kernels.py`) with their
+oracles (`reference.py`); the kernels are `kernels.ple_triton`'s."""
 from __future__ import annotations
 
 import torch
 
 from . import kernels
 from . import reference as ref
-from .recipe import recipe
+from .recipe import draft_head, recipe
 from .units import PLE
 
 
 class Plugin:
     recipe = staticmethod(recipe)
+    draft_head = staticmethod(draft_head)
 
     @staticmethod
     def trained_context(cfg, source) -> int | None:

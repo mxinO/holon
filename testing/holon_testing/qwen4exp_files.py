@@ -170,12 +170,15 @@ def prompts() -> list[list[int]]:
 
 
 @torch.inference_mode()
-def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
+def fixtures(model: torch.nn.Module, pack: pathlib.Path | None = None
+             ) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
     """HF's reference per prompt `p<i>`: `ids` [T] (the prompt and its greedy tokens), `x` [T, H] (the output mixer's
     output, one-shot), `sets.<layer>` [T, budget + ratio - 1] (each position's selected tokens, ascending, -1 padded)
-    and `ple_ids` [T, heads]; the boundary ties per prompt in the metadata. Wraps `model`'s indexers with the judge's
-    tie rule (`holon_judge.qwen4exp`), so pass a model of its own."""
-    from holon_judge.qwen4exp import wrap_indexers
+    and `ple_ids` [T, heads]; the boundary ties per prompt in the metadata. With the MTP `pack`, `mtp_x` [T, H]: the
+    MTP head's output-mixer x by the judge's pooled reference over the pack's tensors, row p from token p and the
+    trunk's R of p − 1 (zeros for the first: llama.cpp's pairing, the drafter's). Wraps `model`'s indexers with the
+    judge's tie rule (`holon_judge.qwen4exp`), so pass a model of its own."""
+    from holon_judge.qwen4exp import mtp_pooled, pack_state, wrap_indexers
 
     c = model.config
     width = c.indexer_budget + c.indexer_compress_ratio - 1
@@ -190,6 +193,9 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
         if layer.ple is not None:
             hooks.append(layer.ple.ple_embedding.ngram_embedding.register_forward_hook(
                 lambda m, a, out: seen.__setitem__("ple_ids", a[0][0])))
+    if pack is not None:                                        # the trunk's R, before the output mixer
+        hooks.append(model.model.hyper_connection_mixer.register_forward_pre_hook(
+            lambda m, a: seen.__setitem__("trunk", a[0][0].float())))
     tensors, meta = {}, {}
     try:
         for p, ids in enumerate(prompts()):
@@ -198,6 +204,11 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
             ties[0] = 0
             x = model.model(torch.tensor([ids])).last_hidden_state[0]
             tensors[f"p{p}.ids"], tensors[f"p{p}.x"] = torch.tensor(ids), x.float().contiguous()
+            if pack is not None:
+                trunk = seen.pop("trunk")
+                prev = torch.cat([torch.zeros(1, trunk.shape[1]), trunk[:-1]])
+                tensors[f"p{p}.mtp_x"] = mtp_pooled(pack_state(pack), model.config,
+                                                    model.model.embed_tokens(torch.tensor(ids)), prev).contiguous()
             for name, mask in seen.items():
                 if name == "ple_ids":
                     tensors[f"p{p}.ple_ids"] = mask.contiguous()
@@ -238,7 +249,7 @@ def main() -> None:
     for f, digest in digests.items():
         print(f"{digest}  {f.name}  {'ok' if digest == files[f] else 'DIFFERS from the pin ' + files[f]}")
     if a.fixtures:
-        tensors, meta = fixtures(model)
+        tensors, meta = fixtures(model, next(f for f in files if "mtp" in f.name))
         meta |= {"transformers": transformers.__version__, "llama_cpp": "27c7a76",
                  "gguf_sha256": digests[next(iter(files))]}
         save_file(tensors, str(FIXTURES), metadata=meta)

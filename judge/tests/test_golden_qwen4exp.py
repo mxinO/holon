@@ -115,10 +115,16 @@ def test_the_mtp_pooled_reference_reads_the_strata_pack_as_the_checkpoint(tiny, 
     assert (got - want).abs().max() < 1e-4
 
 
-def test_the_committed_fixtures_are_the_tools():
+def test_the_committed_fixtures_are_the_tools(tmp_path):
+    """With FN_STRATA, the MTP fixtures too (from the pack the tool makes, pinned); else the trunk's."""
     from holon_testing import qwen4exp_files as q
 
-    tensors, meta = q.fixtures(q.tiny_hf())                  # a fresh model: the golden test wraps the indexers
+    model = q.tiny_hf()                                      # a fresh model: the golden test wraps the indexers
+    pack = (q.mtp_pack(model, tmp_path, pathlib.Path(os.environ["FN_STRATA"]), pathlib.Path(os.environ["FN_LLAMA_CPP"]))
+            if os.environ.get("FN_STRATA") else None)
+    tensors, meta = q.fixtures(model, pack)
     committed, committed_meta = q.load_fixtures()
+    if pack is None:
+        committed = {k: v for k, v in committed.items() if not k.endswith(".mtp_x")}
     assert tensors.keys() == committed.keys() and all(torch.equal(tensors[k], committed[k]) for k in tensors)
     assert all(int(meta[k]) > 0 and meta[k] == committed_meta[k] for k in meta)        # boundary ties occur

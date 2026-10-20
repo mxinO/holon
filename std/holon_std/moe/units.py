@@ -166,6 +166,11 @@ class Resident:
         return ExpertLinear.merge(gate, up)
 
     @staticmethod
+    def fused(gate_up: ExpertLinear) -> ExpertLinear:
+        gate_up.glu = "swiglu"
+        return gate_up
+
+    @staticmethod
     def stack(down: ExpertLinear) -> ExpertLinear:
         return down
 
@@ -203,10 +208,11 @@ def _store(ctx, **site):
 class MoE(nn.Module):
     """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
     `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The expert path runs in f32 (design
-    D3), CHUNK tokens at a time."""
+    D3), CHUNK tokens at a time. `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
+    up's (transformers' `gate_up_proj`; e.g. Qwen3.8-Flash-Next's MTP pack, FN D9), loaded as `gate_up`."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
-                 layer: int = 0) -> None:
+                 layer: int = 0, fused_gate_up: bool = False) -> None:
         super().__init__()
         self.layer = layer
         self._store = _store(ctx, layer=layer, experts=experts, top_k=top_k)
@@ -215,10 +221,14 @@ class MoE(nn.Module):
                              "(moe.store = std.moe.offload@1)")
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
         stack = {"experts": experts, "top_k": top_k, "device": self._store.device}
-        self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
-                                 **stack)
-        self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
-                               **stack)
+        if fused_gate_up:
+            self.gate_up = ExpertLinear(ctx, in_features=hidden, out_features=2 * inter, rows_per_token=1,
+                                        act_dtype=ctx.dtype, **stack)
+        else:
+            self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1,
+                                     act_dtype=ctx.dtype, **stack)
+            self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1,
+                                   act_dtype=ctx.dtype, **stack)
         self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
@@ -238,7 +248,12 @@ class MoE(nn.Module):
                                           **combine).impl(ctx, **combine)
 
     def finalize_weights(self, ctx) -> None:
-        self._gate_up = self._store.merge(self.gate, self.up)
+        if hasattr(self, "gate_up"):
+            if not hasattr(self._store, "fused"):
+                raise ValueError(f"layer {self.layer}: {type(self._store).__name__} holds no fused gate/up stacks")
+            self._gate_up = self._store.fused(self.gate_up)
+        else:
+            self._gate_up = self._store.merge(self.gate, self.up)
         if self._gate_up is None:
             raise ValueError(f"layer {self.layer}: gate and up experts must share a layout to merge "
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")

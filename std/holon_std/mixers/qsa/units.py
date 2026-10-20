@@ -8,7 +8,9 @@ keys. Every step writes them (`qsa_index@1`); a step whose rows all end within `
 bounds: a verify row by its width) attends densely through gqa, any other step selects each query's blocks
 (`qsa_select@1`) and attends over them (`qsa_attend@1`, the output gate applied at its store), so a short request's
 bits depend on whether a long one shares its step (D6; the snapshot fixes the schedule). A model-only build attends
-over each whole sequence the same way, its pages made for the call."""
+over each whole sequence the same way, its pages made for the call. The indexer's q and k projections are two
+linears as llama.cpp's converter splits them, or with `fused_index_qk` one (`index_qk_proj`, q's rows then k's), as
+transformers stores them."""
 from __future__ import annotations
 
 import dataclasses
@@ -77,21 +79,26 @@ class QSA(nn.Module):
 
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Any:
-        if specs[0].name == "idx":
+        if specs[0].layout == "qsa.idx":                 # (an aux model's spec names are namespaced)
             return IndexPlanner(kernels.dense_limit(params.get("budget", 2048), params.get("ratio", 4)))
         attn = _gqa(params)
         return ctx.unit_class(attn).planner(dict(attn.params), specs, ctx)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
                  index_heads: int, index_head_dim: int, qk_norm: Ref | None = None, output_gate: str = "none",
-                 ratio: int = 4, budget: int = 2048, eps: float = 1e-6, causal: bool = True, window: int = 0) -> None:
+                 ratio: int = 4, budget: int = 2048, eps: float = 1e-6, causal: bool = True, window: int = 0,
+                 fused_index_qk: bool = False) -> None:
         super().__init__()
         params = {k: v for k, v in locals().items() if k not in ("self", "ctx", "layer", "hidden", "__class__")}
         self.attn = ctx.unit(_gqa(params), layer=layer, hidden=hidden)
         self.hi, self.dk, self.ratio, self.budget = index_heads, index_head_dim, ratio, budget
         self.limit = kernels.dense_limit(budget, ratio)
-        self.index_q_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_heads * index_head_dim))
-        self.index_k_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_head_dim))
+        if fused_index_qk:
+            self.index_qk_proj = ctx.unit(Ref(LINEAR, in_features=hidden,
+                                              out_features=(index_heads + 1) * index_head_dim))
+        else:
+            self.index_q_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_heads * index_head_dim))
+            self.index_k_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=index_head_dim))
         self.index_q_norm = ctx.unit(qk_norm, dim=index_head_dim) if qk_norm else None
         self.index_k_norm = nn.Parameter(torch.empty(index_head_dim, dtype=ctx.dtype), requires_grad=False)
         self.index_rope = ctx.unit(rope, head_dim=index_head_dim)
@@ -128,7 +135,11 @@ class QSA(nn.Module):
     def _indexer(self, x: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """The indexer's queries [T, Hi, Dk] (normed and rotated at their positions) and raw keys [T, Dk]."""
         t = x.shape[0]
-        q, k = self.index_q_proj(x).reshape(t, self.hi, self.dk), self.index_k_proj(x)
+        if hasattr(self, "index_qk_proj"):
+            q, k = self.index_qk_proj(x).split([self.hi * self.dk, self.dk], dim=1)
+        else:
+            q, k = self.index_q_proj(x), self.index_k_proj(x)
+        q = q.reshape(t, self.hi, self.dk)
         if self.index_q_norm is not None:
             q = self.index_q_norm(q.contiguous())
         q, _ = self.index_rope(q, k.reshape(t, 1, self.dk).clone(), positions)

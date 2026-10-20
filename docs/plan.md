@@ -693,6 +693,9 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
   at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its
   own size entry for the type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists.
+- **MTP's stream hnorm vs llama.cpp's graph (FN step 3, deferred):** FN pins the pooled hnorm (D9) and checks it
+  against SGLang's form on the tiny pack; llama.cpp's per-stream form needs a C++ harness over `graph_mtp` at
+  `27c7a76` on the tiny GGUF. The head's `stream` parameter lands with that check, if a deployment wants LC's form.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

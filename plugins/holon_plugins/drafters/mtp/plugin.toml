@@ -8,3 +8,6 @@ core_abi = ">=1.0,<2.0"
 
 [resources]
 provides = ["drafter.mtp@1"]
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"mtp.path" = { help = "the head's weights in a file of their own (default: the target checkpoint's)" }

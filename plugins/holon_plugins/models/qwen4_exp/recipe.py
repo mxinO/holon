@@ -9,13 +9,17 @@ D4) is the block's `pre` at its layer, its state on GDN's 64-token grid.
 GGUF only (D1: the deployed files). llama.cpp's converter writes every zero-centred norm as w + 1 in f32 (the HC,
 PLE, indexer and q / k norms; not GDN's gated norm) and `ssm_a = −exp(A_log)`, both undone by value transforms
 (`plugin.py`), and orders GDN's value heads tiled. The MTP block (`blk.<n>` after the trunk's n) is skipped here.
+
+`draft_head("mtp")` (D9) is `std.spec.mtp_hc_head@1` over one QSA + MoE + shared-expert layer, its weights mapped
+from Strata's MTP pack (`mtp-q2_0.gguf`, the drafter's `mtp.path`): HF names under `mtp.`, norms stored as w, the
+indexer's q / k projection and each expert's gate / up rows fused as transformers stores them.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
 from typing import Any
 
-from holon.api import LayerDecl, ModelSpec, Ref, Residual, WeightMap, WeightRule
+from holon.api import AuxSpec, LayerDecl, ModelSpec, Ref, Residual, WeightMap, WeightRule
 
 MINUS = "qwen4_exp.minus_one"
 _HC = (("norm", "norm", MINUS), ("down", "down", None), ("up", "up", None), ("inject", "inject", None))
@@ -78,6 +82,54 @@ def facts(c: Mapping[str, Any]) -> dict[str, Any]:
 
 
 PAD = 128      # HF's `make_ngram_vocab_size_divisible_by` (Qwen3.8-Flash-Next's): the converter keeps the padded table
+_PACK_HC = (("hc_norm", "norm"), ("input_mix_weight_down", "down"), ("input_mix_weight_up", "up"),
+            ("block_inject_weight", "inject"))
+MTP_RULES = (           # Strata's pack (St tools/mtp_pack.py): HF names, under the WeightMap's root `mtp.`
+    *(WeightRule(f"{g}.weight", f"{h}.weight") for g, h in (
+        ("fc_embedding", "fc_embedding"), ("fc_hidden", "fc_hidden"), ("pre_fc_norm_embedding", "enorm"),
+        ("pre_fc_norm_hidden", "hnorm"))),
+    *(WeightRule(f"hyper_connection_mixer.{g}.weight", f"out.hc.{h}") for g, h in _PACK_HC[:3]),
+    *(WeightRule(f"layers.{{i}}.{half}_hyper_connection.{g}.weight", f"layers.{{i}}.{ours}_hc.{h}")
+      for half, ours in (("attn", "attn"), ("mlp", "ffn")) for g, h in _PACK_HC),
+    *(WeightRule(f"layers.{{i}}.self_attn.{g}.weight", f"layers.{{i}}.mixer.attn.{g}.weight")
+      for g in ("q_proj", "k_proj", "v_proj", "o_proj", "q_norm", "k_norm")),
+    WeightRule("layers.{i}.self_attn.indexer.index_qk_proj.weight", "layers.{i}.mixer.index_qk_proj.weight"),
+    WeightRule("layers.{i}.self_attn.indexer.q_layernorm.weight", "layers.{i}.mixer.index_q_norm.weight"),
+    WeightRule("layers.{i}.self_attn.indexer.k_layernorm.weight", "layers.{i}.mixer.index_k_norm"),
+    WeightRule("layers.{i}.mlp.gate.weight", "layers.{i}.ffn.parts.0.router"),
+    WeightRule("layers.{i}.mlp.experts.gate_up_proj", "layers.{i}.ffn.parts.0.gate_up.weight"),
+    WeightRule("layers.{i}.mlp.experts.down_proj", "layers.{i}.ffn.parts.0.down.weight"),
+    *(WeightRule(f"layers.{{i}}.mlp.shared_expert.{g}_proj.weight", f"layers.{{i}}.ffn.parts.1.{g}_proj.weight")
+      for g in ("gate", "up", "down")),
+    WeightRule("layers.{i}.mlp.shared_expert_gate.weight", "layers.{i}.ffn.parts.1.gate.weight"),
+)
+
+
+def _refs(c: Mapping[str, Any], f: dict[str, Any], packed: bool = False) -> dict[str, Ref]:
+    """The trunk's norm, QSA and FFN; `packed`: as the MTP pack stores them (fused indexer q / k, fused gate / up)."""
+    eps = c["rms_norm_eps"]
+    norm = Ref("std.ops.rmsnorm@1", eps=eps, offset=1.0)                       # zero-centred: x̂·(1 + w)
+    rope = Ref("std.ops.rope@1", theta=c["rope_theta"], rotary_dim=f["rotary_dim"])
+    qsa = Ref("std.mixers.qsa@1", heads=c["num_attention_heads"], kv_heads=c["num_key_value_heads"],
+              head_dim=c["head_dim"], qk_norm=norm, output_gate="sigmoid", rope=rope, index_heads=f["index_heads"],
+              index_head_dim=f["index_head_dim"], ratio=f["ratio"], budget=f["budget"], eps=eps)
+    moe = Ref("std.moe@1", experts=f["experts"], top_k=f["top_k"], inter=f["inter"], renormalize=True)
+    if packed:
+        qsa, moe = qsa.with_(fused_index_qk=True), moe.with_(fused_gate_up=True)
+    ffn = Ref("std.ffn.sum@1", parts=(moe, Ref("std.ffn.gated_swiglu@1", inter=f["shared_inter"])))
+    return {"norm": norm, "qsa": qsa, "ffn": ffn}
+
+
+def draft_head(c: Mapping[str, Any], source: str, name: str) -> AuxSpec | None:
+    """The MTP head (D9), its weights Strata's pack's (None for any other name)."""
+    if name != "mtp" or source != "gguf":
+        return None
+    f, eps = facts(c), c["rms_norm_eps"]
+    r, gr = _refs(c, f, packed=True), {"n": f["streams"], "rank": f["rank"], "eps": eps}
+    head = Ref("std.spec.mtp_hc_head@1", hidden=c["hidden_size"], n=f["streams"], norm=r["norm"],
+               block=Ref("std.hyper.gr_block@1", **gr), out=Ref("std.hyper.gr_mix@1", **gr))
+    return AuxSpec(head, (LayerDecl(r["qsa"], r["ffn"], "indexed_attention"),),
+                   WeightMap("gguf", rules=MTP_RULES, root="mtp."))
 
 
 def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
@@ -85,17 +137,11 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
         raise ValueError(f"qwen4_exp: GGUF files only (D1), not {source!r}")
     f, eps, hidden = facts(c), c["rms_norm_eps"], c["hidden_size"]
     n, rank = f["streams"], f["rank"]
-    norm = Ref("std.ops.rmsnorm@1", eps=eps, offset=1.0)                       # zero-centred: x̂·(1 + w)
-    rope = Ref("std.ops.rope@1", theta=c["rope_theta"], rotary_dim=f["rotary_dim"])
-    qsa = Ref("std.mixers.qsa@1", heads=c["num_attention_heads"], kv_heads=c["num_key_value_heads"],
-              head_dim=c["head_dim"], qk_norm=norm, output_gate="sigmoid", rope=rope, index_heads=f["index_heads"],
-              index_head_dim=f["index_head_dim"], ratio=f["ratio"], budget=f["budget"], eps=eps)
+    r = _refs(c, f)
+    qsa, ffn = r["qsa"], r["ffn"]
     gdn = Ref("std.mixers.gdn@1", heads_k=f["heads_k"], heads_v=f["heads_v"], head_k_dim=f["head_k_dim"],
               head_v_dim=f["head_v_dim"], conv_kernel=f["conv_kernel"], v_head_order="tiled", norm_eps=eps,
               out_gate="sigmoid")
-    ffn = Ref("std.ffn.sum@1", parts=(
-        Ref("std.moe@1", experts=f["experts"], top_k=f["top_k"], inter=f["inter"], renormalize=True),
-        Ref("std.ffn.gated_swiglu@1", inter=f["shared_inter"])))
     ple = Ref("qwen4_exp.ple@1", n=n, width=n * hidden, embed_dim=f["ple_heads"] * f["ple_dim"], ngram=f["ngram"],
               heads_per_ngram=f["heads_per_ngram"], eos=f["eos"], multipliers=f["multipliers"], sizes=f["sizes"],
               offsets=f["offsets"], table_rows=-(-sum(f["sizes"]) // PAD) * PAD, dilation=f["ngram"],

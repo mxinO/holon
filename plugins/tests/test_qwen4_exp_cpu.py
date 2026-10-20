@@ -11,11 +11,16 @@ prefilled one-shot and in chunks of 7, 10 and 13 tokens, and as its 100-token pr
 - PLE: the n-gram table rows are HF's, bitwise.
 - Prefix hit vs recompute: the second request, hitting the first's checkpoint at 64, gives bitwise the prompt logprobs
   of a run without the prefix cache.
+- MTP (D9): the head loaded from the tiny Strata-format pack (`drafters.mtp` with `mtp.path`): its output-mixer x
+  within 1e-4 of the judge's pooled reference over the pack's own tensors (the fixture's `mtp_x`), one-shot and in
+  chunks of 13 (the carried R); greedy speculation emits HF's tokens, its drafts replaced by the right ones on
+  alternate steps (a random head is rarely right), so verify rows accept 0 … 3 drafts and GDN, PLE and QSA rewind.
+  `drafters.dflash` refuses the target (its residual is not hidden-size).
 - Plants that must fail: `qsa_dense_limit_off_by_one` (a 20-token step runs dense), `ple_conv_dilation_1`,
   `ple_eos_cut_off`.
 
-Needs the tiny GGUF: `FN_TINY_GGUF=<…/tiny-qwen4exp-f32.gguf>` (built by `python -m holon_testing.qwen4exp_files` in
-the golden venv; its sha256 is pinned), else skipped.
+Needs the tiny GGUF: `FN_TINY_GGUF=<…/tiny-qwen4exp-f32.gguf>`, the MTP pack beside it (both built by
+`python -m holon_testing.qwen4exp_files` in the golden venv; their sha256 are pinned), else skipped.
 """
 import dataclasses
 import hashlib
@@ -46,9 +51,14 @@ def tiny():
     return path, fixtures, meta, head
 
 
-def _engine(path, chunk: int, prefix: bool = False) -> Engine:
+def _engine(path, chunk: int, prefix: bool = False, mtp: pathlib.Path | None = None, drafter: str = "mtp") -> Engine:
+    spec = {} if mtp is None else {
+        "max_draft_tokens": 3, "plugin_options": {"spec.k": "3", f"{drafter}.path": str(mtp)},
+        "slots": {"drafter": f"drafters.{drafter}", "draft_policy": "std.spec.fixed_k",
+                  "verifier": "std.spec.greedy"}}
     return Engine(EngineConfig(str(path), device="cpu", dtype=torch.float32, page_size=16, max_seqs=1,
-                               max_step_tokens=chunk, max_model_len=256, state_memory=64 << 20, prefix_cache=prefix))
+                               max_step_tokens=chunk, max_model_len=256, state_memory=64 << 20, prefix_cache=prefix,
+                               **spec))
 
 
 def _record(engine: Engine) -> dict:
@@ -117,13 +127,18 @@ def test_the_engine_matches_hf(tiny, chunk):
 
 
 def test_a_prefix_hit_is_bitwise_a_recompute(tiny):
-    """A request continuing a cached one resumes at its checkpoint (64): its greedy tokens and their logprobs are
-    bitwise those of a run without the prefix cache. (Prompt-logprob requests never hit: they need every position.)"""
+    """A request continuing a cached one resumes at its checkpoint (64, PLE's alignment: GDN's chunk): its greedy tokens
+    and their logprobs are bitwise those of a run without the prefix cache. (Prompt-logprob requests never hit: they
+    need every position.)"""
+    from holon_std.mixers.gdn.units import CHUNK
+
     path, fixtures, _, _ = tiny
     ids = fixtures["p0.ids"].tolist()
     params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True, logprobs=1)
     plain = _decode(_engine(path, 128), ids[:110], params)
     engine = _engine(path, 128, prefix=True)
+    ple = engine.spec.block.param("pre")
+    assert ple.param("alignment") == ple.param("in_step") == CHUNK
     _ask(engine, ids[:100], DECODE)
     hit = _decode(engine, ids[:110], params)
     assert engine.stats()["prefix_tokens_saved"] == 64
@@ -135,6 +150,45 @@ def _decode(engine: Engine, ids: list[int], params: SamplingParams) -> list:
     while engine.has_work():
         out += [(d.token_ids, d.logprobs.token) for d in engine.step() if d.rid == rid and d.token_ids]
     return out
+
+
+@pytest.mark.parametrize("chunk", [128, 13])
+def test_the_mtp_head_matches_the_pooled_reference(tiny, chunk):
+    path, fixtures, _, _ = tiny
+    pack = path.with_name(f"{q.NAME}-mtp-q2_0.gguf")
+    assert hashlib.sha256(pack.read_bytes()).hexdigest() == q.MTP_PACK_SHA256
+    engine = _engine(path, chunk, mtp=pack)
+    head, rows = engine.executor.drafter.head, []
+    forward = head.forward
+    head.forward = lambda e, r, ctx: rows.append(out := forward(e, r, ctx)) or out
+    ids = fixtures["p0.ids"].tolist()
+    _ask(engine, ids, SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+    got = head.out(torch.cat([r for r in rows if len(r) > 1]))          # the step's rows, not its draft sub-steps
+    assert got.shape[0] == len(ids) and (got - fixtures["p0.mtp_x"]).abs().max() <= 1e-4
+    drafter, steps = engine.executor.drafter, [0]
+    run = drafter.run
+
+    def right_on_alternate_steps(ctx, h):
+        run(ctx, h)
+        table, dev, k = ctx.seq_table, ctx.batch.dev, ctx.batch.plan.draft_k
+        steps[0] += 1
+        if k and len(dev.logits_rows) and steps[0] % 2:
+            slot, p = int(dev.slots[0]), int(table.num_computed[dev.slots[0]])
+            right = ids[p + 1: p + 1 + k]
+            table.draft_tokens[slot, : len(right)] = torch.tensor(right)
+    drafter.run = right_on_alternate_steps
+    assert _ask(engine, ids[: q.PROMPT], DECODE)[0] == ids[q.PROMPT:]                   # lossless
+    stats = engine.stats()
+    assert stats["spec_rows_k3_accepting_0"] > 0 and stats["spec_rows_k3_accepting_3"] > 0
+    engine.close()
+
+
+def test_dflash_refuses_a_wide_residual(tiny, tmp_path):
+    from holon_testing import dflash_files
+
+    draft = dflash_files.save(tmp_path / "draft", 64, 320, (0, 2), mask=7)
+    with pytest.raises(ValueError, match="residual is 256 wide"):
+        _engine(tiny[0], 128, mtp=draft, drafter="dflash")
 
 
 @pytest.mark.parametrize("plant", ["qsa_dense_limit_off_by_one", "ple_conv_dilation_1", "ple_eos_cut_off"])

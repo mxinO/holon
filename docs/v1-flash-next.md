@@ -1484,3 +1484,82 @@ spec of a smaller alignment publishes off the block grid and no hit can use it. 
 | B-1 | The startup assert on real engines | **Done:** before merge, D16's propagation starts every lock family's bf16 GPU engine, which runs the startup profile and its check; that is the startup-assert check of record. Run now on an RTX A5000: Qwen3.8-27B UD-IQ3_S (residual (5120, bf16), 9 graphs) and Qwen3-30B-A3B Q4_K_M ((2048, bf16), 9 graphs) start and decode. |
 | B-2 | Which state is bound | **Stated** in `AuxSpec`'s and `DeclaresState`'s docstrings: the target's mixers and block, and auxiliary models' mixers; an aux unit declares none. |
 | B-3 | The block's state through a tier | **Done:** with the `tier` slot (`testing.toy_tier`), a filler request pushes a's blocks off a tight device pool; b hits at 192, its blocks loaded from the tier and both sums' checkpoints adopted from the tier's copies; greedy output equals the model-only build's. |
+
+## 16. Step 3 record: std units and the model plugin (2026-10-19)
+
+**Status: built, for the panel's code review.** No core edits in this step: the core stays at +27 code lines over the
+base, ABI 1.5.
+
+**What step 3 adds:**
+- **std units:** `std.hyper.expand@1`, `gr_mix@1` (the model's norm) and `gr_block@1` (R complete at every block
+  boundary; `pre`'s state hooks forwarded by `ctx.unit_class`); `std.ffn.sum@1` and `std.ffn.gated_swiglu@1` (D7);
+  `std.mixers.qsa@1` (D6; `stable_topk` now lives in its reference, the judge imports it); `std.spec.mtp_hc_head@1`
+  (D9).
+- **`models.qwen4_exp`:** the GGUF recipe (`residual = Residual(n·H, "float32")`, the converter's w + 1 norms and
+  `ssm_a = −exp(A_log)` undone by value transforms, the PLE table padded to a multiple of 128 rows as the converter
+  keeps it), `qwen4_exp.ple@1` (D4), and `draft_head("mtp")` over Strata's pack.
+- **Edits:** `drafters.mtp` (a head whose `carries` is `"residual"` takes and carries R, `lm_head(head.out(x))`; the
+  plugin option `mtp.path` reads the head's weights from their own file); `drafters.dflash` refuses a target whose
+  residual is not hidden-size; `std.weights.gguf` reads split files (D14); `out_gate` and Q2_0 on the CPU were in
+  the step-4 batch.
+
+**PLE (`qwen4_exp.ple@1`):**
+- **State:** two Slot specs of kind `recurrent@1` in group `ple`: `ple.history` (the last two ids, int64) and
+  `ple.conv` (the last (K − 1)·dilation = 9 rows of C, f32), alignment and `in_step` 64. The recipe's 64 is asserted
+  against `std.mixers.gdn`'s `CHUNK` in the CPU test.
+- **`qwen4_exp.ple_block@1` returns C [T, n·H] f32** (the approved contract change): the oracle, the CPU provider, the
+  Triton kernel and its L0 return it. In-step checkpoints are filled from the state before the step and the step's
+  own ids and C.
+- **Verify rows** run on a scratch copy of their rows' state, so the real state stays as before the step; `rewind`
+  writes the window and the two ids at 1 + n_accept by gathers from the saved state and the step's ids and C.
+
+**Decisions taken while building (for the panel):**
+- **D5 moves to step 6.** The PLE table is read through `std.ops.embedding@1` (resident: dense, or quantized through
+  `qembedding@1`), a `table` Ref of the unit. `std.tiered.rows@1` exists only to serve the table from RAM or SSD, and
+  `rows_gather@1`'s dequantization is `qembedding@1`'s; both land with the tiers in step 6, where the Ref changes and
+  the unit does not.
+- **Fused stacks are unit parameters.** The core maps one checkpoint tensor to one parameter and refuses transforms on
+  quantized tensors, so the pack's fused tensors are read whole: `std.moe@1(fused_gate_up=True)` holds one gate / up
+  stack (per expert gate's rows, then up's: the merged stack's layout), served by the resident store's new `fused`;
+  `std.mixers.qsa@1(fused_index_qk=True)` holds one `index_qk_proj` and splits its output. Both default off, so no
+  lock's facts move. The offload store gains `fused` with the aux experts in step 6 (D12a); until then a fused stack
+  with `moe.store` set fails at load with a clear message.
+- **The pack is a file of its own** (`mtp.path`, as `dflash.path`); `GGUFSource` reads a file without a tokenizer
+  (an empty vocabulary). The MTP rules map its HF names under the root `mtp.`, with no transforms (its norms are w).
+- **The head's e** is the first H columns of the target's embed (`std.hyper.expand@1` repeats it), so the drafter
+  keeps using the target's shared embed. On the GPU its pooled hnorm reads R in the model dtype; on the CPU all is
+  f32.
+- **QSA's planner** picks the index planner by its spec's layout (`qsa.idx`), not by name: an aux model's spec names
+  are namespaced (`mtp.idx`).
+- **The stream form of hnorm** and its check against LC's MTP graph are not built: FN pins pooled (D9), and the check
+  needs a C++ harness over LC 27c7a76's `graph_mtp`. The `stream` parameter is added only with that check (deferred;
+  plan §10).
+
+**§6.1 on the CPU** (`plugins/tests/test_qwen4_exp_cpu.py`, the tiny GGUF and pack at their pinned sha256):
+
+| Check | Result |
+|---|---|
+| prompt logprobs vs the fixture's, one-shot and chunks of 7, 10, 13 | max \|Δ\| 9.5e-7 on both prompts at every chunking; top-1 identical |
+| greedy tokens (24 decode steps) | HF's |
+| QSA token sets at layers 3 and 7 | identical; boundary ties occur (18 and 13 per prompt) |
+| PLE row ids | bitwise |
+| prefix hit (at 64) vs recompute | bitwise tokens and logprobs |
+| MTP head from the pack vs the judge's pooled reference on the pack's tensors (`mtp_x`, new in the fixtures) | max \|Δ\| 2.4e-7 one-shot, 3.6e-7 in chunks of 13 (the carried R) |
+| greedy speculation with MTP, the drafts made right on alternate steps | HF's tokens; verify rows accept 0 and 3 drafts (GDN, PLE, QSA rewound) |
+| plants `qsa_dense_limit_off_by_one`, `ple_conv_dilation_1`, `ple_eos_cut_off` | each fails the test |
+| `drafters.dflash` on this target | refused |
+
+**On the GPU (RTX A5000):** `qwen4_exp.ple_block@1`'s C bitwise chunked vs one-shot (`test_hc_ple_kernels`); the PLE
+unit (`test_qwen4_exp_units`, Qwen3.8-Flash-Next's sizes): a verify row of 1 + 3 tokens leaves the real state
+unchanged, and rewound to n accepted drafts gives bitwise the state and the residual updates of 1 + n one-token steps,
+n = 0 … 3; an in-step checkpoint is bitwise the state a step ending there leaves. Both feed the K / V projections one
+row at a time, the contract's precondition.
+
+**Split GGUF (D14):** a file opened by its first shard (`<name>-00001-of-0000N.gguf`) is one checkpoint: the whole
+file's name, configuration and tensors, each extent in its own shard, `identity()` the sha256 of the shards' digests;
+a missing shard, or a later shard named, is refused. A hub reference names the set and fetches every shard. Tested
+with a tiny Qwen3 written in 5-tensor shards: it serves what the whole file serves.
+
+**Qwen3.8's snapshot is unchanged:** Qwen3.8-27B UD-IQ3_S, bf16, the `v1-qwen3_5` trace (354 steps), `--max-seqs 8`
+and a 2 GiB state budget on an RTX A5000: this step's tree and the base (0aad1ab) write byte-identical snapshot files
+(sha256 `dd32244b…`), and the steps' outputs equal main's recorded snapshot of step 4's GDN check.

@@ -107,6 +107,9 @@ class Plugin:
 class DFlashDrafter:
     def __init__(self, ctx, target, source) -> None:
         cfg = self.cfg = checkpoint(source)
+        if (r := target.spec.residual) is not None and r.width != target.spec.hidden:
+            raise ValueError(f"drafters.dflash: the target's residual is {r.width} wide (ModelSpec.residual), not its "
+                             f"hidden size {target.spec.hidden}: the draft's taps read hidden-size features")
         if (cfg["hidden"], cfg["vocab"]) != (target.spec.hidden, target.spec.vocab):
             raise ValueError(f"drafters.dflash: the draft's hidden size and vocabulary {cfg['hidden'], cfg['vocab']} "
                              f"are not the target's {target.spec.hidden, target.spec.vocab}")
