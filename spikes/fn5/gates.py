@@ -4,11 +4,13 @@ all-resident (experts, PLE table and MTP head in VRAM), one engine at a time.
 - `divergence`: the absolute decode check. Each `v1-long` prompt (4K-32K tokens, its chat prompt up to `gen_start`)
   is one session; an arm decodes `--tokens` greedily with top-k logprobs, and a reference engine of the same QSA mode
   (prefix cache off, eager, whole prompts) re-scores prompt + generated tokens teacher-forced; KL(reference || arm)
-  at the generated positions (`holon_judge.bounded.divergence`, session-bootstrap SEs). Arms: `sparse` (as built),
+  at the generated positions (`holon_judge.bounded.divergence`'s, session-bootstrap SEs). Arms: `sparse` (as built),
   `mtp` (sparse, speculating with the MTP head, 3 drafts), `dense` (the control: `holon_judge.qwen4exp.forced_dense`
   in the arm and its reference), and, with `--plant`, `sparse+plant` and `mtp+plant` (`qsa_decode_select_shift`,
   decode and verify only, so the sparse reference serves them too). Gate per arm: KL p99 <= max(2 x dense,
-  dense + 2.5 SE of dense's p99); pre-registered: the unplanted arms pass and both planted arms fail.
+  dense + 2.5 SE of dense's p99); pre-registered: the unplanted arms pass and both planted arms fail, and if a planted
+  arm passes, the statistic is tightened to p95 (the per-position KLs are kept for the next step, a paired
+  difference).
 - `mtp`: accepted tokens per verify pass (accepted drafts + 1, Strata's count) at 3 drafts on `v1-qwen3_5`'s chat and
   agent prompts (their chat prompts, `--tokens` greedy each); acceptance 2's gate is >= 2.2.
 - `launches`: CUDA kernels per decode token and per 4-row verify pass, counted with the profiler on eager steps (a
@@ -33,7 +35,8 @@ import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import bounded, planted, qwen4exp
-from holon_judge.recording import PromptSet
+from holon_judge.compare import kl_topk
+from holon_judge.recording import PromptSet, Recording, tail_from_topk
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 DRAFTS = 3
@@ -94,23 +97,47 @@ def divergence(a) -> dict:
         out["arms"][name] = {"wall_s": round(time.time() - t0, 1),
                              "spec": {k: v for k, v in stats.items() if k.startswith("spec")}}
         print(name, out["arms"][name], flush=True)
+    kls = {}
     for ref_mode, names in ((contextlib.nullcontext, [n for n in arms if n != "dense"]),
                             (qwen4exp.forced_dense, ["dense"])):
         with ref_mode():
             reference = Engine(config(a, prefix_cache=False, overlap=False, cuda_graphs=False, max_seqs=1,
                                       max_step_tokens=max(len(p) for p in ids) + a.tokens + 1))
             for name in names:
-                d = bounded.divergence(reference, turns[name], len(ids), a.k)
-                out["arms"][name] |= {"kl_mean": d.kl.value, "p50": d.p50, "p99": d.p99, "p50_se": d.p50_se,
-                                      "p99_se": d.p99_se, "n": d.kl.n}
-                print(name, {k: out["arms"][name][k] for k in ("p50", "p99", "p99_se", "n")}, flush=True)
+                kl, session = kls[name] = per_position(reference, turns[name], len(ids), a.k)
+                values, ses = bounded._quantiles(kl, session, torch.tensor(QUANTILES, dtype=torch.float64))
+                names_q = [f"p{round(q * 100)}" for q in QUANTILES]
+                out["arms"][name] |= {"kl_mean": kl.mean().item(), "n": len(kl),
+                                      **dict(zip(names_q, values.tolist(), strict=True)),
+                                      **{f"{q}_se": v for q, v in zip(names_q, ses.tolist(), strict=True)}}
+                print(name, {k: v for k, v in out["arms"][name].items() if k[0] == "p"}, flush=True)
             free(reference)
+    torch.save(kls, pathlib.Path(a.out).with_suffix(".kl.pt"))
+    # The pre-registered statistic: p99; tightened to p95 if a plant passes it (acceptance 2)
     dense = out["arms"]["dense"]
-    bound = max(2 * dense["p99"], dense["p99"] + 2.5 * dense["p99_se"])
-    out["gate"] = {"bound_p99": bound, **{name: out["arms"][name]["p99"] <= bound for name in arms if name != "dense"}}
-    expect = {name: "+plant" not in name for name in out["gate"] if name != "bound_p99"}
-    out["pre_registered"] = {"expected": expect, "as_expected": all(out["gate"][n] == v for n, v in expect.items())}
+    for stat in ("p99", "p95"):
+        bound = max(2 * dense[stat], dense[stat] + 2.5 * dense[f"{stat}_se"])
+        out[f"gate_{stat}"] = {"bound": bound, **{n: out["arms"][n][stat] <= bound for n in arms if n != "dense"}}
+    expect = {n: "+plant" not in n for n in arms if n != "dense"}
+    for stat in ("p99", "p95"):
+        out["statistic"] = stat
+        out["pre_registered"] = {"expected": expect, "as_expected": all(out[f"gate_{stat}"][n] == v
+                                                                       for n, v in expect.items())}
+        if all(not out[f"gate_{stat}"][n] for n in expect if "+plant" in n):
+            break
     return out
+
+
+QUANTILES = (0.5, 0.95, 0.99)
+
+
+def per_position(reference, turns: list[bounded.Turn], sessions: int, k: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """KL(reference || arm) at every generated position and its session (`bounded.divergence`'s, unreduced)."""
+    ref, session = bounded._reference(reference, turns, sessions, k)
+    top_ids = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top_ids])
+    top = torch.tensor([x[:k] for _, _, lps in turns for lp in lps for x in lp.top], dtype=torch.float32)
+    kl, _ = kl_topk(ref, Recording(top_ids, top, top[:, 0], tail_from_topk(top), ref.offsets, {}))
+    return kl, session
 
 
 def mtp(a) -> dict:
