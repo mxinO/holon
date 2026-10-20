@@ -1,6 +1,7 @@
-"""`holon serve <org>/<repo>:<TAG>` or `<org>/<repo>/<stem>`: one GGUF file of a Hugging Face Hub repository, fetched
-into the HF cache (release design §14.3). The hub library is imported only here, when a reference is resolved, so
-serving a local path never needs it; its own configuration applies (`HF_HOME`, `HF_TOKEN`, `HF_HUB_OFFLINE`)."""
+"""`holon serve <org>/<repo>:<TAG>` or `<org>/<repo>/<stem>`: one GGUF file of a Hugging Face Hub repository (a split
+file: all its shards, FN D14), fetched into the HF cache (release design §14.3). The hub library is imported only
+here, when a reference is resolved, so serving a local path never needs it; its own configuration applies
+(`HF_HOME`, `HF_TOKEN`, `HF_HUB_OFFLINE`)."""
 from __future__ import annotations
 
 import pathlib
@@ -28,20 +29,21 @@ def resolve(ref: str) -> Resolved | None:
         if cached:                                    # the hub unreachable: say what the cache lacks
             raise ValueError(f"{repo}: its cached snapshot holds no GGUF file")
         return None                                   # not a GGUF repository: another source's
-    path = pick(sorted(files), tag, stem, repo)
+    paths = pick(sorted(files), tag, stem, repo)
 
     def fetch() -> str:
         from huggingface_hub import hf_hub_download
 
-        return hf_hub_download(repo, path)
+        return [hf_hub_download(repo, p) for p in paths][0]    # the shards side by side; the source opens the first
 
-    return Resolved(f"{repo}/{path}", files[path], fetch)
+    what = f"{repo}/{paths[0]}" + (f" ({len(paths)} files)" if len(paths) > 1 else "")
+    return Resolved(what, sum(files[p] for p in paths), fetch)
 
 
-def pick(files: list[str], tag: str | None, stem: str, repo: str) -> str:
-    """The file a reference names among the repository's model files (paths in it): with `tag`, of the files whose
-    stem ends in `-TAG` or `.TAG` (any case), the shortest stem (`Q4_K_M` takes `X-Q4_K_M` over `X-UD-Q4_K_M`); with
-    `stem`, the file of that stem; else the only file. A split file is refused: the source reads one file."""
+def pick(files: list[str], tag: str | None, stem: str, repo: str) -> list[str]:
+    """The file a reference names among the repository's model files (paths in it), as its paths (a split file's
+    shards, in order): with `tag`, of the files whose stem ends in `-TAG` or `.TAG` (any case), the shortest stem
+    (`Q4_K_M` takes `X-Q4_K_M` over `X-UD-Q4_K_M`); with `stem`, the file of that stem; else the only file."""
     whole = {p: SPLIT.sub("", pathlib.PurePosixPath(p).stem) for p in files}      # the stem without a split suffix
     if tag is not None:
         found = [p for p, s in whole.items() if s.lower().endswith((f"-{tag.lower()}", f".{tag.lower()}"))]
@@ -53,9 +55,11 @@ def pick(files: list[str], tag: str | None, stem: str, repo: str) -> str:
     found = [p for p in found if p not in split or whole[p] not in singles]
     split = [p for p in split if p in found]
     if len(found) == 1 and not split:
-        return found[0]
+        return found
     if found and len(split) == len(found) and len({whole[p] for p in found}) == 1:
-        raise ValueError(f"{repo}: {whole[found[0]]} is split into {len(found)} files; the GGUF source reads one file")
+        if len(found) != (n := int(found[0][-10:-5])):              # `-<i>-of-<n>.gguf`
+            raise ValueError(f"{repo}: {whole[found[0]]} is split into {n} files, of which it has {len(found)}")
+        return sorted(found)
     what = "several GGUF files" if found else f"no GGUF file {stem}" if stem else f"no GGUF file tagged {tag}"
     raise ValueError(f"{what} in {repo}; name one as {repo}:<TAG> or {repo}/<name>: "
                      + (", ".join(sorted(set(whole.values()))) or "it has none"))

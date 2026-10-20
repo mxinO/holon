@@ -78,6 +78,40 @@ def test_quantized_parts_say_where_their_bytes_lie_in_the_file(tiny_checkpoint, 
             assert extent.path == str(file) and f.read(extent.nbytes) == q.parts["blocks"].numpy().tobytes()
 
 
+def test_a_split_file_is_one_checkpoint(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
+    """A split GGUF (FN D14), opened by its first file: the whole file's name, configuration and tensors, each extent
+    in its own shard; it serves what the whole file serves. A missing shard, or a later shard named, is refused."""
+    from holon_judge.gguf import shards
+    from holon_std.weights.gguf.source import GGUFSource
+
+    whole, split = tmp_path / "tiny.gguf", tmp_path / "split" / "tiny.gguf"
+    split.parent.mkdir()
+    write(tiny_checkpoint, whole, Q.Q8_0)
+    write(tiny_checkpoint, split, Q.Q8_0, split=5)
+    files = sorted(split.parent.iterdir())
+    a, b = GGUFSource(whole), GGUFSource(files[0])
+    assert len(files) > 2 and b.files == files == shards(files[0]) and (b.name, b.config()) == (a.name, a.config())
+    got, want = dict(b.tensors()), dict(a.tensors())
+    assert got.keys() == want.keys()
+    for name, t in got.items():
+        if not isinstance(t, QTensor):
+            assert torch.equal(t, want[name])
+            continue
+        extent = t.extents["blocks"]
+        with open(extent.path, "rb") as f:
+            f.seek(extent.offset)
+            assert f.read(extent.nbytes) == t.parts["blocks"].numpy().tobytes() == want[name].parts["blocks"].numpy(
+                ).tobytes()
+    assert {t.extents["blocks"].path for t in got.values() if isinstance(t, QTensor)} != {extent.path}
+    prompts, _ = tiny_case
+    assert _engine(files[0]).generate(prompts, GREEDY) == _engine(whole).generate(prompts, GREEDY)
+    with pytest.raises(ValueError, match="by its first"):
+        GGUFSource(files[1])
+    files[-1].unlink()
+    with pytest.raises(ValueError, match="are missing"):
+        GGUFSource(files[0])
+
+
 def test_a_unit_that_cannot_read_a_layout_fails_at_load(tiny_checkpoint, tmp_path):  # noqa: F811
     file = tmp_path / "norms-quantized.gguf"
     write(tiny_checkpoint, file, Q.Q8_0, quantize_norms=True)          # RMSNorm has no quantized form

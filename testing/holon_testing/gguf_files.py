@@ -47,14 +47,14 @@ def _tensors(checkpoint: pathlib.Path) -> dict[str, tuple[np.ndarray, list[str]]
 
 
 def write(checkpoint: pathlib.Path, path: pathlib.Path, qtype: gguf.GGMLQuantizationType,
-          quantize_norms: bool = False, types: dict[str, gguf.GGMLQuantizationType] | None = None
-          ) -> dict[str, np.ndarray]:
+          quantize_norms: bool = False, types: dict[str, gguf.GGMLQuantizationType] | None = None,
+          split: int = 0) -> dict[str, np.ndarray]:
     """The checkpoint as a GGUF file (matrices and expert stacks in `qtype`, or `types[<GGUF name part>]`, e.g.
-    `{"ffn_up_exps": Q4_0}`; norms and the router F32 unless `quantize_norms`); returns the dequantized tensors by
-    HF name."""
+    `{"ffn_up_exps": Q4_0}`; norms and the router F32 unless `quantize_norms`; with `split`, as files of that many
+    tensors, `<stem>-00001-of-0000N.gguf` …); returns the dequantized tensors by HF name."""
     cfg = json.loads((checkpoint / "config.json").read_text())
     moe = cfg["model_type"] == "qwen3_moe"
-    w = gguf.GGUFWriter(path, "qwen3moe" if moe else "qwen3")
+    w = gguf.GGUFWriter(path, "qwen3moe" if moe else "qwen3", split_max_tensors=split)
     w.add_block_count(cfg["num_hidden_layers"])
     w.add_context_length(cfg["max_position_embeddings"])
     w.add_embedding_length(cfg["hidden_size"])
