@@ -103,6 +103,10 @@ TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_
 FP4 = ("mxfp4", "nvfp4")
 # ggml type -> (values per block, block bytes)
 BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
+# Holon: the row widths qembedding serves, as multiples (QK_K = 256 unless listed): the legacy types' get_rows reads
+# whole 32-value blocks; IQ4_NL's reads 256-value groups, so a row of whole blocks narrower than that (FN: PLE's
+# 160-wide rows) is gathered as bytes and converted (`QEmbedding`), bitwise the same values.
+QK = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32}
 DTYPES = ("bfloat16", "float32")
 ACT_QUANT = ("a4", "a8")                    # q8_1 activations (8 bits) serve either
 # Each spec's activation format per path, and the ggml_prec each format asks mmq for (GGML_PREC_Q8, GGML_PREC_Q4).
@@ -453,10 +457,13 @@ class QEmbedding:
     def __init__(self, ext: Extension, ctx, *, layout: str, vocab: int, hidden: int, dtype: str) -> None:
         self.type, self.hidden, self.dtype = ggml_type(layout), hidden, getattr(torch, dtype)
         self.lib = ext(ctx.fingerprint.sm)
+        self.gather = hidden % 256 != 0 and self.type == TYPES["iq4_nl"]     # Holon: see QK
 
     def __call__(self, ids: torch.Tensor, blocks: torch.Tensor) -> torch.Tensor:
         y = torch.empty(len(ids), self.hidden, dtype=self.dtype, device=blocks.device)
-        if len(ids):
+        if len(ids) and self.gather:
+            self.lib.dequantize(self.type, blocks.index_select(0, ids), y)
+        elif len(ids):
             self.lib.get_rows(self.type, blocks, ids.to(torch.int32), y)
         return y
 
@@ -709,7 +716,9 @@ def _supports_qlinear_glu(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
 
 def _supports_qembedding(f: dict) -> bool:
     # get_rows has no NVFP4
-    return ggml_type(f["layout"]) not in (None, TYPES["nvfp4"]) and f["hidden"] % 256 == 0 and f["dtype"] in DTYPES
+    name = weight_type(f["layout"])
+    return (ggml_type(f["layout"]) not in (None, TYPES["nvfp4"]) and f["hidden"] % QK.get(name, 256) == 0
+            and f["dtype"] in DTYPES)
 
 
 def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
