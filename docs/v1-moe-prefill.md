@@ -1,20 +1,14 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building: steps 0–5 done, at the close before the merge** (§2.1–§2.2, §7.1).
-**Step 5:** 18 of 18 locks propagated (L2 passing, snapshots run-identical ×3); the 5080 offload lock re-pinned with
-its bars met (4K 1.136×, 32K 1.005× gated). **Owner decisions (2026-10-20, §9):** acceptance 5's offload rows are the
-six-prompt geomean (single prompt recorded beside); the 5080 offload decode rows' deviations (six prompts: 1K
-0.969×) are accepted as D3′'s and D5's routing (the code at main's numerics 1.000×, O5); the 4090 Q4_K_M lock takes
-`ggml_cuda.pass_rows` 2,048 (re-propagated); suite time +6% accepted (acceptance 7 restated); no D6 on offload
-locks (O1); O2 closed. Step 0 tripped no
-decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
-keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
-id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is kept: it passes M0.7's rule on the 5090's
-32K row and the 5080's 4K row (not on every row). The 5090 4K row stays under its bar with every item (O2, with the
-owner); the sm_89 gate passes (§10 L3-4). **Step 4:** every prefill bar is met in one session
-(5090 4K 1.008×, 32K 1.016× gated; 5080 4K 1.141×, 32K 1.006× gated); the 5080 offload lock's 4K decode row misses
-acceptance 5's tolerance by 0.05 pp on its single prompt: routing, not cost (over six prompts 1.011×; at main's
-numerics 1.0002×; §7.1).
+Status: **closed (2026-10-20); design rev 6, built in steps 0–5** (§7.1; the acceptance table below §1). Every
+prefill bar is met: the 5080 natural-fit offload lock (re-pinned at the close) 1.850 / 1.136 / 1.005× FreeToken gated at
+1K / 4K / 32K; the 5090 resident 1.029 / 1.008 / 1.016×. 18 of 18 locks propagated (L2 passing, snapshots
+run-identical ×3). **Owner decisions (2026-10-20, §9):** O1 no D6 on offload locks; O2 closed at step 4; O3 the 4090
+Q4_K_M lock at `ggml_cuda.pass_rows` 2,048 (its batched-decode KV cliff stated there); O5 the 5080 offload decode
+deviations accepted as D3′'s and D5's routing (the code at main's numerics 1.000×), acceptance 5's offload rows the
+six-prompt geomean (the single prompt recorded beside); acceptance 7's suite time +6% accepted. On the way: D3 failed
+M0.7's keep rule and was reverted (§10 L3-1); D3′ (the router per pass) kept (step 3d); the sm_89 gate passed (§10
+L3-4); T6 (FN's 640-wide rows) landed at no cost to existing widths (§10).
 - Rev 2 answered the three-lens panel's first round (A correctness, B architecture, C performance: 3 blockers, 19
   majors, 23 minors).
 - Rev 3 answered its second round and took in FN's requests.
@@ -24,7 +18,8 @@ numerics 1.0002×; §7.1).
 - Rev 6 answers the fifth round: A's minor on `lend_tail`'s call number and C's minor on who owns the pass's
   fallback buffer. B is clean.
 
-All are applied with the lead's decisions (§10). Rev 6 awaits the panel's re-review.
+All are applied with the lead's decisions (§10). Rev 6 is the design that was built; the panel reviewed the code at
+step 3 and at the close (§10).
 
 This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
 gate").
@@ -34,7 +29,7 @@ rows. FreeToken's all-resident prefill runs 1.6–2.0× Holon's on the RTX 5090.
 
 **Step 0** is `spikes/moe_prefill/README.md` (`evidence/moe_prefill_rtx-a5000_2026-10-18.json`). It ran Qwen3-30B-A3B
 Q4_K_M all-resident on one RTX A5000, with nsys per component, a per-call GEMM bench, and a source study of FreeToken's
-and llama.cpp's prefill GEMMs. Its bar-card half (§7 step 0) is still to run.
+and llama.cpp's prefill GEMMs. Its bar-card half ran on 2026-10-18 (§2.1–§2.2).
 
 ## 1. Goal and acceptance
 
@@ -45,7 +40,7 @@ Close the MoE prefill gap to FreeToken without leaving Holon's exactness classes
 - Holon calls it at 512 rows on resident stacks;
 - its grouped grid launches every column tile of every slot.
 
-The bars are **proposed for the owner to confirm** (§9). The predictions per item set are in §1.1 and are fixed
+The bars were confirmed with the owner (§9 O2, closed at step 4). The predictions per item set are in §1.1 and are fixed
 before any code. Every bar is measured by §5.2's method.
 
 1. **The recorded shortfall rows, against FreeToken's gated arm.** RTX 5080, Qwen3-30B-A3B Q4_K_M at the natural fit
@@ -53,9 +48,9 @@ before any code. Every bar is measured by §5.2's method.
    - prefill ≥ 1.0× FreeToken **gated** (acceptance 3) at 4K and 32K.
    - The 0.92× / 0.88× shortfall was recorded against FreeToken's default 8,192-token chunks. At 4K the two arms are
      the same run, since a 4K prompt is one chunk either way.
-   - At 32K the gated reference is a different, slower FreeToken. Step 0 measures it at 4,096 and 8,192 chunks; until
-     then it is modelled ≈ 4–7% slower than the reference that recorded 0.88× (C-N-M1: it streams every expert once
-     per chunk, 8 times instead of 4). The record states the measured distance beside the bar.
+   - At 32K the gated reference is a different, slower FreeToken (C-N-M1: it streams every expert once per chunk, 8
+     times instead of 4; modelled ≈ 4–7% slower than the reference that recorded 0.88×). **Measured: 4.8% slower** on
+     the 5080 at 32K (6,276 against 5,988 ms, step 5; step 4: 6,277 against 5,988).
    - the 1K row stays ≥ 1.5×;
    - every llama.cpp prefill row stays ≥ 2.1×.
 2. **All-resident.** RTX 5090, same model (the lock's settings with `max_model_len` 33,792 and `max_seqs` 1, stated in
@@ -106,6 +101,18 @@ before any code. Every bar is measured by §5.2's method.
    (D11). Suite time grows only by the track's own L0 cases (the panel's §5.1 list; the owner, 2026-10-20: +6% at the
    close accepted), every other file within its run-to-run spread (lean tests, §5.1).
 
+**Acceptance at the close (2026-10-20), item by item.**
+
+| # | Item | Verdict | Owner decision | Evidence |
+|---|---|---|---|---|
+| 1 | The 5080 shortfall rows against FreeToken gated | **met** | O2 (the gated arm; closed at step 4) | at the re-pinned lock 1.850 / 1.136 / 1.005× at 1K / 4K / 32K; llama.cpp rows ≥ 2.51× (step 4); the gated arm 4.8% slower than the default at 32K (§7.1 steps 4–5; `evidence/mp5_close_2026-10-20.json`, `evidence/mp4_bars_rtx-5080_2026-10-19.json`) |
+| 2 | All-resident, 5090 | **met** | O2 | 1.029 / 1.008 / 1.016× FreeToken gated; llama-server 1.78 / 2.36 / 1.45× (step 4); T6 leaves them 0.9998× (step 5; `evidence/mp4_bars_rtx-5090_2026-10-19.json`) |
+| 3 | FreeToken's arms | **met** | O2 | gated at the lock's step budget, the default reported (5090 32K 0.950×, 5080 32K 0.959×) |
+| 4 | Exactness | **met** | — | D1, D2, D4 bitwise (`prompt_logprobs` identity at every step, sm_86 / 89 / 120; §10 L3-4; T6); D3′ and D5 bounded: L2 passing on all 18 locks (step 5); L0 on every lock type × SM |
+| 5 | Decode keeps its bits and its speed | **accepted deviation** | O5 (routing, not cost; the six-prompt geomean); O3 (the 4090 lock at 2,048) | bits: graphs-vs-eager and mmvq untouched (steps 2–3); 5090 `holon_tg` within (step 4); 5080 offload six prompts 0.969 ± 2.6% / 1.008 ± 2.2% / 1.006 ± 0.6% (single 1.005 / 0.992 / 1.001), pooled 0.994 ± 1.2%, the code at main's numerics 1.000×; the 4090 lock's B32 / B64 below by the KV cliff (O3) |
+| 6 | Memory | **met; one cliff stated** | O3 | every pool ≥ its `max_model_len` and recorded rows; the 5080 cache share −21.6 MB, within D5's 25 MB; the 16 GB soak clean (step 4); the 4090 lock 32 tokens short of a 23rd B32 / B64 sequence per wave (O3) |
+| 7 | No core diff, no ABI bump, lean tests | **met; suite time accepted** | acceptance 7 restated (+6%) | `check_core_diff` empty, ABI 1.3; the suite 1,317 → 1,396 s with 63 new tests (step 5) |
+
 ### 1.1 Predictions per item set (A5000 step 0; restated from the bar cards in §2.2)
 
 The base is the measured all-4,096 probe (D1 and D5 in, A5000 GPU-busy ms):
@@ -114,7 +121,7 @@ The base is the measured all-4,096 probe (D1 and D5 in, A5000 GPU-busy ms):
 |---|---|---|---|
 | 1K | 212 | 172 | 172 |
 | 4K | 686 | 584 | 584 |
-| 32K | 10,013 | 9,184 | ≈ 9,423, **modelled** (its 4K-call GEMM rate per token); step 0 measures it |
+| 32K | 10,013 | 9,184 | ≈ 9,423, **modelled** (its 4K-call GEMM rate per token); measured on the bar cards since (§2.2): 4.8% slower than the default on the 5080 |
 
 Item savings at 1K / 4K / 32K (ms):
 
@@ -129,7 +136,8 @@ Item savings at 1K / 4K / 32K (ms):
 there (the arena already makes 4,096-row calls), so the A5000 base is the 4,096-expert-row arm (703 ms at 4K) with
 dense calls at 512 rows; D5 saves 20 ms there (C2-m3).
 
-**Gated cells are modelled until step 0 measures FreeToken at 4,096 and 8,192 chunks** (lead decision; C-N-M1):
+**Gated cells were modelled until step 0 measured FreeToken at 4,096 and 8,192 chunks** (lead decision; C-N-M1; measured
+since, §2.2 and §7.1):
 - resident: FreeToken +2.6% at 32K (its 4K-call GEMM rate);
 - offload: +2.6% (C's first model) up to +4–7%. Gating doubles FreeToken's full-expert streams at 32K, so the band
   runs from the first to the second.
@@ -1038,6 +1046,9 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
   whose `12.lock` is the newest); `scripts/ci/check_locks.py --release` green. 14 traces moved
   where D5's or D3′'s bounded numerics changed a generated token, 4 stayed byte-identical; every L2 passes
   against its own floor. The 27B rows' ΔPPL carries its own wide SE (±0.3–1.0%), as at X's close.
+  The locks' `[deploy] commit` stays `c281d8c`, the commit they were written at (re-stamping would rewrite them).
+  main's history was rewritten on 2026-10-20 (merge messages only, trees identical); the old → new SHA map is kept
+  with the maintainers, and this track's entries are appended when it is rebased for the merge.
 - **The 5080's natural-fit offload lock, re-filled and re-pinned** (`3.lock`):
   - The fill at the lock's settings, main's tree and this one in one session: main 3,224 / 1,695 / 1,529, this tree
     3,229 / 1,700 / 1,529 (gate/up / q6_k down / q4_k down slots).
@@ -1046,17 +1057,23 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     until it does, **3,216 / 1,693 / 1,523**: 21.6 MB under main's lock's 3,236 / 1,618 / 1,618 in bytes, within D5's
     ≈ 25 MB (acceptance 6: **met**). L2 passing, the trace moved, snapshots run-identical ×3.
   - **Acceptance 1 at the re-pinned lock** (§5.2's method, one session, 6 balanced rounds, clocks 2,767 MHz every arm;
-    one flagged repetition, FreeToken default 1K): against FreeToken gated 1.850× (sd 0.014) / **1.136×** (0.0005) /
+    one flagged repetition, FreeToken default 1K, round 0, prompt 1 at 1,309 ms, 3.5× its cell's median: kept and
+    reported with the flag, on a reported row, not a bar; the cell's median moves 0.01% without it): against FreeToken gated 1.850× (sd 0.014) / **1.136×** (0.0005) /
     **1.0053×** (0.0001) at 1K / 4K / 32K: **met**; FreeToken default at 32K 0.959× (reported); against main 1.020 /
     1.226 / 1.097×. The llama.cpp rows are step 4's (prefill moved < 0.1% with the pin).
   - **Acceptance 5's offload decode rows, both ways** (the re-pinned lock on this tree against main's lock on main's
-    tree; `ctx.py`, 256 decode tokens, 3 rounds; the owner has not yet chosen the method):
+    tree; `ctx.py`, 256 decode tokens, 3 rounds; the owner's method, 2026-10-20: the six-prompt geomean, the single
+    prompt beside):
 
-    | Context | One prompt (shift 0) | Six prompts, geomean | Per prompt |
+    | Context | One prompt (shift 0) | Six prompts, geomean ± prompt SE | Per prompt |
     |---|---|---|---|
-    | 1K | 1.0046 (sd 0.0001): within | **0.9687** (sd 0.0001): misses by 2.6 pp | 0.856–1.013 |
-    | 4K | **0.9917** (sd 0.0001): misses by 0.33 pp | 1.0075: within | 0.961–1.122 |
-    | 32K | 1.0012: within | 1.0055: within | 0.990–1.035 |
+    | 1K | 1.0046 (sd over rounds 0.0001) | **0.9687 ± 2.6%** | 0.856–1.013 |
+    | 4K | **0.9917** (0.0001): 0.33 pp under the tolerance | 1.0076 ± 2.2% | 0.961–1.122 |
+    | 32K | 1.0012 (0.0001) | 1.0055 ± 0.6% | 0.990–1.035 |
+
+    The prompt SE (the sd of the six prompts' log ratios over √6) is what the round sd misses: per prompt the rows
+    swing ±5% (1K, 4K) and ±1.6% (32K). Pooled over the 18 prompt × context pairs the geomean is **0.994 ± 1.2%**:
+    within one SE of 1.0, the support for O5 beside the split below.
 
     Decode follows the misses per token prompt by prompt (1K, shift 1: 9.6 → 19.4 misses, 0.856×).
   - **The split at the re-pinned counts** (main, this tree, and this tree at main's prefill numerics — the probe of
@@ -1083,7 +1100,8 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     (top-1 98.246% against ≥ 97.969%, ΔPPL vs floor +0.091% ± 0.105% against ≤ 0.513%), trace moved, snapshots
     run-identical ×3. **The trade at 2,048:** prefill 1.44 / 1.67× main at 1K / 4K (4,096: 1.44 / 1.75×); batched decode
     1.005 / 0.964 / 0.956× at B16 / 32 / 64 (six seeds; at 4,096 0.998 / 0.959 / 0.961×); KV 26,464 tokens (main
-    26,752), 22 sequences per B32 / B64 wave against main's 23.
+    26,752), 22 sequences per B32 / B64 wave against main's 23. **The cliff:** 32 tokens (2 pages, ≈ 3 MB) short of the
+    23rd; no lock-level setting gives them back (§9 O3), so it is stated there as a follow-up.
   - At 512, the code at main's prefill numerics (the probe) against main, six seeds: 0.993 (sd 0.003) / 1.002 (0.002)
     / 0.994 (0.002): ≈ 0.6% of code cost at B16 and B64 (C5's per-call 1.004–1.017× on q4_k down, L3-4), just past
     0.5%, and B32's −2.5% is the bounded items' routing.
@@ -1275,30 +1293,31 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
 - **O1 (escalated by the lead; not blocking): D6 on the 5080 offload lock trades 32K prefill against decode.**
   **Owner decision (2026-10-20): no D6 on offload locks.**
   - Default: no D6 on offload locks, so decode wins.
-  - Then the 32K row is predicted at ≈ 1.00–1.06× against the gated FreeToken arm (modelled until step 0 measures
-    it), and ≈ 0.98–0.99× against FreeToken's ungated 8,192-token default (reported, not gated).
+  - Then the 32K row was predicted at ≈ 1.00–1.06× against the gated FreeToken arm (measured at the close: 1.005×,
+    the gated arm 4.8% slower than the default), and ≈ 0.98–0.99× against FreeToken's ungated 8,192-token default (reported, not gated).
   - With D6: ≈ 1.00–1.02× against the default, at ≈ −3.0% / −3.7% / −2.4% decode at 1K / 4K / 32K. The FreeToken
     decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin. Taking D6
     there **waives acceptance 5's decode tolerance** (≤ max(0.5%, 2 sd)) on that lock.
 - **O2: the bars and arms.** **Closed at step 4** (the lead): the 5090 resident 4K row met its bar, 1.008× FreeToken
   gated by more than 2 sd, in one session with every other prefill bar (§7.1, step 4). The owner confirms it closed
-  (2026-10-20).
-  - Confirm acceptance 1–2, with FreeToken's gated arm at the lock's step budget and its default reported only.
-  - Rows at or under their bar in §1.1:
-    - 5090 1K and 4K, without D4;
-    - 5090 4K and the 5080 32K-gated row at the bar's low end, even with D4.
-  - These are re-sent with the measured gated arm after the bar cards' step 0.
-  - **From the step-2 base (C1; escalated by the lead):** the 5090 resident 4K row is predicted at 0.988–0.993× with
-    every remaining item, under its bar; both 32K gated rows at ≈ 1.002–1.009×, within 3% (§2.2). Step 3's
-    measurements replace the prediction.
-  - Acceptance 1's 32K row is now against the gated FreeToken, which step 0 measures as slower than the reference
-    that recorded 0.88× (≈ 4–7% modelled). The owner confirms the relabel.
+  (2026-10-20). Its sub-items resolved:
+  - acceptance 1–2 confirmed, with FreeToken's gated arm at the lock's step budget and its default reported only;
+  - the rows §1.1 put at or under their bar (5090 1K / 4K; the 5080 32K gated row) all met it at step 4 and again at
+    the close (5080 32K gated 1.005×; the 5090's rows unchanged by T6, 0.9998×);
+  - the relabel of acceptance 1's 32K row against the gated FreeToken: confirmed; the gated arm measured 4.8% slower
+    than the reference that recorded 0.88×.
 - **O3: pass size per class.** `ggml_cuda.pass_rows` lowers the step-size gain on classes whose KV capacity cannot
   absorb 4,096 (likely the 24 GB 30B classes at 2,048 and the 16 GB class at 512 or 2,048). The values are set by
   hand at the close from step 0's measurements. **Owner decision (2026-10-20): the 4090 Q4_K_M lock takes 2,048**
   (§7.1 step 5: KV 26,464 against main's 26,752; prefill 1.44 / 1.67× main at 1K / 4K against 1.44 / 1.75× at 4,096;
   batched decode 1.005 / 0.964 / 0.956× at B16 / 32 / 64, six seeds, against 0.998 / 0.959 / 0.961× at 4,096 and
-  0.998 / 0.975 / 0.989× at 512).
+  0.998 / 0.975 / 0.989× at 512). **The KV cliff at 2,048 (C's close review):** the pool is 26,464 tokens, 32 tokens (2 pages, ≈ 3 MB at 96 KiB a
+  token) short of 23 × 1,152 = 26,496, the 23rd sequence per B32 / B64 wave at depth 1,024 that main's 26,752 holds; one
+  sequence fewer per wave accounts for nearly all of B32 / B64's −3.6% / −4.4%. No lock-level setting gives the 3 MB
+  back: `memory_fraction` and `state_memory` are not planned (a lock does not carry them: `plans.py` NOT_PLANNED),
+  `ggml_cuda.pass_rows` offers 512 / 2,048 / 4,096 only, and a smaller `max_step_tokens` trades the lock's prefill
+  budget. A deployment that serves B32 at depth 1,024 can pass `--memory-fraction` above 0.9 at `holon serve`.
+  Follow-up (plan §10): a workspace trim of ≥ 3 MB in kernels.ggml_cuda, at the next round that moves its source.
 - **O4: bf16 expert intermediates** (FreeToken's, ≈ 2.4% at 4K) stay out (m02 D3). The handicap is stated next to the
   bars.
 - **O5: acceptance 5's decode tolerance on routing-sensitive rows.** One prompt per context or six prompts (geomean)?
@@ -1326,6 +1345,7 @@ Records: the sm_89 rows in `evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
 | `ROW_BLOCKS` | `2b0fc68`, `3b949c7`, `c281d8c` | `_supports_matmul` takes `in` as a multiple of the block for Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, IQ4_NL (32) and Q2_0 (64), 256 otherwise. `vendor.patch` (the lead's decision after the first form): a row that ends inside a K step runs mmq instances of its own (`tail`, a template argument of `mul_mat_q` and its process loop, picked in `mul_mat_q_case` for those seven types when `in % 256 ≠ 0`); their loaders clamp each block index to the row's last block (`ggml_cuda_mmq_kblock`; Q8_0's second half on its own). The q8_1 activations past `in` are zero padding, so the clamped products are 0: upstream's bits. Every other width runs the instances as they were |
 | The form, per call and in SASS | three loader forms measured, then the `tail` instances | The loader forms (A5000, dense mmq at `in` 2,048, 8 interleaved rounds, Q4_0 / Q8_0 / IQ4_NL / Q5_0 at T = 4,096, against the step-4 tree): a fast exit for whole K steps 1.015 / 1.087 / 1.022 / 1.022×; a `tail` loader on a row's last step only 1.022 / 1.030 / 1.014 / 1.022×; always clamping 1.002 / 1.015 / 1.008 / 1.000× (`3b949c7`; on the 4090 1.006 / 1.021 / 1.014 / 0.98×, and 0.996 / 0.998× prefill at 1K / 4K on the MXFP4 lock, whose dense tensors are Q8_0). Any edit to the shared loaders moved the kernels' registers by up to ±20. **The `tail` instances (`c281d8c`) leave the existing ones as they were: every kernel of the step-4 build is in this one with the same SASS, sm_86, sm_89 and sm_120 (3,803 kernels each: 2,603 byte for byte, 1,200 differing only as below; `cuobjdump -sass`), the only differences an assert's line number loaded as a constant and global addresses (`c[0x4]`); 672 `tail` instances are added per SM.** Measured as well (the lead's checks): per call on a 4090 against the step-4 tree (6 interleaved rounds, T = 512 / 4,096) Q4_0 1.011 / 1.000×, Q8_0 1.000 / 1.001×, IQ4_NL 1.006 / 1.000×, Q5_0 1.002 / 1.000× (the 0.05 ms calls at T = 512 within their ±1% spread; identical SASS); the 5090's resident bar rows (the bar's flags, §5.2's method, 6 balanced rounds, clocks 2,557–2,580 MHz): 0.9998× the step-4 tree at 1K and at 4K (sd 0.001), so step 4's 4K bar (1.008×) stands |
 | L0 and memcheck | `dedc4b3`, `3b949c7` | `test_qlinear_at_in_640` (Q2_0, IQ4_NL, Q4_0, Q8_0) and `test_linear_experts_at_in_640` (Q2_0, IQ4_NL: mmvq, mmq with ids at a chunk and past it, and `check_pass_rows` at 640, so both `PASS_PROVEN` entries hold there too), the bytes after the weights poisoned; at 640 every launched mmq kernel is a `tail` instance and at 768 none (the launched names); memcheck at 640 with buffers of exactly the weights' size (both paths, four types). At `c281d8c`: sm_86 305 passed, memcheck 0 errors; sm_120 (5080) 318 passed, memcheck 0 errors; sm_89 (4090) 316 passed, memcheck 0 errors |
+| Follow-up (A's close review) | — | a host `GGML_ASSERT(stride_channel_x % stride_row_x == 0 && stride_sample_x % stride_row_x == 0)` on `tail` launches, marked "Holon:", to make the clamp's precondition (a tile's `kbx0` a row start) explicit. Bitwise-neutral, but it moves `kernels.ggml_cuda`'s source hash and with it all 18 locks, so it waits for the next round that moves that source (plan §10) |
 | Bitwise for the locks | — | `prompt_logprobs` hashes of the T6 tree equal the step-4 tree's (A5000, Q4_K_M resident and natural fit, run-identical ×2). The locks' expert types are not T6's; their Q8_0 / IQ4_NL dense tensors (the 4090 MXFP4 lock, the 5080 27B IQ3_S lock) are 256-multiples, where the clamp never binds |
 
 ### Building: items handed to FN (the lead's decision, 2026-10-20)
