@@ -1,0 +1,13 @@
+[plugin]
+name = "policies.last_turn"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"
+
+[resources]
+provides = ["unit.policies.last_turn@1"]
+
+[properties]
+numerics = "exact"         # where a checkpoint is taken, never its bytes

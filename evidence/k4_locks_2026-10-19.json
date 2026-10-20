@@ -1,0 +1,1151 @@
+{
+ "measurement": "K step 4, acceptance 6: the 27B agent locks with the tier, by `python -m holon_tools tune <model> --golden \u2026 --floor \u2026 --prompts judge/prompts/v1-qwen3_5.jsonl --approve --clock <the previous lock's flags> --slots tier=std.state_tier --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5 recurrent.policy=prompt_end,branch,answer:1`, then `holon_judge snapshot --runs 3` (the new lock's flags + --host-memory) and `holon_judge bounded --policies --sessions 8` (the previous lock's flags + the tier's sizes; the check adds the tier and each policy). At 8 sessions the RTX 5080's failed bounded for `branch` (KL p99); at 16 (the lead's rerun) every arm passes, and both locks are committed",
+ "date": "2026-10-19",
+ "commit": "32d5945f0273",
+ "dirty": true,
+ "harness_commit": "8251d07 (the step-4 harness, uncommitted while these ran; std and core as at the commit above)",
+ "locks": {
+  "rtx-5090": {
+   "from": "5.lock",
+   "written": "6.lock",
+   "tune": {
+    "clock": {
+     "samples": [
+      [
+       256,
+       1,
+       0.06517100497148931
+      ],
+      [
+       512,
+       1,
+       0.10919563192874193
+      ],
+      [
+       1024,
+       1,
+       0.21096347295679152
+      ],
+      [
+       2048,
+       1,
+       0.42123321909457445
+      ],
+      [
+       1,
+       1,
+       0.011512547745951451
+      ],
+      [
+       2,
+       2,
+       0.012256189780600835
+      ],
+      [
+       3,
+       3,
+       0.013243287663499359
+      ],
+      [
+       4,
+       4,
+       0.01313280515751103
+      ]
+     ],
+     "step_cost": "0.0110891,0.000197983,0.000381702"
+    },
+    "kernel_rates": {
+     "attention.paged_decode": {
+      "kernels.flashinfer": 194.17379170959512,
+      "kernels.triton_attn": 287.22609576357223
+     }
+    }
+   },
+   "tune_log": [
+    "verdict: approve",
+    "  unit:kernels.state_copy: - -> 1.0.0 sha256:b531d1901",
+    "  site:std.state_tier.kv.d2h/state_copy@1: - -> kernels.state_copy 42b3ae85e269",
+    "  site:std.state_tier.kv.h2d/state_copy@1: - -> kernels.state_copy 979ac0a68820",
+    "  site:std.state_tier.plugin.conv_state.checkpoints.d2h/state_copy@1: - -> kernels.state_copy 294c82a7b664",
+    "  site:std.state_tier.plugin.conv_state.checkpoints.h2d/state_copy@1: - -> kernels.state_copy cf4200f93757",
+    "  site:std.state_tier.plugin.ssm_state.checkpoints.d2h/state_copy@1: - -> kernels.state_copy b04229e49371",
+    "  site:std.state_tier.plugin.ssm_state.checkpoints.h2d/state_copy@1: - -> kernels.state_copy 5e7e9d39c3c5",
+    "  engine:plugin_options: {'recurrent.checkpoints': '4'} -> {'recurrent.checkpoints': '5', 'state_tier.host.bytes': '16GiB', 'recurrent.policy': 'prompt_end,branch,answer:1', 'state_tier.step_cost': '0.0110891,0.000197983,0.000381702'}",
+    "  engine:slots: {'logits_processor': 'grammar.xgrammar'} -> {'logits_processor': 'grammar.xgrammar', 'tier': 'std.state_tier'}",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-5, prefix tokens saved 2048",
+    "overall     33372  97.156%    98.114%  4.15e-04  7.43e-01  2.93e+01  +0.397% \u00b1 0.515%   4.46%",
+    "floor       33372  96.947%    97.923%  4.16e-04  6.48e-01  2.21e+01  +0.018% \u00b1 0.894%   4.43%",
+    "vs floor                                                             +0.378% \u00b1 0.685%",
+    "budget            \u226596.697%            \u22648.33e-04 \u22641.30e+00                     \u22641.963%",
+    "PASS"
+   ],
+   "snapshot": {
+    "model": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+    "dtype": "bfloat16",
+    "runs": 3,
+    "hardware": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu130",
+    "trace": "sha256:178205fee798392b824ef159f47175942a38cd82041e4e5f724103fb68429f69",
+    "steps": 579,
+    "pools": {
+     "state.conv_state": 5,
+     "plugin.conv_state.checkpoints": 5,
+     "state.ssm_state": 5,
+     "plugin.ssm_state.checkpoints": 5,
+     "state.kv": 12043,
+     "plugin.state_tier.kv": 4096,
+     "plugin.state_tier.plugin.conv_state.checkpoints": 83,
+     "plugin.state_tier.plugin.ssm_state.checkpoints": 83
+    },
+    "diffs": [
+     null,
+     null
+    ],
+    "run_identical": true,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "tokens_saved": 2048
+   },
+   "bounded": {
+    "sessions": 12,
+    "turns": 4,
+    "system_len": 512,
+    "max_tokens": 128,
+    "results": {
+     "baseline": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": false,
+       "overlap": false
+      },
+      "top1": {
+       "value": 0.9918619791666666,
+       "se": 0.0016276041666666667,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9957131079967024,
+       "se": 0.0007722546817111229,
+       "n": 6065
+      },
+      "regret": {
+       "value": 0.0022981769094864526,
+       "se": 0.00041284872032535655,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0026437387194514213,
+        "se": 0.0003530070322510489,
+        "n": 6144
+       },
+       "p50": 0.0001645975418975964,
+       "p99": 0.02743546731293101,
+       "p50_se": 3.4909951241161504e-05,
+       "p99_se": 0.008623276202778292
+      },
+      "tokens_saved": 0,
+      "mixed_steps": 69,
+      "margins": {
+       "top1": 0.005754449716687399,
+       "confident": 0.0027303326112049693,
+       "kl_p50": 0.0001645975418975964,
+       "kl_p99": 0.03048788539514556
+      },
+      "failures": [],
+      "passed": true
+     },
+     "branch, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,branch"
+       }
+      },
+      "top1": {
+       "value": 0.9923502604166666,
+       "se": 0.0013048547092959293,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9958840961475139,
+       "se": 0.0006195567378871052,
+       "n": 6074
+      },
+      "regret": {
+       "value": 0.0015232147125061601,
+       "se": 0.0003238609752303564,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0023874884576795697,
+        "se": 0.00030111932129695803,
+        "n": 6144
+       },
+       "p50": 0.00016046923123707484,
+       "p99": 0.02560429053494121,
+       "p50_se": 4.5685435699374644e-05,
+       "p99_se": 0.00503859811445485
+      },
+      "tokens_saved": 31616,
+      "mixed_steps": 4,
+      "margins": {
+       "top1": 0.005754449716687399,
+       "confident": 0.0027303326112049693,
+       "kl_p50": 0.0001645975418975964,
+       "kl_p99": 0.03048788539514556
+      },
+      "failures": [],
+      "passed": true
+     },
+     "answer:1, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,answer:1"
+       }
+      },
+      "top1": {
+       "value": 0.9918619791666666,
+       "se": 0.0015549603048555457,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9965352252103613,
+       "se": 0.0009158646471035467,
+       "n": 6061
+      },
+      "regret": {
+       "value": 0.0013142392369142424,
+       "se": 0.00034266184462192515,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.002892504690585392,
+        "se": 0.000493871075620543,
+        "n": 6144
+       },
+       "p50": 0.00014638435670690124,
+       "p99": 0.03439415658112073,
+       "p50_se": 4.1898377706199316e-05,
+       "p99_se": 0.008842448840542421
+      },
+      "tokens_saved": 34304,
+      "mixed_steps": 3,
+      "margins": {
+       "top1": 0.005754449716687399,
+       "confident": 0.0027303326112049693,
+       "kl_p50": 0.0001645975418975964,
+       "kl_p99": 0.03048788539514556
+      },
+      "failures": [],
+      "passed": true
+     }
+    },
+    "passed": true,
+    "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M",
+    "dtype": "bfloat16",
+    "graphs_vs_eager": false,
+    "spec_vs_plain": false,
+    "mixed": null,
+    "policies": true,
+    "late": 4,
+    "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+    "hardware": "NVIDIA GeForce RTX 5090",
+    "torch": "2.11.0+cu130",
+    "plant": null,
+    "fired": null
+   },
+   "lock_text": "# Written by the holon tools; never edit by hand (AGENTS.md).\ndigest = \"sha256:4cc9a06829558c65d4767fb40bcaf50afb7f7d94244f36ea56eb33406eddd615\"\nplan_id = \"sha256:0e1e8b57c8187ea29b8a8987132cbfb38a3e6afb0e23e40e68dc95f4f62e8595\"\nmodel_id = \"unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7\"\nfingerprint_class = \"rtx-5090/cu130-torch2.11\"\nsm = 120\nrecipe = \"sha256:952ef96ce35f99072edc6b36c96399874aca9d1be2e3dc12752e307334c852a6\"\n\n[deploy]\ncommit = \"32d5945f0273098f8cb4957e805f9a35d19bdd69\"\nuv_lock = \"sha256:09b707086b4104f6072e8b128fba0858f08012bb24ecbe4cbf5039010644eaa5\"\n\n[engine]\nchunk_with_decode = 512\ncuda_graphs = true\ndtype = \"bfloat16\"\nmax_draft_tokens = 0\nmax_model_len = 49152\nmax_seqs = 4\nmax_step_tokens = 2048\noverlap = true\npage_size = 16\nplugin_options = { \"recurrent.checkpoints\" = \"5\", \"recurrent.policy\" = \"prompt_end,branch,answer:1\", \"state_tier.host.bytes\" = \"16GiB\", \"state_tier.step_cost\" = \"0.0110891,0.000197983,0.000381702\" }\nprefix_cache = true\nslots = { logits_processor = \"grammar.xgrammar\", tier = \"std.state_tier\" }\nsource = \"gguf\"\n\n[snapshot]\ntrace = \"sha256:a5894d908f706472b9ff99db9c1cd2fb3c37389a618c3e46f69f3dac93f2baed\"\nuncovered = []\n\n[units]\n\"grammar.xgrammar\" = { src = \"sha256:685a1ba40b70d71d6ea8c2ef33645268234e92cb8e64dff55032f1b76e90d8cf\", version = \"1.0.0\" }\nholon = { src = \"sha256:5aaa322dfa4199c15cd0b456ea2cd904c9e43012f8505c137ac856a5953b0e62\", version = \"0.1.1\" }\n\"kernels.fla\" = { src = \"sha256:8d21a04b2f3de35c1d46548ec4584528063d05f687775d9f697d4125a15fccdd\", version = \"1.0.0\" }\n\"kernels.flashinfer\" = { src = \"sha256:438dfe292ad17a0b37f62858242300ffb7188f055647b645e37160c4d497438a\", version = \"1.0.0\" }\n\"kernels.gdn_triton\" = { src = \"sha256:8a589d748561402bd03a60cc4e4b0f68408571db7a68585113345181d5911a2e\", version = \"1.0.0\" }\n\"kernels.ggml_cuda\" = { src = \"sha256:78b35d24d91e570ed1bd21ee499ed4e74aeec96ca596fe3d55a0f4fad5fa8a90\", version = \"1.0.0\" }\n\"kernels.state_copy\" = { src = \"sha256:b531d190169557536f3ca870b982df08ac3472e655760a89403f234c99eab021\", version = \"1.0.0\" }\n\"kernels.triton_attn\" = { src = \"sha256:aee5583511e125f3ebb65f07df097dbe47bd558a237b46f0f9e504389ff47945\", version = \"1.0.0\" }\n\"models.qwen3_5\" = { src = \"sha256:dab0466d530bb68dd1c7205f32ecbb448eadc97e3eee4ed2e46bcc7358a9b25f\", version = \"1.0.0\" }\n\"std.blocks\" = { src = \"sha256:0752e7076ddc43a609d18337e244c03f9aaf705617b770b0d19934825c46c701\", version = \"1.0.0\" }\n\"std.ffn\" = { sem = \"sha256:3d659257417ee8d6db9940788a3c20c14c4c31282948b5bc8ab32aa375a499fa\", src = \"sha256:c712fef41852aa23ecebe10639e5684d31384023cc2c6a63bc565132157cc62b\", version = \"1.0.0\" }\n\"std.mixers.gdn\" = { sem = \"sha256:e7d915e0a1e5d6843b3c75869ae1dd7360df391641490c51ece6b067b7b97dbf\", src = \"sha256:42e398fa3237d679ac6904b680efb751a22ecf6d54dca7c30ad48439b0996d60\", version = \"1.0.0\" }\n\"std.mixers.gqa\" = { sem = \"sha256:da941a3b055f935dfb5ff9c0898b31cac918a1dfd5168eed6690d8acd25f8fcb\", src = \"sha256:450a98ed91d00d61b657adc8e11f35a207de6f6922db13603974f4bfc84d2986\", version = \"1.0.0\" }\n\"std.ops\" = { sem = \"sha256:c2bc5197346b521199c88ec892402ed02b8dfbb082cefa5b9e041fc1c09f54a3\", src = \"sha256:3c5efbf1e6a8fb699ccc94126dd71708b63bb77f2e62454c16f91edd10755fea\", version = \"1.0.0\" }\n\"std.sampling\" = { sem = \"sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b\", src = \"sha256:b5629e228a727d9cdd52fecb5d33748b93a8075b3dfaceeb3649955de9ee0b83\", version = \"1.0.0\" }\n\"std.state.paged\" = { src = \"sha256:887effb79cbf8ccbc8dfacf0ffa3462fed9b230162358a5de27166007d1bc144\", version = \"1.0.0\" }\n\"std.state.recurrent\" = { src = \"sha256:7dcb11de4ca5a4c154c2f4d309cef83609c30b148285a3aaf0aca5617dafe17f\", version = \"1.0.0\" }\n\"std.state_tier\" = { src = \"sha256:6b381aa183c61963afc61cbff7306fb28b9b1b9ba70b503cad32674bf44666c9\", version = \"1.0.0\" }\n\"std.weights.gguf\" = { src = \"sha256:ea3140520886f4412455879e945597ac79ddc98caf1d4852b3439d8e29fff109\", version = \"1.0.0\" }\n\n[sites]\n\"kv/attention.paged_decode@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"kv/attention.paged_prefill@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"needs_host_lens\", \"serves_decode_rows\"] }, impl = \"kernels.flashinfer\" }\n\"kv/attention.paged_verify@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"bfloat16\", kv_heads = 4, layout = \"kv.hnd\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"recurrent/gated_delta_rule@1\" = { config = { facts = { dtype = \"bfloat16\", head_k_dim = 128, head_v_dim = 128, heads_k = 16, heads_v = 48, v_head_order = \"tiled\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.fla\" }\n\"std.ffn.swiglu[inter=17408]/silu_mul@1\" = { config = { facts = { dtype = \"bfloat16\", inter = 17408 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.mixers.gdn[layer=0]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=0]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=10]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=10]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=12]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=12]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=13]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=13]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=14]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=14]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=16]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=16]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=17]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=17]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=18]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=18]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=1]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=1]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=20]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=20]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=21]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=21]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=22]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=22]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=24]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=24]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=25]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=25]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=26]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=26]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=28]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=28]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=29]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=29]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=2]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=2]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=30]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=30]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=32]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=32]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=33]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=33]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=34]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=34]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=36]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=36]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=37]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=37]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=38]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=38]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=40]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=40]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=41]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=41]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=42]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=42]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=44]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=44]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=45]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=45]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=46]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=46]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=48]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=48]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=49]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=49]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=4]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=4]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=50]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=50]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=52]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=52]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=53]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=53]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=54]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=54]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=56]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=56]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=57]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=57]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=58]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=58]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=5]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=5]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=60]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=60]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=61]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=61]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=62]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=62]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=6]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=6]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=8]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=8]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=9]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=9]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gqa[layer=11]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=11]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=51]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=51]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=55]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=55]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=59]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=59]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=63]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=63]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.ops.qembedding[layout=ggml.q4_k/gguf.native,vocab=248320,hidden=5120,dtype=bfloat16]/qembedding@1\" = { config = { facts = { dtype = \"bfloat16\", hidden = 5120, layout = \"ggml.q4_k/gguf.native\", vocab = 248320 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq3_s/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_nl/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq4_nl/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_nl/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_nl/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_nl/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_nl/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_nl/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_nl/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq4_xs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.iq4_xs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q3_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q3_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q3_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q4_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.q4_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q5_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.q5_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q6_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q6_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q6_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=5120,out=248320,act_dtype=bfloat16,out_dtype=float32,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q6_k/gguf.native\", out = 248320, out_dtype = \"float32\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.q6_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q8_0/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q8_0/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q8_0/gguf.native,in=5120,out=48,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q8_0/gguf.native\", out = 48, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq4_nl/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq4_nl/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq4_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.q3_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.q3_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.q4_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.q5_k/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.rmsnorm[dim=256]/add_rmsnorm@1\" = { config = { facts = { dim = 256, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=256]/rmsnorm@1\" = { config = { facts = { dim = 256, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=5120]/add_rmsnorm@1\" = { config = { facts = { dim = 5120, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=5120]/rmsnorm@1\" = { config = { facts = { dim = 5120, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rope[head_dim=256]/rope@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, max_positions = 49152, rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.state_tier.kv.d2h/state_copy@1\" = { config = { facts = { chunk = 65536, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.kv.h2d/state_copy@1\" = { config = { facts = { chunk = 65536, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.conv_state.checkpoints.d2h/state_copy@1\" = { config = { facts = { chunk = 61440, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.conv_state.checkpoints.h2d/state_copy@1\" = { config = { facts = { chunk = 61440, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.ssm_state.checkpoints.d2h/state_copy@1\" = { config = { facts = { chunk = 3145728, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.ssm_state.checkpoints.h2d/state_copy@1\" = { config = { facts = { chunk = 3145728, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n"
+  },
+  "rtx-5080": {
+   "from": "10.lock",
+   "written": "11.lock",
+   "tune": {
+    "clock": {
+     "samples": [
+      [
+       256,
+       1,
+       0.1064506839029491
+      ],
+      [
+       512,
+       1,
+       0.19870962598361075
+      ],
+      [
+       1024,
+       1,
+       0.39149226900190115
+      ],
+      [
+       2048,
+       1,
+       0.7944848882034421
+      ],
+      [
+       1,
+       1,
+       0.015505264251260087
+      ],
+      [
+       2,
+       2,
+       0.01671997015364468
+      ],
+      [
+       3,
+       3,
+       0.019893017466529272
+      ],
+      [
+       4,
+       4,
+       0.020015538306324743
+      ]
+     ],
+     "step_cost": "0.0137211,0.000366293,0.00133747"
+    },
+    "kernel_rates": {}
+   },
+   "tune_log": [
+    "verdict: approve",
+    "  unit:kernels.state_copy: - -> 1.0.0 sha256:b531d1901",
+    "  site:std.state_tier.kv.d2h/state_copy@1: - -> kernels.state_copy 0c2970ea8ee1",
+    "  site:std.state_tier.kv.h2d/state_copy@1: - -> kernels.state_copy e13c3593323c",
+    "  site:std.state_tier.plugin.conv_state.checkpoints.d2h/state_copy@1: - -> kernels.state_copy 294c82a7b664",
+    "  site:std.state_tier.plugin.conv_state.checkpoints.h2d/state_copy@1: - -> kernels.state_copy cf4200f93757",
+    "  site:std.state_tier.plugin.ssm_state.checkpoints.d2h/state_copy@1: - -> kernels.state_copy b04229e49371",
+    "  site:std.state_tier.plugin.ssm_state.checkpoints.h2d/state_copy@1: - -> kernels.state_copy 5e7e9d39c3c5",
+    "  engine:plugin_options: {'kv.format': 'q8_0', 'recurrent.checkpoints': '4'} -> {'kv.format': 'q8_0', 'recurrent.checkpoints': '5', 'state_tier.host.bytes': '16GiB', 'recurrent.policy': 'prompt_end,branch,answer:1', 'state_tier.step_cost': '0.0137211,0.000366293,0.00133747'}",
+    "  engine:slots: {'logits_processor': 'grammar.xgrammar'} -> {'logits_processor': 'grammar.xgrammar', 'tier': 'std.state_tier'}",
+    "  snapshot trace byte-identical (auto-advance awaits changed-line coverage)",
+    "  trace covered step widths 1-5, prefix tokens saved 2048",
+    "overall     33372  97.495%    98.360%  2.23e-04  6.39e-01  2.56e+01  +0.665% \u00b1 0.456%   3.62%",
+    "floor       33372  97.540%    98.382%  2.58e-04  7.12e-01  1.84e+01  +0.656% \u00b1 0.495%   3.69%",
+    "vs floor                                                             +0.009% \u00b1 0.805%",
+    "budget            \u226597.290%            \u22645.17e-04 \u22641.42e+00                     \u22642.001%",
+    "PASS"
+   ],
+   "snapshot": {
+    "model": "Qwen3.8-27B-UD-IQ3_S.gguf",
+    "dtype": "bfloat16",
+    "runs": 3,
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "torch": "2.11.0+cu130",
+    "trace": "sha256:178205fee798392b824ef159f47175942a38cd82041e4e5f724103fb68429f69",
+    "steps": 579,
+    "pools": {
+     "state.conv_state": 5,
+     "plugin.conv_state.checkpoints": 5,
+     "state.ssm_state": 5,
+     "plugin.ssm_state.checkpoints": 5,
+     "state.kv": 3235,
+     "plugin.state_tier.kv": 7710,
+     "plugin.state_tier.plugin.conv_state.checkpoints": 83,
+     "plugin.state_tier.plugin.ssm_state.checkpoints": 83
+    },
+    "diffs": [
+     null,
+     null
+    ],
+    "run_identical": true,
+    "step_widths": [
+     1,
+     2,
+     3,
+     4,
+     5
+    ],
+    "tokens_saved": 2048
+   },
+   "bounded": {
+    "sessions": 12,
+    "turns": 4,
+    "system_len": 512,
+    "max_tokens": 128,
+    "results": {
+     "baseline": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": false,
+       "overlap": false
+      },
+      "top1": {
+       "value": 0.9938151041666666,
+       "se": 0.0012909383351791686,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9978515947777227,
+       "se": 0.0006207182695094511,
+       "n": 6051
+      },
+      "regret": {
+       "value": 0.0009110979832864056,
+       "se": 0.00029461184797361615,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0014428809389696944,
+        "se": 0.00022526433482822271,
+        "n": 6144
+       },
+       "p50": 8.40981466260346e-05,
+       "p99": 0.019497267023612413,
+       "p50_se": 1.5461466750904565e-05,
+       "p99_se": 0.004156112587405364
+      },
+      "tokens_saved": 0,
+      "mixed_steps": 69,
+      "margins": {
+       "top1": 0.004564156254494312,
+       "confident": 0.0025,
+       "kl_p50": 8.40981466260346e-05,
+       "kl_p99": 0.019497267023612413
+      },
+      "failures": [],
+      "passed": true
+     },
+     "branch, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "kv.format": "q8_0",
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,branch"
+       }
+      },
+      "top1": {
+       "value": 0.9918619791666666,
+       "se": 0.0010973305053112662,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9958718626155878,
+       "se": 0.0008265626406112012,
+       "n": 6056
+      },
+      "regret": {
+       "value": 0.003032489689455057,
+       "se": 0.0010881782096915915,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0028142191493460912,
+        "se": 0.0007440780472414862,
+        "n": 6144
+       },
+       "p50": 0.00010729960581969521,
+       "p99": 0.043213843310231995,
+       "p50_se": 3.116887764900733e-05,
+       "p99_se": 0.01593509805787949
+      },
+      "tokens_saved": 31552,
+      "mixed_steps": 5,
+      "margins": {
+       "top1": 0.004564156254494312,
+       "confident": 0.0025,
+       "kl_p50": 8.40981466260346e-05,
+       "kl_p99": 0.019497267023612413
+      },
+      "failures": [
+       "kl_p99 0.04321 beyond 0.0195 of the baseline"
+      ],
+      "passed": false
+     },
+     "answer:1, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "kv.format": "q8_0",
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,answer:1"
+       }
+      },
+      "top1": {
+       "value": 0.9913736979166666,
+       "se": 0.0012366286759234086,
+       "n": 6144
+      },
+      "confident": {
+       "value": 0.9957031895554453,
+       "se": 0.0008044433771741853,
+       "n": 6051
+      },
+      "regret": {
+       "value": 0.0027733026266408465,
+       "se": 0.001184650986650841,
+       "n": 6144
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0029288232435837557,
+        "se": 0.0006532390853932592,
+        "n": 6144
+       },
+       "p50": 0.00010436210043963972,
+       "p99": 0.03498616278193989,
+       "p50_se": 1.7169453080666245e-05,
+       "p99_se": 0.01610665865040013
+      },
+      "tokens_saved": 34176,
+      "mixed_steps": 3,
+      "margins": {
+       "top1": 0.004564156254494312,
+       "confident": 0.0025,
+       "kl_p50": 8.40981466260346e-05,
+       "kl_p99": 0.019497267023612413
+      },
+      "failures": [],
+      "passed": true
+     }
+    },
+    "passed": false,
+    "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+    "dtype": "bfloat16",
+    "graphs_vs_eager": false,
+    "spec_vs_plain": false,
+    "mixed": null,
+    "policies": true,
+    "late": 4,
+    "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "torch": "2.11.0+cu130",
+    "plant": null,
+    "fired": null
+   },
+   "lock_text": "# Written by the holon tools; never edit by hand (AGENTS.md).\ndigest = \"sha256:cb69b0d96c1fb869086483fcf8548c19b03312afb6868c81716fc0d87ec9a1c7\"\nplan_id = \"sha256:53b592ea15a2632993daa4b438c7d993dab853a8042d0425549488d372fabd47\"\nmodel_id = \"unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e\"\nfingerprint_class = \"rtx-5080/cu130-torch2.11\"\nsm = 120\nrecipe = \"sha256:952ef96ce35f99072edc6b36c96399874aca9d1be2e3dc12752e307334c852a6\"\n\n[deploy]\ncommit = \"32d5945f0273098f8cb4957e805f9a35d19bdd69\"\nuv_lock = \"sha256:09b707086b4104f6072e8b128fba0858f08012bb24ecbe4cbf5039010644eaa5\"\n\n[engine]\nchunk_with_decode = 512\ncuda_graphs = true\ndtype = \"bfloat16\"\nmax_draft_tokens = 0\nmax_model_len = 49152\nmax_seqs = 4\nmax_step_tokens = 2048\noverlap = true\npage_size = 16\nplugin_options = { \"kv.format\" = \"q8_0\", \"recurrent.checkpoints\" = \"5\", \"recurrent.policy\" = \"prompt_end,branch,answer:1\", \"state_tier.host.bytes\" = \"16GiB\", \"state_tier.step_cost\" = \"0.0137211,0.000366293,0.00133747\" }\nprefix_cache = true\nslots = { logits_processor = \"grammar.xgrammar\", tier = \"std.state_tier\" }\nsource = \"gguf\"\n\n[snapshot]\ntrace = \"sha256:43b5e78ff05e0ef5d1f29a2bc52d23718035f324ba763e2e5370229c44231da0\"\nuncovered = []\n\n[units]\n\"grammar.xgrammar\" = { src = \"sha256:685a1ba40b70d71d6ea8c2ef33645268234e92cb8e64dff55032f1b76e90d8cf\", version = \"1.0.0\" }\nholon = { src = \"sha256:5aaa322dfa4199c15cd0b456ea2cd904c9e43012f8505c137ac856a5953b0e62\", version = \"0.1.1\" }\n\"kernels.fla\" = { src = \"sha256:8d21a04b2f3de35c1d46548ec4584528063d05f687775d9f697d4125a15fccdd\", version = \"1.0.0\" }\n\"kernels.flashinfer\" = { src = \"sha256:438dfe292ad17a0b37f62858242300ffb7188f055647b645e37160c4d497438a\", version = \"1.0.0\" }\n\"kernels.gdn_triton\" = { src = \"sha256:8a589d748561402bd03a60cc4e4b0f68408571db7a68585113345181d5911a2e\", version = \"1.0.0\" }\n\"kernels.ggml_cuda\" = { src = \"sha256:78b35d24d91e570ed1bd21ee499ed4e74aeec96ca596fe3d55a0f4fad5fa8a90\", version = \"1.0.0\" }\n\"kernels.state_copy\" = { src = \"sha256:b531d190169557536f3ca870b982df08ac3472e655760a89403f234c99eab021\", version = \"1.0.0\" }\n\"kernels.triton_attn\" = { src = \"sha256:aee5583511e125f3ebb65f07df097dbe47bd558a237b46f0f9e504389ff47945\", version = \"1.0.0\" }\n\"models.qwen3_5\" = { src = \"sha256:dab0466d530bb68dd1c7205f32ecbb448eadc97e3eee4ed2e46bcc7358a9b25f\", version = \"1.0.0\" }\n\"std.blocks\" = { src = \"sha256:0752e7076ddc43a609d18337e244c03f9aaf705617b770b0d19934825c46c701\", version = \"1.0.0\" }\n\"std.ffn\" = { sem = \"sha256:3d659257417ee8d6db9940788a3c20c14c4c31282948b5bc8ab32aa375a499fa\", src = \"sha256:c712fef41852aa23ecebe10639e5684d31384023cc2c6a63bc565132157cc62b\", version = \"1.0.0\" }\n\"std.mixers.gdn\" = { sem = \"sha256:e7d915e0a1e5d6843b3c75869ae1dd7360df391641490c51ece6b067b7b97dbf\", src = \"sha256:42e398fa3237d679ac6904b680efb751a22ecf6d54dca7c30ad48439b0996d60\", version = \"1.0.0\" }\n\"std.mixers.gqa\" = { sem = \"sha256:da941a3b055f935dfb5ff9c0898b31cac918a1dfd5168eed6690d8acd25f8fcb\", src = \"sha256:450a98ed91d00d61b657adc8e11f35a207de6f6922db13603974f4bfc84d2986\", version = \"1.0.0\" }\n\"std.ops\" = { sem = \"sha256:c2bc5197346b521199c88ec892402ed02b8dfbb082cefa5b9e041fc1c09f54a3\", src = \"sha256:3c5efbf1e6a8fb699ccc94126dd71708b63bb77f2e62454c16f91edd10755fea\", version = \"1.0.0\" }\n\"std.sampling\" = { sem = \"sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b\", src = \"sha256:b5629e228a727d9cdd52fecb5d33748b93a8075b3dfaceeb3649955de9ee0b83\", version = \"1.0.0\" }\n\"std.state.paged\" = { src = \"sha256:887effb79cbf8ccbc8dfacf0ffa3462fed9b230162358a5de27166007d1bc144\", version = \"1.0.0\" }\n\"std.state.recurrent\" = { src = \"sha256:7dcb11de4ca5a4c154c2f4d309cef83609c30b148285a3aaf0aca5617dafe17f\", version = \"1.0.0\" }\n\"std.state_tier\" = { src = \"sha256:6b381aa183c61963afc61cbff7306fb28b9b1b9ba70b503cad32674bf44666c9\", version = \"1.0.0\" }\n\"std.weights.gguf\" = { src = \"sha256:ea3140520886f4412455879e945597ac79ddc98caf1d4852b3439d8e29fff109\", version = \"1.0.0\" }\n\n[sites]\n\"kv/attention.paged_decode@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"q8_0\", kv_heads = 4, layout = \"kv.hnd.q8_0\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"kv/attention.paged_prefill@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"q8_0\", kv_heads = 4, layout = \"kv.hnd.q8_0\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\"] }, impl = \"kernels.triton_attn\" }\n\"kv/attention.paged_verify@1\" = { config = { facts = { head_dim = 256, heads = 24, kv_dtype = \"q8_0\", kv_heads = 4, layout = \"kv.hnd.q8_0\", max_seqs = 4, page = 16, q_dtype = \"bfloat16\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"recurrent/gated_delta_rule@1\" = { config = { facts = { dtype = \"bfloat16\", head_k_dim = 128, head_v_dim = 128, heads_k = 16, heads_v = 48, v_head_order = \"tiled\" }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.fla\" }\n\"std.ffn.swiglu[inter=17408]/silu_mul@1\" = { config = { facts = { dtype = \"bfloat16\", inter = 17408 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.mixers.gdn[layer=0]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=0]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=10]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=10]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=12]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=12]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=13]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=13]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=14]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=14]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=16]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=16]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=17]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=17]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=18]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=18]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=1]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=1]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=20]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=20]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=21]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=21]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=22]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=22]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=24]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=24]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=25]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=25]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=26]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=26]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=28]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=28]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=29]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=29]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=2]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=2]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=30]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=30]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=32]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=32]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=33]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=33]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=34]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=34]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=36]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=36]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=37]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=37]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=38]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=38]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=40]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=40]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=41]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=41]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=42]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=42]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=44]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=44]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=45]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=45]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=46]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=46]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=48]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=48]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=49]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=49]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=4]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=4]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=50]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=50]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=52]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=52]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=53]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=53]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=54]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=54]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=56]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=56]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=57]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=57]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=58]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=58]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=5]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=5]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=60]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=60]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=61]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=61]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=62]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=62]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=6]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=6]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=8]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=8]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=9]/causal_conv1d@1\" = { config = { facts = { channels = 10240, dtype = \"bfloat16\", kernel_size = 4 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gdn[layer=9]/gated_rmsnorm@1\" = { config = { facts = { dim = 128, dtype = \"bfloat16\", eps = 1e-06 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.gdn_triton\" }\n\"std.mixers.gqa[layer=11]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=11]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=15]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=19]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=23]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=27]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=31]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=35]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=39]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=3]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=43]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=47]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=51]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=51]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=55]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=55]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=59]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=59]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=63]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=63]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/attention.qk_rope_kv@1\" = { config = { facts = { cos_sin = \"rope.cos_sin[10000000.0,64,49152]\", dtype = \"bfloat16\", eps = 1e-06, gated = true, head_dim = 256, heads = 24, kv_heads = 4, layout = \"kv.hnd.q8_0\", max_positions = 49152, norm = \"rmsnorm@1\", offset = 1.0, page = 16, rope = \"rope@1\", rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.mixers.gqa[layer=7]/kv_write@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, kv_heads = 4, layout = \"kv.hnd.q8_0\", page = 16 }, launch = { fused = [\"attention.qk_rope_kv@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.triton_attn\" }\n\"std.ops.qembedding[layout=ggml.q3_k/gguf.native,vocab=248320,hidden=5120,dtype=bfloat16]/qembedding@1\" = { config = { facts = { dtype = \"bfloat16\", hidden = 5120, layout = \"ggml.q3_k/gguf.native\", vocab = 248320 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq1_s/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq1_s/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_s/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq2_s/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_s/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_s/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_s/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_s/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_s/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_s/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xs/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq2_xs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xs/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xs/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xs/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xs/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xxs/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq2_xxs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xxs/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xxs/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xxs/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xxs/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq2_xxs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq2_xxs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq3_s/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_s/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.iq3_s/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq3_xxs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq3_xxs/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.iq3_xxs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_nl/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_nl/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.iq4_xs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.iq4_xs/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.iq4_xs/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q2_k/gguf.native,in=5120,out=10240,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q2_k/gguf.native\", out = 10240, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q2_k/gguf.native,in=5120,out=12288,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q2_k/gguf.native\", out = 12288, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q3_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q3_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=5120,out=6144,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q3_k/gguf.native\", out = 6144, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q3_k/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.q3_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=17408,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 17408, layout = \"ggml.q4_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q4_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q4_k/gguf.native,in=6144,out=5120,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 6144, layout = \"ggml.q4_k/gguf.native\", out = 5120, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=17408,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 17408, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q5_k/gguf.native,in=5120,out=248320,act_dtype=bfloat16,out_dtype=float32,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q5_k/gguf.native\", out = 248320, out_dtype = \"float32\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q6_k/gguf.native,in=5120,out=1024,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q6_k/gguf.native\", out = 1024, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear[layout=ggml.q8_0/gguf.native,in=5120,out=48,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8]/qlinear@2\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", in = 5120, layout = \"ggml.q8_0/gguf.native\", out = 48, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" }, fused = [\"qlinear_glu@1\"] }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq2_s/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq2_s/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq2_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq2_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq2_xxs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq2_xxs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq3_s/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq3_s/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq3_xxs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq3_xxs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.qlinear_glu[layout=ggml.iq4_xs/gguf.native,in=5120,out=34816,act_dtype=bfloat16,out_dtype=bfloat16,act_quant=a8,glu=swiglu]/qlinear_glu@1\" = { config = { facts = { act_dtype = \"bfloat16\", act_quant = \"a8\", glu = \"swiglu\", in = 5120, layout = \"ggml.iq4_xs/gguf.native\", out = 34816, out_dtype = \"bfloat16\" }, launch = { act = { mmq = \"q8_1\", mmvq = \"q8_1\" } }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.ggml_cuda\" }\n\"std.ops.rmsnorm[dim=256]/add_rmsnorm@1\" = { config = { facts = { dim = 256, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=256]/rmsnorm@1\" = { config = { facts = { dim = 256, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=5120]/add_rmsnorm@1\" = { config = { facts = { dim = 5120, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rmsnorm[dim=5120]/rmsnorm@1\" = { config = { facts = { dim = 5120, dtype = \"bfloat16\", eps = 1e-06, offset = 1.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.ops.rope[head_dim=256]/rope@1\" = { config = { facts = { dtype = \"bfloat16\", head_dim = 256, max_positions = 49152, rotary_dim = 64, theta = 10000000.0 }, props = [\"deterministic\", \"graph_safe\"] }, impl = \"kernels.flashinfer\" }\n\"std.state_tier.kv.d2h/state_copy@1\" = { config = { facts = { chunk = 34816, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.kv.h2d/state_copy@1\" = { config = { facts = { chunk = 34816, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.conv_state.checkpoints.d2h/state_copy@1\" = { config = { facts = { chunk = 61440, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.conv_state.checkpoints.h2d/state_copy@1\" = { config = { facts = { chunk = 61440, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.ssm_state.checkpoints.d2h/state_copy@1\" = { config = { facts = { chunk = 3145728, direction = \"d2h\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n\"std.state_tier.plugin.ssm_state.checkpoints.h2d/state_copy@1\" = { config = { facts = { chunk = 3145728, direction = \"h2d\" }, props = [\"deterministic\"] }, impl = \"kernels.state_copy\" }\n",
+   "bounded_16_sessions": {
+    "sessions": 24,
+    "turns": 4,
+    "system_len": 512,
+    "max_tokens": 128,
+    "results": {
+     "baseline": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": false,
+       "overlap": false
+      },
+      "top1": {
+       "value": 0.9927571614583334,
+       "se": 0.0008100783806626257,
+       "n": 12288
+      },
+      "confident": {
+       "value": 0.99694618686035,
+       "se": 0.0004765557141028428,
+       "n": 12116
+      },
+      "regret": {
+       "value": 0.002087614576642712,
+       "se": 0.000608571729240261,
+       "n": 12288
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0024098371389699633,
+        "se": 0.00046976309417623104,
+        "n": 12288
+       },
+       "p50": 9.81559143668669e-05,
+       "p99": 0.02355637989307308,
+       "p50_se": 1.3481798411224509e-05,
+       "p99_se": 0.004904875681661467
+      },
+      "tokens_saved": 0,
+      "mixed_steps": 159,
+      "margins": {
+       "top1": 0.0028640595812958,
+       "confident": 0.0025,
+       "kl_p50": 9.81559143668669e-05,
+       "kl_p99": 0.02355637989307308
+      },
+      "failures": [],
+      "passed": true
+     },
+     "branch, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "kv.format": "q8_0",
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,branch"
+       }
+      },
+      "top1": {
+       "value": 0.9905598958333334,
+       "se": 0.0009599085687167782,
+       "n": 12288
+      },
+      "confident": {
+       "value": 0.9962785312603374,
+       "se": 0.0005888421591049194,
+       "n": 12092
+      },
+      "regret": {
+       "value": 0.0024582316885547093,
+       "se": 0.0006292407479936349,
+       "n": 12288
+      },
+      "kl": {
+       "kl": {
+        "value": 0.0021989140386648467,
+        "se": 0.0005124292808714805,
+        "n": 12288
+       },
+       "p50": 0.00011058948729876988,
+       "p99": 0.022615080794635478,
+       "p50_se": 1.7087946134167422e-05,
+       "p99_se": 0.00472474412716433
+      },
+      "tokens_saved": 67456,
+      "mixed_steps": 16,
+      "margins": {
+       "top1": 0.0028640595812958,
+       "confident": 0.0025,
+       "kl_p50": 9.81559143668669e-05,
+       "kl_p99": 0.02355637989307308
+      },
+      "failures": [],
+      "passed": true
+     },
+     "answer:1, tier": {
+      "config": {
+       "cuda_graphs": true,
+       "prefix_cache": true,
+       "overlap": true,
+       "slots": {
+        "logits_processor": "grammar.xgrammar",
+        "tier": "std.state_tier"
+       },
+       "plugin_options": {
+        "kv.format": "q8_0",
+        "recurrent.checkpoints": "5",
+        "state_tier.host.bytes": "16GiB",
+        "recurrent.policy": "prompt_end,answer:1"
+       }
+      },
+      "top1": {
+       "value": 0.9927571614583334,
+       "se": 0.0010145954313108348,
+       "n": 12288
+      },
+      "confident": {
+       "value": 0.9971079160469344,
+       "se": 0.0006084189388844291,
+       "n": 12102
+      },
+      "regret": {
+       "value": 0.0016925173646692808,
+       "se": 0.0006292927816465885,
+       "n": 12288
+      },
+      "kl": {
+       "kl": {
+        "value": 0.002635411995869882,
+        "se": 0.0006302413752618846,
+        "n": 12288
+       },
+       "p50": 0.00011513944268273796,
+       "p99": 0.03100033429507746,
+       "p50_se": 1.2823053540940852e-05,
+       "p99_se": 0.009241083338939624
+      },
+      "tokens_saved": 69312,
+      "mixed_steps": 7,
+      "margins": {
+       "top1": 0.0028640595812958,
+       "confident": 0.0025,
+       "kl_p50": 9.81559143668669e-05,
+       "kl_p99": 0.02355637989307308
+      },
+      "failures": [],
+      "passed": true
+     }
+    },
+    "passed": true,
+    "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+    "dtype": "bfloat16",
+    "graphs_vs_eager": false,
+    "spec_vs_plain": false,
+    "mixed": null,
+    "policies": true,
+    "late": 8,
+    "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+    "hardware": "NVIDIA GeForce RTX 5080",
+    "torch": "2.11.0+cu130",
+    "plant": null,
+    "fired": null,
+    "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 16 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+   },
+   "bounded_by_wave": {
+    "8": {
+     "sessions": 12,
+     "turns": 4,
+     "system_len": 512,
+     "max_tokens": 128,
+     "results": {
+      "baseline": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": false,
+        "overlap": false
+       },
+       "top1": {
+        "value": 0.9938151041666666,
+        "se": 0.0012909383351791686,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9978515947777227,
+        "se": 0.0006207182695094511,
+        "n": 6051
+       },
+       "regret": {
+        "value": 0.0009110979832864056,
+        "se": 0.00029461184797361615,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0014428809389696944,
+         "se": 0.00022526433482822271,
+         "n": 6144
+        },
+        "p50": 8.40981466260346e-05,
+        "p99": 0.019497267023612413,
+        "p50_se": 1.5461466750904565e-05,
+        "p99_se": 0.004156112587405364,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 8.771523290184108e-05,
+          "p99": 0.016608677104443574
+         },
+         "late": {
+          "n": 2048,
+          "p50": 7.779938348471114e-05,
+          "p99": 0.02587260732802172
+         }
+        }
+       },
+       "tokens_saved": 0,
+       "mixed_steps": 69,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [],
+       "passed": true
+      },
+      "branch, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,branch"
+        }
+       },
+       "top1": {
+        "value": 0.9918619791666666,
+        "se": 0.0010973305053112662,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9958718626155878,
+        "se": 0.0008265626406112012,
+        "n": 6056
+       },
+       "regret": {
+        "value": 0.003032489689455057,
+        "se": 0.0010881782096915915,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0028142191493460912,
+         "se": 0.0007440780472414862,
+         "n": 6144
+        },
+        "p50": 0.00010729960581969521,
+        "p99": 0.043213843310231995,
+        "p50_se": 3.116887764900733e-05,
+        "p99_se": 0.01593509805787949,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 0.0001309285381751736,
+          "p99": 0.05044652376644063
+         },
+         "late": {
+          "n": 2048,
+          "p50": 7.75720196086367e-05,
+          "p99": 0.033655301349671284
+         }
+        }
+       },
+       "tokens_saved": 31552,
+       "mixed_steps": 5,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [
+        "kl_p99 0.04321 beyond 0.0195 of the baseline"
+       ],
+       "passed": false
+      },
+      "answer:1, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,answer:1"
+        }
+       },
+       "top1": {
+        "value": 0.9913736979166666,
+        "se": 0.0012366286759234086,
+        "n": 6144
+       },
+       "confident": {
+        "value": 0.9957031895554453,
+        "se": 0.0008044433771741853,
+        "n": 6051
+       },
+       "regret": {
+        "value": 0.0027733026266408465,
+        "se": 0.001184650986650841,
+        "n": 6144
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0029288232435837557,
+         "se": 0.0006532390853932592,
+         "n": 6144
+        },
+        "p50": 0.00010436210043963972,
+        "p99": 0.03498616278193989,
+        "p50_se": 1.7169453080666245e-05,
+        "p99_se": 0.01610665865040013,
+        "by_wave": {
+         "first": {
+          "n": 4096,
+          "p50": 0.00012269305990032667,
+          "p99": 0.037071794713912164
+         },
+         "late": {
+          "n": 2048,
+          "p50": 8.2678521241115e-05,
+          "p99": 0.021307574953652948
+         }
+        }
+       },
+       "tokens_saved": 34176,
+       "mixed_steps": 3,
+       "margins": {
+        "top1": 0.004564156254494312,
+        "confident": 0.0025,
+        "kl_p50": 8.40981466260346e-05,
+        "kl_p99": 0.019497267023612413
+       },
+       "failures": [],
+       "passed": true
+      }
+     },
+     "passed": false,
+     "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+     "dtype": "bfloat16",
+     "graphs_vs_eager": false,
+     "spec_vs_plain": false,
+     "mixed": null,
+     "policies": true,
+     "late": 4,
+     "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+     "hardware": "NVIDIA GeForce RTX 5080",
+     "torch": "2.11.0+cu130",
+     "plant": null,
+     "fired": null,
+     "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 8 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+    },
+    "16": {
+     "sessions": 24,
+     "turns": 4,
+     "system_len": 512,
+     "max_tokens": 128,
+     "results": {
+      "baseline": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": false,
+        "overlap": false
+       },
+       "top1": {
+        "value": 0.9927571614583334,
+        "se": 0.0008100783806626257,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.99694618686035,
+        "se": 0.0004765557141028428,
+        "n": 12116
+       },
+       "regret": {
+        "value": 0.002087614576642712,
+        "se": 0.000608571729240261,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0024098371389699633,
+         "se": 0.00046976309417623104,
+         "n": 12288
+        },
+        "p50": 9.81559143668669e-05,
+        "p99": 0.02355637989307308,
+        "p50_se": 1.3481798411224509e-05,
+        "p99_se": 0.004904875681661467,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 9.224991993479856e-05,
+          "p99": 0.02811680979067156
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011007468125036869,
+          "p99": 0.013878020392865847
+         }
+        }
+       },
+       "tokens_saved": 0,
+       "mixed_steps": 159,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      },
+      "branch, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,branch"
+        }
+       },
+       "top1": {
+        "value": 0.9905598958333334,
+        "se": 0.0009599085687167782,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.9962785312603374,
+        "se": 0.0005888421591049194,
+        "n": 12092
+       },
+       "regret": {
+        "value": 0.0024582316885547093,
+        "se": 0.0006292407479936349,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.0021989140386648467,
+         "se": 0.0005124292808714805,
+         "n": 12288
+        },
+        "p50": 0.00011058948729876988,
+        "p99": 0.022615080794635478,
+        "p50_se": 1.7087946134167422e-05,
+        "p99_se": 0.00472474412716433,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 0.0001100191676868132,
+          "p99": 0.027329440303951222
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011277235325441343,
+          "p99": 0.01359852461578681
+         }
+        }
+       },
+       "tokens_saved": 67456,
+       "mixed_steps": 16,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      },
+      "answer:1, tier": {
+       "config": {
+        "cuda_graphs": true,
+        "prefix_cache": true,
+        "overlap": true,
+        "slots": {
+         "logits_processor": "grammar.xgrammar",
+         "tier": "std.state_tier"
+        },
+        "plugin_options": {
+         "kv.format": "q8_0",
+         "recurrent.checkpoints": "5",
+         "state_tier.host.bytes": "16GiB",
+         "recurrent.policy": "prompt_end,answer:1"
+        }
+       },
+       "top1": {
+        "value": 0.9927571614583334,
+        "se": 0.0010145954313108348,
+        "n": 12288
+       },
+       "confident": {
+        "value": 0.9971079160469344,
+        "se": 0.0006084189388844291,
+        "n": 12102
+       },
+       "regret": {
+        "value": 0.0016925173646692808,
+        "se": 0.0006292927816465885,
+        "n": 12288
+       },
+       "kl": {
+        "kl": {
+         "value": 0.002635411995869882,
+         "se": 0.0006302413752618846,
+         "n": 12288
+        },
+        "p50": 0.00011513944268273796,
+        "p99": 0.03100033429507746,
+        "p50_se": 1.2823053540940852e-05,
+        "p99_se": 0.009241083338939624,
+        "by_wave": {
+         "first": {
+          "n": 8192,
+          "p50": 0.00011693109107281516,
+          "p99": 0.04552461003063551
+         },
+         "late": {
+          "n": 4096,
+          "p50": 0.00011240808605674185,
+          "p99": 0.014503104322577726
+         }
+        }
+       },
+       "tokens_saved": 69312,
+       "mixed_steps": 7,
+       "margins": {
+        "top1": 0.0028640595812958,
+        "confident": 0.0025,
+        "kl_p50": 9.81559143668669e-05,
+        "kl_p99": 0.02355637989307308
+       },
+       "failures": [],
+       "passed": true
+      }
+     },
+     "passed": true,
+     "model": "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S",
+     "dtype": "bfloat16",
+     "graphs_vs_eager": false,
+     "spec_vs_plain": false,
+     "mixed": null,
+     "policies": true,
+     "late": 8,
+     "engine_args": "--chunk-with-decode 512 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-model-len 49152 --max-seqs 4 --max-step-tokens 2048 --overlap --page-size 16 --plugin-options kv.format=q8_0 recurrent.checkpoints=5 state_tier.host.bytes=16GiB --prefix-cache --slots logits_processor=grammar.xgrammar --source gguf --host-memory 21474836480 --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.triton_attn attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn causal_conv1d=kernels.gdn_triton gated_delta_rule=kernels.fla gated_rmsnorm=kernels.gdn_triton kv_write=kernels.triton_attn qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda qlinear_glu=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer silu_mul=kernels.flashinfer",
+     "hardware": "NVIDIA GeForce RTX 5080",
+     "torch": "2.11.0+cu130",
+     "plant": null,
+     "fired": null,
+     "command": "python -m holon_judge bounded --model <Qwen3.8-27B-UD-IQ3_S.gguf> --prompts judge/prompts/v1-qwen3_5.jsonl --sessions 16 --policies --engine-args \"<lock 10's flags and kernel pins> --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5\" --json <file>"
+    }
+   }
+  }
+ }
+}

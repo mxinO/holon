@@ -16,6 +16,7 @@ class FakeState:
     def __init__(self, capacity: int, slots: int) -> None:
         self.free, self.slots, self.held = capacity, list(range(slots)), {}
         self.capacity: dict[int, int] = {}       # no fast path: every reservation is checked
+        self.due: dict[int, float] = {}           # no load-gated request
 
     def cut(self, seq: Seq, n: int) -> int:
         return n

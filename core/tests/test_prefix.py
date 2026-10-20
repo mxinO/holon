@@ -1,5 +1,7 @@
-"""PrefixIndex: chain keys, verified matches, leaf-first LRU eviction that never touches units still in use."""
+"""PrefixIndex: chain keys, verified matches, leaf-first LRU eviction that never touches units still in use, and an
+eviction policy choosing among the eligible entries (docs/v1-kv-tiers.md KS5)."""
 import numpy as np
+import pytest
 import torch
 from holon.core.memory import Ledger
 from holon.core.prefix import PrefixIndex
@@ -85,3 +87,41 @@ def test_eviction_stops_climbing_a_chain_once_enough_is_free():
     a = _publish(index, pool, list(range(12)))                             # chain a0 -> a1 -> a2, 3 free units
     index.evict("kv", pool.num_free + 1)
     assert set(index.entries) == {a[0], a[1]}                              # only the leaf went
+
+
+class _KeepRoots:
+    """A toy eviction policy: entries of depth ≤ 1 stay while deeper ones can go."""
+
+    def victim(self, candidates):
+        shallow = None
+        for e in candidates:
+            if e.depth > 1:
+                return e
+            shallow = shallow or e
+        return shallow
+
+
+def test_an_eviction_policy_keeps_the_roots_under_pressure():
+    index, pool = _index(units=12)
+    a = _publish(index, pool, list(range(16)))                              # depths 0 … 3
+    b = _publish(index, pool, [50 + t for t in range(12)])                  # depths 0 … 2
+    index.match(a, list(range(16)))                                         # b is the least recently used chain
+    index.policy = _KeepRoots()
+    index.evict("kv", pool.num_free + 3)
+    assert set(index.entries) == {a[0], a[1], b[0], b[1]}                   # the deep ones went
+    index.evict("kv", pool.capacity)
+    assert not index.entries                                                # then the roots, when nothing else is left
+    a = _publish(index, pool, list(range(8)))
+    index.policy = type("Lazy", (), {"victim": lambda self, candidates: None})()
+    index.evict("kv", pool.num_free + 1)                                    # none: the least recently used instead
+    assert set(index.entries) == {a[0]}
+    asked = []                                                              # a second ask would loop forever
+
+    def wrong(candidates):
+        assert not asked, "asked again: the core took a non-candidate"
+        asked.append(1)
+        return index.entries[a[0]]
+    index.policy = type("Wrong", (), {"victim": lambda self, candidates: wrong(candidates)})()
+    pool.incref(np.asarray(index.entries[a[0]].units["kv"]))                # held: not eligible
+    with pytest.raises(RuntimeError, match="not one of the eligible"):
+        index.evict("kv", pool.capacity)

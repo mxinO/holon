@@ -23,12 +23,18 @@
                                    [--sessions N] [--graphs-vs-eager]
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace; or decode
                                    # graphs on vs off at a batch of N sessions
+                                   [--policies [--late N]]
+                                   # ... or the checkpoint policies `branch` and `answer:1` with the state tier,
+                                   # late sessions added (docs/v1-kv-tiers.md §6)
     python -m holon_judge constrained --model <.gguf> --jsb <JSONSchemaBench dir> --engine-args "<speculating>"
                                    [--calibration <jsonl>] [--plant <bug>] [--json <file>]
                                    # grammar + speculation vs grammar (M0.5 §5)
+    python -m holon_judge tiers    --model <hf dir or id | .gguf> --prompts <jsonl> --engine-args "<tight pool>"
+                                   [--pressure-args "<overrides>"] [--plant <bug> ...] [--json <file>]
+                                   # state tiers: invariance, the null test, run-identity, plants (docs/v1-kv-tiers.md)
 
-`compare`, `l2`, `gate`, `snapshot-diff`, `snapshot`, `bounded` and `constrained` exit with status 1 on a failed
-check.
+`compare`, `l2`, `gate`, `snapshot-diff`, `snapshot`, `bounded`, `constrained` and `tiers` exit with status 1 on a
+failed check.
 """
 from __future__ import annotations
 
@@ -40,13 +46,14 @@ import pathlib
 import re
 import shlex
 import sys
+import time
 
 import torch
 
 from . import golden, modes
 from . import kv as kv_format
 from .compare import Result, compare, compare_drafter
-from .planted import PLANTS
+from .planted import PLANTS, TIER_PLANTS
 from .recording import PromptSet, Recording
 
 ACT = ("a4", "a8")                 # the quant.act option (docs/m06-lowp.md D3)
@@ -297,7 +304,10 @@ def _bounded(a: argparse.Namespace) -> int:
     from . import bounded, gguf
 
     path = golden.resolve_model(a.model)
-    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions)
+    if a.late is not None and not a.policies:
+        raise SystemExit("bounded: --late goes with --policies")
+    late = (a.late if a.late is not None else max(2, a.sessions // 2)) if a.policies else 0
+    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions, late=late)
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     base = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
@@ -307,8 +317,8 @@ def _bounded(a: argparse.Namespace) -> int:
         return Engine(dataclasses.replace(base, **overrides))
 
     reference = None
-    if sum(map(bool, (a.graphs_vs_eager, a.spec_vs_plain, a.mixed))) > 1:
-        raise SystemExit("bounded: --graphs-vs-eager, --spec-vs-plain and --mixed are separate comparisons")
+    if sum(map(bool, (a.graphs_vs_eager, a.spec_vs_plain, a.mixed, a.policies))) > 1:
+        raise SystemExit("bounded: --graphs-vs-eager, --spec-vs-plain, --mixed and --policies are separate comparisons")
     if a.graphs_vs_eager:                                # every decode step a batch of `sessions` rows, padded
         baseline = bounded.BASELINE | {"cuda_graphs": False}
         configs = {"graphs on": bounded.BASELINE | {"cuda_graphs": True}}
@@ -319,6 +329,12 @@ def _bounded(a: argparse.Namespace) -> int:
         baseline = bounded.BASELINE | reference
         configs = {"spec, prefix on, depth 1": {"prefix_cache": True, "overlap": True},
                    "spec, depth 0": dict(bounded.BASELINE)}
+    elif a.policies:                                     # the checkpoint policies with the state tier (K, §6)
+        baseline = bounded.BASELINE
+        opts = base.plugin_options
+        tier = {"prefix_cache": True, "overlap": True, "slots": base.slots | {"tier": a.tier}}
+        configs = {f"{p}, tier": tier | {"plugin_options": opts | {"recurrent.policy": "prompt_end," + p}}
+                   for p in ("branch", "answer:1")}
     elif a.mixed:                                        # mixed steps (docs/m07-perf.md §3.1) vs today's schedule
         baseline = bounded.BASELINE
         configs = {f"mixed {a.mixed}": bounded.BASELINE | {"chunk_with_decode": a.mixed},
@@ -330,12 +346,13 @@ def _bounded(a: argparse.Namespace) -> int:
                    for p, o in ((True, True), (True, False), (False, True))}   # the baseline is off, 0
         if a.chunked:                                    # prefill in chunks of `chunked` tokens vs one shot
             configs[f"chunked {a.chunked}"] = bounded.BASELINE | {"max_step_tokens": a.chunked}
-    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
+    with PLANTS[a.plant]() if a.plant else contextlib.nullcontext() as fired:
         report = bounded.compare_configs(build, configs, trace, a.k, baseline, reference)
     meta = gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)
     report |= {"model": meta["model"], "dtype": a.dtype, "graphs_vs_eager": a.graphs_vs_eager,
-               "spec_vs_plain": a.spec_vs_plain, "mixed": a.mixed, "engine_args": a.engine_args,
-               "hardware": golden.hardware(torch.device("cuda")), "torch": torch.__version__, "plant": a.plant}
+               "spec_vs_plain": a.spec_vs_plain, "mixed": a.mixed, "policies": a.policies, "late": late,
+               "engine_args": a.engine_args, "hardware": golden.hardware(torch.device("cuda")),
+               "torch": torch.__version__, "plant": a.plant, "fired": dict(fired) if fired is not None else None}
     print(bounded.table(report))
     if a.json:
         pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
@@ -381,6 +398,103 @@ def _constrained(a: argparse.Namespace) -> int:
         pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
         pathlib.Path(a.json).write_text(json.dumps(report, indent=1) + "\n")
     return 0 if report["passed"] else 1
+
+
+def _tiers(a: argparse.Namespace) -> int:
+    """`holon_judge tiers` (holon_judge/tiers.py): the clean checks, then each plant's against them."""
+    from holon.core.cli import engine_config, engine_flags, engine_settings
+    from holon.core.engine import Engine
+
+    from . import bounded, gguf, tiers
+
+    if a.plant and a.plant_runs < 2:
+        raise SystemExit("tiers: --plant-runs at least 2 (a plant that moves the schedule shows across runs)")
+    path = golden.resolve_model(a.model)
+    flags, given = argparse.ArgumentParser(), argparse.ArgumentParser()
+    engine_flags(flags)
+    engine_flags(given, given_only=True)
+    config = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
+                                 dtype=golden.DTYPES[a.dtype])
+    if config.device != "cpu" and config.state_memory is None:
+        raise SystemExit("tiers: give --state-memory in --engine-args (the device pool the filler takes)")
+    config.plugin_options.setdefault("recurrent.policy", "prompt_end,branch,answer:1")      # read by hybrids only
+    pressure = engine_settings(given.parse_args(shlex.split(a.pressure_args)))
+    options = pressure.pop("plugin_options", {})
+
+    def build(tier: bool = True, options: dict | None = None, **overrides):
+        cfg = dataclasses.replace(config, **overrides)
+        slots = {k: v for k, v in cfg.slots.items() if k != "tier"} | ({"tier": a.tier} if tier else {})
+        opts = cfg.plugin_options | (options or {})
+        return Engine(dataclasses.replace(cfg, slots=slots, plugin_options=opts if tier else tiers.tiers_off(opts)))
+
+    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions, turns=a.turns,
+                                       system_len=a.system_len, chunk_len=a.chunk_len, max_tokens=a.max_tokens)
+    cpu = config.device == "cpu"
+    streams = (lambda i=0: tiers.Deferred(i)) if cpu else (lambda i=0: tiers.Delayed(a.delay, a.io_sleep))
+    clean, wall = {}, {}
+    for name, check in (("invariance", lambda: tiers.invariance(build, trace, streams)),
+                        ("identity", lambda: tiers.identity(build, trace, streams, a.runs, options=options,
+                                                            **pressure)),
+                        ("null", lambda: tiers.null_test(build, trace))):
+        if name != "null" or clean["invariance"]["hybrid"]:
+            start = time.monotonic()
+            clean[name] = check()
+            wall[name] = round(time.monotonic() - start, 1)
+    report = {"model": (gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path))["model"],
+              "dtype": a.dtype, "engine_args": a.engine_args, "pressure_args": a.pressure_args, "tier": a.tier,
+              "trace": {"sessions": a.sessions, "turns": a.turns, "system_len": a.system_len,
+                        "chunk_len": a.chunk_len, "max_tokens": a.max_tokens},
+              "streams": "holon_judge.deferred, seeds 0.." if cpu else f"unseeded sleeps up to {a.delay} s",
+              "hardware": "cpu" if cpu else golden.hardware(torch.device("cuda")), "torch": torch.__version__,
+              "checks": {k: tiers.strip(v) for k, v in clean.items()}, "wall_s": wall, "plants": {}}
+    ssd = config.plugin_options.get("state_tier.levels") == "ssd"
+    ssd_dir = pathlib.Path(str(config.plugin_options.get("state_tier.ssd.dir", "state_tier.ssd")))
+    restart_root = ssd_dir.with_name(ssd_dir.name + "-restart")       # its engines' own directories
+    if ssd:                                   # the level restored after a restart (3f's two engines)
+        start = time.monotonic()
+        clean["restart"] = tiers.restart(build, trace, streams, restart_root)
+        wall["restart"] = round(time.monotonic() - start, 1)
+        report["checks"]["restart"] = tiers.strip(clean["restart"])
+    loops = sorted({c for name in a.plant or () for c in TIER_PLANTS[name][1]} - set(clean) - {"invariance",
+                                                                                                "restart"})
+    for name in loops:                        # the closed-loop variants the plants need (tiers.LOOPS)
+        start = time.monotonic()
+        clean[name] = tiers.identity(build, trace, streams, a.runs, loop=tiers.LOOPS[name], options=options,
+                                     **pressure)
+        wall[name] = round(time.monotonic() - start, 1)
+        report["checks"][name] = tiers.strip(clean[name])
+    passed = all(r["verdict"] == "pass" for r in clean.values())
+    if a.plant:
+        run = {"invariance": lambda: tiers.invariance(build, trace, streams)} | {
+            name: lambda name=name: tiers.identity(build, trace, streams, a.plant_runs, clean[name],
+                                                   loop=tiers.LOOPS[name], options=options, **pressure)
+            for name in ["identity", *loops]}
+        run["restart"] = lambda: tiers.restart(build, trace, streams, restart_root)
+        off = tiers.identity(build, trace, streams, 1, tier=False, options=options, **pressure)
+        report["tiers_off"] = {"clean": tiers.strip(off)}
+        passed &= off["verdict"] == "pass"
+        for name in a.plant:
+            plant, checks = TIER_PLANTS[name]
+            result = tiers.judge_plant(name, plant, checks, run, clean)
+            with plant() as fired:          # tiers off: nothing may change
+                try:
+                    got = tiers.identity(build, trace, streams, 1, off, tier=False, options=options, **pressure)
+                except tiers.RunFailed as e:
+                    got = {"verdict": "crash", "failures": [str(e)], "changed": 1}
+            if got.get("moved_at_step", [None]) != [None]:
+                got["verdict"] = "fail"                          # tiers off, the schedule may not move either
+            result["tiers_off"] = {"fired": dict(fired), "changed": got["changed"], "verdict": got["verdict"],
+                                   "moved_at_step": got.get("moved_at_step")}
+            report["plants"][name] = result
+            passed &= result["verdict"] == "caught" and got["verdict"] == "pass"
+            print(f"{name}: {result['verdict']}, fired {dict(result['fired'])}, changed {result['changed']}; tiers off "
+                  f"{got['verdict']}", flush=True)
+    report["passed"] = passed
+    print(json.dumps({k: v for k, v in report["checks"].items()}, indent=1, default=str))
+    if a.json:
+        pathlib.Path(a.json).parent.mkdir(parents=True, exist_ok=True)
+        pathlib.Path(a.json).write_text(json.dumps(report, indent=1, default=str) + "\n")
+    return 0 if passed else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -509,6 +623,11 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--mixed", type=int, help="judge mixed steps (this chunk_with_decode) against today's schedule")
     b.add_argument("--spec-vs-plain", action="store_true",
                    help="judge speculative decoding (the engine args' drafter, policy, verifier) against plain")
+    b.add_argument("--policies", action="store_true", help="judge the checkpoint policies branch and answer:1 with the "
+                   "state tier (prefix on, depth 1) against the baseline, late sessions added")
+    b.add_argument("--late", type=int, help="with --policies: sessions starting in the second and third waves "
+                   "(default: half of --sessions, at least 2)")
+    b.add_argument("--tier", default="std.state_tier", help="with --policies: the tier plugin")
     b.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve`")
     b.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     b.add_argument("--k", type=int, default=20)
@@ -528,6 +647,30 @@ def main(argv: list[str] | None = None) -> int:
     cs.add_argument("--json", help="write the machine-readable report here")
     cs.add_argument("--plant", choices=sorted(PLANTS), help="calibration: run with a planted bug (must fail)")
     cs.set_defaults(run=_constrained)
+
+    ti = sub.add_parser("tiers", help="state tiers: invariance, the null test, run-identity and plants "
+                        "(docs/v1-kv-tiers.md acceptance 2, §6)")
+    ti.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
+    ti.add_argument("--prompts", required=True)
+    ti.add_argument("--engine-args", default="", help="EngineConfig flags of the tested configuration: a device pool "
+                    "(--state-memory) holding about one session, host memory and the tier's options")
+    ti.add_argument("--pressure-args", default="", help="EngineConfig flags over --engine-args for run-identity and "
+                    "the plants' runs (a pressure configuration: loads due later, a smaller host level)")
+    ti.add_argument("--tier", default="std.state_tier", help="the tier plugin (slot `tier`)")
+    ti.add_argument("--sessions", type=int, default=8)
+    ti.add_argument("--turns", type=int, default=4)
+    ti.add_argument("--system-len", type=int, default=512)
+    ti.add_argument("--chunk-len", type=int, default=96)
+    ti.add_argument("--max-tokens", type=int, default=32)
+    ti.add_argument("--runs", type=int, default=3, help="run-identity: fresh engines")
+    ti.add_argument("--plant-runs", type=int, default=3, help="run-identity runs per plant (at least 2)")
+    ti.add_argument("--delay", type=float, default=0.05, help="GPU: the longest sleep before a tier copy (seconds)")
+    ti.add_argument("--io-sleep", type=float, help="GPU: each level I/O job sleeps 0 or this long first (seconds)")
+    ti.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
+    ti.add_argument("--plant", nargs="+", choices=sorted(TIER_PLANTS), help="tier plants to judge (each must be "
+                    "caught, and change nothing with tiers off)")
+    ti.add_argument("--json", help="write the machine-readable report here")
+    ti.set_defaults(run=_tiers)
 
     a = ap.parse_args(argv)
     return a.run(a)

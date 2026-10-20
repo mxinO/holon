@@ -1,0 +1,16 @@
+{"id":0,"arrival":0.0,"system":16384,"turns":[{"append":134,"output":154,"gap":0.0},{"append":130,"output":146,"gap":0.2216}]}
+{"id":1,"arrival":5.0,"system":16384,"turns":[{"append":161,"output":158,"gap":0.0},{"append":362,"output":174,"gap":0.8722}]}
+{"id":2,"arrival":3.7212,"system":16384,"turns":[{"append":193,"output":192,"gap":0.0},{"append":45,"output":44,"gap":0.2047}],"after":0}
+{"id":3,"arrival":2.8373,"system":16384,"turns":[{"append":108,"output":184,"gap":0.0},{"append":523,"output":157,"gap":0.8499}],"after":1}
+{"id":4,"arrival":1.0914,"system":16384,"turns":[{"append":188,"output":66,"gap":0.0},{"append":428,"output":46,"gap":0.0341}],"after":2}
+{"id":5,"arrival":0.5993,"system":16384,"turns":[{"append":288,"output":128,"gap":0.0},{"append":379,"output":38,"gap":1.4225}],"after":3}
+{"id":6,"arrival":1.4319,"system":16384,"turns":[{"append":137,"output":50,"gap":0.0},{"append":92,"output":138,"gap":0.282}],"after":4}
+{"id":7,"arrival":1.0382,"system":16384,"turns":[{"append":123,"output":185,"gap":0.0},{"append":401,"output":26,"gap":0.27}],"after":5}
+{"id":8,"arrival":3.0631,"system":16384,"turns":[{"append":116,"output":157,"gap":0.0},{"append":155,"output":163,"gap":0.2583}],"after":6}
+{"id":9,"arrival":0.7228,"system":16384,"turns":[{"append":136,"output":156,"gap":0.0},{"append":327,"output":79,"gap":0.2056}],"after":7}
+{"id":10,"arrival":1.2948,"system":16384,"turns":[{"append":284,"output":155,"gap":0.0},{"append":481,"output":54,"gap":1.7728}],"after":8}
+{"id":11,"arrival":1.7512,"system":16384,"turns":[{"append":193,"output":115,"gap":0.0},{"append":332,"output":149,"gap":0.4942}],"after":9}
+{"id":12,"arrival":4.7744,"system":16384,"turns":[{"append":127,"output":93,"gap":0.0},{"append":653,"output":77,"gap":0.719}],"after":10}
+{"id":13,"arrival":1.4051,"system":16384,"turns":[{"append":165,"output":71,"gap":0.0},{"append":187,"output":154,"gap":1.1267}],"after":11}
+{"id":14,"arrival":0.6621,"system":16384,"turns":[{"append":204,"output":166,"gap":0.0},{"append":372,"output":44,"gap":0.0549}],"after":12}
+{"id":15,"arrival":2.8196,"system":16384,"turns":[{"append":128,"output":32,"gap":0.0},{"append":1395,"output":24,"gap":0.2364}],"after":13}

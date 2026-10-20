@@ -33,6 +33,10 @@ for them); a step with nothing to decode prefills up to `max_step_tokens`, as to
 prefill step capped at C alternates with a decode (verify) step while both kinds can run, else the step takes the
 kind that can.
 
+Load-gated requests (a prefix hit the tier loads, docs/v1-kv-tiers.md D4): admitted, they wait until the tier's clock
+reaches their loads' due time (`clock`, `StateManager.due`) while the requests behind them run; when nothing else can
+run, the earliest-due one runs at once and its step waits for its copies on the device.
+
 Liveness: the pools always hold one request of the engine's maximum length, and every unit is held by some request
 or only by the prefix cache, which evicts such units before anyone is preempted. So the top-ranked request fits once
 everything below it is preempted, and every step makes progress.
@@ -60,8 +64,10 @@ def _host_tokens(seq: Seq, start: int, n: int, on_device: bool) -> list[int]:
 class Scheduler:
     def __init__(self, state: StateManager, max_step_tokens: int, max_model_len: int,
                  draft_k: Callable[[list[Seq]], int] | None = None, lookahead: Callable[[int], int] | None = None,
-                 host_lens_only: bool = False, chunk_with_decode: int = 0) -> None:
+                 host_lens_only: bool = False, chunk_with_decode: int = 0,
+                 clock: Callable[[], float] = lambda: 0.0) -> None:
         self.state, self.max_step_tokens, self.max_model_len = state, max_step_tokens, max_model_len
+        self.clock = clock
         self.chunk_with_decode = chunk_with_decode
         self._prefilled = False                   # with a drafter and C > 0: the last step prefilled (alternation)
         self.draft_k, self.host_lens_only = draft_k, host_lens_only
@@ -81,6 +87,9 @@ class Scheduler:
 
     def schedule(self) -> tuple[BatchPlan, list[Seq]] | None:
         rows, n_decode, decoding = self._rows()
+        while not rows and self.state.due:          # only load-gated requests left: the earliest-due runs now
+            del self.state.due[min(self.state.due, key=self.state.due.get)]
+            rows, n_decode, decoding = self._rows()
         if not rows:
             return None
         seqs, n_query, n_logits = (list(c) for c in zip(*rows, strict=True))
@@ -127,13 +136,15 @@ class Scheduler:
         return rows, 0, len(rows)
 
     def _prefill(self, budget: int) -> list[tuple[Seq, int, int]]:
-        rows, ahead = [], None
+        rows, ahead, now = [], None, self.clock()
         self._k = 0
         for seq in list(self.waiting):
             if seq.pending or seq.status is Status.BLOCKED:      # preempted while its decode was in flight: wait for
                 continue                                         # the commit; or its logits processor is not ready
             if budget == 0 or (seq.slot < 0 and not self._fit(seq, None)):
                 break
+            if self.state.due.get(seq.slot, now) > now:          # load-gated
+                continue
             n = min(len(seq.tokens) - seq.num_computed, budget)       # after admission: a prefix hit counts
             n = self.state.cut(seq, n)                                 # end where a state kind publishes
             last = seq.num_computed + n == len(seq.tokens)

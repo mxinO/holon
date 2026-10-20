@@ -95,7 +95,10 @@ write another lock. Core changes are seen through the core's own `holon` unit pi
 
 `tune` builds the base plan, lists for each decode op the providers that run here and support every site, and
 benchmarks one op at a time; a pinned provider is replaced only when beaten by more than 3%, so re-tuning does not
-flip pins on noise.
+flip pins on noise. With `--clock` (an engine with a state tier, `--slots tier=std.state_tier`) it first fits the
+tier's `state_tier.step_cost` (`docs/v1-kv-tiers.md` D4) to timed steps at the given settings, prefill steps of one
+row at 256–2048 tokens and decode steps at every row count, in relative error, and the lock takes it. The engine
+settings are the flags', not the starting lock's: pass the lock's (as `--max-seqs 4 --max-model-len …`).
 
 The snapshot trace is the judge's (`holon_judge.snapshot.trace`): a 2048-token prompt, the same prompt extended and
 submitted once the first has finished (a prefix-cache hit), and 62 short requests with staggered lengths, so the

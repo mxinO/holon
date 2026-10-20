@@ -80,7 +80,7 @@ def plan_of(engine: Any, model_id: str | None = None, commit: str = "unknown") -
     # An option naming another checkpoint (a drafter's) is planned as that checkpoint's identity, not its host path.
     opened = engine.ctx.sources
     sources = {k: opened[str(v)] for k, v in settings["plugin_options"].items() if str(v) in opened}
-    unplanned = sources.keys() | frontend_options(engine.plugins.installed)
+    unplanned = sources.keys() | unplanned_options(engine.plugins.installed)
     settings["plugin_options"] = {k: v for k, v in settings["plugin_options"].items() if k not in unplanned}
     cls = lock_class(platform.fingerprint(engine.device), engine.ctx.cpu_kernels)
     return Plan(model_id=model_id or engine.source.identity(), fingerprint_class=cls,
@@ -96,14 +96,27 @@ def lock_class(fp: Fingerprint, cpu_kernels: bool) -> str:
     return f"{fp.gpu}+{fp.cpu_isa}/{fp.toolchain}" if cpu_kernels and fp.cpu_isa else fp.cls
 
 
-def frontend_options(installed: Mapping[str, Installed]) -> set[str]:
-    """The plugin options declared only by frontend plugins, which the engine never loads: they cannot shape outputs,
-    so plans leave them out. An undeclared option stays planned (release design §14.2)."""
-    slots: dict[str, set[str]] = {}
+def unplanned_options(installed: Mapping[str, Installed]) -> set[str]:
+    """The plugin options declared only by frontend plugins, which the engine never loads, or `planned = false`: they
+    cannot shape outputs, so plans leave them out. An undeclared option stays planned (release design §14.2)."""
+    slots: dict[str, set[str | None]] = {}
     for inst in installed.values():
-        for key in inst.manifest.options:
-            slots.setdefault(key, set()).add(inst.manifest.slot)
-    return {key for key, found in slots.items() if found == {"frontend"}}
+        for key, option in inst.manifest.options.items():
+            slots.setdefault(key, set()).add(inst.manifest.slot if option.planned else None)
+    return {key for key, found in slots.items() if found <= {"frontend", None}}
+
+
+def state_identity(engine: Any) -> str | None:
+    """What state a tier persisted must have been made under to be reused (docs/v1-kv-tiers.md D11): the plan's id
+    without the tier's own options (byte-neutral by tier invariance) and the clamp-dependent `max_model_len`; None if
+    the engine's plan cannot be computed."""
+    try:
+        plan = plan_of(engine)
+    except Exception:  # noqa: BLE001 — then nothing persisted is trusted
+        return None
+    own = engine.plugins.installed[engine.cfg.slots["tier"]].manifest.options
+    options = {k: v for k, v in plan.engine["plugin_options"].items() if k not in own}
+    return dataclasses.replace(plan, engine=plan.engine | {"plugin_options": options, "max_model_len": None}).plan_id
 
 
 def unit_pin(inst: Installed) -> UnitPin:

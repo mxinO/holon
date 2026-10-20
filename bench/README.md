@@ -22,6 +22,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
 | `mtp_decision.py` | release design D3's MTP default rule from `run.py` records of a plain lock against MTP over it (`holon@mtp`): per-round TPOT, p95 gap and p95 TTFT ratios, the power estimate after 4 rounds, the verdict |
 | `offload_ctx.py` | v1 offload's reference rows (docs/v1-offload.md acceptance 3, D14): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts, llama-server and FreeToken arms interleaved over rounds, peak VRAM; `spikes/x4_refs/` |
+| `tier_resume.py` | milestone K's resume rows on a 27B lock with the state tier (`docs/v1-kv-tiers.md` acceptance 3): 3a (a parked conversation resumed from VRAM, RAM and SSD, idle or beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain steps), 3f (the two-engine restart); same-session interleaved arms, clocks sampled per row |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
@@ -59,8 +60,15 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
   system prompt (instructions + tool schemas), 16 sessions run by two clients one after another (closed loop: a
   session starts when its client's previous one finished, `after`), 11–17 turns each; 225 requests, contexts up to
   25.8K tokens. Run with `--corpus` and the client's `--temperature 1.0`.
+- **claude_code_2turns**: claude_code with each session cut to its first two turns (milestone K's 3e: the first request's TTFT with and without the `branch` checkpoint at the shared system prompt).
 - **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
+- **agent_park**: parked agent conversations, milestone K's gate trace (`docs/v1-kv-tiers.md` §8): four closed-loop
+  clients each serve three sessions round-robin (`client`), one request at a time, so a session's state is parked
+  while its client's other sessions take a turn. The 12 sessions share a 4,096-token system prompt and open with a
+  512-token task; then 10–14 turns each add a tool result (log-normal, median 384, σ 0.6, ≤ 2K) to an output of
+  reasoning plus a tool call (median 300, σ 0.6, ≤ 2K), after a gap of 0.5–3 s. 159 requests; contexts end at
+  12.2–19.6K tokens, ≈ 137K distinct tokens at the end.
 
 With `--corpus`, prompts are spans of natural text: the system prompt from a seeded offset, and each session's turns
 one walk through the text outside it from the session's own offset, so no context repeats a span of itself. Records

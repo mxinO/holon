@@ -42,9 +42,11 @@ class Backend:
         return self.engine.has_work()
 
     def stats(self) -> dict[str, int]:
-        """Counters (the worker reports each trace's increase): prefix hits, mixed steps, preemptions, drafts."""
+        """Counters (the worker reports each trace's increase): prefix hits, mixed steps, preemptions, drafts, dropped
+        checkpoint publishes and a state tier's counts."""
         return {k: v for k, v in self.engine.stats().items()
-                if k in ("prefix_tokens_saved", "mixed_steps", "preemptions") or k.startswith("spec_")}
+                if k in ("prefix_tokens_saved", "mixed_steps", "preemptions", "dropped_publishes")
+                or k.startswith(("spec_", "std.state_tier."))}
 
     def info(self) -> dict:
         pools = [p for p in self.engine.ledger.pools.values() if p.tokens_per_unit]

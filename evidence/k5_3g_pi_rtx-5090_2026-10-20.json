@@ -1,0 +1,3570 @@
+{
+ "measurement": "K 3g (report, not gated): the pi agent test re-run on an RTX 5090 desktop with the tier, as K-M1 ran it (demo x3, workloads x2, pi 0.73.1 with the counted runs' provider config, a raw capture proxy local only), Qwen3.8-27B UD-Q4_K_M served from rtx-5090 lock 6 (the tier: host.bytes 16 GiB, staging 5, prompt_end,branch,answer:1) at the code it pins (32d5945: every lock is outdated by K's later core and std follow-ups until the close's propagation, and a served lock is what the harness checks), --host-memory 21474836480; 3g's row: of the uncached input, the previous turn's own output (measured with the server's cached tokens), against K-M1's prediction",
+ "date": "2026-10-20",
+ "hardware": "NVIDIA GeForce RTX 5090 desktop",
+ "prediction": "44% under prompt_end (the first pi test) -> <= 10% with answer checkpoints if answers are re-rendered verbatim (K-M1: 38 / 38 verbatim, replay 3.1%)",
+ "clock": "the before-screen failed (an engine of an aborted attempt still held the GPU when it ran, CUDA out of memory); the after-screen is in clock_screens.after (2,535 / 2,595 MHz p10 / p50, steady)",
+ "commands": {
+  "serve": "holon serve <Qwen3.8-27B-UD-Q4_K_M.gguf> --port 8000 --host-memory 21474836480   (at 32d5945, lock 6)",
+  "proxy": "python bench/capture_proxy.py --upstream http://127.0.0.1:8000 --port 18000 --out <dir>/raw_requests.jsonl --raw <dir>/raw.jsonl",
+  "runs": "TMPDIR=/tmp python bench/demo/pi_run.py --server http://127.0.0.1:18000 --gpu-class rtx-5090 --pi <pi> --task demo --runs 3 (then --task workloads --runs 2) --out <dir>/pi_record.json",
+  "analysis": "python spikes/k0_tiers/m1/analyse.py --raw <dir>/raw.jsonl --model <gguf> --record <dir>/pi_record.json --out <file> --clock-after <file>   (the measured share counts the previous answer past the hit, as 3g defines it)"
+ },
+ "commit": "32d5945f0273098f8cb4957e805f9a35d19bdd69",
+ "model": "Qwen3.8-27B-UD-Q4_K_M",
+ "served": {
+  "plan_id": "sha256:0e1e8b57c8187ea29b8a8987132cbfb38a3e6afb0e23e40e68dc95f4f62e8595",
+  "lock": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/6.lock",
+  "diff": []
+ },
+ "client": {
+  "pi": "0.73.1",
+  "node": "v24.18.0",
+  "packages_digest": "sha256:3f8972bdff2cc484aa5697802077a2ece9999f0e282ae253265e63828c06fa7f",
+  "command": "pi --mode json --provider holon --model <served id> --session-dir <tmp> <prompt>",
+  "tools": "read, bash, edit, write (pi's defaults)"
+ },
+ "series": {
+  "demo": {
+   "runs": 3,
+   "compat": "documented",
+   "thinking": null,
+   "models_json": {
+    "providers": {
+     "holon": {
+      "baseUrl": "http://127.0.0.1:<proxy>/v1",
+      "api": "openai-completions",
+      "apiKey": "holon",
+      "models": [
+       {
+        "id": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning": true,
+        "contextWindow": 49152
+       }
+      ],
+      "compat": {
+       "supportsDeveloperRole": false,
+       "thinkingFormat": "qwen-chat-template"
+      }
+     }
+    }
+   },
+   "outcomes": [
+    {
+     "success": true,
+     "turns": 7,
+     "wall_s": 37.6,
+     "requests": 7
+    },
+    {
+     "success": true,
+     "turns": 8,
+     "wall_s": 48.9,
+     "requests": 8
+    },
+    {
+     "success": true,
+     "turns": 9,
+     "wall_s": 47.4,
+     "requests": 9
+    }
+   ]
+  },
+  "workloads": {
+   "runs": 2,
+   "compat": "documented",
+   "thinking": null,
+   "models_json": {
+    "providers": {
+     "holon": {
+      "baseUrl": "http://127.0.0.1:<proxy>/v1",
+      "api": "openai-completions",
+      "apiKey": "holon",
+      "models": [
+       {
+        "id": "Qwen3.8-27B-UD-Q4_K_M",
+        "reasoning": true,
+        "contextWindow": 49152
+       }
+      ],
+      "compat": {
+       "supportsDeveloperRole": false,
+       "thinkingFormat": "qwen-chat-template"
+      }
+     }
+    }
+   },
+   "outcomes": [
+    {
+     "success": true,
+     "turns": 7,
+     "wall_s": 98.4,
+     "requests": 7
+    },
+    {
+     "success": true,
+     "turns": 26,
+     "wall_s": 295.7,
+     "requests": 26
+    }
+   ]
+  }
+ },
+ "clock_screens": {
+  "after": {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "seconds": 71.3,
+   "batch": 4,
+   "tok_s": 287.3,
+   "samples": 692,
+   "sm_mhz": {
+    "p10": 2535.0,
+    "p50": 2595.0,
+    "p90": 2662.0
+   },
+   "mem_mhz": 13801.0,
+   "power_w": 600.0,
+   "slowdown_share": 0.0,
+   "power_cap_share": 1.0,
+   "steady": true
+  }
+ },
+ "checks": {
+  "requests": 57,
+  "prompt_len_equal_server": 57,
+  "gen_len_equal_server": 57,
+  "default_template_differs": 0
+ },
+ "rows": [
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 1,
+   "prompt_len": 1668,
+   "generated": 69,
+   "answer_end": 1737,
+   "next_prompt_len": 1930,
+   "lcp": 1737,
+   "lcp_minus_prompt": 69,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1664,
+   "think_end_offset": 19,
+   "first_tool_call_offset": 21,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1668,
+    "lcp": 1666,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 71,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 2,
+   "prompt_len": 1930,
+   "generated": 127,
+   "answer_end": 2057,
+   "next_prompt_len": 3433,
+   "lcp": 2057,
+   "lcp_minus_prompt": 127,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1920,
+   "think_end_offset": 13,
+   "first_tool_call_offset": 15,
+   "tool_calls": 4,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1907,
+    "lcp": 1905,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 129,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 3,
+   "prompt_len": 3433,
+   "generated": 101,
+   "answer_end": 3534,
+   "next_prompt_len": 4934,
+   "lcp": 3534,
+   "lcp_minus_prompt": 101,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 3392,
+   "think_end_offset": 14,
+   "first_tool_call_offset": 16,
+   "tool_calls": 3,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     3520
+    ],
+    "deepest_usable": 3520,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     3456,
+     3520
+    ],
+    "deepest_usable": 3520,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     3456,
+     3520
+    ],
+    "deepest_usable": 3520,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     3456,
+     3520
+    ],
+    "deepest_usable": 3520,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 3393,
+    "lcp": 3391,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 103,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 4,
+   "prompt_len": 4934,
+   "generated": 67,
+   "answer_end": 5001,
+   "next_prompt_len": 5717,
+   "lcp": 5001,
+   "lcp_minus_prompt": 67,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 4928,
+   "think_end_offset": 13,
+   "first_tool_call_offset": 15,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     4992
+    ],
+    "deepest_usable": 4992,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     4992
+    ],
+    "deepest_usable": 4992,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     4992
+    ],
+    "deepest_usable": 4992,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     4992
+    ],
+    "deepest_usable": 4992,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 4876,
+    "lcp": 4874,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 69,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 5,
+   "prompt_len": 5717,
+   "generated": 2056,
+   "answer_end": 7773,
+   "next_prompt_len": 7821,
+   "lcp": 7773,
+   "lcp_minus_prompt": 2056,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 5696,
+   "think_end_offset": 1696,
+   "first_tool_call_offset": 1740,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     7616,
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     7552,
+     7616,
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5642,
+    "lcp": 5640,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 2058,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 1,
+   "turn": 6,
+   "prompt_len": 7821,
+   "generated": 92,
+   "answer_end": 7913,
+   "next_prompt_len": 7985,
+   "lcp": 7913,
+   "lcp_minus_prompt": 92,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 7808,
+   "think_end_offset": 39,
+   "first_tool_call_offset": 41,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     7872
+    ],
+    "deepest_usable": 7872,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     7872
+    ],
+    "deepest_usable": 7872,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     7872
+    ],
+    "deepest_usable": 7872,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     7872
+    ],
+    "deepest_usable": 7872,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 6046,
+    "lcp": 6044,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 94,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 1,
+   "prompt_len": 1668,
+   "generated": 85,
+   "answer_end": 1753,
+   "next_prompt_len": 1891,
+   "lcp": 1753,
+   "lcp_minus_prompt": 85,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1664,
+   "think_end_offset": 14,
+   "first_tool_call_offset": 16,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1668,
+    "lcp": 1666,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 87,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 2,
+   "prompt_len": 1891,
+   "generated": 191,
+   "answer_end": 2082,
+   "next_prompt_len": 3984,
+   "lcp": 2082,
+   "lcp_minus_prompt": 191,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1856,
+   "think_end_offset": 24,
+   "first_tool_call_offset": 26,
+   "tool_calls": 4,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1920,
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1920,
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1873,
+    "lcp": 1871,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 193,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 3,
+   "prompt_len": 3984,
+   "generated": 132,
+   "answer_end": 4116,
+   "next_prompt_len": 5516,
+   "lcp": 4116,
+   "lcp_minus_prompt": 132,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 3968,
+   "think_end_offset": 15,
+   "first_tool_call_offset": 17,
+   "tool_calls": 3,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     4096
+    ],
+    "deepest_usable": 4096,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     4032,
+     4096
+    ],
+    "deepest_usable": 4096,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     4032,
+     4096
+    ],
+    "deepest_usable": 4096,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     4032,
+     4096
+    ],
+    "deepest_usable": 4096,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 3938,
+    "lcp": 3936,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 134,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 4,
+   "prompt_len": 5516,
+   "generated": 2840,
+   "answer_end": 8356,
+   "next_prompt_len": 8426,
+   "lcp": 8356,
+   "lcp_minus_prompt": 2840,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 5504,
+   "think_end_offset": 2460,
+   "first_tool_call_offset": 2510,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     8320
+    ],
+    "deepest_usable": 8320,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8256,
+     8320
+    ],
+    "deepest_usable": 8320,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     8192,
+     8256,
+     8320
+    ],
+    "deepest_usable": 8320,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     8128,
+     8192,
+     8256,
+     8320
+    ],
+    "deepest_usable": 8320,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5451,
+    "lcp": 5449,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 2842,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 5,
+   "prompt_len": 8426,
+   "generated": 275,
+   "answer_end": 8701,
+   "next_prompt_len": 8926,
+   "lcp": 8701,
+   "lcp_minus_prompt": 275,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 8384,
+   "think_end_offset": 200,
+   "first_tool_call_offset": 224,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8576,
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     8512,
+     8576,
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     8448,
+     8512,
+     8576,
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5897,
+    "lcp": 5895,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 277,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 6,
+   "prompt_len": 8926,
+   "generated": 105,
+   "answer_end": 9031,
+   "next_prompt_len": 9836,
+   "lcp": 9031,
+   "lcp_minus_prompt": 105,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 8896,
+   "think_end_offset": 32,
+   "first_tool_call_offset": 34,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     9024
+    ],
+    "deepest_usable": 9024,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8960,
+     9024
+    ],
+    "deepest_usable": 9024,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     8960,
+     9024
+    ],
+    "deepest_usable": 9024,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     8960,
+     9024
+    ],
+    "deepest_usable": 9024,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 6193,
+    "lcp": 6191,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 107,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 2,
+   "turn": 7,
+   "prompt_len": 9836,
+   "generated": 93,
+   "answer_end": 9929,
+   "next_prompt_len": 10075,
+   "lcp": 9929,
+   "lcp_minus_prompt": 93,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 9792,
+   "think_end_offset": 38,
+   "first_tool_call_offset": 50,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     9920
+    ],
+    "deepest_usable": 9920,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     9856,
+     9920
+    ],
+    "deepest_usable": 9920,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     9856,
+     9920
+    ],
+    "deepest_usable": 9920,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     9856,
+     9920
+    ],
+    "deepest_usable": 9920,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 7067,
+    "lcp": 7065,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 95,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 1,
+   "prompt_len": 1670,
+   "generated": 88,
+   "answer_end": 1758,
+   "next_prompt_len": 1910,
+   "lcp": 1758,
+   "lcp_minus_prompt": 88,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1664,
+   "think_end_offset": 14,
+   "first_tool_call_offset": 16,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1728
+    ],
+    "deepest_usable": 1728,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1670,
+    "lcp": 1668,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 90,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 2,
+   "prompt_len": 1910,
+   "generated": 175,
+   "answer_end": 2085,
+   "next_prompt_len": 3461,
+   "lcp": 2085,
+   "lcp_minus_prompt": 175,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1856,
+   "think_end_offset": 13,
+   "first_tool_call_offset": 15,
+   "tool_calls": 4,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1920,
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1920,
+     1984,
+     2048
+    ],
+    "deepest_usable": 2048,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1892,
+    "lcp": 1890,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 177,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 3,
+   "prompt_len": 3461,
+   "generated": 132,
+   "answer_end": 3593,
+   "next_prompt_len": 4993,
+   "lcp": 3593,
+   "lcp_minus_prompt": 132,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 3456,
+   "think_end_offset": 9,
+   "first_tool_call_offset": 11,
+   "tool_calls": 3,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     3584
+    ],
+    "deepest_usable": 3584,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     3520,
+     3584
+    ],
+    "deepest_usable": 3584,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     3520,
+     3584
+    ],
+    "deepest_usable": 3584,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     3520,
+     3584
+    ],
+    "deepest_usable": 3584,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 3426,
+    "lcp": 3424,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 134,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 4,
+   "prompt_len": 4993,
+   "generated": 1570,
+   "answer_end": 6563,
+   "next_prompt_len": 6851,
+   "lcp": 5293,
+   "lcp_minus_prompt": 300,
+   "answer_end_minus_lcp": 1270,
+   "prompt_end": 4992,
+   "think_end_offset": 1499,
+   "first_tool_call_offset": 1512,
+   "tool_calls": 1,
+   "divergence": "in the reasoning",
+   "answer_1": {
+    "kept": [
+     6528
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_2": {
+    "kept": [
+     6464,
+     6528
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_3": {
+    "kept": [
+     6400,
+     6464,
+     6528
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_4": {
+    "kept": [
+     6336,
+     6400,
+     6464,
+     6528
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "strip": {
+    "prompt_len": 4945,
+    "lcp": 4943,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1572,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 5,
+   "prompt_len": 6851,
+   "generated": 419,
+   "answer_end": 7270,
+   "next_prompt_len": 7344,
+   "lcp": 7270,
+   "lcp_minus_prompt": 419,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 6848,
+   "think_end_offset": 50,
+   "first_tool_call_offset": 81,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     7232
+    ],
+    "deepest_usable": 7232,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     7168,
+     7232
+    ],
+    "deepest_usable": 7232,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     7104,
+     7168,
+     7232
+    ],
+    "deepest_usable": 7232,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     7040,
+     7104,
+     7168,
+     7232
+    ],
+    "deepest_usable": 7232,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5300,
+    "lcp": 5298,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 421,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 6,
+   "prompt_len": 7344,
+   "generated": 454,
+   "answer_end": 7798,
+   "next_prompt_len": 7840,
+   "lcp": 7798,
+   "lcp_minus_prompt": 454,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 7296,
+   "think_end_offset": 209,
+   "first_tool_call_offset": 225,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     7616,
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     7552,
+     7616,
+     7680,
+     7744
+    ],
+    "deepest_usable": 7744,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5739,
+    "lcp": 5737,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 456,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 7,
+   "prompt_len": 7840,
+   "generated": 241,
+   "answer_end": 8081,
+   "next_prompt_len": 8628,
+   "lcp": 8081,
+   "lcp_minus_prompt": 241,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 7808,
+   "think_end_offset": 199,
+   "first_tool_call_offset": 201,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     8064
+    ],
+    "deepest_usable": 8064,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8000,
+     8064
+    ],
+    "deepest_usable": 8064,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     7936,
+     8000,
+     8064
+    ],
+    "deepest_usable": 8064,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     7872,
+     7936,
+     8000,
+     8064
+    ],
+    "deepest_usable": 8064,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 6022,
+    "lcp": 6020,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 243,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "demo",
+   "run": 3,
+   "turn": 8,
+   "prompt_len": 8628,
+   "generated": 389,
+   "answer_end": 9017,
+   "next_prompt_len": 9052,
+   "lcp": 9017,
+   "lcp_minus_prompt": 389,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 8576,
+   "think_end_offset": 332,
+   "first_tool_call_offset": 334,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     8960
+    ],
+    "deepest_usable": 8960,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8896,
+     8960
+    ],
+    "deepest_usable": 8960,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     8832,
+     8896,
+     8960
+    ],
+    "deepest_usable": 8960,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     8768,
+     8832,
+     8896,
+     8960
+    ],
+    "deepest_usable": 8960,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 6607,
+    "lcp": 6605,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 391,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 1,
+   "prompt_len": 1852,
+   "generated": 80,
+   "answer_end": 1932,
+   "next_prompt_len": 2273,
+   "lcp": 1932,
+   "lcp_minus_prompt": 80,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1792,
+   "think_end_offset": 10,
+   "first_tool_call_offset": 12,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1852,
+    "lcp": 1850,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 82,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 2,
+   "prompt_len": 2273,
+   "generated": 179,
+   "answer_end": 2452,
+   "next_prompt_len": 8446,
+   "lcp": 2452,
+   "lcp_minus_prompt": 179,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 2240,
+   "think_end_offset": 22,
+   "first_tool_call_offset": 24,
+   "tool_calls": 4,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     2432
+    ],
+    "deepest_usable": 2432,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     2368,
+     2432
+    ],
+    "deepest_usable": 2432,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     2304,
+     2368,
+     2432
+    ],
+    "deepest_usable": 2432,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     2304,
+     2368,
+     2432
+    ],
+    "deepest_usable": 2432,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 2259,
+    "lcp": 2257,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 181,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 3,
+   "prompt_len": 8446,
+   "generated": 5939,
+   "answer_end": 14385,
+   "next_prompt_len": 14425,
+   "lcp": 10392,
+   "lcp_minus_prompt": 1946,
+   "answer_end_minus_lcp": 3993,
+   "prompt_end": 8384,
+   "think_end_offset": 5144,
+   "first_tool_call_offset": 5176,
+   "tool_calls": 1,
+   "divergence": "in the reasoning",
+   "answer_1": {
+    "kept": [
+     14336
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_2": {
+    "kept": [
+     14272,
+     14336
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_3": {
+    "kept": [
+     14208,
+     14272,
+     14336
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_4": {
+    "kept": [
+     14144,
+     14208,
+     14272,
+     14336
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "strip": {
+    "prompt_len": 8406,
+    "lcp": 8404,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 5941,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 4,
+   "prompt_len": 14425,
+   "generated": 1025,
+   "answer_end": 15450,
+   "next_prompt_len": 15492,
+   "lcp": 15450,
+   "lcp_minus_prompt": 1025,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 14400,
+   "think_end_offset": 14,
+   "first_tool_call_offset": 21,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     15424
+    ],
+    "deepest_usable": 15424,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     15360,
+     15424
+    ],
+    "deepest_usable": 15424,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     15296,
+     15360,
+     15424
+    ],
+    "deepest_usable": 15424,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     15232,
+     15296,
+     15360,
+     15424
+    ],
+    "deepest_usable": 15424,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 9237,
+    "lcp": 9235,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1027,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 5,
+   "prompt_len": 15492,
+   "generated": 191,
+   "answer_end": 15683,
+   "next_prompt_len": 15717,
+   "lcp": 15683,
+   "lcp_minus_prompt": 191,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 15488,
+   "think_end_offset": 134,
+   "first_tool_call_offset": 136,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     15680
+    ],
+    "deepest_usable": 15680,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     15616,
+     15680
+    ],
+    "deepest_usable": 15680,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     15552,
+     15616,
+     15680
+    ],
+    "deepest_usable": 15680,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     15552,
+     15616,
+     15680
+    ],
+    "deepest_usable": 15680,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 10286,
+    "lcp": 10284,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 193,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 1,
+   "turn": 6,
+   "prompt_len": 15717,
+   "generated": 105,
+   "answer_end": 15822,
+   "next_prompt_len": 15900,
+   "lcp": 15822,
+   "lcp_minus_prompt": 105,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 15680,
+   "think_end_offset": 32,
+   "first_tool_call_offset": 50,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     15808
+    ],
+    "deepest_usable": 15808,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     15744,
+     15808
+    ],
+    "deepest_usable": 15808,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     15744,
+     15808
+    ],
+    "deepest_usable": 15808,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     15744,
+     15808
+    ],
+    "deepest_usable": 15808,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 10373,
+    "lcp": 10371,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 107,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 1,
+   "prompt_len": 1852,
+   "generated": 131,
+   "answer_end": 1983,
+   "next_prompt_len": 5444,
+   "lcp": 1983,
+   "lcp_minus_prompt": 131,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 1792,
+   "think_end_offset": 15,
+   "first_tool_call_offset": 17,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     1856,
+     1920
+    ],
+    "deepest_usable": 1920,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 1852,
+    "lcp": 1850,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 133,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 2,
+   "prompt_len": 5444,
+   "generated": 1343,
+   "answer_end": 6787,
+   "next_prompt_len": 8603,
+   "lcp": 6787,
+   "lcp_minus_prompt": 1343,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 5440,
+   "think_end_offset": 1208,
+   "first_tool_call_offset": 1210,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     6784
+    ],
+    "deepest_usable": 6784,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     6720,
+     6784
+    ],
+    "deepest_usable": 6784,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     6656,
+     6720,
+     6784
+    ],
+    "deepest_usable": 6784,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     6592,
+     6656,
+     6720,
+     6784
+    ],
+    "deepest_usable": 6784,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 5425,
+    "lcp": 5423,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1345,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 3,
+   "prompt_len": 8603,
+   "generated": 85,
+   "answer_end": 8688,
+   "next_prompt_len": 9079,
+   "lcp": 8688,
+   "lcp_minus_prompt": 85,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 8576,
+   "think_end_offset": 31,
+   "first_tool_call_offset": 33,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     8640
+    ],
+    "deepest_usable": 8640,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 7372,
+    "lcp": 7370,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 87,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 4,
+   "prompt_len": 9079,
+   "generated": 2509,
+   "answer_end": 11588,
+   "next_prompt_len": 11628,
+   "lcp": 10137,
+   "lcp_minus_prompt": 1058,
+   "answer_end_minus_lcp": 1451,
+   "prompt_end": 9024,
+   "think_end_offset": 1846,
+   "first_tool_call_offset": 1920,
+   "tool_calls": 1,
+   "divergence": "in the reasoning",
+   "answer_1": {
+    "kept": [
+     11584
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_2": {
+    "kept": [
+     11520,
+     11584
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_3": {
+    "kept": [
+     11456,
+     11520,
+     11584
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_4": {
+    "kept": [
+     11392,
+     11456,
+     11520,
+     11584
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "strip": {
+    "prompt_len": 7813,
+    "lcp": 7811,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 2511,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 5,
+   "prompt_len": 11628,
+   "generated": 148,
+   "answer_end": 11776,
+   "next_prompt_len": 12236,
+   "lcp": 11776,
+   "lcp_minus_prompt": 148,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 11584,
+   "think_end_offset": 68,
+   "first_tool_call_offset": 83,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     11712
+    ],
+    "deepest_usable": 11712,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     11648,
+     11712
+    ],
+    "deepest_usable": 11712,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     11648,
+     11712
+    ],
+    "deepest_usable": 11712,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     11648,
+     11712
+    ],
+    "deepest_usable": 11712,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 8512,
+    "lcp": 8510,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 150,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 6,
+   "prompt_len": 12236,
+   "generated": 97,
+   "answer_end": 12333,
+   "next_prompt_len": 12773,
+   "lcp": 12333,
+   "lcp_minus_prompt": 97,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 12224,
+   "think_end_offset": 30,
+   "first_tool_call_offset": 32,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     12288
+    ],
+    "deepest_usable": 12288,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     12288
+    ],
+    "deepest_usable": 12288,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     12288
+    ],
+    "deepest_usable": 12288,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     12288
+    ],
+    "deepest_usable": 12288,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 9048,
+    "lcp": 9046,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 99,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 7,
+   "prompt_len": 12773,
+   "generated": 394,
+   "answer_end": 13167,
+   "next_prompt_len": 13366,
+   "lcp": 13167,
+   "lcp_minus_prompt": 394,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 12736,
+   "think_end_offset": 295,
+   "first_tool_call_offset": 319,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     13120
+    ],
+    "deepest_usable": 13120,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     13056,
+     13120
+    ],
+    "deepest_usable": 13120,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     12992,
+     13056,
+     13120
+    ],
+    "deepest_usable": 13120,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     12928,
+     12992,
+     13056,
+     13120
+    ],
+    "deepest_usable": 13120,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 9551,
+    "lcp": 9549,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 396,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 8,
+   "prompt_len": 13366,
+   "generated": 575,
+   "answer_end": 13941,
+   "next_prompt_len": 13983,
+   "lcp": 13941,
+   "lcp_minus_prompt": 575,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 13312,
+   "think_end_offset": 102,
+   "first_tool_call_offset": 144,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     13888
+    ],
+    "deepest_usable": 13888,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     13824,
+     13888
+    ],
+    "deepest_usable": 13888,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     13760,
+     13824,
+     13888
+    ],
+    "deepest_usable": 13888,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     13696,
+     13760,
+     13824,
+     13888
+    ],
+    "deepest_usable": 13888,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 9845,
+    "lcp": 9843,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 577,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 9,
+   "prompt_len": 13983,
+   "generated": 162,
+   "answer_end": 14145,
+   "next_prompt_len": 14484,
+   "lcp": 14145,
+   "lcp_minus_prompt": 162,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 13952,
+   "think_end_offset": 88,
+   "first_tool_call_offset": 109,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     14144
+    ],
+    "deepest_usable": 14144,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     14080,
+     14144
+    ],
+    "deepest_usable": 14144,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     14016,
+     14080,
+     14144
+    ],
+    "deepest_usable": 14144,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     14016,
+     14080,
+     14144
+    ],
+    "deepest_usable": 14144,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 10356,
+    "lcp": 10354,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 164,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 10,
+   "prompt_len": 14484,
+   "generated": 1275,
+   "answer_end": 15759,
+   "next_prompt_len": 15813,
+   "lcp": 15097,
+   "lcp_minus_prompt": 613,
+   "answer_end_minus_lcp": 662,
+   "prompt_end": 14464,
+   "think_end_offset": 58,
+   "first_tool_call_offset": 60,
+   "tool_calls": 1,
+   "divergence": "inside a tool call",
+   "answer_1": {
+    "kept": [
+     15744
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_2": {
+    "kept": [
+     15680,
+     15744
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_3": {
+    "kept": [
+     15616,
+     15680,
+     15744
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "answer_4": {
+    "kept": [
+     15552,
+     15616,
+     15680,
+     15744
+    ],
+    "deepest_usable": null,
+    "within_one_block": false
+   },
+   "strip": {
+    "prompt_len": 10765,
+    "lcp": 10763,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1277,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 11,
+   "prompt_len": 15813,
+   "generated": 232,
+   "answer_end": 16045,
+   "next_prompt_len": 16232,
+   "lcp": 16045,
+   "lcp_minus_prompt": 232,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 15808,
+   "think_end_offset": 171,
+   "first_tool_call_offset": 173,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     16000
+    ],
+    "deepest_usable": 16000,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     15936,
+     16000
+    ],
+    "deepest_usable": 16000,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     15872,
+     15936,
+     16000
+    ],
+    "deepest_usable": 16000,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     15872,
+     15936,
+     16000
+    ],
+    "deepest_usable": 16000,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 12032,
+    "lcp": 12030,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 234,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 12,
+   "prompt_len": 16232,
+   "generated": 2135,
+   "answer_end": 18367,
+   "next_prompt_len": 18409,
+   "lcp": 18367,
+   "lcp_minus_prompt": 2135,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 16192,
+   "think_end_offset": 508,
+   "first_tool_call_offset": 536,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     18304
+    ],
+    "deepest_usable": 18304,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     18240,
+     18304
+    ],
+    "deepest_usable": 18304,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     18176,
+     18240,
+     18304
+    ],
+    "deepest_usable": 18304,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     18112,
+     18176,
+     18240,
+     18304
+    ],
+    "deepest_usable": 18304,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 12276,
+    "lcp": 12274,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 2137,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 13,
+   "prompt_len": 18409,
+   "generated": 176,
+   "answer_end": 18585,
+   "next_prompt_len": 18825,
+   "lcp": 18585,
+   "lcp_minus_prompt": 176,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 18368,
+   "think_end_offset": 119,
+   "first_tool_call_offset": 121,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     18560
+    ],
+    "deepest_usable": 18560,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     18496,
+     18560
+    ],
+    "deepest_usable": 18560,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     18432,
+     18496,
+     18560
+    ],
+    "deepest_usable": 18560,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     18432,
+     18496,
+     18560
+    ],
+    "deepest_usable": 18560,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 13941,
+    "lcp": 13939,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 178,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 14,
+   "prompt_len": 18825,
+   "generated": 165,
+   "answer_end": 18990,
+   "next_prompt_len": 19410,
+   "lcp": 18990,
+   "lcp_minus_prompt": 165,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 18816,
+   "think_end_offset": 72,
+   "first_tool_call_offset": 100,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     18944
+    ],
+    "deepest_usable": 18944,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     18880,
+     18944
+    ],
+    "deepest_usable": 18944,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     18880,
+     18944
+    ],
+    "deepest_usable": 18944,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     18880,
+     18944
+    ],
+    "deepest_usable": 18944,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 14234,
+    "lcp": 14232,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 167,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 15,
+   "prompt_len": 19410,
+   "generated": 1185,
+   "answer_end": 20595,
+   "next_prompt_len": 20647,
+   "lcp": 20595,
+   "lcp_minus_prompt": 1185,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 19392,
+   "think_end_offset": 561,
+   "first_tool_call_offset": 598,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     20544
+    ],
+    "deepest_usable": 20544,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     20480,
+     20544
+    ],
+    "deepest_usable": 20544,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     20416,
+     20480,
+     20544
+    ],
+    "deepest_usable": 20544,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     20352,
+     20416,
+     20480,
+     20544
+    ],
+    "deepest_usable": 20544,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 14743,
+    "lcp": 14741,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1187,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 16,
+   "prompt_len": 20647,
+   "generated": 256,
+   "answer_end": 20903,
+   "next_prompt_len": 20943,
+   "lcp": 20903,
+   "lcp_minus_prompt": 256,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 20608,
+   "think_end_offset": 14,
+   "first_tool_call_offset": 16,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     20864
+    ],
+    "deepest_usable": 20864,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     20800,
+     20864
+    ],
+    "deepest_usable": 20864,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     20736,
+     20800,
+     20864
+    ],
+    "deepest_usable": 20864,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     20672,
+     20736,
+     20800,
+     20864
+    ],
+    "deepest_usable": 20864,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 15415,
+    "lcp": 15413,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 258,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 17,
+   "prompt_len": 20943,
+   "generated": 161,
+   "answer_end": 21104,
+   "next_prompt_len": 21349,
+   "lcp": 21104,
+   "lcp_minus_prompt": 161,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 20928,
+   "think_end_offset": 88,
+   "first_tool_call_offset": 90,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     21056
+    ],
+    "deepest_usable": 21056,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     20992,
+     21056
+    ],
+    "deepest_usable": 21056,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     20992,
+     21056
+    ],
+    "deepest_usable": 21056,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     20992,
+     21056
+    ],
+    "deepest_usable": 21056,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 15693,
+    "lcp": 15691,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 163,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 18,
+   "prompt_len": 21349,
+   "generated": 346,
+   "answer_end": 21695,
+   "next_prompt_len": 21717,
+   "lcp": 21695,
+   "lcp_minus_prompt": 346,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 21312,
+   "think_end_offset": 85,
+   "first_tool_call_offset": 130,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     21632
+    ],
+    "deepest_usable": 21632,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     21568,
+     21632
+    ],
+    "deepest_usable": 21632,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     21504,
+     21568,
+     21632
+    ],
+    "deepest_usable": 21632,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     21440,
+     21504,
+     21568,
+     21632
+    ],
+    "deepest_usable": 21632,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 16007,
+    "lcp": 16005,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 348,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 19,
+   "prompt_len": 21717,
+   "generated": 86,
+   "answer_end": 21803,
+   "next_prompt_len": 22870,
+   "lcp": 21803,
+   "lcp_minus_prompt": 86,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 21696,
+   "think_end_offset": 30,
+   "first_tool_call_offset": 32,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     21760
+    ],
+    "deepest_usable": 21760,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     21760
+    ],
+    "deepest_usable": 21760,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     21760
+    ],
+    "deepest_usable": 21760,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     21760
+    ],
+    "deepest_usable": 21760,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 16286,
+    "lcp": 16284,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 88,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 20,
+   "prompt_len": 22870,
+   "generated": 812,
+   "answer_end": 23682,
+   "next_prompt_len": 23861,
+   "lcp": 23682,
+   "lcp_minus_prompt": 812,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 22848,
+   "think_end_offset": 344,
+   "first_tool_call_offset": 373,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     23680
+    ],
+    "deepest_usable": 23680,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     23616,
+     23680
+    ],
+    "deepest_usable": 23680,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     23552,
+     23616,
+     23680
+    ],
+    "deepest_usable": 23680,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     23488,
+     23552,
+     23616,
+     23680
+    ],
+    "deepest_usable": 23680,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 17405,
+    "lcp": 17403,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 814,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 21,
+   "prompt_len": 23861,
+   "generated": 99,
+   "answer_end": 23960,
+   "next_prompt_len": 24181,
+   "lcp": 23960,
+   "lcp_minus_prompt": 99,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 23808,
+   "think_end_offset": 44,
+   "first_tool_call_offset": 46,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     23936
+    ],
+    "deepest_usable": 23936,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     23872,
+     23936
+    ],
+    "deepest_usable": 23936,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     23872,
+     23936
+    ],
+    "deepest_usable": 23936,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     23872,
+     23936
+    ],
+    "deepest_usable": 23936,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 18048,
+    "lcp": 18046,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 101,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 22,
+   "prompt_len": 24181,
+   "generated": 760,
+   "answer_end": 24941,
+   "next_prompt_len": 25553,
+   "lcp": 24941,
+   "lcp_minus_prompt": 760,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 24128,
+   "think_end_offset": 60,
+   "first_tool_call_offset": 79,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     24896
+    ],
+    "deepest_usable": 24896,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     24832,
+     24896
+    ],
+    "deepest_usable": 24896,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     24768,
+     24832,
+     24896
+    ],
+    "deepest_usable": 24896,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     24704,
+     24768,
+     24832,
+     24896
+    ],
+    "deepest_usable": 24896,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 18320,
+    "lcp": 18318,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 762,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 23,
+   "prompt_len": 25553,
+   "generated": 2557,
+   "answer_end": 28110,
+   "next_prompt_len": 28884,
+   "lcp": 28110,
+   "lcp_minus_prompt": 2557,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 25536,
+   "think_end_offset": 1956,
+   "first_tool_call_offset": 1988,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     28096
+    ],
+    "deepest_usable": 28096,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     28032,
+     28096
+    ],
+    "deepest_usable": 28096,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     27968,
+     28032,
+     28096
+    ],
+    "deepest_usable": 28096,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     27904,
+     27968,
+     28032,
+     28096
+    ],
+    "deepest_usable": 28096,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 19628,
+    "lcp": 19626,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 2559,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 24,
+   "prompt_len": 28884,
+   "generated": 1141,
+   "answer_end": 30025,
+   "next_prompt_len": 30108,
+   "lcp": 30025,
+   "lcp_minus_prompt": 1141,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 28864,
+   "think_end_offset": 466,
+   "first_tool_call_offset": 501,
+   "tool_calls": 1,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     30016
+    ],
+    "deepest_usable": 30016,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     29952,
+     30016
+    ],
+    "deepest_usable": 30016,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     29888,
+     29952,
+     30016
+    ],
+    "deepest_usable": 30016,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     29824,
+     29888,
+     29952,
+     30016
+    ],
+    "deepest_usable": 30016,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 20999,
+    "lcp": 20997,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 1143,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  },
+  {
+   "task": "workloads",
+   "run": 2,
+   "turn": 25,
+   "prompt_len": 30108,
+   "generated": 404,
+   "answer_end": 30512,
+   "next_prompt_len": 32260,
+   "lcp": 30512,
+   "lcp_minus_prompt": 404,
+   "answer_end_minus_lcp": 0,
+   "prompt_end": 30080,
+   "think_end_offset": 247,
+   "first_tool_call_offset": 297,
+   "tool_calls": 2,
+   "divergence": "nowhere (verbatim to the end)",
+   "answer_1": {
+    "kept": [
+     30464
+    ],
+    "deepest_usable": 30464,
+    "within_one_block": true
+   },
+   "answer_2": {
+    "kept": [
+     30400,
+     30464
+    ],
+    "deepest_usable": 30464,
+    "within_one_block": true
+   },
+   "answer_3": {
+    "kept": [
+     30336,
+     30400,
+     30464
+    ],
+    "deepest_usable": 30464,
+    "within_one_block": true
+   },
+   "answer_4": {
+    "kept": [
+     30272,
+     30336,
+     30400,
+     30464
+    ],
+    "deepest_usable": 30464,
+    "within_one_block": true
+   },
+   "strip": {
+    "prompt_len": 21753,
+    "lcp": 21751,
+    "lcp_minus_prompt": -2,
+    "answer_end_minus_lcp": 406,
+    "divergence": "before the answer",
+    "within_one_block": {
+     "1": false,
+     "2": false,
+     "3": false,
+     "4": false
+    }
+   }
+  }
+ ],
+ "uncached": {
+  "prompt_end": {
+   "uncached_input": 76734,
+   "previous_output_uncached": 34454,
+   "previous_output_share": 0.449,
+   "replay_equals_measured_cached": 6,
+   "requests": 57
+  },
+  "prompt_end+answer:1": {
+   "uncached_input": 53758,
+   "previous_output_uncached": 12802,
+   "previous_output_share": 0.2381,
+   "replay_equals_measured_cached": 53,
+   "requests": 57
+  },
+  "prompt_end+answer:2": {
+   "uncached_input": 53758,
+   "previous_output_uncached": 12802,
+   "previous_output_share": 0.2381,
+   "replay_equals_measured_cached": 53,
+   "requests": 57
+  },
+  "prompt_end+answer:3": {
+   "uncached_input": 53758,
+   "previous_output_uncached": 12802,
+   "previous_output_share": 0.2381,
+   "replay_equals_measured_cached": 53,
+   "requests": 57
+  },
+  "prompt_end+answer:4": {
+   "uncached_input": 53758,
+   "previous_output_uncached": 12802,
+   "previous_output_share": 0.2381,
+   "replay_equals_measured_cached": 53,
+   "requests": 57
+  },
+  "measured": {
+   "uncached_input": 48894,
+   "previous_output": 12738,
+   "previous_output_share": 0.2605
+  }
+ },
+ "summary": {
+  "answers": 52,
+  "answers_crossing_a_block": 52,
+  "answer_end_minus_lcp": {
+   "min": 0,
+   "p50": 0.0,
+   "max": 3993,
+   "le_0": 48
+  },
+  "answer_shapes": {
+   "generated": {
+    "min": 67,
+    "p50": 191.0,
+    "max": 5939
+   },
+   "tool_calls_per_answer": {
+    "1": 39,
+    "2": 6,
+    "3": 3,
+    "4": 4
+   },
+   "with_reasoning": 52,
+   "with_text_before_the_first_call": 24
+  },
+  "strip_answer_end_minus_lcp_p50": 193.0,
+  "strip_lcp_minus_prompt": {
+   "-2": 52
+  },
+  "within_one_block_of_a_kept_checkpoint": {
+   "1": {
+    "all_answers": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "answers_crossing_a_block": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "strip_template_all_answers": {
+     "count": 0,
+     "of": 52,
+     "share": 0.0
+    }
+   },
+   "2": {
+    "all_answers": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "answers_crossing_a_block": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "strip_template_all_answers": {
+     "count": 0,
+     "of": 52,
+     "share": 0.0
+    }
+   },
+   "3": {
+    "all_answers": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "answers_crossing_a_block": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "strip_template_all_answers": {
+     "count": 0,
+     "of": 52,
+     "share": 0.0
+    }
+   },
+   "4": {
+    "all_answers": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "answers_crossing_a_block": {
+     "count": 48,
+     "of": 52,
+     "share": 0.9231
+    },
+    "strip_template_all_answers": {
+     "count": 0,
+     "of": 52,
+     "share": 0.0
+    }
+   }
+  },
+  "divergence_sites": {
+   "nowhere (verbatim to the end)": 48,
+   "in the reasoning": 3,
+   "inside a tool call": 1
+  },
+  "divergence_sites_strip_template": {
+   "before the answer": 52
+  },
+  "uncached": {
+   "prompt_end": {
+    "uncached_input": 76734,
+    "previous_output_uncached": 34454,
+    "previous_output_share": 0.449,
+    "replay_equals_measured_cached": 6,
+    "requests": 57
+   },
+   "prompt_end+answer:1": {
+    "uncached_input": 53758,
+    "previous_output_uncached": 12802,
+    "previous_output_share": 0.2381,
+    "replay_equals_measured_cached": 53,
+    "requests": 57
+   },
+   "prompt_end+answer:2": {
+    "uncached_input": 53758,
+    "previous_output_uncached": 12802,
+    "previous_output_share": 0.2381,
+    "replay_equals_measured_cached": 53,
+    "requests": 57
+   },
+   "prompt_end+answer:3": {
+    "uncached_input": 53758,
+    "previous_output_uncached": 12802,
+    "previous_output_share": 0.2381,
+    "replay_equals_measured_cached": 53,
+    "requests": 57
+   },
+   "prompt_end+answer:4": {
+    "uncached_input": 53758,
+    "previous_output_uncached": 12802,
+    "previous_output_share": 0.2381,
+    "replay_equals_measured_cached": 53,
+    "requests": 57
+   },
+   "measured": {
+    "uncached_input": 48894,
+    "previous_output": 12738,
+    "previous_output_share": 0.2605
+   }
+  },
+  "decision_rule": {
+   "rule": ">= 50% of answers re-rendered verbatim to within one block of a kept checkpoint",
+   "answer_on_by_default": true,
+   "smallest_k_meeting_it": 1
+  }
+ }
+}

@@ -1,0 +1,19 @@
+[plugin]
+name = "state_tiers.zlib"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"
+
+[resources]
+provides = ["unit.state_tiers.zlib@1"]
+
+[properties]
+numerics = "exact"         # lossless: a hit's bytes are the ones the host level held
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"zlib.bytes" = { help = "the level's capacity in uncompressed bytes, split over the host pools as host.bytes is", default = "4GiB" }
+"zlib.level" = { help = "zlib's compression level", default = "1" }
+"zlib.read" = { help = "bytes per second the clock charges a read (decompression)", default = "1e9" }
+"zlib.write" = { help = "bytes per second the clock charges a write (compression)", default = "3e8" }

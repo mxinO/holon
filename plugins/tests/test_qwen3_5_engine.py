@@ -70,17 +70,52 @@ def test_a_checkpoint_hit_computes_what_recomputing_does(tiny, policy):
     assert engine.stats()["prefix_tokens_saved"] == 128 and hot == cold
 
 
-def test_without_checkpoint_units_nothing_is_reused(tiny):
-    """A checkpoint pool may get no units (its budget did not fit): publishes find no room, so a turn recomputes."""
+def test_without_checkpoint_units_nothing_is_reused(tiny, capsys):
+    """A checkpoint pool with no units recomputes a turn: `recurrent.checkpoints` 0, or left unset (best effort) with a
+    state budget that cannot fit the default beside the paged floor (the ledger falls back to the minimum, 0), which
+    says so once. Set explicitly, the units are required: the same budget refuses the start."""
     _, path, prompts = tiny
     first = prompts[2]
     turn = first + [7, 8, 9] + prompts[3]
     params = SamplingParams(temperature=0.0, max_tokens=5, logprobs=1)
     cold = _run(_engine(path, prefix_cache=False), turn, params)
-    engine = _engine(path, plugin_options={"recurrent.checkpoints": "0"})
-    assert engine.ledger.pool("plugin.ssm_state.checkpoints").capacity == 0
-    _run(engine, first, params)
-    assert _run(engine, turn, params) == cold and engine.stats()["prefix_tokens_saved"] == 0
+    probe = _engine(path).ledger.pools.values()                        # the default: max_seqs units
+    fits = sum((q.capacity if q.name.endswith(".checkpoints") else q.min_units) * q.unit_bytes for q in probe)
+    with pytest.raises(RuntimeError, match="memory budget"):
+        _engine(path, plugin_options={"recurrent.checkpoints": "3"}, state_memory=fits - 1)
+    for options, warned in (({"recurrent.checkpoints": "0"}, False), ({}, True)):
+        capsys.readouterr()
+        engine = _engine(path, plugin_options=options, state_memory=fits - 1)
+        assert engine.ledger.pool("plugin.ssm_state.checkpoints").capacity == 0
+        _run(engine, first, params)
+        assert _run(engine, turn, params) == cold and engine.stats()["prefix_tokens_saved"] == 0
+        assert engine.stats()["dropped_publishes"] == 0                # nothing cut for, nothing published
+        assert capsys.readouterr().err.count("got 0 units") == (2 if warned else 0)    # once per spec
+
+
+@pytest.mark.parametrize("policy", ["branch", "policies.last_turn@1"])
+def test_a_branch_point_outlives_preemption(tiny, policy):
+    """`branch_at` and `matched` are the first admission's (as `cached_tokens` is): B leaves A's chain at m = 128;
+    preempted with its prefill past its own block at 192, its payloads dropped, and re-admitted (now matching its own
+    blocks to 192, which have no continuation), it still checkpoints at m."""
+    _, path, _ = tiny
+    gen = torch.Generator().manual_seed(4)
+    system, x, y = (torch.randint(0, 320, (n,), generator=gen).tolist() for n in (128, 140, 150))
+    engine = _engine(path, overlap=False, max_model_len=512,
+                     plugin_options={"recurrent.policy": "prompt_end," + policy})
+    _run(engine, system + x, SamplingParams(temperature=0.0, max_tokens=1))      # A: its prompt end at 256
+    rid = engine.add(system + y, SamplingParams(temperature=0.0, max_tokens=1))
+    while not (seq := next(iter(engine._live.get(rid, ())), None)) or seq.num_computed <= 200:
+        engine.step()
+    assert (seq.branch_at, seq.matched) == (128, 128) and seq.num_computed < seq.prompt_len
+    engine.sched._preempt(seq)                                        # mid-prefill, between m and its prompt end
+    idx = engine.state.index
+    for pool in idx.payload_pools:
+        idx.evict_payloads(pool, idx.payload_pools[pool].capacity)    # the checkpoint at m is gone
+    while engine.has_work():
+        engine.step()
+    m = idx.match(idx.keys(system, 0, 2, None), system)[-1]
+    assert "ssm_state" in m.payloads                                  # taken again at m
 
 
 def _prefill_steps(engine, prompt) -> int:
@@ -197,7 +232,7 @@ class _Seq:
         self.tokens, self.num_computed, self.prompt_len = [0] * tokens, computed, prompt or tokens
 
 
-def _kind(policy: str, units: int = 2):
+def _kind(policy: str, units: int = 2, unit=None):
     from holon.api import Slot, StateSpec
     from holon_std.state.recurrent.kind import Recurrent
 
@@ -206,6 +241,9 @@ def _kind(policy: str, units: int = 2):
 
         def pool(self, name, **kw):
             return type("P", (), {"capacity": units, "name": f"plugin.{name}", "num_free": units})()
+
+        def unit(self, ref, spec):
+            return unit
     spec = StateSpec("ssm_state", "recurrent@1", Slot(8), (0,), "t", alignment=64, in_step=64)
     return Recurrent(spec, type("P", (), {"name": "state.ssm_state"})(), _Ctx())
 
@@ -221,6 +259,23 @@ def test_the_kinds_cuts_follow_the_in_step_grid():
     assert _kind("prompt_end", units=0).cut(_Seq(400, 0), 0, 100) == 100   # nothing to publish: no rounding
     # every 1024: the next position (2048) lies past the prompt, so its last step is not rounded
     assert _kind("every:1024").cut(_Seq(1500, 1024), 1024, 476) == 476
+
+
+class _EveryBlock:
+    """A policy unit: a tentative checkpoint at every 64-token position."""
+
+    def next(self, view):
+        return (view.num_computed // 64 + 1) * 64, True
+
+
+@pytest.mark.parametrize("keep", [0, 3])
+def test_a_policy_units_keep_is_the_kinds(keep):
+    unit = _EveryBlock()
+    if keep:
+        unit.keep = keep
+    kind = _kind("prompt_end,toy.every_block@1", unit=unit)
+    assert kind.keep_tentative == keep                                # the engine refuses it above 0 without a tier
+    assert kind._next(_Seq(300, 0)) == (64, keep > 0)                  # without `keep`, nothing keeps it: not tentative
 
 
 def test_every_n_keeps_both_positions_of_one_step(tiny):

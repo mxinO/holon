@@ -1,0 +1,35 @@
+{
+ "measurement": "K step 1: tiers-off snapshot traces, base b5b1e7f vs the step-1 seams (docs/v1-kv-tiers.md acceptance 5)",
+ "date": "2026-10-18",
+ "hardware": "RTX A5000",
+ "base": "b5b1e7f",
+ "command": "python -m holon_judge snapshot --model <gguf> --prompts judge/prompts/v1.jsonl --engine-args <args> --runs 1 (first run's full record saved: streams and per-step delta digests), then holon_judge snapshot-diff base step1",
+ "run_identity": "each configuration also ran --runs 3 (run_identical: true) at base and at the step-1 code before its review fixes; the final step-1 code ran --runs 1 against the base record",
+ "results": {
+  "8b": {
+   "model": "Qwen3-8B Q4_K_M (GGUF)",
+   "engine_args": "--max-model-len 8192",
+   "steps": 68,
+   "base_sha256": "187c1ea4a5a7e66f0856b05d18fd556c9ccc10a39150f5708586a5bb105d152e",
+   "step1_sha256": "187c1ea4a5a7e66f0856b05d18fd556c9ccc10a39150f5708586a5bb105d152e",
+   "identical": true
+  },
+  "27b": {
+   "model": "Qwen3.8-27B UD-Q4_K_M (GGUF)",
+   "engine_args": "--max-seqs 4 --chunk-with-decode 512 --max-model-len 16384 --plugin-options recurrent.checkpoints=4",
+   "steps": 579,
+   "base_sha256": "69074f7bd7adb568a7e91890085a83701836ab1e52f265fd5bfb717a51fdd593",
+   "step1_sha256": "69074f7bd7adb568a7e91890085a83701836ab1e52f265fd5bfb717a51fdd593",
+   "identical": true
+  },
+  "30b-offload47": {
+   "model": "Qwen3-30B-A3B Q4_K_M (GGUF), offload store at 47%",
+   "engine_args": "--max-model-len 8192 --host-memory 21474836480 --plugin-options moe.store=std.moe.offload@1 moe.cache=*=0.47",
+   "steps": 68,
+   "base_sha256": "4b1ca6800736117f5e77f1cd21c84202c4d7929651f38ca05745843c0fef2bcc",
+   "step1_sha256": "4b1ca6800736117f5e77f1cd21c84202c4d7929651f38ca05745843c0fef2bcc",
+   "identical": true
+  }
+ },
+ "verdict": "byte-identical"
+}

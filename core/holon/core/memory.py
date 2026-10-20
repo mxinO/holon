@@ -200,7 +200,7 @@ class Copies:
 
     def _run(self, ops: list, after: platform.Event | None) -> None:
         done = self.stream.run(lambda: [copy_units(self.pools[op.src_pool], op.src_units, self.pools[op.dst_pool],
-                                                   op.dst_units) for op in ops], after)
+                                                   op.dst_units) for op in ops], [after] if after else [])
         for op in ops:
             if op.lands_by is not None:
                 self.landing.setdefault(op.lands_by, []).append(done)
@@ -216,8 +216,10 @@ class Ledger:
     materialized: bool = False            # host pools can no longer be requested
 
     def plugin_pool(self, name: str, *, unit_bytes: int, segments: int = 1, min_units: int = 0, pref_units: int = 0,
-                    device: str = "device", mapped: bool = False, fill: bool = False, priority: int = 0) -> Pool:
-        """A plugin's pool (`BuildCtx.pool`), namespaced so it cannot collide with the core's."""
+                    device: str = "device", mapped: bool = False, fill: bool = False, priority: int = 0,
+                    late: bool = False) -> Pool:
+        """A plugin's pool (`BuildCtx.pool`), namespaced so it cannot collide with the core's. `late`: a host pool
+        after the device's pools (a state tier's, `TierCtx.host_pool`)."""
         name, pref_units = f"plugin.{name}", max(pref_units, min_units)
         if device not in ("device", "host") or (mapped and device != "host") or (fill and device == "host") or (
                 priority and not fill):
@@ -226,7 +228,7 @@ class Ledger:
         if device == "device":
             return self.request(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units,
                                 pref_units=pref_units, priority=priority, fill=fill)
-        if self.materialized:
+        if self.materialized and not late:
             raise ValueError(f"host pool {name!r} requested after the pools were materialized (request host pools in "
                              "`before_materialize` at the latest)")
         pool = self.request(name, unit_bytes=unit_bytes, segments=segments, min_units=min_units, pref_units=pref_units,

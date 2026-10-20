@@ -4,7 +4,7 @@ from __future__ import annotations
 import mmap
 import os
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -207,15 +207,15 @@ class Stream:
         self.device = device
         self._stream = torch.cuda.Stream(device) if device.type == "cuda" else None
 
-    def run(self, fn: Callable[[], object], after: Event | None = None) -> Event:
+    def run(self, fn: Callable[[], object], after: Sequence[Event] = ()) -> Event:
         """Enqueue `fn()`'s device work on this stream, after `after`; the event recorded once it is done."""
         done = Event(self.device)
         if self._stream is None:
             fn()
             return done
         with torch.cuda.stream(self._stream):
-            if after is not None:
-                after.wait()
+            for event in after:
+                event.wait()
             fn()
             done.record()
         return done

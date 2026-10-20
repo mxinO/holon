@@ -14,4 +14,4 @@ numerics = "exact"
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
 "recurrent.policy" = { help = "when recurrent state is checkpointed for prefix reuse: prompt_end, or every:<n> tokens (n a multiple of the page)", default = "prompt_end" }
-"recurrent.checkpoints" = { help = "recurrent-state checkpoints kept for prefix reuse", default = "max_seqs" }
+"recurrent.checkpoints" = { help = "recurrent-state checkpoints kept for prefix reuse; set, they are required (the start is refused if the state budget cannot hold them); unset, best effort", default = "max_seqs" }

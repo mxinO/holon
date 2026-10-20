@@ -11,6 +11,7 @@ dependencies = ["holonlm", "holonlm-std", "gguf", "safetensors", "transformers",
 "testing.ref_kernels" = "holon_testing.ref_kernels"
 "testing.gguf_dense" = "holon_testing.gguf_dense"
 "testing.toy_mask" = "holon_testing.toy_mask"
+"testing.toy_tier" = "holon_testing.toy_tier"
 
 [build-system]
 requires = ["hatchling"]

@@ -212,4 +212,4 @@ def test_serve_help_and_option_checks_follow_the_declarations(tmp_path, monkeypa
     err = capsys.readouterr().err
     assert "WARNING: no installed plugin declares the option zz" in err
     assert "1.lock: k.fmt=z: not one of x, y (toy_eng); serving defaults" in err
-    assert plans.frontend_options(installed) == {"f.name"}
+    assert plans.unplanned_options(installed) == {"f.name"}

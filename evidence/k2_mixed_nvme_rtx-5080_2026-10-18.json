@@ -1,0 +1,262 @@
+{
+ "runs": [
+  {
+   "command": "bench.py --tag rtx-5080 --only c --nvme-dir <local> --storage local NVMe --out-dir <repo>/evidence",
+   "date": "2026-10-18",
+   "env": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sm": "12.0",
+    "torch": "2.11.0+cu130",
+    "torch_cuda": "13.0",
+    "python": "3.12.12",
+    "commit": "3a5719d88978db9f7438e896e67ac1dd31ba3dca",
+    "dirty": false,
+    "cuda_visible_devices": "0"
+   }
+  }
+ ],
+ "tag": "rtx-5080",
+ "env": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "sm": "12.0",
+  "torch": "2.11.0+cu130",
+  "torch_cuda": "13.0",
+  "python": "3.12.12",
+  "commit": "3a5719d88978db9f7438e896e67ac1dd31ba3dca",
+  "dirty": false,
+  "cuda_visible_devices": "0"
+ },
+ "predictions": {
+  "l0": "bitwise equal to the oracle, both directions and paths, chunks 34,816 / 65,536 / 61,440 / 3,145,728 B and n = 0; compute-sanitizer memcheck clean",
+  "a_per_step": "one 0.57 / 1.29 GB gather per 512-token prefill step (~0.22 s): median +0.5-2%, p90 <= +3%",
+  "a_back_to_back": "1.29 GB gathers back to back: median +3-8%, p90 <= +10%; gather 40-46 GB/s beside prefill",
+  "b_build_us": {
+   "16K": [
+    30,
+    80
+   ],
+   "32K": [
+    60,
+    160
+   ]
+  },
+  "b_submit_sm_us": {
+   "16K": [
+    40,
+    100
+   ],
+   "32K": [
+    80,
+    200
+   ]
+  },
+  "b_per_chunk_ns": [
+   4,
+   10
+  ],
+  "b_submit_dma_ms": {
+   "16K": 5,
+   "32K": [
+    21,
+    25
+   ]
+  },
+  "c_mixed_over_model": {
+   "0.5": [
+    0.8,
+    0.9
+   ],
+   "0.75": [
+    0.75,
+    0.85
+   ]
+  }
+ },
+ "c": {
+  "storage": "local NVMe",
+  "rows": [
+   {
+    "readers": 2,
+    "writers": 1,
+    "read_share_target": 0.5,
+    "read_share": 0.4998911623857205,
+    "read": {
+     "gbps": 0.8520029303835889,
+     "bytes": 2558558208,
+     "seconds": 3.0029922630055808,
+     "ops": 4593,
+     "lat_p50_ms": 1.0417079902254045,
+     "lat_p99_ms": 3.6679629993159324
+    },
+    "write": {
+     "gbps": 0.8525034814918041,
+     "bytes": 2559672320,
+     "seconds": 3.0025359140126966,
+     "ops": 4595,
+     "lat_p50_ms": 0.1795699936337769,
+     "lat_p99_ms": 0.27364000561647117
+    },
+    "measured_gbps": 1.7043768613900316,
+    "model_gbps": 2.164152907064223,
+    "mixed_factor": 0.7875491864861345,
+    "pure": {
+     "read": 2.1676715273224483,
+     "write": 2.1606472153868284
+    }
+   },
+   {
+    "readers": 2,
+    "writers": 1,
+    "read_share_target": 0.75,
+    "read_share": 0.7498874887488749,
+    "read": {
+     "gbps": 1.2365449833544715,
+     "bytes": 3712778240,
+     "seconds": 3.002541994006606,
+     "ops": 6665,
+     "lat_p50_ms": 0.7030889973975718,
+     "lat_p99_ms": 3.202823980245739
+    },
+    "write": {
+     "gbps": 0.4125698847131315,
+     "bytes": 1238335488,
+     "seconds": 3.001516916003311,
+     "ops": 2223,
+     "lat_p50_ms": 0.17795999883674085,
+     "lat_p99_ms": 0.21781001123599708
+    },
+    "measured_gbps": 1.6489740153120094,
+    "model_gbps": 2.1448776529574656,
+    "mixed_factor": 0.7687963054854531,
+    "pure": {
+     "read": 2.126620512467171,
+     "write": 2.2015447503420607
+    }
+   },
+   {
+    "readers": 2,
+    "writers": 1,
+    "read_share_target": null,
+    "read_share": 0.24076893795203655,
+    "read": {
+     "gbps": 0.46924210764661595,
+     "bytes": 1409351680,
+     "seconds": 3.0034637920034584,
+     "ops": 2530,
+     "lat_p50_ms": 2.0408860000316054,
+     "lat_p99_ms": 5.645249999361113
+    },
+    "write": {
+     "gbps": 1.4788458516575482,
+     "bytes": 4444192768,
+     "seconds": 3.0051764780073427,
+     "ops": 7978,
+     "lat_p50_ms": 0.23096901713870466,
+     "lat_p99_ms": 2.3741050099488348
+    },
+    "measured_gbps": 1.947820532616886,
+    "model_gbps": 2.132638993932772,
+    "mixed_factor": 0.9133381402845566,
+    "pure": {
+     "read": 2.065476977805604,
+     "write": 2.154859234708602
+    }
+   },
+   {
+    "readers": 3,
+    "writers": 1,
+    "read_share_target": 0.5,
+    "read_share": 0.49990041824337783,
+    "read": {
+     "gbps": 0.9311225223304077,
+     "bytes": 2796421120,
+     "seconds": 3.0032794320140965,
+     "ops": 5020,
+     "lat_p50_ms": 1.5243680099956691,
+     "lat_p99_ms": 4.5018509845249355
+    },
+    "write": {
+     "gbps": 0.9318670677944695,
+     "bytes": 2797535232,
+     "seconds": 3.0020754340221174,
+     "ops": 5022,
+     "lat_p50_ms": 0.17928998568095267,
+     "lat_p99_ms": 0.6813789950683713
+    },
+    "measured_gbps": 1.8626160098091542,
+    "model_gbps": 2.340141467942225,
+    "mixed_factor": 0.7959416280277376,
+    "pure": {
+     "read": 2.5425873790223803,
+     "write": 2.167619949943407
+    }
+   },
+   {
+    "readers": 3,
+    "writers": 1,
+    "read_share_target": 0.75,
+    "read_share": 0.7499283051333524,
+    "read": {
+     "gbps": 1.455024703007194,
+     "bytes": 4370104320,
+     "seconds": 3.003457130980678,
+     "ops": 7845,
+     "lat_p50_ms": 0.9450979996472597,
+     "lat_p99_ms": 3.2454340253025293
+    },
+    "write": {
+     "gbps": 0.4853637236708196,
+     "bytes": 1457258496,
+     "seconds": 3.0024050519859884,
+     "ops": 2616,
+     "lat_p50_ms": 0.1782689942047,
+     "lat_p99_ms": 0.21482998272404075
+    },
+    "measured_gbps": 1.9402184089430536,
+    "model_gbps": 2.44282902182701,
+    "mixed_factor": 0.7942505969950978,
+    "pure": {
+     "read": 2.5439620830074965,
+     "write": 2.1826234755415035
+    }
+   },
+   {
+    "readers": 3,
+    "writers": 1,
+    "read_share_target": null,
+    "read_share": 0.3512622456669179,
+    "read": {
+     "gbps": 0.6914703207964127,
+     "bytes": 2077261824,
+     "seconds": 3.004122898011701,
+     "ops": 3729,
+     "lat_p50_ms": 2.121266006724909,
+     "lat_p99_ms": 5.454739992273971
+    },
+    "write": {
+     "gbps": 1.2776452656164203,
+     "bytes": 3836444672,
+     "seconds": 3.0027463610167615,
+     "ops": 6887,
+     "lat_p50_ms": 0.24500000290572643,
+     "lat_p99_ms": 2.3260460002347827
+    },
+    "measured_gbps": 1.9685301489875884,
+    "model_gbps": 2.304137086473378,
+    "mixed_factor": 0.8543459330367116,
+    "pure": {
+     "read": 2.5453764171731654,
+     "write": 2.1916680004359947
+    }
+   }
+  ],
+  "read_file_how": "fallocate",
+  "write_file_how": "fallocate",
+  "fill_gbps": 2.248897916996192,
+  "test_file_removed": true
+ },
+ "notes": {
+  "worktree": "the K worktree at 03a0918 with this step's uncommitted kernels.expert_io provider and the lead's uncommitted std/holon_std/state_tier (its kernels.py / reference.py contract), tiers off in the engine",
+  "environment": "desktop container (CUDA 13.0), a uv-synced venv of the K worktree"
+ }
+}

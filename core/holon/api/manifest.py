@@ -16,7 +16,7 @@ from typing import Any, Literal, get_args
 
 from .terms import parse_versioned
 
-ABI = "1.3"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
+ABI = "1.4"    # the plugin ABI this core implements (design §4.5); manifests declare the range they need (`core_abi`)
 _COMPARE = {">=": operator.ge, ">": operator.gt, "<=": operator.le, "<": operator.lt, "==": operator.eq}
 
 
@@ -41,7 +41,7 @@ class Cardinality(enum.Enum):
 # The slots a plugin may fill: each has plugins and the core loads them. A new slot is a minor ABI addition
 # (design §4.2).
 SLOTS: types.MappingProxyType[str, Cardinality] = types.MappingProxyType({
-    **dict.fromkeys(["model", "sampler", "verifier", "draft_policy"], Cardinality.SINGLE),
+    **dict.fromkeys(["model", "sampler", "verifier", "draft_policy", "tier", "eviction_policy"], Cardinality.SINGLE),
     **dict.fromkeys(["unit", "kernel", "state_kind", "weight_source"], Cardinality.PER_SITE),
     "logits_processor": Cardinality.ORDERED_MULTI,
     **dict.fromkeys(["frontend", "drafter"], Cardinality.MULTI),
@@ -69,11 +69,13 @@ class Resource:
 @dataclasses.dataclass(frozen=True, slots=True)
 class Option:
     """A plugin option the plugin reads (`EngineConfig.plugin_options`, manifest `[options]`): its help line, its
-    default as display text, and, for a closed set, the values it accepts (`holon serve` checks them before a start)."""
+    default as display text, and, for a closed set, the values it accepts (`holon serve` checks them before a start).
+    `planned = false`: plans leave it out (a host path, a thread count: what cannot change outputs)."""
 
     help: str
     default: str | None = None
     choices: tuple[str, ...] = ()
+    planned: bool = True
 
     def __post_init__(self) -> None:
         if not isinstance(self.help, str) or not self.help:

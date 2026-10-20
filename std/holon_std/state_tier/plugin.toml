@@ -1,0 +1,35 @@
+[plugin]
+name = "std.state_tier"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "tier"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"   # the slot `tier` (docs/v1-kv-tiers.md §4)
+
+[resources]
+provides = ["op.state_copy@1"]
+
+[properties]
+numerics = "exact"         # a hit's bytes are the same whichever level held them (D4)
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"state_tier.host.bytes" = { help = "pinned host memory for the host level (e.g. 16GiB), within host_memory", default = "8GiB" }
+"state_tier.host.pages" = { help = "the share of host.bytes for pages; the rest holds payloads (checkpoints)", default = "0.25" }
+"state_tier.host.admit" = { help = "which page copies the host level takes: publish (every block), hit:<n> (blocks matched n times), evict (at eviction only); payloads always", default = "publish" }
+"state_tier.step_cost" = { help = "the clock's seconds per step: a,b,c for a + b·tokens + c·rows (tune measures them)", default = "0.015,0.0004,0.0005" }
+"state_tier.h2d_rate" = { help = "bytes per second the clock charges a load on the H2D lane", default = "43e9" }
+"state_tier.stall_bytes" = { help = "a load this small is due at once: its step waits for it", default = "32MiB" }
+"state_tier.host.reserve" = { help = "with a level: the free host units per pool the step hook keeps by writing host leaves back (default: one max_model_len load's)" }
+"state_tier.levels" = { help = "the level below host: ssd, or the Ref of a level unit (one in K)", default = "" }
+"state_tier.ssd.dir" = { help = "the SSD level's directory (its slot files, lock and manifest)", planned = false }
+"state_tier.ssd.bytes" = { help = "the SSD level's size, split over its shapes as host.bytes is (decides the hit set: planned)", default = "64GiB" }
+"state_tier.io_threads" = { help = "the tier's I/O threads: the level's concurrency", default = "3", planned = false }
+"state_tier.ssd.direct" = { help = "O_DIRECT for aligned units where the filesystem allows it (else buffered, DONTNEED)", default = "true" }
+"state_tier.ssd.persist" = { help = "off, or close: a snapshot at a clean close, restored at the next start of the same identity", default = "off" }
+"state_tier.ssd.read" = { help = "the level's read rate the clock charges, bytes/s (default K-M4's)" }
+"state_tier.ssd.write" = { help = "the level's write rate, bytes/s" }
+"state_tier.ssd.mixed" = { help = "the factor on a write a queued read waits for" }
+"state_tier.ssd.read_beside" = { help = "the factor on a read decided while background writes run (step 3: 0.80 at 3 threads)" }
+
+[dependencies]
+python = ["numpy", "torch"]

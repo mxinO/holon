@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from .model import AuxSpec, BuildCtx, Resolved
     from .quant import QTensor
     from .state import HitLen, MemOp, Payload, PrefixView, SeqView, StateSpec
+    from .tier import EvictionPolicy, StateTier
 
 
 # -- units (built modules) ------------------------------------------------------------------------------------------
@@ -92,11 +93,18 @@ class PayloadPool(Protocol):
     payload_pool: str         # the pool its payloads use, which the prefix index may evict payloads from
 
 
+class KeepsTentatives(Protocol):
+    keep_tentative: int       # a request's last this many tentative payloads (`Payload.tentative`) are kept; a newer
+                              # one drops the oldest (docs/v1-kv-tiers.md D8)
+
+
 class RestoresPayloads(Protocol):
     def hit_length(self, idx: PrefixView, upto: int) -> HitLen:
         """The prefix the kind can restore; a non-paged kind without it allows no prefix hit."""
 
-    def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]: ...
+    def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]:
+        """MemOps copying `payload` from its pool — the kind's own, or a state tier's host copy — into the request's
+        state, before its first forward."""
 
 
 # -- drafters and draft policies --------------------------------------------------------------------------------------
@@ -142,6 +150,19 @@ class Rewindable(Protocol):
         keep only what their accepted tokens produced."""
 
 
+class StateTierPlugin(Protocol):
+    def build(self, ctx: BuildCtx) -> StateTier:
+        """On the `tier` slot's plugin: the engine's tier, built with the engine (it may bind kernel sites here; at
+        `attach` only kernels without a workspace, which is planned before the pools materialize; its storage comes at
+        `attach`). Required for that slot."""
+
+
+class EvictionPolicyPlugin(Protocol):
+    def build(self, ctx: BuildCtx) -> EvictionPolicy:
+        """On the `eviction_policy` slot's plugin: the engine's policy, configured by the deployment's options.
+        Required for that slot."""
+
+
 class Reports(Protocol):
     def stats(self) -> dict[str, int]:
         """A slot object's counters, reported in the engine's stats as `<plugin name>.<key>`."""
@@ -159,7 +180,8 @@ class ShutsDown(Protocol):
 class RequestsPools(Protocol):
     def before_materialize(self, ctx: BuildCtx) -> None:
         """Once, after every model (auxiliary models included) is built and loaded, before the pools are first
-        materialized: the last point to request pools, host pools included (`BuildCtx.pool`)."""
+        materialized: the last point to request pools, host pools included (`BuildCtx.pool`; a state tier's host
+        pools come at its `attach`, after the final materialize, `TierCtx.host_pool`)."""
 
 
 class ResetsState(Protocol):

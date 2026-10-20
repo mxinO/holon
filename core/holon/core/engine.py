@@ -19,6 +19,7 @@ import itertools
 import secrets
 import sys
 import time
+import types
 from typing import Any
 
 import numpy as np
@@ -189,6 +190,9 @@ class Engine:
         if "logits_processor" in cfg.slots:
             self.processor = p.load(p.single("logits_processor", cfg.slots["logits_processor"])).build(
                 self.ctx, VocabView(self.spec.vocab, self.eos, source.tokenizer))
+        # A state tier below the device and the device's eviction policy (docs/v1-kv-tiers.md; opt-in, single).
+        self.tier, victims = (p.load(p.single(slot, cfg.slots[slot])).build(self.ctx) if slot in cfg.slots else None
+                               for slot in ("tier", "eviction_policy"))
 
         # Shared objects (`BuildCtx.shared`): their last pool requests, then a reset after every materialize. They are
         # all built by now: the hooks run for these.
@@ -200,9 +204,11 @@ class Engine:
                                          if hasattr(o, "after_materialize")]
 
         self._hits: dict[Seq, int | None] = {}            # first admission's prefix hit, None once reported
+        self._first: dict[Seq, tuple[int, int]] = {}      # first admission's branch_at and matched, kept likewise
 
         def admit(seq: Seq) -> None:
             self._hits.setdefault(seq, seq.num_computed)   # the prefix hit of its first admission only
+            seq.branch_at, seq.matched = self._first.setdefault(seq, (seq.branch_at, seq.matched))
             sampler.admit(seq.slot, seq.params)
             if admit_draft is not None:
                 admit_draft(seq.slot, seq.tokens)
@@ -211,28 +217,39 @@ class Engine:
                                   index=prefix_index(self.spec, bound, cfg.prefix_cache, self.ledger.pools),
                                   overflow=self._overflow(drafter))
         host_lens = any(getattr(planner, "needs_host_lens", False) for planner in planners.values())
+        if self.state.index is None and (self.tier, victims) != (None, None) or self.tier is None and any(
+                getattr(b.kind, "keep_tentative", 0) for b in bound):
+            raise PluginError("slots tier and eviction_policy act on the prefix cache (off here), and a state kind "
+                              "keeping tentative payloads needs a tier (docs/v1-kv-tiers.md D8)")
+        if self.state.index is not None:
+            self.state.index.policy = victims
         self.sched = Scheduler(self.state, cfg.max_step_tokens, cfg.max_model_len,
                                draft_k=self._draft_k if self.policy is not None else None,
                                lookahead=getattr(drafter, "lookahead", None), host_lens_only=host_lens,
-                               chunk_with_decode=cfg.chunk_with_decode)
+                               chunk_with_decode=cfg.chunk_with_decode,
+                               clock=self.tier.clock if self.tier is not None else lambda: 0.0)
         # What rolls back after a verify (api.Rewindable): the target's modules and the slot objects. An auxiliary
         # model runs inside `Drafter.run`, after this: rolling it back is the drafter's call.
         slot_objects = [o for o in (sampler, verifier, drafter, self.policy) if callable(getattr(o, "rewind", None))]
         # Slot objects with counters of their own (`stats()`), reported by `stats()` under their plugin's name.
         self._reporters = [(p.single(slot, cfg.slots.get(slot)), o) for slot, o in (
             ("sampler", sampler), ("verifier", verifier), ("drafter", drafter), ("draft_policy", self.policy),
-            ("logits_processor", self.processor)) if callable(getattr(o, "stats", None))]
+            ("logits_processor", self.processor), ("tier", self.tier)) if callable(getattr(o, "stats", None))]
         rewinders = [functools.partial(rewind_modules, model), *(o.rewind for o in slot_objects)]
         self.executor = Executor(cfg, self.device, model, self.spec.vocab, sampler, self.state, planners,
                                  verifier, drafter, pools=self.ledger.pools, rewinders=rewinders,
                                  sub_planners=sub_planners, substeps=substeps,
                                  namespaces=[ns for ns, _ in aux.modules] if aux is not None else [],
-                                 verify_widths=self._verify_widths(), processor=self.processor, shared=self.shared)
+                                 verify_widths=self._verify_widths(), processor=self.processor,
+                                 shared=self.shared + [self.tier] * (self.tier is not None))   # its step hooks
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
         if cfg.clamp_context:
             self._clamp()
         self.state.reset_padding()
+        if self.tier is not None:                        # after the final materialize, before graph capture
+            self.state.index.restore(self.tier.attach(self._tier_ctx()))
+            self.state.index.tier = self.tier
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
             if pool.buffer is not None and not pool.host:   # (a plugin pool may get no units)
                 platform.check_expandable(pool.buffer)
@@ -261,6 +278,20 @@ class Engine:
                   file=sys.stderr, flush=True)
             self.cfg.max_model_len = self.sched.max_model_len = fits
             self.state.limit(fits)
+
+    def _tier_ctx(self) -> types.SimpleNamespace:
+        """What the state tier's `attach` gets (`holon.api.TierCtx`)."""
+        from . import plans  # it imports the engine
+
+        index, cfg = self.state.index, self.cfg
+        return types.SimpleNamespace(
+            pools=index.pools | {b.kind.payload_pool: index.payload_pools[b.kind.payload_pool]
+                                 for b in self.state.bound if hasattr(b.kind, "payload_pool")},
+            identity=plans.state_identity(self), max_seqs=cfg.max_seqs, max_model_len=cfg.max_model_len,
+            block=index.block, options=cfg.plugin_options, stream=lambda: platform.Stream(self.device),
+            host_pool=lambda name, *, unit_bytes, segments, units, mapped=False: self.ledger.plugin_pool(
+                name, unit_bytes=unit_bytes, segments=segments, min_units=units, pref_units=units, device="host",
+                mapped=mapped, late=True))
 
     def _verify_widths(self) -> tuple[int, ...]:
         """The verify-row widths to capture: 1 + each k the policy declares (`ks()`), else every k up to the maximum."""
@@ -357,6 +388,7 @@ class Engine:
             self.sched.finish(seq, reason)
             self._prompt_lp.pop(seq, None)
             self._hits.pop(seq, None)
+            self._first.pop(seq, None)
             deltas.append(TokenDelta(rid, [], seq.index, finish_reason=reason, error=error, kind=kind))
         if seqs and seqs[0].constrained:
             self._blocked.pop(rid, None)
@@ -392,6 +424,8 @@ class Engine:
             failed = failed or e
         for o in (self.processor, *self.shared):
             getattr(o, "shutdown", lambda: None)()
+        if self.tier is not None:
+            self.tier.close()
         self.executor = self._inflight = None
         self.shared, self.ctx.shared_objects = [], {}    # what they hold, host memory included, goes too
         self.ledger.free(host=True)
@@ -403,7 +437,7 @@ class Engine:
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
                "preemptions": self.sched.preemptions, "prefix_tokens_saved": self.state.tokens_saved,
-               "mixed_steps": self.mixed_steps,
+               "mixed_steps": self.mixed_steps, "dropped_publishes": self.state.dropped_publishes,
                "cached_blocks": len(self.state.index.entries) if self.state.index is not None else 0,
                "graphs": len(self.executor.graphs) if self.executor and self.executor.graphs is not None else 0}
         if self.policy is not None:                  # the speculation counters (__init__)
@@ -495,7 +529,9 @@ class Engine:
         ops = self.state.step_ops(plan, seqs)
         plan.mem_ops, plan.publishes = ops.mem_ops, ops.in_step
         masks = self._masks(rows) if self.processor is not None else None
+        loads = self.state.launching(seqs)               # waited for on the device first
         out = self.executor.launch(plan, exact, logprobs, prompt, masks)
+        self.state.launched(loads, out.done)
         self.state.unpin(ops.pins)
         for r, got in zip(prompt or [], out.prompt_logprobs, strict=True):
             acc = self._prompt_lp[seqs[r.row]]
@@ -550,6 +586,8 @@ class Engine:
             except Exception as e:                       # the steps launched after this one are discarded
                 self._stopped = f"after_commit of step {step.plan.step}: {type(e).__name__}: {e}"
                 raise
+        if self.tier is not None:
+            self.state.index.poll()                      # what the tier dropped in its hooks, before any publish
         tokens = out.tokens.tolist() if out.tokens is not None else []
         accepts = iter(out.accepts.tolist() if out.accepts is not None else [])
         drafts = out.drafts.tolist() if out.drafts is not None else None
@@ -622,11 +660,13 @@ class Engine:
                 [t[:k] for t in lps[2][at: at + len(out)]])
             prompt_lp = self._prompt_lp.pop(seq, None) if self._prompt_lp else None
             cached = self._hits.pop(seq, None) if reason else self._hits.get(seq)
+            if reason:
+                self._first.pop(seq, None)
             if cached is not None and not reason:
                 self._hits[seq] = None
             deltas.append(TokenDelta(seq.rid, out, seq.index, logprobs, prompt_lp, reason, cached_tokens=cached))
         for seq, spec, at, payload in step.publishes:    # after this commit's blocks are cached
-            self.state.register(seq, spec, at, payload)
+            self.state.register(seq, spec, at, payload, step.out.done)
         return deltas
 
     def _completes_block(self, seq: Seq) -> bool:

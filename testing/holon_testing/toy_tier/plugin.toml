@@ -1,0 +1,21 @@
+[plugin]
+name = "testing.toy_tier"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "tier"
+license = "Apache-2.0"
+core_abi = ">=1.4,<2.0"
+
+[properties]
+numerics = "exact"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"toy_tier.scale" = { help = "host units per device unit of each pool it copies", default = "4" }
+"toy_tier.refuse" = { help = "chance it refuses a page store", default = "0" }
+"toy_tier.drops" = { help = "chance per launch it drops one of its copies", default = "0" }
+"toy_tier.delay" = { help = "launches from a load to its due time", default = "0" }
+"toy_tier.seed" = { help = "its random choices' seed", default = "0" }
+"toy_tier.path" = { help = "where it persists its copies at close", planned = false }
+
+[dependencies]
+python = ["torch"]

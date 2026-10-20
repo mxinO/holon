@@ -628,6 +628,31 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   loaded after prebuild (fixed at the close); Holon's offload decode sat 1.3–3% below step 4's at the closing code —
   bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; on
   the 5080 decode is back at step 4's numbers, and the offload lock is propagated, `8615e26`). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+
+  **K status (2026-10-20): closed, acceptance met** (3a's SSD cells beside decoders by the owner's option 2).
+  Design and record: `docs/v1-kv-tiers.md` (rev 8.5, panel-clean; §13 the build record per step, the panels'
+  reviews, "Owner decisions", "Close (2026-10-20)"); records `evidence/k0_*` … `k6_close_propagation_2026-10-20.json`.
+
+  | # | Result |
+  |---|---|
+  | 1 | Plugins: `std.state_tier` (pinned host level, the SSD level, a virtual clock for loads), `branch` / `answer` checkpoint policies, `evict.root_pin`; held out after the tag, plugin-only: `state_tiers.zlib` (a `Level`), `policies.last_turn` (its finding: `SeqView.matched`, added in ABI 1.4) |
+  | 2 | Exact: tier invariance and run-identity through host and SSD (A5000; the 27B pair on the RTX 5090), the restart check, the null test, the policies bounded (KL p99 split by wave), timing plants on GPU |
+  | 3 | Gate, Qwen3.8-27B on the RTX 5080 / 5090: 3a resume from RAM / SSD within the link-rate bars (SSD beside decoders on the host's tuned rates, post-hoc: the default rates' clock is conservative), 3b gaps 1.000× / 1.022×, `agent_park` TTFT 0.047× VRAM-only and throughput 2.26×, 0.122× `llama-server --cache-ram` (sized to serve the trace), 3e first-turn TTFT 0.017× with `branch`, 3f restart 450 ms (5-resume median), 3h tier overhead 0.96× roomy; 3g reported (26.1% against ≤ 10%) |
+  | 4 | Memory: exact host pools; attach refuses floors, a staging pool below `max_seqs` + 1, and names `--host-memory`; a set `recurrent.checkpoints` is required |
+  | 5 | Core: KS1–KS5 and `SeqView.matched` in ABI 1.4; +337 code lines over `d659b2b` (was `b5b1e7f`; the owner's cap); the post-tag follow-ups `a77a1a2` (`branch_at` kept; was `39abbcb`) and `5739f8c` (`SeqView.matched`; was `e1ae0f7`) |
+  | 6 | Locks: 23 of 23 propagated once and approved, 22 traces byte-identical; the 27B agent locks take the tier (`rtx-5080/13` at `max_model_len` 40,960, `rtx-5090/7` at 49,152), launched with `--host-memory`. The RTX 5080's was re-propagated at the close review: at 49,152 (`12`) its staging margin was ≈ 90 MB, too thin to ship |
+
+  Decisions: `answer:1` on by default (K-M1); the owner's cap +337 and 3a's option 2; `llama-server` sized to serve
+  `agent_park` for 3d (the matched-KV reference fails). Found on the way: a staging pool could fall to 0 units
+  silently (now refused with a tier, required when set, warned when the default); `branch_at` changed across
+  preemption (kept); the clock's write lane outlasts the drive's real writes at the default write rate (3a's miss);
+  two desktops lost their GPU mid-run. Old → new SHA maps of `main`'s rewrite: `docs/history/`. Next: FN, GLM.
+- **Required staging units and a short card** (panel, K's close): when the staging units are in a pool's minimum
+  (a state tier's, `max_seqs` + 1), a shortfall should come out of the context instead of refusing the start. Checked
+  at the close review: a served start already does (`clamp_context`: `rtx-5080/12.lock` at a 2.79 GiB state budget
+  serves 41,920 tokens, staging 5 kept); the engines that do not clamp refuse (`OutOfUnits`, the KV pool below the
+  lock's length): propagate's L2 and the judge's snapshot, which verify a lock at its own length, as at the close's
+  propagation. Generic, a later core round. Until then the RTX 5080's 27B tier lock is at 40,960 tokens for margin.
 - **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
   path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
   tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the

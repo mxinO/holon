@@ -52,7 +52,7 @@ to host-side policies and live tunables).
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
 | D7 | Hardware: development on RTX A5000s (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (RTX PRO 6000 96 GB, sm_120) for sm_120 kernel work and large-memory tasks. Datacenter path (H100, GB200) later. Shared test machines are used through one persistent container per machine: builds, tests and benchmarks run inside it repeatedly rather than as many short batch jobs. |
-| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its core needs return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). **As built** (`docs/v1-offload.md`): the offload program is four milestones — X expert offload, K KV and checkpoint tiers, FN Qwen3.8-Flash-Next, GLM GLM-5.3-Flash —; X added the seams S0–S5 (ABI 1.2) and the scheduler's row kinds (1.3) and no slot; payload tiers, hit costs, load futures and per-layer events are milestone K's, Pool resize (VMM) X's second wave. |
+| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its core needs return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). **As built** (`docs/v1-offload.md`): the offload program is four milestones — X expert offload, K KV and checkpoint tiers, FN Qwen3.8-Flash-Next, GLM GLM-5.3-Flash —; X added the seams S0–S5 (ABI 1.2) and the scheduler's row kinds (1.3) and no slot; K added the slots `tier` and `eviction_policy` with its seams KS1–KS5 (ABI 1.4, `docs/v1-kv-tiers.md` §4: residency in the prefix index, promotion and load gating, stores and staging payloads, the tier's attach and identity, the victim policy) and no hit cost, load future or per-layer event (K D9, D7, D12); Pool resize (VMM) is X's second wave. |
 | D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
 ---
@@ -211,19 +211,20 @@ first-party distributions provide are listed per distribution (`std/contracts.tx
 
 | Cardinality | Meaning | Slots |
 |---|---|---|
-| `single` | exactly one per Plan | model, sampler, verifier, draft_policy |
+| `single` | exactly one per Plan | model, sampler, verifier, draft_policy; tier, eviction_policy (opt-in, selected via `EngineConfig.slots`) |
 | `per_site` | bound per site (layer, op instance, state spec) | unit (mixers, ffn/MoE, norms, blocks, ops — anything a recipe names by `Ref`), kernel, state_kind, weight_source |
 | `ordered_multi` | ordered list, `after`/`before` in the manifest | logits_processor (v0: at most one, selected via `EngineConfig.slots`) |
 | `multi` | any number, keyed by name | frontend, drafter (v0: one per deployment) |
 
 These are ABI 1.0's slots (`holon.api.SLOTS`): each has plugins and the core loads them. Slots planned for later
-features join when their first plugin does, each a minor ABI addition: `launcher` (§8), `connector` (KV offload,
-§9), `eviction_policy` (prefix index, §6.3), `checkpoint_policy` and `codec` (§9), `plan_transform` (§8), `encoder`
-(VLM), `exporter` (§7.9), `schedule_policy` (scheduling and its mixing budget are the core's in v0, §7.1). Where
-later sections name them, they describe those plans. **Not re-added (v1 offload):** `placement_policy`, `tier` and
-`mover` — the core never calls them, so placement policies, tiers and route transforms are protocols of `std.tiered`
-(or contracts their plugins own) bound by open plugin options holding a `Ref` (`moe.placement`, `moe.tiers`,
-`moe.route_transform`), and movers are S2's MemOps (§6.5).
+features join when their first plugin does, each a minor ABI addition: `launcher` (§8), `checkpoint_policy` and
+`codec` (§9), `plan_transform` (§8), `encoder` (VLM), `exporter` (§7.9), `schedule_policy` (scheduling and its mixing
+budget are the core's in v0, §7.1). Where later sections name them, they describe those plans. Milestone K added
+`tier` and `eviction_policy` (ABI 1.4, §6.3, §6.4): `tier` (the prefix index's levels below the device) takes over the
+planned `connector` for prefix-index offload; a v2 PD transfer may implement its protocol or bring a slot of its own.
+**Not re-added (v1 offload):** `placement_policy` and `mover` — the core never calls them, so placement policies,
+expert tiers and route transforms are protocols of `std.tiered` (or contracts their plugins own) bound by open plugin
+options holding a `Ref` (`moe.placement`, `moe.tiers`, `moe.route_transform`), and movers are S2's MemOps (§6.5).
 
 A `Ref("a.b.c@1")` is served by the installed plugin whose name is the longest prefix of the unit name (e.g.
 `std.ops` serves `std.ops.rmsnorm`), and whose version major equals the Ref's major. Everything the resolver needs
@@ -324,8 +325,12 @@ approvals, and the `isolation-check` CI job.
 
 - **The plugin ABI was frozen at 1.0 at the release** (release design §7), is 1.1 since v0.1.1 (an additive
   `TokenDelta` field), 1.2 with v1 offload's core seams S0–S5 (`docs/v1-offload.md` §4: shared objects and their
-  lifecycle, step hooks, host pools and async MemOps, fill pools, weight extents, CPU facts) and 1.3 with the
-  scheduler's row kinds (`BatchPlan.row_kind`, `RowKind`, graph padding included). `holon.api.ABI` is the version;
+  lifecycle, step hooks, host pools and async MemOps, fill pools, weight extents, CPU facts), 1.3 with the
+  scheduler's row kinds (`BatchPlan.row_kind`, `RowKind`, graph padding included) and 1.4 with milestone K's seams
+  KS1–KS5 (`docs/v1-kv-tiers.md` §4: the slots `tier` and `eviction_policy`; `BlockRecord`, `Fence`, `Stream`,
+  `Load`, `TierCtx`, `StateTier`, `EntryView`, `EvictionPolicy`; `Payload.tentative`, `SeqView.branch_at`,
+  `Seq.branch_at`, `SeqView.matched`, `Seq.matched`, `Pool.segments`, `Option.planned` and the optional
+  `KeepsTentatives`). `holon.api.ABI` is the version;
   every manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
   manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields in
   order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
@@ -792,7 +797,7 @@ class Ledger:                     # the core's (holon.core.memory); plugins requ
                 resize: Literal["fixed", "recapture", "vmm"], device: DeviceId) -> Pool
     def rebalance(self, targets: dict[str, int]) -> Ticket        # applied between steps (v1)
 
-class Pool:                       # plugins see name, unit_bytes, capacity, num_free, view(), alloc() (holon.api)
+class Pool:                       # plugins see name, unit_bytes, segments, capacity, num_free, view(), alloc() (holon.api)
     # planned VMM members (each a minor ABI addition when it lands):
     base: int                     # stable device address for the pool's lifetime
     capacity_dev: Tensor          # device scalar; in-graph resolvers will read it
@@ -816,7 +821,8 @@ class Pool:                       # plugins see name, unit_bytes, capacity, num_
   placement never follows free memory; a pinned pool that does not get its size is refused by its plugin at the first
   launch (the startup profile never launches). Host pools (`device="host"`, `mapped`, S2) are allocated once, exactly
   (no power-of-two rounding), before the first materialize and outside the device profile, against
-  `EngineConfig.host_memory`.
+  `EngineConfig.host_memory` — or, for a state tier (§6.4), at its `attach` after the final one (`TierCtx.host_pool`),
+  from what the others left.
 - v0 implements `fixed`; a pool's buffer is stable for its lifetime. The VMM contract (stable base address, device
   capacity scalar, declared resize mode, shrink callbacks) is planned with `vmm` (cuMem-backed live resize,
   Strata-style) in v1, each member a minor ABI addition; plugins using today's `Pool` members need no change.
@@ -844,7 +850,7 @@ class StateSpec:
 class StateKind(Rewindable, Protocol):   # e.g. paged_kv, ssm_checkpoint (plugins); bound by the core to ONE spec
                                          # and its pool: factory(spec, pool, ctx) -> StateKind
     def units_needed(self, seq: SeqView, new_tokens: int) -> int
-    def hit_length(self, idx: PrefixView, upto: int) -> HitLen               # (length; a tier cost with offload)
+    def hit_length(self, idx: PrefixView, upto: int) -> HitLen               # (length; no cost: K D9)
     def publish(self, seq: SeqView, upto: int) -> tuple[Payload, list[MemOp]] | None
     def adopt(self, seq: SeqView, payload: Payload) -> list[MemOp]
     # planned, not in ABI 1.0: reclaimable(seq) (ring buffers), fork(src, dsts) (n > 1 siblings share by prefix hits)
@@ -863,12 +869,14 @@ v0 decision: **one pool per StateSpec**. Shared padded pools are an opt-in v1 ex
 
 ### 6.3 PrefixIndex
 
-- Core-owned; one per engine. Key: `(namespace, block_hash_chain)`; value: `{spec_name: Payload | Tombstone}`.
-  A payload's tier is planned with offload (a minor ABI addition).
+- Core-owned; one per engine. Key: `(namespace, block_hash_chain)`; value: `{spec_name: Payload}`. Where a copy
+  lives is the core's private state (K KS1): an entry is resident while it holds device units, or only the tier (slot
+  `tier`) holds its pages; with a tier, payloads live in it from registration.
 - `namespace = hash(model_id, weight_version, adapter_id, mm_salt, statekind_versions)` — prevents silent
   corruption across weight updates, adapters, multimodal inputs and StateKind upgrades.
-- Hit length is a fixed point over all specs (no `isinstance`); `hit_length` returns a `HitLen`: its length today,
-  and later a cost, so a hit that lives on SSD is not scored like a VRAM hit (planned: a minor ABI addition):
+- Hit length is a fixed point over all specs (no `isinstance`); `hit_length` returns a `HitLen`, its length; the
+  deepest hit wins whichever level holds it (loading beats recomputing per token on these machines; tune refuses an
+  SSD level slower than recompute, K D9):
 
 ```python
 L = upto
@@ -880,7 +888,9 @@ while True:
 
 - Drafter state (e.g. MTP draft-layer KV) takes part in the fixed point like any other spec, so a prefix hit
   restores the draft layer too.
-- What to publish (checkpoint policies) and what to evict are plugins. v0: hash chain over full KV pages
+- What to publish (checkpoint policies) is the state kind's; which device entry to evict is the slot
+  `eviction_policy` (`victim` over the eligible entries, least recently used first; without one, the first). v0: hash
+  chain over full KV pages
   (nano-vllm style). **Eviction is joint per chain**: evicting a recurrent checkpoint also releases the KV pages that
   only it made reachable, so KV and checkpoint LRUs cannot strand each other.
 - **Publish and adopt are device MemOps** (§7.3), not host reads of live state: `publish` emits "copy slot →
@@ -891,8 +901,18 @@ while True:
 - Because the index is page-granular, recurrent checkpoints are taken at page boundaries. For agent traffic the
   default policy checkpoints at the **end of each prompt** (chat templates may re-render earlier turns, e.g. strip
   reasoning, so anchors on sampled tool-call tokens are unreliable); the chunk is cut at `floor(end / page) · page`.
-- Eviction-policy contract: `victims()` may return **demote** actions (move a payload to a lower tier, keep the
-  index entry) as well as drops; payloads with an in-flight async store stay pinned until the store completes.
+- **Tiers (milestone K, `docs/v1-kv-tiers.md` D3–D8).** The index sees only the device boundary; the tier owns
+  everything below. Eligible for eviction: resident, no resident child (`kids`), units held only by the index; a
+  victim the tier holds is demoted (a pure free), any other is offered as an eviction store and dropped with its
+  non-resident subtree if refused; the tier reports its own drops (`dropped()`). Admission promotes a hit's
+  non-resident tail into free units and units that pure evictions free — never a preemption; a short tail is trimmed
+  and the fixed point re-run —, and the tier loads it (§6.4); a request publishing a block only the tier holds is
+  promoted into place (its own units take the cached bytes). Pages are stored at insert (write-through; the tier may
+  refuse), payloads at registration (mandatory; the staging unit is freed then, so a kind's pool only stages, and a
+  request keeps its last `keep_tentative` tentative payloads). Every decision is logical; a unit freed while a copy
+  still reads or writes it is reused only after the next launch waits for that copy. `SeqView.branch_at` tells a
+  checkpoint policy where a request leaves a cached chain, and `SeqView.matched` where its matched prefix ends before a
+  kind trims the hit to a payload (both the first admission's, kept when a preempted request is admitted again).
 - **v0 (implemented in E4)**: paged state only (the index is off when any spec is not paged; checkpoints arrive in
   M0.3). Blocks are `lcm(tokens_per_unit, alignment)` tokens; keys chain from a namespace derived from the model's
   canonical hash; entries verify their tokens, so a hash collision is a miss. Pages are shared by refcount — the
@@ -915,16 +935,16 @@ while True:
 
 ### 6.4 Async loading
 
-- When a prefix hit lives below VRAM (offload tier, PD transfer), the **connector/tier plugin chooses** per request
-  between (a) `BLOCKED(future)` — the Seq is skipped until all its state has arrived — and (b) layer-wise loading —
-  the Seq runs while ops wait on per-layer ready events `ctx.ready(spec, layer)`.
-- Load futures **reserve their destination pages** in the ledger when issued and are **cancellable**: abort and
-  preemption cancel the future and release its pages.
-- Load futures and per-layer ready events are planned (minor ABI additions); `BLOCKED` exists in v0 (a logits
-  processor's `ready` uses it). Designing them up front is what keeps a connector API from growing as vLLM's did
-  (~45 methods). v1's expert offload needed neither: its prefill stream (next layer's experts during this layer)
-  waits on events inside a kernel plugin (`expert_prefetch@1`), so layer-wise loading and core ready events stay
-  planned, with prefix-index tiers, for milestone K (`docs/v1-offload.md` §11).
+- When a prefix hit lives below the device, the tier (slot `tier`, milestone K) loads it into units the index owns,
+  not a per-request choice. The request is admitted but gated until the tier's virtual clock reaches the load's due
+  time — a function of the steps scheduled, never of when a copy lands —, and when nothing else can run the
+  earliest-due one runs at once; its first step's launch waits for the copy on the device.
+- Loads are **never cancelled** and hold no pins: an aborted or preempted request releases its references, an
+  evicted loading entry's units are reused only after the next launch waits on the load, and a load whose every entry
+  went before any step read it is abandoned (`loaded(load, None)`: a copy not yet enqueued is skipped). `BLOCKED`
+  stays the logits processor's.
+- Layer-wise loading and per-layer ready events stay planned, with PD in v2 (K D12). v1's expert offload needed
+  neither either: its prefill stream waits on events inside a kernel plugin (`expert_prefetch@1`).
 
 ### 6.5 TieredStore (std library, not core)
 
@@ -933,8 +953,9 @@ while True:
 fixed launch with a precondition), and the `PlacementPolicy` and `Tier` protocols — plugins bound by open options
 holding a `Ref`, not slots (§4.2); copies between steps are S2 MemOps, not `Mover`s. Two resolver styles:
 
-- `HostPlannedResolver` — misses known before the step (KV prefix/offload, KVMem-style window selection); runs in
-  `Planner.plan_bounds`; emits transfers (MemOps) + per-layer events. Planned, with milestone K.
+- `HostPlannedResolver` — misses known before the step (KVMem-style window selection); runs in
+  `Planner.plan_bounds`; emits transfers (MemOps) + per-layer events. Planned (prefix-index tiers went to the slot
+  `tier` instead, §6.4).
 - `DeviceResolver` — misses known only inside the step (experts, sparse-KV); fixed-shape, in-graph lookup
   `ids → slot`, misses gathered over PCIe into staging slots. A device-owned policy (decayed-count admission, the
   default; LRU; promote-on-fetch) owns its resolve contract and changes the map in the graph, logging each change; a
@@ -1335,7 +1356,7 @@ milestone measures how small the core diff is.
 
 | Feature | Plugins | Core seams used |
 |---|---|---|
-| KV offload (RAM/SSD, remote) | milestone K (`docs/v1-offload.md` §11): `std.tiered` tiers, a connector (planned slot) | `BLOCKED`; S2 host pools; PrefixIndex tier payloads and per-layer events (planned: minor ABI additions) |
+| KV and checkpoint offload (RAM/SSD) | milestone K (`docs/v1-kv-tiers.md`): `std.state_tier` (slot `tier`) with SSD `Level`s; `evict.root_pin` (slot `eviction_policy`); checkpoint policies of `std.state.recurrent` | KS1–KS5 (ABI 1.4): residency in the PrefixIndex, promotion and load gating, stores and staging payloads, the tier's attach and identity, the victim policy; S1 step hooks, S2 host pools |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload (v1, milestone X) | `std.moe.offload@1` over `std.tiered` (DeviceResolver, pinned RAM and `O_DIRECT` SSD tiers); placement policies (`placement.*`), tiers (`tiers.*`), route transforms (`transforms.*`, `approx`); `kernels.expert_io` (resolve, gather, prefetch), `kernels.cpu_task` and `kernels.ggml_cpu` (CPU miss compute) | S0 shared objects, S1 step hooks, S2 host pools and async MemOps, S3 fill pools, S4 weight extents, S5 CPU facts (ABI 1.2), row kinds (1.3); planned: VMM resize (X's second wave) |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
