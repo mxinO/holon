@@ -177,17 +177,19 @@ def analyse(raw_path: pathlib.Path, model: pathlib.Path, record: dict) -> dict:
             if (flat[i][3], flat[i][4]) not in first:
                 pp, pg = len(seqs[i - 1][0]), len(seqs[i - 1][1])
                 own += pg - min(max(hit - pp, 0), pg)
+        measured = [f[2] for f in flat]
         uncached[name] = {"uncached_input": total, "previous_output_uncached": own,
-                          "previous_output_share": round(own / total, 4) if total else None}
-        if k is None:
-            measured = [f[2] for f in flat]
-            uncached[name]["replay_equals_measured_cached"] = sum(h == c for h, c in zip(hits, measured, strict=True))
-            uncached[name]["requests"] = len(hits)
-            uncached["measured"] = {
-                "uncached_input": sum(len(f[0]) - (f[2] or 0) for f in flat),
-                "previous_output": sum(len(seqs[i - 1][1]) for i, f in enumerate(flat) if (f[3], f[4]) not in first)}
-            uncached["measured"]["previous_output_share"] = round(
-                uncached["measured"]["previous_output"] / uncached["measured"]["uncached_input"], 4)
+                          "previous_output_share": round(own / total, 4) if total else None,
+                          "replay_equals_measured_cached": sum(h == c for h, c in zip(hits, measured, strict=True)),
+                          "requests": len(hits)}
+    # measured: the server's cached tokens; of each request's uncached input, the previous answer's tokens past the
+    # hit (under prompt_end alone, the whole answer: the K-M1 record's definition; 3g's with answer checkpoints)
+    hits = [f[2] or 0 for f in flat]
+    own = sum(len(seqs[i - 1][1]) - min(max(hits[i] - len(seqs[i - 1][0]), 0), len(seqs[i - 1][1]))
+              for i, f in enumerate(flat) if (f[3], f[4]) not in first)
+    total = sum(len(f[0]) - h for f, h in zip(flat, hits, strict=True))
+    uncached["measured"] = {"uncached_input": total, "previous_output": own,
+                            "previous_output_share": round(own / total, 4) if total else None}
     return {"checks": checks, "rows": rows, "uncached": uncached, "summary": summarize(rows, uncached)}
 
 

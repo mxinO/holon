@@ -1457,6 +1457,30 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### 3g (2026-10-20, report): the pi agent test with the tier
+
+The pi agent test re-run on an RTX 5090 desktop as K-M1 ran it: demo ×3 and workloads ×2, pi 0.73.1 with the
+counted runs' provider config, a raw capture proxy (local only). Qwen3.8-27B UD-Q4_K_M served from rtx-5090 lock 6
+(the tier: `host.bytes` 16 GiB, staging 5, `prompt_end,branch,answer:1`) **at the code it pins** (`32d5945`): every
+lock is outdated by K's later core and std follow-ups until the close's propagation, and the harness requires a served
+lock of the class; `--host-memory 21474836480` (`evidence/k5_3g_pi_rtx-5090_2026-10-20.json`). All 5 sessions passed
+(7, 8, 9, 7 and 26 turns), 57 of 57 requests clean; every rendered prompt and generated list had the server's token
+counts. The before clock screen failed (an aborted attempt's engine still held the GPU); the after-screen was steady
+(2,535 / 2,595 MHz p10 / p50).
+
+| | predicted | measured |
+|---|---|---|
+| the previous turn's own output, of the uncached input | 44% → ≤ 10% if answers are re-rendered verbatim (K-M1's replay: 3.1%) | **26.1%** (12,738 / 48,894), from the server's cached tokens |
+| the same traffic replayed under `prompt_end` alone | | 44.9% (34,454 / 76,734): the first pi test's 44% |
+| uncached input against that replay | | −36% (48,894 against 76,734) |
+| answers re-rendered verbatim through their end | 38 / 38 in K-M1 | **48 / 52**: 3 diverge in the reasoning, 1 inside a tool call |
+
+The prediction's condition did not hold this time. The four non-verbatim answers lost 7,376 tokens (662–3,993 each, the
+long ones), most of the 12,738; the 48 verbatim ones leave only their tails past the last aligned position. The
+`answer:1` replay (23.8%) matches the measurement within the replay's own misses (53 of 57 hits equal). Why pi
+re-rendered those four differently (K-M1 saw none) is not established from positions alone (the record keeps no text);
+it is pi's rendering of its history, not the tier's. Report only: 3g is not gated.
+
 ### Close (prepared 2026-10-20; held for MoE prefill's merge)
 
 What the close still does, in order, when the lead relays that `main` has MoE prefill:
@@ -1476,7 +1500,7 @@ Acceptance at this point (before the rebase):
 |---|---|---|
 | 1 Strategies are plugins | met | `std.state_tier` with the SSD level, the `branch` / `answer` policies, `evict.root_pin`; held out after the tag: `state_tiers.zlib` and `policies.last_turn`, plugin-only; the proof's finding (`SeqView.matched`) added inside ABI 1.4 (the owner) |
 | 2 Exactness | met | tier invariance and run-identity on the A5000 (Qwen3-8B, host and SSD) and the RTX 5090 (the 27B pair); the null test; the policies' bounded checks; the plants (steps 2–4) |
-| 3 Development gate | met with option 2 for 3a's SSD cells beside decoders | the bar table ("Step 4"), 3d on the sized reference, 3a post-hoc ("Owner decisions"); 3g (the pi agent re-run, report only) was not in step 4's list and is not run |
+| 3 Development gate | met with option 2 for 3a's SSD cells beside decoders | the bar table ("Step 4"), 3d on the sized reference, 3a post-hoc ("Owner decisions"); 3g reported ("3g": 26.1% against the ≤ 10% predicted, the re-rendering not verbatim on 4 of 52 answers) |
 | 4 Memory | met | host pools exact (S2, `mmap` + `cudaHostRegister`); `host.bytes` pinned by the tier locks; attach refuses a host level below its floors, a staging pool below `max_seqs` + 1, and names `--host-memory` when refused host memory; the SSD level refuses a directory without its bytes; `dropped_publishes` 0 on `agent_park` at staging 5 |
 | 5 Core | met at the owner's cap | KS1–KS5 in ABI 1.4; **+337** code lines over `b5b1e7f` (the owner, 2026-10-20); the `could_fit` / eviction property test (`core/tests/test_state_liveness.py`); tiers-off snapshots byte-identical where re-checked (the two tier locks' tunes), all histories at the propagation |
 | 6 Locks | the 27B tier locks met; the rest at the close | rtx-5080 11 and rtx-5090 6 after their bounded checks ("Step 4" and its follow-ups); every other history in step 3 above |
