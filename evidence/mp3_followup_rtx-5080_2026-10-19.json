@@ -1,0 +1,801 @@
+{
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "date": "2026-10-19",
+ "config": "the natural-fit offload flags at the A/B pin",
+ "pin": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529",
+ "trees_note": "d4n = e9048de with 0488063 reverted (D5 + D4); x1 = 2dc93fc with 0488063 reverted (3c only); vg / vs = a815981 with step 3b's ggml plugin.py / std, tiered, lfu, expert_io files swapped for x1's; vw = a9a0333 with the id workspace at pass_rows",
+ "ab": {
+  "persistent_scratch (28ad86e) and old trees, 3 rounds": {
+   "trees": [
+    [
+     "d4n",
+     "e9048de",
+     "dirty"
+    ],
+    [
+     "s3n",
+     "28ad86e",
+     "clean"
+    ],
+    [
+     "d4",
+     "e9048de",
+     "clean"
+    ],
+    [
+     "s3",
+     "af3322d",
+     "clean"
+    ]
+   ],
+   "order": [
+    "round 0: d4n s3n d4 s3",
+    "round 1: s3 d4 s3n d4n",
+    "round 2: d4n s3n d4 s3"
+   ],
+   "stats": {
+    "s3n/d4n 1024": {
+     "round_geomeans": [
+      0.9995,
+      0.9975,
+      1.001
+     ],
+     "median_of_geomeans": 0.9995,
+     "sd": 0.0018,
+     "median_paired": 0.9995,
+     "keep_rule": false
+    },
+    "s3n/d4n 4096": {
+     "round_geomeans": [
+      0.9969,
+      0.9975,
+      0.9983
+     ],
+     "median_of_geomeans": 0.9975,
+     "sd": 0.0007,
+     "median_paired": 0.9973,
+     "keep_rule": false
+    },
+    "s3n/d4n 32768": {
+     "round_geomeans": [
+      0.9984,
+      0.999,
+      0.9996
+     ],
+     "median_of_geomeans": 0.999,
+     "sd": 0.0006,
+     "median_paired": 0.9989,
+     "keep_rule": false
+    },
+    "d4/d4n 1024": {
+     "round_geomeans": [
+      1.0,
+      0.9939,
+      1.0003
+     ],
+     "median_of_geomeans": 1.0,
+     "sd": 0.0036,
+     "median_paired": 1.0,
+     "keep_rule": false
+    },
+    "d4/d4n 4096": {
+     "round_geomeans": [
+      1.0036,
+      1.0039,
+      1.0048
+     ],
+     "median_of_geomeans": 1.0039,
+     "sd": 0.0006,
+     "median_paired": 1.0042,
+     "keep_rule": false
+    },
+    "d4/d4n 32768": {
+     "round_geomeans": [
+      1.0011,
+      1.0017,
+      1.0025
+     ],
+     "median_of_geomeans": 1.0017,
+     "sd": 0.0007,
+     "median_paired": 1.0017,
+     "keep_rule": false
+    },
+    "s3/d4n 1024": {
+     "round_geomeans": [
+      1.0002,
+      0.9964,
+      1.0007
+     ],
+     "median_of_geomeans": 1.0002,
+     "sd": 0.0023,
+     "median_paired": 1.0,
+     "keep_rule": false
+    },
+    "s3/d4n 4096": {
+     "round_geomeans": [
+      1.0016,
+      1.0024,
+      1.0027
+     ],
+     "median_of_geomeans": 1.0024,
+     "sd": 0.0006,
+     "median_paired": 1.0021,
+     "keep_rule": false
+    },
+    "s3/d4n 32768": {
+     "round_geomeans": [
+      1.0001,
+      1.001,
+      1.0014
+     ],
+     "median_of_geomeans": 1.001,
+     "sd": 0.0006,
+     "median_paired": 1.0009,
+     "keep_rule": false
+    },
+    "s3/d4 1024": {
+     "round_geomeans": [
+      1.0002,
+      1.0026,
+      1.0004
+     ],
+     "median_of_geomeans": 1.0004,
+     "sd": 0.0013,
+     "median_paired": 1.0005,
+     "keep_rule": false
+    },
+    "s3/d4 4096": {
+     "round_geomeans": [
+      0.998,
+      0.9985,
+      0.9979
+     ],
+     "median_of_geomeans": 0.998,
+     "sd": 0.0003,
+     "median_paired": 0.9979,
+     "keep_rule": false
+    },
+    "s3/d4 32768": {
+     "round_geomeans": [
+      0.999,
+      0.9993,
+      0.9989
+     ],
+     "median_of_geomeans": 0.999,
+     "sd": 0.0002,
+     "median_paired": 0.999,
+     "keep_rule": false
+    },
+    "d4n/d4 1024": {
+     "round_geomeans": [
+      1.0,
+      1.0062,
+      0.9997
+     ],
+     "median_of_geomeans": 1.0,
+     "sd": 0.0036,
+     "median_paired": 1.0,
+     "keep_rule": false
+    },
+    "d4n/d4 4096": {
+     "round_geomeans": [
+      0.9964,
+      0.9961,
+      0.9953
+     ],
+     "median_of_geomeans": 0.9961,
+     "sd": 0.0006,
+     "median_paired": 0.9958,
+     "keep_rule": false
+    },
+    "d4n/d4 32768": {
+     "round_geomeans": [
+      0.9989,
+      0.9983,
+      0.9975
+     ],
+     "median_of_geomeans": 0.9983,
+     "sd": 0.0007,
+     "median_paired": 0.9983,
+     "keep_rule": false
+    }
+   }
+  },
+  "mmvq fast path (e076f00), 5 rounds": {
+   "trees": [
+    [
+     "d4n",
+     "e9048de",
+     "dirty"
+    ],
+    [
+     "s3f",
+     "e076f00",
+     "clean"
+    ],
+    [
+     "s3n",
+     "28ad86e",
+     "clean"
+    ]
+   ],
+   "order": [
+    "round 0: d4n s3f s3n",
+    "round 1: s3n s3f d4n",
+    "round 2: d4n s3f s3n",
+    "round 3: s3n s3f d4n",
+    "round 4: d4n s3f s3n"
+   ],
+   "stats": {
+    "s3f/d4n 1024": {
+     "round_geomeans": [
+      0.9998,
+      0.9982,
+      0.9947,
+      0.9995,
+      0.9988
+     ],
+     "median_of_geomeans": 0.9988,
+     "sd": 0.0021,
+     "median_paired": 0.9985,
+     "keep_rule": false
+    },
+    "s3f/d4n 4096": {
+     "round_geomeans": [
+      0.9969,
+      0.9972,
+      0.9974,
+      0.9976,
+      0.9986
+     ],
+     "median_of_geomeans": 0.9974,
+     "sd": 0.0006,
+     "median_paired": 0.9976,
+     "keep_rule": false
+    },
+    "s3f/d4n 32768": {
+     "round_geomeans": [
+      0.9985,
+      0.9988,
+      0.9988,
+      0.9992,
+      0.999
+     ],
+     "median_of_geomeans": 0.9988,
+     "sd": 0.0003,
+     "median_paired": 0.9989,
+     "keep_rule": false
+    },
+    "s3n/d4n 1024": {
+     "round_geomeans": [
+      1.0,
+      0.9984,
+      1.0001,
+      0.9995,
+      0.9999
+     ],
+     "median_of_geomeans": 0.9999,
+     "sd": 0.0007,
+     "median_paired": 0.9995,
+     "keep_rule": false
+    },
+    "s3n/d4n 4096": {
+     "round_geomeans": [
+      0.9965,
+      0.9973,
+      0.9974,
+      0.9978,
+      0.9988
+     ],
+     "median_of_geomeans": 0.9974,
+     "sd": 0.0008,
+     "median_paired": 0.9973,
+     "keep_rule": false
+    },
+    "s3n/d4n 32768": {
+     "round_geomeans": [
+      0.9982,
+      0.9989,
+      0.9989,
+      0.9993,
+      0.999
+     ],
+     "median_of_geomeans": 0.9989,
+     "sd": 0.0004,
+     "median_paired": 0.9989,
+     "keep_rule": false
+    }
+   }
+  },
+  "held count (a815981), 5 rounds": {
+   "trees": [
+    [
+     "d4n",
+     "e9048de",
+     "dirty"
+    ],
+    [
+     "s3f",
+     "a815981",
+     "clean"
+    ],
+    [
+     "s3n",
+     "28ad86e",
+     "clean"
+    ]
+   ],
+   "order": [
+    "round 0: d4n s3f s3n",
+    "round 1: s3n s3f d4n",
+    "round 2: d4n s3f s3n",
+    "round 3: s3n s3f d4n",
+    "round 4: d4n s3f s3n"
+   ],
+   "stats": {
+    "s3f/d4n 1024": {
+     "round_geomeans": [
+      0.9993,
+      0.9923,
+      1.0008,
+      1.0002,
+      0.9997
+     ],
+     "median_of_geomeans": 0.9997,
+     "sd": 0.0035,
+     "median_paired": 1.0,
+     "keep_rule": false
+    },
+    "s3f/d4n 4096": {
+     "round_geomeans": [
+      0.9973,
+      0.9981,
+      0.9985,
+      0.9985,
+      0.998
+     ],
+     "median_of_geomeans": 0.9981,
+     "sd": 0.0005,
+     "median_paired": 0.9982,
+     "keep_rule": false
+    },
+    "s3f/d4n 32768": {
+     "round_geomeans": [
+      0.9986,
+      0.9993,
+      0.9989,
+      0.9993,
+      0.9995
+     ],
+     "median_of_geomeans": 0.9993,
+     "sd": 0.0004,
+     "median_paired": 0.9992,
+     "keep_rule": false
+    },
+    "s3n/d4n 1024": {
+     "round_geomeans": [
+      0.991,
+      0.999,
+      1.0002,
+      1.0008,
+      0.9992
+     ],
+     "median_of_geomeans": 0.9992,
+     "sd": 0.004,
+     "median_paired": 0.9995,
+     "keep_rule": false
+    },
+    "s3n/d4n 4096": {
+     "round_geomeans": [
+      0.9968,
+      0.9977,
+      0.9982,
+      0.998,
+      0.998
+     ],
+     "median_of_geomeans": 0.998,
+     "sd": 0.0006,
+     "median_paired": 0.9979,
+     "keep_rule": false
+    },
+    "s3n/d4n 32768": {
+     "round_geomeans": [
+      0.9981,
+      0.9991,
+      0.9986,
+      0.9993,
+      0.9994
+     ],
+     "median_of_geomeans": 0.9991,
+     "sd": 0.0005,
+     "median_paired": 0.999,
+     "keep_rule": false
+    }
+   }
+  },
+  "id workspace at pass_rows (c0fe9c2), 5 rounds": {
+   "trees": [
+    [
+     "d4n",
+     "e9048de",
+     "dirty"
+    ],
+    [
+     "s3w",
+     "c0fe9c2",
+     "clean"
+    ]
+   ],
+   "order": [
+    "round 0: d4n s3w",
+    "round 1: s3w d4n",
+    "round 2: d4n s3w",
+    "round 3: s3w d4n",
+    "round 4: d4n s3w"
+   ],
+   "stats": {
+    "s3w/d4n 1024": {
+     "round_geomeans": [
+      0.9987,
+      1.0006,
+      1.0006,
+      0.9999,
+      0.9997
+     ],
+     "median_of_geomeans": 0.9999,
+     "sd": 0.0008,
+     "median_paired": 1.0,
+     "keep_rule": false
+    },
+    "s3w/d4n 4096": {
+     "round_geomeans": [
+      0.9993,
+      1.0001,
+      0.9997,
+      0.9996,
+      1.0003
+     ],
+     "median_of_geomeans": 0.9997,
+     "sd": 0.0004,
+     "median_paired": 0.9997,
+     "keep_rule": false
+    },
+    "s3w/d4n 32768": {
+     "round_geomeans": [
+      0.9999,
+      1.0005,
+      1.0,
+      0.9997,
+      1.0002
+     ],
+     "median_of_geomeans": 1.0,
+     "sd": 0.0003,
+     "median_paired": 1.0,
+     "keep_rule": false
+    }
+   }
+  }
+ },
+ "bisects_4k_10_prompts_5_rounds": {
+  "main": [
+   "round 0 run-d4n exit 0",
+   "round 0 run-x1 exit 0",
+   "round 0 run-s3h exit 0",
+   "round 1 run-s3h exit 0",
+   "round 1 run-x1 exit 0",
+   "round 1 run-d4n exit 0",
+   "round 2 run-d4n exit 0",
+   "round 2 run-x1 exit 0",
+   "round 2 run-s3h exit 0",
+   "round 3 run-s3h exit 0",
+   "round 3 run-x1 exit 0",
+   "round 3 run-d4n exit 0",
+   "round 4 run-d4n exit 0",
+   "round 4 run-x1 exit 0",
+   "round 4 run-s3h exit 0",
+   "round 0: run-d4n run-x1 run-s3h",
+   "round 1: run-s3h run-x1 run-d4n",
+   "round 2: run-d4n run-x1 run-s3h",
+   "round 3: run-s3h run-x1 run-d4n",
+   "round 4: run-d4n run-x1 run-s3h",
+   "run-x1/run-d4n   4096: rounds [0.9999, 1.001, 0.9993, 1.0002, 0.9997] median 0.9999 sd 0.0006 median-paired 1.0000 gain>=max(0.5%,3sd): False",
+   "run-s3h/run-d4n   4096: rounds [0.9969, 0.9984, 0.9975, 0.9977, 0.998] median 0.9977 sd 0.0006 median-paired 0.9976 gain>=max(0.5%,3sd): False"
+  ],
+  "b2": [
+   "round 0 run-d4n exit 0",
+   "round 0 run-vg exit 0",
+   "round 0 run-vs exit 0",
+   "round 0 run-s3h exit 0",
+   "round 1 run-s3h exit 0",
+   "round 1 run-vs exit 0",
+   "round 1 run-vg exit 0",
+   "round 1 run-d4n exit 0",
+   "round 2 run-d4n exit 0",
+   "round 2 run-vg exit 0",
+   "round 2 run-vs exit 0",
+   "round 2 run-s3h exit 0",
+   "round 3 run-s3h exit 0",
+   "round 3 run-vs exit 0",
+   "round 3 run-vg exit 0",
+   "round 3 run-d4n exit 0",
+   "round 4 run-d4n exit 0",
+   "round 4 run-vg exit 0",
+   "round 4 run-vs exit 0",
+   "round 4 run-s3h exit 0",
+   "round 0: run-d4n run-vg run-vs run-s3h",
+   "round 1: run-s3h run-vs run-vg run-d4n",
+   "round 2: run-d4n run-vg run-vs run-s3h",
+   "round 3: run-s3h run-vs run-vg run-d4n",
+   "round 4: run-d4n run-vg run-vs run-s3h",
+   "run-vg/run-d4n   4096: rounds [0.9999, 0.9998, 1.0001, 0.9998, 0.9993] median 0.9998 sd 0.0003 median-paired 1.0000 gain>=max(0.5%,3sd): False",
+   "run-vs/run-d4n   4096: rounds [0.9969, 0.9975, 0.9971, 0.9972, 0.9967] median 0.9971 sd 0.0003 median-paired 0.9973 gain>=max(0.5%,3sd): False",
+   "run-s3h/run-d4n   4096: rounds [0.997, 0.9979, 0.9976, 0.9964, 0.997] median 0.9970 sd 0.0006 median-paired 0.9973 gain>=max(0.5%,3sd): False"
+  ],
+  "b3": [
+   "round 0 run-d4n exit 0",
+   "round 0 run-s3m exit 0",
+   "round 0 run-s3h exit 0",
+   "round 1 run-s3h exit 0",
+   "round 1 run-s3m exit 0",
+   "round 1 run-d4n exit 0",
+   "round 2 run-d4n exit 0",
+   "round 2 run-s3m exit 0",
+   "round 2 run-s3h exit 0",
+   "round 3 run-s3h exit 0",
+   "round 3 run-s3m exit 0",
+   "round 3 run-d4n exit 0",
+   "round 4 run-d4n exit 0",
+   "round 4 run-s3m exit 0",
+   "round 4 run-s3h exit 0",
+   "round 0: run-d4n run-s3m run-s3h",
+   "round 1: run-s3h run-s3m run-d4n",
+   "round 2: run-d4n run-s3m run-s3h",
+   "round 3: run-s3h run-s3m run-d4n",
+   "round 4: run-d4n run-s3m run-s3h",
+   "run-s3m/run-d4n   4096: rounds [0.9976, 0.9985, 0.9972, 0.9979, 0.9988] median 0.9979 sd 0.0007 median-paired 0.9979 gain>=max(0.5%,3sd): False",
+   "run-s3h/run-d4n   4096: rounds [0.9968, 0.9986, 0.9975, 0.9975, 0.9984] median 0.9975 sd 0.0008 median-paired 0.9979 gain>=max(0.5%,3sd): False"
+  ],
+  "b4": [
+   "round 0 run-d4n exit 0",
+   "round 0 run-vw exit 0",
+   "round 0 run-s3m exit 0",
+   "round 1 run-s3m exit 0",
+   "round 1 run-vw exit 0",
+   "round 1 run-d4n exit 0",
+   "round 2 run-d4n exit 0",
+   "round 2 run-vw exit 0",
+   "round 2 run-s3m exit 0",
+   "round 3 run-s3m exit 0",
+   "round 3 run-vw exit 0",
+   "round 3 run-d4n exit 0",
+   "round 4 run-d4n exit 0",
+   "round 4 run-vw exit 0",
+   "round 4 run-s3m exit 0",
+   "round 0: run-d4n run-vw run-s3m",
+   "round 1: run-s3m run-vw run-d4n",
+   "round 2: run-d4n run-vw run-s3m",
+   "round 3: run-s3m run-vw run-d4n",
+   "round 4: run-d4n run-vw run-s3m",
+   "run-vw/run-d4n   4096: rounds [0.9999, 1.0005, 1.0, 0.9997, 1.001] median 1.0000 sd 0.0005 median-paired 1.0003 gain>=max(0.5%,3sd): False",
+   "run-s3m/run-d4n   4096: rounds [0.9961, 0.9991, 0.9978, 0.998, 0.9985] median 0.9980 sd 0.0011 median-paired 0.9979 gain>=max(0.5%,3sd): False"
+  ],
+  "b5": [
+   "round 0 run-d4n exit 0",
+   "round 0 run-s3x exit 0",
+   "round 0 run-s3w exit 0",
+   "round 1 run-s3w exit 0",
+   "round 1 run-s3x exit 0",
+   "round 1 run-d4n exit 0",
+   "round 2 run-d4n exit 0",
+   "round 2 run-s3x exit 0",
+   "round 2 run-s3w exit 0",
+   "round 3 run-s3w exit 0",
+   "round 3 run-s3x exit 0",
+   "round 3 run-d4n exit 0",
+   "round 4 run-d4n exit 0",
+   "round 4 run-s3x exit 0",
+   "round 4 run-s3w exit 0",
+   "round 0: run-d4n run-s3x run-s3w",
+   "round 1: run-s3w run-s3x run-d4n",
+   "round 2: run-d4n run-s3x run-s3w",
+   "round 3: run-s3w run-s3x run-d4n",
+   "round 4: run-d4n run-s3x run-s3w",
+   "run-s3x/run-d4n   4096: rounds [0.9998, 1.0002, 1.0, 1.0001, 0.9997] median 1.0000 sd 0.0002 median-paired 0.9997 gain>=max(0.5%,3sd): False",
+   "run-s3w/run-d4n   4096: rounds [0.999, 1.0002, 0.9997, 1.0003, 1.0004] median 1.0002 sd 0.0006 median-paired 1.0000 gain>=max(0.5%,3sd): False"
+  ]
+ },
+ "fits": {
+  "fitn-run-d4.log": "gate_up.q4_k.1536x2048=3229,down.q6_k.2048x768=1700,down.q4_k.2048x768=1529",
+  "fitn-run-d4n.log": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529",
+  "fitn-run-s3.log": "gate_up.q4_k.1536x2048=3235,down.q6_k.2048x768=1706,down.q4_k.2048x768=1529",
+  "fitn-run-s3n.log": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529",
+  "fit-s3x.log": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529"
+ },
+ "final_tree_1f535e8": {
+  "l0": "308 passed, 1 skipped, 1 warning in 213.55s (0:03:33)",
+  "memcheck": "========= ERROR SUMMARY: 0 errors",
+  "identity_vs_d5": {
+   "idx-run-d5-capped_f5b": {
+    "tree": "aded4cd",
+    "config": null,
+    "runs": [
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     },
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     }
+    ],
+    "run_identical": true,
+    "expert_pass": {
+     "Offload": 4096
+    }
+   },
+   "idx-run-d5-natural": {
+    "tree": "aded4cd",
+    "config": null,
+    "runs": [
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     },
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     }
+    ],
+    "run_identical": true,
+    "expert_pass": {
+     "Offload": 4096
+    }
+   },
+   "idx-run-s3x-capped_f5b": {
+    "tree": "1f535e8",
+    "config": null,
+    "runs": [
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     },
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     }
+    ],
+    "run_identical": true,
+    "expert_pass": {
+     "Offload": 4096
+    }
+   },
+   "idx-run-s3x-natural": {
+    "tree": "1f535e8",
+    "config": null,
+    "runs": [
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     },
+     {
+      "1027": "1ffd119333223a6387b2f185b29c4f3dc77a9beea94dc0ef4e59bf216a1cc1d8",
+      "4096": "ae52d6d56f24fb5b0fd7b172e3b22ae6b4e81c13e8a6b21890e143aa95bb9039"
+     }
+    ],
+    "run_identical": true,
+    "expert_pass": {
+     "Offload": 4096
+    }
+   }
+  },
+  "tail_check": {
+   "coldest": {
+    "mode": "coldest",
+    "config": "natural",
+    "cache": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529",
+    "tail": null,
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "contexts": {
+     "4096": {
+      "ttft_s": [
+       0.3363,
+       0.338,
+       0.3359
+      ],
+      "ttft_median_s": 0.3363,
+      "borrowed": {
+       "ring": 3,
+       "stage": 0
+      },
+      "ring_ok": true,
+      "decode_tokens": 64,
+      "miss_mb_per_token": 121.27,
+      "miss_mb_by_quarter": [
+       179.13,
+       151.91,
+       76.92,
+       77.13
+      ]
+     },
+     "32768": {
+      "ttft_s": [
+       6.2801,
+       6.2813,
+       6.2798
+      ],
+      "ttft_median_s": 6.2801,
+      "borrowed": {
+       "ring": 24,
+       "stage": 0
+      },
+      "ring_ok": true,
+      "decode_tokens": 64,
+      "miss_mb_per_token": 58.64,
+      "miss_mb_by_quarter": [
+       102.99,
+       51.39,
+       42.14,
+       38.05
+      ]
+     }
+    },
+    "peak_misses": 6
+   },
+   "tail": {
+    "mode": "tail",
+    "config": "natural",
+    "cache": "gate_up.q4_k.1536x2048=3217,down.q6_k.2048x768=1688,down.q4_k.2048x768=1529",
+    "tail": [
+     0,
+     209
+    ],
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "contexts": {
+     "4096": {
+      "ttft_s": [
+       0.3374,
+       0.3393,
+       0.3367
+      ],
+      "ttft_median_s": 0.3374,
+      "borrowed": {
+       "ring": 3,
+       "stage": 0
+      },
+      "ring_ok": true,
+      "decode_tokens": 64,
+      "miss_mb_per_token": 120.59,
+      "miss_mb_by_quarter": [
+       176.48,
+       152.21,
+       76.54,
+       77.13
+      ]
+     },
+     "32768": {
+      "ttft_s": [
+       6.2765,
+       6.2784,
+       6.2869
+      ],
+      "ttft_median_s": 6.2784,
+      "borrowed": {
+       "ring": 24,
+       "stage": 0
+      },
+      "ring_ok": true,
+      "decode_tokens": 64,
+      "miss_mb_per_token": 57.43,
+      "miss_mb_by_quarter": [
+       105.02,
+       48.53,
+       38.8,
+       37.36
+      ]
+     }
+    },
+    "peak_misses": 6
+   }
+  }
+ }
+}

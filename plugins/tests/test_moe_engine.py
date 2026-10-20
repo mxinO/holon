@@ -16,10 +16,11 @@ from holon.api import RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.kernels import DECODE, PADDING
-from holon_std.moe.offload import KEY, PASS
-from holon_std.moe.units import CHUNK
+from holon_std.moe.offload import KEY
+from holon_std.moe.units import CHUNK, MoE
 from holon_std.tiered.ring import Lent
 from holon_testing.gguf_files import write
+from holon_testing.ref_kernels.kernels import LinearExperts
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
 
@@ -109,6 +110,55 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
     assert engine.ctx.kernels[merged[0]]["provider"] == "testing.ref_kernels"
     x, ids = torch.randn(3, 1, cfg["hidden_size"]), torch.tensor([[0, 5], [7, 2], [3, 4]], dtype=torch.int32)
     assert torch.equal(unit._gate_up(types.SimpleNamespace(x=x), ids), unit._gate_up(x, ids))
+
+
+@pytest.mark.parametrize("store", ["resident", "offload"])
+def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, monkeypatch, store):
+    """docs/v1-moe-prefill.md D1 on both stores (offload: a streaming step, the ring on): a step's expert passes take
+    the smaller of the two stacks' `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in
+    whole chunks, and the step's last partial chunk is a pass of its own, so every row's chunk and kernel path are a
+    chunk's: calls of 512 then 88 rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up
+    then down in every layer. D10's fallback: each pass allocates one `scratch` of the larger of its kernels'
+    `scratch_bytes`, passed to both calls (no `out`: no lent memory); a kernel that does not define `scratch_bytes` is
+    called without the keywords. D3′: a router with `pass_rows` takes a pass in one call."""
+    checkpoint, _ = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    offload = {"host_memory": 1 << 24, "plugin_options": {"moe.store": "std.moe.offload@1"}}
+    offload = offload if store == "offload" else {}
+    engine = _engine(file, max_step_tokens=4100, max_model_len=4200, state_memory=8 << 20, **offload)
+    layers = len(engine.executor.model.layers)
+    assert {m._store.pass_tokens(4100) for m in engine.executor.model.modules() if hasattr(m, "_gate_up")} == {4096}
+    sizes, call = [], LinearExperts.__call__
+
+    def recorded(self, x, parts, ids, **kw):
+        sizes.append(len(ids))
+        scratch = kw.get("scratch")
+        buffers.append((sorted(kw), None if scratch is None else (scratch.data_ptr(), len(scratch))))
+        return call(self, x, parts, ids, **kw)
+    for tokens, passes in ((600, [512, 88]), (1027, [1024, 3]), (4100, [4096, 4]), (601, [512, 89])):
+        sizes.clear()
+        buffers: list = []
+        prompt = torch.randint(0, 512, (tokens,), generator=torch.Generator().manual_seed(tokens)).tolist()
+        with mock.patch.object(LinearExperts, "__call__", recorded):
+            engine.generate([prompt], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+        assert sizes == [n for n in passes for _ in range(2)] * layers, (tokens, sizes)
+        if hasattr(LinearExperts, "scratch_bytes"):
+            moe = next(m for m in engine.executor.model.modules() if hasattr(m, "_down"))
+            want = [max(moe._gate_up.kernel.scratch_bytes(n), moe._down.kernel.scratch_bytes(n)) for n in passes]
+            assert [kw for kw, _ in buffers] == [["scratch"]] * len(buffers)
+            assert [b[1][1] for b in buffers[::2]] == want * layers and buffers[::2] == buffers[1::2]   # one a pass
+            monkeypatch.delattr(LinearExperts, "scratch_bytes")       # the last prompt: a kernel without buffers
+        else:
+            assert buffers == [([], None)] * len(buffers)
+    # D3′: a router declaring `pass_rows` routes a pass of whole CHUNKs in one call, the last partial chunk on its own
+    moes = [m for m in engine.executor.model.modules() if hasattr(m, "_route_rows")]
+    routed, route = [], MoE._route
+    monkeypatch.setattr(MoE, "_route", lambda self, x: routed.append(len(x)) or route(self, x))
+    for m in moes:
+        m._route_rows = 4096
+    prompt = torch.randint(0, 512, (4100,), generator=torch.Generator().manual_seed(1)).tolist()
+    engine.generate([prompt], SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+    assert routed == [4096, 4] * layers, routed
 
 
 def test_gate_and_up_of_different_layouts_fail_at_startup(tiny_moe, tmp_path):
@@ -354,7 +404,8 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     offload = engine.executor.model.layers[0].ffn._store
     assert store.staging == 6 and store.prefill == 8 and store.lending
-    assert offload.pass_tokens(10) == PASS and offload.pass_tokens(9) == CHUNK     # the worst step profiles a pass
+    # the worst step profiles a pass (of the bound kernels' pass_rows: one chunk within this 10-token step budget)
+    assert store.large_passes(10) and not store.large_passes(9) and offload.pass_tokens(10) == CHUNK
     held = []
 
     def size(step, record):           # per class: resident pieces + empty slots
@@ -376,6 +427,137 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
         assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
 
 
+@pytest.fixture(scope="module")
+def wide_moe(tmp_path_factory):
+    """FN's MoE shape at a tiny width (docs/v1-moe-prefill.md §5.1): 512 experts, top-10, two layers, as a GGUF of
+    Q8_0 stacks, its prompts and the resident store's outputs."""
+    torch.manual_seed(2)
+    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=64, intermediate_size=128, moe_intermediate_size=32,
+                         num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2, head_dim=16,
+                         num_experts=512, num_experts_per_tok=10, norm_topk_prob=True, tie_word_embeddings=False,
+                         eos_token_id=None)
+    path = tmp_path_factory.mktemp("wide_moe")
+    model = Qwen3MoeForCausalLM(cfg)
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.mlp.gate.weight.mul_(8)
+            layer.mlp.experts.gate_up_proj.mul_(20)
+            layer.mlp.experts.down_proj.mul_(5)
+    model.save_pretrained(path / "hf")
+    write(path / "hf", path / "moe.gguf", Q.Q8_0)
+    prompts = [torch.randint(0, 512, (n,)).tolist() for n in (3, 17, 8, 25)]
+    return path / "moe.gguf", prompts, _served(_engine(path / "moe.gguf", state_memory=1 << 24), prompts)
+
+
+@contextlib.contextmanager
+def _tail_checked(store):
+    """D11's terms, asserted around `Lent` on every step that lends a tail (its tables copied on the device as the step
+    goes, checked at its end: no host sync inside the step): call 0 lends n slots of the tail's class (`lends` row 0)
+    and evicts, in every role, every expert holding a slot of the range, which the rounds then never pick; the range
+    (`tail_view`) is the class's last n slots, contiguous, and holds the bytes its clients asked for; no slot of the
+    range is in the pool, the stage lists or the ring, nor mapped — at the step's start and after every layer —; what
+    the step holds per class is what its pool holds (the range counted in neither), so a held ring has a slot for every
+    missing piece and no step is short; at its end the empty slots it found lie below the lent ones, as they were, and
+    the lent ones lie above them whole, by call then expert id. Yields each tail step's (empty slots found, `lends`
+    rows, ring held)."""
+    begin, done, steps = Lent.begin, Lent.done, []
+
+    def checked_begin(self):
+        before, found = store.residency.device.clone(), (store.empty.clone(), store.n_empty.clone())
+        begin(self)
+        if self.tail is None:
+            return
+        cls, n = self.tail
+        c, classes = list(store.classes.values())[cls], store._class_index
+        view = store.tail_view()
+        assert view.is_contiguous() and len(view) == n * c.unit_bytes >= max(f() for f in store.tail_bytes) > 0
+        assert view.data_ptr() == c.slots()[c.size - n].data_ptr()
+        self._snap = {"before": before, "found": found, "maps": [store.residency.device.clone()],
+                      "held": self._held(classes), "want": self._want(store.residency.device, classes)} | {
+            name: getattr(store, name).clone() for name in ("pool", "stage_tab", "ring", "lent_call", "lend_needs",
+                                                            "ring_ok", "errors")}
+
+    def checked_done(self, g):
+        done(self, g)
+        if self.tail is None:
+            return
+        snap = self._snap
+        snap["maps"].append(store.residency.device.clone())
+        if g < len(store.layers) - 1:
+            return
+        t = {k: v.cpu() if isinstance(v, torch.Tensor) else [x.cpu() for x in v] for k, v in snap.items()}
+        (cls, n), roles = self.tail, torch.from_numpy(store.class_table == self.tail[0])        # [G, R]
+        lo, size = list(store.classes.values())[cls].size - n, list(store.classes.values())[cls].size
+
+        def inside(slots):
+            return (slots >= lo) & (slots < size)
+        held = (inside(t["before"]) & roles[:, None, :]).any(-1)                             # [G, E]: the range's
+        call, ring_ok = t["lent_call"], bool(t["ring_ok"])
+        assert (t["maps"][0][held] == -1).all() and (call[held] == 0).all()
+        assert (call != 0).eq(~held).all()                                  # the rounds never pick a holder
+        assert t["lend_needs"][0].tolist() == [n * (k == cls) for k in range(len(store.classes))]
+        assert not any(inside(m.permute(0, 2, 1)[roles]).any() for m in t["maps"]), "a piece mapped in the tail"
+        assert not inside(t["pool"][cls, :-1]).any(), "the pool holds the tail"              # (past it: the sink)
+        assert torch.equal(t["held"], (t["pool"][:, :-1] >= 0).sum(1)), "held counts other slots than the pool's"
+        stage, ring = t["stage_tab"][roles], t["ring"].permute(0, 2, 1)[roles]
+        assert not inside(stage).any() and not inside(ring).any()
+        missing = t["maps"][0].permute(0, 2, 1)[roles] < 0
+        assert not ring_ok or ((t["held"] >= t["want"]).all() and (ring[missing] >= 0).all())
+        assert not int(t["errors"]) & 4                                                     # never short
+        (stack, n_found), empty, lent_slots = t["found"], store.empty.cpu(), store.lent_slots.cpu()
+        for layer in range(len(store.layers)):                  # given back: found below, then the lent, whole
+            k = int(n_found[layer])
+            order = sorted(call[layer].ge(0).nonzero()[:, 0].tolist(), key=lambda e: (int(call[layer, e]), e))
+            assert int(store.n_empty[layer]) == k + len(order)
+            assert torch.equal(empty[layer, :, :k], stack[layer, :, :k])
+            assert torch.equal(empty[layer, :, k:k + len(order)], lent_slots[layer, order].t())
+        steps.append((int(n_found.sum()), t["lend_needs"].numpy(), ring_ok))
+    with mock.patch.object(Lent, "begin", checked_begin), mock.patch.object(Lent, "done", checked_done):
+        yield steps
+
+
+def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys):
+    """docs/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
+    streaming step first lends the tail — call 0, the last slots of the largest class arena (gate/up's), enough for
+    the passes' `out` and `scratch` —, then X's rounds (calls 1…), every step's terms as `_tail_checked` asserts them;
+    the first, on a cache with no spare empty slots, stages from the rounds' slots without falling short. The passes'
+    buffers are the range's (the reference provider stages each chunk through `scratch`, then `out`), so an expert
+    left mapped there would read them as weights: the outputs are the resident store's, mixed steps included, and F11's
+    residency, empty slots and their stacks are its replay's step by step (the replay models `lend_tail` from the
+    slots). The plant that leaves the tail's experts mapped fires and fails parity. A configuration whose tail class
+    cannot stage a pass outside the range, and every policy without `lend_tail`, are refused at bind."""
+    from holon_judge.placement import parity, route_dump
+    from holon_judge.planted import tail_unmap_undone
+    from holon_plugins.placement.lfu.reference import replay
+
+    file, prompts, want = wide_moe
+    tail = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "moe.ring_lend": "tail"}
+    engine = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
+    store = engine.ctx.shared_objects[KEY]
+    assert store.tail == (0, 15) and list(store.classes)[0].startswith("gate_up") and store.prefill == 512
+    with route_dump(engine) as trace, _tail_checked(store) as steps:
+        assert _served(engine, prompts) == want
+    assert steps and steps[0][0] == 0 and all((s[1][0] > 0).sum() == 1 and s[1][1:].any() for s in steps), steps
+    report = parity(trace)
+    assert report["first_differing_step"] is None and trace.mirrored and report["admissions"], report
+    # parity compared the empty slots' stacks step by step (the host's, in the delta log's order); the device's too
+    stacks = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks)[-1]
+    n_empty = store.n_empty.tolist()
+    assert n_empty == stacks["empty"].tolist() and all(
+        np.array_equal(store.empty[g, :, :n].t().numpy(), stacks["stacks"][g]) for g, n in enumerate(n_empty))
+    with tail_unmap_undone():
+        planted = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
+        with route_dump(planted) as trace:
+            _served(planted, prompts)
+    fired = int(capsys.readouterr().err.split("tail-unmap-undone fired: {'lent': ")[1].split("}")[0])
+    assert fired > 0 and parity(trace)["first_differing_step"] is not None
+    with pytest.raises(ValueError, match="cannot stage a prefill pass"):
+        _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.cache": "*=0.5"})
+    for policy in ("placement.lru@1", "placement.promote@1", "placement.profile_decay@1"):
+        with pytest.raises(ValueError, match="does not lend a tail"):
+            _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.placement": policy})
+
+
 def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     """The worst step of the startup profile runs on minimum pools, where a fill cache holds nothing to lend: its
     expert passes are still a streaming step's (sized by the step's tokens, not by the layout). At batch 1 (staging
@@ -390,7 +572,8 @@ def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     assert store.arena.min_units * store.arena.unit_bytes >= staged      # what it lays out below, alignment aside
     engine.ledger.materialize(None)                       # the profile's minimum pools
     offload = engine.executor.model.layers[0].ffn._store
-    assert not store.lending and offload.pass_tokens(10) == PASS
+    assert not store.lending and store.large_passes(10)
+    assert offload.pass_tokens(10) == min(s.kernel.pass_rows for s in offload._stacks) == CHUNK
 
 
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
@@ -630,7 +813,8 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
-                                           ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.25 ssd"),
+                                           ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
+                                           ("", "*=0.25 ssd"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
@@ -648,11 +832,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
-    ssd = ring == "ssd"                              # their copies on SMs / copy engines; "ssd": RAM holds a quarter
-    ring = "" if ssd else ring
+    ssd = ring == "ssd"                              # their copies on SMs / copy engines, "tail" lending a tail (D11)
+    ring = "" if ssd else ring                       # first; "ssd": RAM holds a quarter
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
-        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm"} | (
+        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
+        "moe.ring_lend": "tail" if ring == "tail" else "coldest"} | (
         {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
@@ -660,9 +845,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
     mode = "warn" if ring == "dma" else "error"                   # "dma": one sync per streaming step, counted
     with (route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
-          _no_host_sync(Lent, "begin", "sources", "done", mode=mode)):
+          _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails):
         warnings.simplefilter("always")
         assert _served(engine, prompts) == want
+    assert bool(tails) == (ring == "tail")
     syncs = [w for w in syncs if "called a synchronizing" in str(w.message)]
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
@@ -677,7 +863,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert store.exclusive and io.served() > 0 and io.flag() == 0
     if not policy:
         report = parity(trace)
-        assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache in ("*=0.25", "*=0.5"))
+        assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache != "" and cache != "*=0")
         assert report["device_is_mirror"] and bool(store.borrowed["ring"]) == bool(ring), (report, store.borrowed)
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0

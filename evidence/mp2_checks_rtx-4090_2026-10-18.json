@@ -1,0 +1,89 @@
+{
+ "name": "mp2_checks",
+ "gpu": "RTX 4090",
+ "date": "2026-10-18",
+ "method": "docs/v1-moe-prefill.md \u00a77.1; spikes/moe_prefill/identity.py, gemm.py, prefill.py; bench/holon_tg.py",
+ "commits": {
+  "main": "b5b1e7f",
+  "step1": "1026875",
+  "step2": "1c82ae1"
+ },
+ "identity_step1": {
+  "resident": {
+   "main": {
+    "tree": "b5b1e7f",
+    "expert_pass": {
+     "Resident": 512
+    },
+    "hashes": {
+     "1027": "9aa7630c426fab83eb8c2471b9793f741d40b3040dd7d13cba6486272e046281",
+     "4096": "877e5a617326e065fae3c410c115d8341c37e2c6720d686a3134da836916cf68"
+    },
+    "run_identical": true
+   },
+   "branch": {
+    "tree": "1026875",
+    "expert_pass": {
+     "Resident": 4096
+    },
+    "hashes": {
+     "1027": "9aa7630c426fab83eb8c2471b9793f741d40b3040dd7d13cba6486272e046281",
+     "4096": "877e5a617326e065fae3c410c115d8341c37e2c6720d686a3134da836916cf68"
+    },
+    "run_identical": true
+   },
+   "identical": true
+  }
+ },
+ "identity_step2": {
+  "resident": {
+   "main": {
+    "tree": "b5b1e7f",
+    "expert_pass": {
+     "Resident": 512
+    },
+    "hashes": {
+     "1027": "9aa7630c426fab83eb8c2471b9793f741d40b3040dd7d13cba6486272e046281",
+     "4096": "877e5a617326e065fae3c410c115d8341c37e2c6720d686a3134da836916cf68"
+    },
+    "run_identical": true
+   },
+   "branch": {
+    "tree": "1c82ae1",
+    "expert_pass": {
+     "Resident": 4096
+    },
+    "hashes": {
+     "1027": "9aa7630c426fab83eb8c2471b9793f741d40b3040dd7d13cba6486272e046281",
+     "4096": "877e5a617326e065fae3c410c115d8341c37e2c6720d686a3134da836916cf68"
+    },
+    "run_identical": true
+   },
+   "identical": true
+  }
+ },
+ "l0": {
+  "step1": "135 passed, 3 skipped, 1 warning in 150.01s (0:02:30)",
+  "step2": "277 passed, 9 skipped, 1 warning in 271.92s (0:04:31)"
+ },
+ "memcheck": {
+  "step1": "========= ERROR SUMMARY: 0 errors",
+  "step2": "========= ERROR SUMMARY: 0 errors"
+ },
+ "mutations_step2": {
+  "skip_tail": "62 failed, 78 deselected, 1 warning in 46.73s",
+  "fixup": "the test process aborted (a crash inside mmq with ids)"
+ },
+ "startup_kv_branch": {
+  "kv-kv_4090_branch": [
+   {
+    "kv_tokens": 25776,
+    "profiled_peak_gib": 0.974,
+    "max_model_len": 8192,
+    "allocated_after_start_gib": 19.944,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 1.243
+   }
+  ]
+ }
+}

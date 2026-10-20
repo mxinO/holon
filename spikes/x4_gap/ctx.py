@@ -9,6 +9,7 @@ beside its llama.cpp and FreeToken ones, and each engine's expert-cache counters
 - freetoken: offload_ctx's worker plus `moe_collect_stats` (its in-graph decode miss counters), read per request.
 - llama: offload_ctx's worker as is.
 
+An arm may name its own `python` (e.g. a wrapper pinning another tree's PYTHONPATH).
 `chunk` / `kernel_chunk` (arm keys) set std.moe's expert-path pass size and kernels.ggml_cuda's mmq rows per call in
 the Holon worker's process only (prefill probes for D8; both 512 as shipped).
 `--nsys-context C` brackets context C's request with cudaProfilerStart/Stop (for `nsys --capture-range=cudaProfilerApi`)
@@ -216,6 +217,8 @@ def freetoken_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
 
 def worker(a: argparse.Namespace) -> None:
     corpus = workloads.corpus(offload_ctx.CORPUS)
+    if a.prompt_shift:                  # another prompt per context: its start moved by prompt_shift · 7,919 tokens
+        offload_ctx.OFFSETS = {c: offload_ctx.OFFSETS.get(c, 0) + a.prompt_shift * 7919 for c in a.contexts}
     fn = {"holon": holon_worker, "freetoken": freetoken_worker, "llama": offload_ctx.llama_worker}[a.engine]
     print("RESULT " + json.dumps(fn(a, corpus)), flush=True)
 
@@ -244,10 +247,11 @@ def orchestrate(a: argparse.Namespace) -> None:
             else:
                 raise SystemExit(f"GPU stayed busy: {busy}")
             log = outdir / f"r{rnd}_{arm['name']}.log"
-            cmd = [*shlex.split(arm.get("wrap", "")), py[arm["engine"]], str(pathlib.Path(__file__)), "worker",
+            cmd = [*shlex.split(arm.get("wrap", "")), arm.get("python", py[arm["engine"]]), str(pathlib.Path(__file__)),
+                   "worker",
                    "--engine", arm["engine"], "--model", a.model, "--ctx", str(arm.get("ctx", a.ctx)),
                    "--flags", arm["flags"], "--contexts", *map(str, arm.get("contexts", a.contexts)),
-                   "--nsys-context", str(arm.get("nsys_context", 0))]
+                   "--nsys-context", str(arm.get("nsys_context", 0)), "--prompt-shift", str(arm.get("prompt_shift", 0))]
             if arm["engine"] == "llama":
                 cmd += ["--server", a.server, "--log", str(log.with_suffix(".server.log")),
                         "--wrap", arm.get("server_wrap", "")]
@@ -289,6 +293,7 @@ def main() -> None:
     w.add_argument("--wrap", default="")
     w.add_argument("--trace", help="holon: the decode routing per context (.npz)")
     w.add_argument("--nsys-context", type=int, default=0)
+    w.add_argument("--prompt-shift", type=int, default=0, help="another prompt per context (arm key prompt_shift)")
     w.add_argument("--chunk", type=int, default=0, help="holon: tokens per expert-path pass (std.moe CHUNK; 0: 512)")
     w.add_argument("--kernel-chunk", type=int, default=0, help="holon: kernels.ggml_cuda's mmq rows per call (0: 512)")
     o = sub.add_parser("run")

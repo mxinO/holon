@@ -1,0 +1,7 @@
+[
+ {
+  "name": "holon_ship",
+  "engine": "holon",
+  "args": "--ctx 16384 --max-seqs 32 --flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 2048 --overlap --page-size 16 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer'"
+ }
+]

@@ -21,7 +21,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 - Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots (or every
   slot, where that is at most 64 more), so an expert's rows are bitwise the same in arenas of 12, 13, 16, 74 and 128
   slots under any placement, at every tile width, and in compacted launches padded with null-slot rows to the type's
-  mmvq limit + 1, on both id helpers (per slot, compact; Q4_K, Q6_K, IQ2_XXS, IQ2_S, IQ3_XXS; gate/up and down).
+  mmvq limit + 1, on both id helpers (per slot, compact; the SM's `PASS_PROVEN` types; gate/up and down).
 - Violated preconditions set their bit in the kernel's `errors` word and leave only their own rows uncomputed: an id
   out of range, more slots than the binding's bound, a slot repeated inside rows beyond mmq's column tiles (within
   them it is computed; llama.cpp's helper instead left stale entries that wrote over a real row, which M0.2's padding
@@ -43,8 +43,11 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
+import math
 import os
+import re
 import types
+from unittest import mock
 
 import numpy as np
 import pytest
@@ -56,8 +59,22 @@ from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, q8_1
 from holon_judge.planted import PLANTS
 from holon_plugins.kernels.ggml_cuda import extension
-from holon_plugins.kernels.ggml_cuda.plugin import CHUNK, FP4, ID_ERRORS, NATIVE_FP4, PREC, TYPES, Prepared, q8_1_bytes
+from holon_plugins.kernels.ggml_cuda.plugin import (
+    CHUNK,
+    FP4,
+    ID_ERRORS,
+    IDS_J_TOKENS,
+    IDS_J_TOKENS_DEFAULT,
+    NATIVE_FP4,
+    PASS_PROVEN,
+    PASS_ROWS,
+    PREC,
+    TYPES,
+    Prepared,
+    q8_1_bytes,
+)
 from holon_std.moe import reference
+from holon_testing.pass_rows import check_pass_rows
 
 from .test_ggml_cuda import (
     SLACK,
@@ -144,8 +161,8 @@ def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "n
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), CHUNK), K,
-                                                                            kernel.slots))
+    return Sized(kernel, lambda x, parts, ids: kernel.lib.workspace_bytes_id(device, k, min(len(ids), kernel.pass_rows),
+                                                                            K, kernel.slots))
 
 
 def uniform(tokens: int, n: int, seed: int) -> torch.Tensor:
@@ -231,7 +248,8 @@ def test_link(sm):
     undefined = subprocess.run(["nm", "-D", "--undefined-only", str(extension.module_path(sm))],
                                capture_output=True, text=True, check=True).stdout
     assert not [s for s in undefined.split() if "ggml" in s or "gguf" in s]
-    for f in ("topk-moe.cu", "moe-weighted-reduction.cu"):
+    for f in ("topk-moe.cu", "moe-weighted-reduction.cu", "mmq.cu", "mmq.cuh", "mmq-load-tiles.cuh",
+              "mmq-config-ampere.cuh", "template-instances/mmq-instance-iq1_m.cu"):
         assert "Holon:" in (extension.CUDA_DIR / f).read_text()
 
 
@@ -241,6 +259,7 @@ def test_linear_experts_every_type(ctx, lib, name):
     down = experts(ctx, name, INTER, H, K)
     t = gate_up.mmvq_tokens
     assert 1 <= t <= 8 and fused.mmvq_tokens == down.mmvq_tokens == t
+    assert fused.glu_store, f"{name}: D4's store not taken at out {2 * INTER}"       # every type, on every MMA SM
     sg, sd = stack(name, E, 2 * INTER, H, seed=1), stack(name, E, H, INTER, seed=2)
     for tokens in (1, t, t + 1, 64):
         ids, x, h = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens), down_input(tokens, tokens)
@@ -252,15 +271,21 @@ def test_linear_experts_every_type(ctx, lib, name):
 
 
 @pytest.mark.parametrize("name", sorted(TYPES))
-def test_linear_experts_every_type_at_prefill_chunks(ctx, name):
+def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
     """mmq's prefill kernels on every type: the tile width J follows the chunk's tokens (128 at a 512-token chunk,
     64 at the sweep's 64), and each J is its own kernel. A small stack (8 experts, 256 rows) keeps it to ~1M
-    outputs; 513 tokens adds the one-token mmvq tail chunk."""
+    outputs; 513 tokens adds the one-token mmvq tail chunk. D0's passes (docs/v1-moe-prefill.md): `pass_rows` is
+    PASS_ROWS on a pair of `PASS_PROVEN` (this SM's), else CHUNK, and where it is larger a call of up to 4,608 rows
+    gives each row its 512-row chunk's bits (holon_testing's check; Qwen3-30B-A3B's 128 experts: the NaN test)."""
     n, out = 8, 256
     kernel, s = experts(ctx, name, H, out, 1, n=n), stack(name, n, out, H, seed=5)
+    assert kernel.pass_rows == (PASS_ROWS if (sm, name, "q8_1") in PASS_PROVEN else CHUNK)
     for tokens in (CHUNK, CHUNK + 1):
         ids, x = uniform(tokens, n, seed=tokens), gate_up_input(tokens, seed=tokens)
         check(kernel(x, s.parts, ids), emulated(kernel, s, x, ids), H, f"{name} T={tokens}", True)
+    if kernel.pass_rows > CHUNK:
+        ids, x = uniform(9 * CHUNK, n, seed=9), gate_up_input(9 * CHUNK, seed=9)
+        check_pass_rows(kernel, s.parts, x, ids, name)
 
 
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
@@ -297,11 +322,39 @@ def qwen_stacks():
             for name in ("q4_k", "iq3_xxs")}
 
 
+@pytest.mark.parametrize("name", ["q2_0", "iq4_nl"])
+def test_linear_experts_at_in_640(ctx, lib, name):
+    """T6 (docs/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
+    but not of 256) on mmvq and mmq with ids, at a chunk and at a pass of two; mmq's last K step stays inside each
+    row (the bytes after the stack are poison). Both types are `PASS_PROVEN`: a pass gives each row its chunk's bits
+    at 640 too (a small stack, as in the every-type test). mmq takes its `tail` instances there only: at 768 (whole
+    K steps) upstream's."""
+    down = experts(ctx, name, 640, H, K)
+    sd, t = stack(name, E, H, 640, seed=13), down.mmvq_tokens
+    for tokens in (1, t, t + 1, 64, 2 * CHUNK + 1):
+        ids = uniform(tokens, E, seed=tokens)
+        h = torch.randn(tokens, K, 640, generator=torch.Generator().manual_seed(tokens)).cuda()
+        y = down(h, sd.parts, ids)
+        check(y, emulated(down, sd, h, ids), 640, f"down {name} at 640, T={tokens}")
+    ids = uniform(64, E, seed=64)
+    for k, tail in ((640, "true"), (INTER, "false")):
+        kern, s = (down, sd) if k == 640 else (experts(ctx, name, k, H, K), stack(name, E, H, k, seed=15))
+        h = torch.randn(64, K, k, generator=torch.Generator().manual_seed(k)).cuda()
+        names = [n for n in launched(lambda kern=kern, h=h, s=s: kern(h, s.parts, ids))
+                 if n.startswith("void mul_mat_q<")]
+        assert names and {re.match(r"void mul_mat_q<([^>]*)>", n)[1].split(", ")[-1] for n in names} == {tail}, names
+    small = experts(ctx, name, 640, 256, 1, n=8)
+    if small.pass_rows > CHUNK:
+        h = torch.randn(9 * CHUNK, 1, 640, generator=torch.Generator().manual_seed(9)).cuda()
+        check_pass_rows(small, stack(name, 8, 256, 640, seed=14).parts, h, uniform(9 * CHUNK, 8, seed=9), name)
+
+
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs"])
 def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     sg, sd = qwen_stacks[name]
     gate_up, fused = experts(ctx, name, H, 2 * INTER, 1, n=EQ), experts(ctx, name, H, 2 * INTER, 1, "swiglu", n=EQ)
     down = experts(ctx, name, INTER, H, K, n=EQ)
+    assert fused.glu_store, f"{name}: D4's store not taken at out {2 * INTER}"
     t = gate_up.mmvq_tokens
     rng = torch.Generator().manual_seed(7)
     same = torch.randperm(EQ, generator=rng)[:K]
@@ -326,6 +379,49 @@ def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     for kern, s, inp, k in ((gate_up, sg, x, H), (down, sd, h, INTER)):
         r = l0.check(kern(inp[:t], s.parts, ids[:t]), kern(inp, s.parts, ids)[:t], torch.bfloat16, k)
         assert r.passed, f"{name} in={k}: mmvq at {t} tokens vs mmq at {t + 1}: {r}"
+
+
+@pytest.mark.parametrize("name", ["q4_k", "q6_k"])
+def test_every_tile_of_every_entry_is_written(ctx, lib, name):
+    """D2 (docs/v1-moe-prefill.md): mmq with ids launches only column tiles that hold rows, each block finding its
+    entry by a binary search over the entries' bounds, at a tile width chosen against the mean rows per entry. Into an
+    output pre-filled with NaN every row of every entry is written, through each id helper (calls of 9 to 4,096 rows
+    at E = 128), with routings that give one entry many tiles (every token on 8 experts, a skewed popularity) or many
+    entries one partial tile (uniform); each row's bits are its row's in the 4,096-row call (the tile width does not
+    move them), that call's rows are its 512-row chunks' calls' (D0's `pass_rows` at E = 128), calls of 512, 2,048
+    and 4,096 rows take the per-slot, compact and device-wide helpers, and no stream-k fixup is launched."""
+    device, errors, slots = torch.cuda.current_device(), torch.zeros(1, dtype=torch.int32, device="cuda"), EQ + K
+    rng = torch.Generator().manual_seed(17)
+    hot = 1 / torch.arange(1, EQ + 1, dtype=torch.float64)[torch.randperm(EQ, generator=rng)]
+    routings = {"uniform": uniform(PASS_ROWS, EQ, seed=17),
+                "same 8 experts": torch.randperm(EQ, generator=rng)[:K][torch.rand(PASS_ROWS, K, generator=rng)
+                                                                         .argsort(-1)].int().cuda(),
+                "skewed": torch.multinomial(hot.expand(PASS_ROWS, EQ), K, generator=rng).int().cuda()}
+    for stage, (k, out, _) in STAGES.items():
+        s = stack(name, EQ, out, k, seed=18)
+        w = s.w.view(-1, s.w.shape[-1])
+        x = (gate_up_input if stage == "gate_up" else down_input)(PASS_ROWS, seed=19)
+
+        def call(n, ids, a=0, x=x, w=w, k=k, out=out):
+            y = torch.full((n, K, out), float("nan"), device="cuda")
+            ws = torch.empty(lib.workspace_bytes_id(device, k, n, K, slots), dtype=torch.uint8, device="cuda")
+            lib.mmq_id(TYPES[name], PREC["q8_1"], w, x[a:a + n], ids[a:a + n], y, ws, slots, errors, J_AGAINST_T)
+            return y
+        for routing, ids in routings.items():
+            what = f"{name} {stage} {routing}"
+            assert all(len(set(row)) == K for row in ids[:64].tolist())
+            ref = call(PASS_ROWS, ids)
+            assert not ref.isnan().any(), what
+            for n in (9, 64, CHUNK, 4 * CHUNK):
+                y = call(n, ids)
+                assert not y.isnan().any() and torch.equal(y, ref[:n]), f"{what} T={n}"
+            chunks = torch.cat([call(CHUNK, ids, a) for a in range(0, PASS_ROWS, CHUNK)])
+            assert torch.equal(ref, chunks), f"{what}: the 4,096-row call against its chunks' calls"
+            names = set().union(*(launched(lambda n=n, ids=ids: call(n, ids)) for n in (CHUNK, 4 * CHUNK, PASS_ROWS)))
+            assert not any("stream_k_fixup" in c for c in names), what
+            helpers = ("mm_ids_helper_per_slot", "mm_ids_helper_compact", "mm_ids_device")
+            assert all(any(h in c for c in names) for h in helpers), f"{what}: {sorted(names)}"
+    assert int(errors) == 0
 
 
 def test_mixed_types_in_one_layer(ctx, sm):
@@ -384,7 +480,9 @@ def test_ids_from_moe_topk(ctx, qwen_stacks):
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "nvfp4/hf"])
 def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
     """Captured at every decode bucket (mmvq up to the limit, mmq above), replayed with other ids and inputs: the
-    result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device)."""
+    result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device) — and
+    so with passed buffers (docs/v1-moe-prefill.md D10), static, NaN-poisoned: gate/up's and down's `out`, and one
+    `scratch` for both calls."""
     if name == "nvfp4/hf":
         gate_up, down, pg, pd, _ = nvfp4_stacks(ctx, EQ)
     else:
@@ -412,9 +510,23 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         ids.copy_(uniform(tokens, EQ, seed=tokens + 1))
         graph.replay()
         assert torch.equal(y, layer()), f"{name} T={tokens}: replay on new routing differs from eager"
+        h, out = torch.full((tokens, K, INTER), torch.nan, device="cuda"), torch.full_like(y, torch.nan)
+        scratch = torch.full((max(gate_up.scratch_bytes(tokens), down.scratch_bytes(tokens)),), 0xFF,
+                             dtype=torch.uint8, device="cuda")
+        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens and not gate_up.glu_store)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            down(gate_up(x, pg, ids, out=h, scratch=scratch), pd, ids, out=out, scratch=scratch)
+        x.copy_(layer_input(tokens, seed=tokens + 2)[:, None])
+        ids.copy_(uniform(tokens, EQ, seed=tokens + 2))
+        graph.replay()
+        assert torch.equal(out, layer()), f"{name} T={tokens}: replay with passed buffers differs from eager"
 
 
-PLACED = ["q4_k", "q6_k", "iq2_xxs", "iq2_s", "iq3_xxs"]     # the vehicle's (Q4_K_M) and the IQ2 / IQ3 MoE quants'
+# per SM, the types D0 proves there (`PASS_PROVEN`: the lock classes' expert types and FN's MoE quants)
+SM = 10 * torch.cuda.get_device_capability()[0] + torch.cuda.get_device_capability()[1] if torch.cuda.is_available() \
+    else 0
+PLACED = sorted({t for s, t, _ in PASS_PROVEN if s == SM})
 EP = 12                                                     # experts placed in an arena, k = 8 of them per token
 SLOTS = (EP, EP + 1, 16, 74)                                # docs/v1-offload.md D4's slot counts
 STAGES = {"gate_up": (H, 2 * INTER, 1), "down": (INTER, H, K)}          # in, out, input rows per token
@@ -460,6 +572,8 @@ def placed_inputs(stage: str, tokens: int, seed: int) -> tuple[torch.Tensor, tor
 # EP + K slots per call): per slot where the launch lists every slot (at most 64 more than EP + K, SLOTS included),
 # compact where the arena has more
 HELPERS = {"per_slot": EP + K, "compact": 128}
+# mmq with ids picks J against a call's tokens up to this many, above against its entries' mean (the plugin's rule)
+J_AGAINST_T = IDS_J_TOKENS.get(SM, IDS_J_TOKENS_DEFAULT)
 
 
 def helper(fn) -> str:
@@ -472,11 +586,12 @@ def helper(fn) -> str:
 def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name, stage):
     """D4's placement invariance on mmq with ids: an expert's rows are bitwise the same wherever an arena places it
     (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
-    permutations) and at every mmq tile width (token
-    counts from the mmvq limit + 1 to a 512-token chunk: J from 8 or 16 up to 128), all against one launch over EP
-    slots in order at 512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K
-    at points that move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same
-    grid says so), and its rows differed."""
+    permutations) and at every mmq tile width (token counts from the mmvq limit + 1 to 320 on the 128-slot arena,
+    whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to J_AGAINST_T and
+    above against the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at
+    512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that
+    move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same grid says so),
+    and its rows differed."""
     k, out, _ = STAGES[stage]
     s = stack(name, EP, out, k, seed=21)
     x, ids = placed_inputs(stage, CHUNK, seed=22)
@@ -485,12 +600,14 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     device, typ = torch.cuda.current_device(), TYPES[name]
     assert any(lib.mmq_schedule(device, typ, PREC["q8_1"], out * n, 64)[0] == 2 for n in SLOTS)
     launches = [(n, "random", t) for n in (*SLOTS, HELPERS["compact"]) for t in (64, CHUNK)] + [(EP, "reversed", 64)]
-    a = arena(ctx, s, stage, SLOTS[-1], "random")
-    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 40, 48, 80, 96, 112, 128, 200})
-    widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, t)[2] for t in tiles}
+    a = arena(ctx, s, stage, HELPERS["compact"], "random")
+    tiles = sorted({a.kernel.mmvq_tokens + 1, 16, 24, 32, 48, 64, 96, 112, 128, 160, 180, 200, 256, 320})
+    rows = [t if t <= J_AGAINST_T else -(-t * K // a.kernel.slots) for t in tiles]     # what J is chosen against
+    widths = {lib.mmq_schedule(device, typ, PREC["q8_1"], out, r)[2] for r in rows}
     assert min(widths) <= 16 and max(widths) == 128 and len(widths) >= 9
-    for n, placement, tokens in launches + [(SLOTS[-1], "random", t) for t in tiles]:
-        y, path = (a if n == SLOTS[-1] else arena(ctx, s, stage, n, placement))(x[:tokens], ids[:tokens])
+    for n, placement, tokens in launches + [(HELPERS["compact"], "random", t) for t in tiles]:
+        same = (n, placement) == (HELPERS["compact"], "random")
+        y, path = (a if same else arena(ctx, s, stage, n, placement))(x[:tokens], ids[:tokens])
         assert path == "mmq/q8_1" and torch.equal(y, ref[:tokens]), f"{name} {stage}: {n} slots {placement}, T={tokens}"
 
 
@@ -499,20 +616,22 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
 def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     """D8's expert passes: the arena binding (`linear_experts_arena@1`) takes 4,096 rows per mmq call at top-8 (32,768
     pairs: the id helper's device-wide path, past one block's 16,384), in whole 512-row chunks, and each row is bitwise
-    what a 512-row call — the reference chunk's — gives it, with every expert of the layer in its arena. On that path
-    the helper flags as the others do: ids out of range, more slots than the bound, a slot past mmq's column tiles."""
+    what a 512-row call — the reference chunk's — gives it, with every expert of the layer in its arena; with passed
+    buffers too (`passed_buffers`). On that path the helper flags as the others do: ids out of range, more slots than
+    the bound, a slot past mmq's column tiles."""
     k, out, rows = STAGES[stage]
     s = stack(name, EP, out, k, seed=31)
     facts = {"layout": f"ggml.{name}/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
              "rows_per_token": rows, "glu": "none", "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
              "slots": EP + K}
     kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
-    assert kernel.chunk == 4096
+    assert kernel.pass_rows == 4096
     parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
     x, ids = placed_inputs(stage, 4608, seed=32)
     y = kernel(x, parts, ids)
     assert torch.equal(y, torch.cat([kernel(x[a:a + CHUNK], parts, ids[a:a + CHUNK]) for a in range(0, 4608, CHUNK)]))
     assert any("mm_ids_device" in n for n in launched(lambda: kernel(x[:4096], parts, ids[:4096])))
+    passed_buffers(ctx, facts, parts, x, ids)
     if name != "q4_k" or stage != "gate_up":
         return
     x, ids, errors = x[:4096], ids[:4096], kernel.errors
@@ -533,6 +652,48 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     errors.zero_()
     narrow(x, parts, ids)
     assert int(errors) == ID_ERRORS["slots"], "more slots than the bound"
+
+
+def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
+    """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
+    `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
+    tail) give the allocating call's bits; `scratch` is gate/up's f32 output only (the persistent workspace holds every
+    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short or misaligned buffer, or one
+    overlapping another or `x`, is refused before anything is launched."""
+    for glu, fused in (("none", True), ("swiglu", True), ("swiglu", False)):
+        f = facts | {"glu": glu}
+        kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **f).impl(ctx, **f)
+        kernel.glu_store &= fused
+        assert kernel.scratch_bytes(kernel.mmvq_tokens) == 0
+        small, empty = kernel.mmvq_tokens, torch.empty(0, dtype=torch.uint8, device="cuda")
+        want = kernel(x[:small], parts, ids[:small])
+        with (mock.patch.object(kernel, "_gate_up_out", side_effect=AssertionError),        # mmvq calls do none of
+              mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
+            assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
+        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4)
+        for tokens in (len(ids), len(ids) - CHUNK + 1):
+            want = kernel(x[:tokens], parts, ids[:tokens])
+            out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
+                                                                        dtype=torch.uint8, device="cuda")
+            got = kernel(x[:tokens], parts, ids[:tokens], out=out, scratch=scratch)
+            assert got is out and torch.equal(out, want), f"{glu}, T={tokens}: passed buffers"
+    shape, nbytes = (len(ids), K, kernel.out_y), kernel.scratch_bytes(len(ids))
+    room = torch.empty(nbytes + 512, dtype=torch.uint8, device="cuda")
+    at = -room.data_ptr() % 256
+    scratch, size = room[at:at + nbytes], math.prod(shape) * 4
+    flat = torch.empty(x.nbytes + size, dtype=torch.uint8, device="cuda")          # out's first bytes are x's last
+    for kw, why in (({"scratch": scratch[:-1]}, "scratch"), ({"scratch": room[at + 1:at + 1 + nbytes]}, "scratch"),
+                    ({"out": scratch[:size].view(torch.float32).view(shape), "scratch": scratch}, "overlaps"),
+                    ({"out": torch.empty(*shape[:2], shape[2] + 1, device="cuda")}, "contiguous f32"),
+                    ({"out": flat[x.nbytes - 256:][:size].view(torch.float32).view(shape),
+                      "x": flat[:x.nbytes].view(x.dtype).view(x.shape)}, "overlaps"),
+                    ({"scratch": scratch, "x": scratch[256:256 + x.nbytes].view(x.dtype).view(x.shape)}, "overlaps")):
+        xs = kw.pop("x", x)
+
+        def call(kw=kw, xs=xs, why=why):
+            with pytest.raises(ValueError, match=why):
+                kernel(xs, parts, ids, **kw)
+        assert not launched(call), why
 
 
 @pytest.mark.parametrize("name", PLACED)
@@ -673,7 +834,9 @@ def test_moe_router(ctx, lib, n, hidden):
     q8_1 loop runs several rounds at 16 experts of 4,096); the tile counters left zeroed, so a second call
     (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
     Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
-    `moe_topk`)."""
+    `moe_topk`); for prompt chunks (CHUNK rows and more, experts a multiple of 64: docs/v1-moe-prefill.md D3) the
+    router GEMM's logits, within the f32 budget and row-invariant across calls of 512 rows and more, then `moe_topk`'s
+    selection on them, bitwise."""
     gen = torch.Generator().manual_seed(n)
     router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
     router[1] = router[0]                                               # tied logits: the lower id first
@@ -708,7 +871,20 @@ def test_moe_router(ctx, lib, n, hidden):
                 assert all(map(bitwise, call(x[a:b]), (logits[a:b], w[a:b], ids[a:b]))), f"rows {a}:{b}"
             if x.dtype == torch.bfloat16:
                 assert all(map(bitwise, route(x[:rows], router), (w[:rows], ids[:rows])))
-                assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                if n % 64:
+                    assert all(map(bitwise, route(x, router), choose(torch.nn.functional.linear(x.float(), router))))
+                    continue
+                def logits_of(rows_: torch.Tensor) -> torch.Tensor:
+                    out = torch.full((len(rows_), n), float("nan"), device="cuda")
+                    lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n), *out.shape,
+                                                                     device="cuda"), out)
+                    return out
+                gemm = logits_of(x)
+                r = l0.check(gemm[finite], x[finite].double() @ router.double().T, torch.float32, hidden)
+                assert r.passed, f"router GEMM: {r}"
+                for a, b in ((0, CHUNK), (len(x) - CHUNK, len(x)), (3, 70)):
+                    assert bitwise(logits_of(x[a:b]), gemm[a:b]), f"router GEMM rows {a}:{b}"
+                assert all(map(bitwise, route(x, router), choose(gemm)))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
 
 
@@ -882,12 +1058,16 @@ def test_nvfp4_scale2_per_expert_on_both_paths(ctx, lib):
         check(y, emulated(down, weighted, h, ids), INTER, f"down T={tokens}")
         assert torch.equal(y, down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None]), f"down T={tokens}"
     ids, x, h = uniform(64, E, seed=5), gate_up_input(64, seed=5), down_input(64, 5)
+    # D4: the fused store (docs/v1-moe-prefill.md) against ours with halves scaled to f32's smallest normals, their
+    # products below them (flushed alike)
+    assert fused.glu_store and check_swiglu(lib, fused, none, sg, x, ids, "subnormal halves",
+                                            gu | {"scale2": gu["scale2"] * 1e-36}) is None
     with pytest.raises(ValueError, match=r"scale2 \(32,\) for 32 experts, glu swiglu"):    # one row for two halves
         fused(x, gu | {"scale2": dw["scale2"]}, ids)
     with PLANTS["nvfp4-scale2-by-slot"]():                                                                  # N4
         assert not torch.equal(down(h, dw, ids), down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None])
     with PLANTS["nvfp4-scale2-after-swiglu"](), pytest.raises(AssertionError, match="mmq's SwiGLU differs"):  # N5
-        check_swiglu(lib, fused, none, sg, x, ids, "N5", gu)
+        check_swiglu(lib, experts(ctx, "nvfp4/hf", H, 2 * INTER, 1, "swiglu"), none, sg, x, ids, "N5", gu)
 
 
 @pytest.mark.parametrize("name", FP4)

@@ -1,0 +1,26 @@
+[
+ {
+  "name": "nsys_holon_ship",
+  "engine": "holon",
+  "args": "--profile ",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_holon_all4k",
+  "engine": "holon",
+  "args": "--profile --pass-tokens 4096 --expert-rows 4096 --dense-rows 4096",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_ft_fused",
+  "engine": "freetoken",
+  "args": "--profile --flags '--moe-strategy fused'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ },
+ {
+  "name": "nsys_ft_fused_g4096",
+  "engine": "freetoken",
+  "args": "--profile --flags '--moe-strategy fused --max-extend-length 4096'",
+  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"
+ }
+]
