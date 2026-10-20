@@ -12,11 +12,9 @@
 // Holon: T6 (docs/v1-moe-prefill.md §10). A row of `stride` blocks whose width is not a multiple of MMQ_ITER_K: the
 // last K step's blocks past the row re-read the row's last block, not the next row's (or past the buffer). The
 // activations there are q8_1's zero padding, so those products are 0 either way: the same bits as upstream's padded
-// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block.
+// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block. Always applied: the
+// clamp never binds at whole K steps, and a fast exit for them measured slower (its branch; the record in §10).
 template <int qk> static __device__ __forceinline__ int ggml_cuda_mmq_kblock(const int kbx0, const int stride, const int kbx) {
-    if (stride % (MMQ_ITER_K / qk) == 0) {          // rows of whole K steps (every width a multiple of 256): upstream's
-        return kbx0 + kbx;
-    }
     const int kb0 = kbx0 % stride;
     return kbx0 - kb0 + min(kb0 + kbx, stride - 1);
 }

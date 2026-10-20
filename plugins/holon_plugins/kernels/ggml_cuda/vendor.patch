@@ -1527,7 +1527,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
 --- a/ggml/src/ggml-cuda/mmq-load-tiles.cuh
 +++ b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
-@@ -4,8 +4,25 @@
+@@ -4,8 +4,23 @@
  
  #include "mmq.cuh"
  
@@ -1539,11 +1539,9 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
 +// Holon: T6 (docs/v1-moe-prefill.md §10). A row of `stride` blocks whose width is not a multiple of MMQ_ITER_K: the
 +// last K step's blocks past the row re-read the row's last block, not the next row's (or past the buffer). The
 +// activations there are q8_1's zero padding, so those products are 0 either way: the same bits as upstream's padded
-+// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block.
++// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block. Always applied: the
++// clamp never binds at whole K steps, and a fast exit for them measured slower (its branch; the record in §10).
 +template <int qk> static __device__ __forceinline__ int ggml_cuda_mmq_kblock(const int kbx0, const int stride, const int kbx) {
-+    if (stride % (MMQ_ITER_K / qk) == 0) {          // rows of whole K steps (every width a multiple of 256): upstream's
-+        return kbx0 + kbx;
-+    }
 +    const int kb0 = kbx0 % stride;
 +    return kbx0 - kb0 + min(kb0 + kbx, stride - 1);
 +}
@@ -1554,7 +1552,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -38,7 +55,7 @@
+@@ -38,7 +53,7 @@
              i = min(i, i_max);
          }
  
@@ -1563,7 +1561,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int16_t    * qxi = (const int16_t *) bxi->qs + kqsx * 2;
  
          const int dst_offset = kbx*(scale_entries_per_block*QI8_0) + kqsx*QI8_0;
-@@ -85,7 +102,7 @@
+@@ -85,7 +100,7 @@
              i = min(i, i_max);
          }
  
@@ -1572,7 +1570,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + ksx] = bxi->d;
-@@ -96,7 +113,7 @@
+@@ -96,7 +111,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_0(
@@ -1581,7 +1579,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -129,7 +146,7 @@
+@@ -129,7 +144,7 @@
              i = min(i, i_max);
          }
  
@@ -1590,7 +1588,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int16_t    * qxi = (const int16_t *) bxi->qs + kqsx * 4;
  
          const int dst_offset = kbx*(scale_entries_per_block*QI8_0) + kqsx*QI8_0;
-@@ -174,7 +191,7 @@
+@@ -174,7 +189,7 @@
              i = min(i, i_max);
          }
  
@@ -1599,7 +1597,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + ksx] = bxi->d;
-@@ -185,7 +202,7 @@
+@@ -185,7 +200,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
@@ -1608,7 +1606,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -214,7 +231,7 @@
+@@ -214,7 +229,7 @@
              i = min(i, i_max);
          }
  
@@ -1617,7 +1615,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int qs0 = get_int_b2(bxi->qs, kqsx);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -237,7 +254,7 @@
+@@ -237,7 +252,7 @@
              i = min(i, i_max);
          }
  
@@ -1626,7 +1624,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                     + kbxd] = bxi->d;
-@@ -248,7 +265,7 @@
+@@ -248,7 +263,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_1(
@@ -1635,7 +1633,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -277,7 +294,7 @@
+@@ -277,7 +292,7 @@
              i = min(i, i_max);
          }
  
@@ -1644,7 +1642,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int qs0 = get_int_b4(bxi->qs, kqsx);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -300,7 +317,7 @@
+@@ -300,7 +315,7 @@
              i = min(i, i_max);
          }
  
@@ -1653,7 +1651,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_dm[i*sram_stride                     + kbxd] = bxi->dm;
-@@ -311,7 +328,7 @@
+@@ -311,7 +326,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_0(
@@ -1662,7 +1660,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -340,7 +357,7 @@
+@@ -340,7 +355,7 @@
              i = min(i, i_max);
          }
  
@@ -1671,7 +1669,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ql = get_int_b2(bxi->qs, kqsx);
          const int qh = get_int_b2(bxi->qh, 0) >> (4 * kqsx);
-@@ -380,7 +397,7 @@
+@@ -380,7 +395,7 @@
              i = min(i, i_max);
          }
  
@@ -1680,7 +1678,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                     + kbxd] = bxi->d;
-@@ -391,7 +408,7 @@
+@@ -391,7 +406,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_1(
@@ -1689,7 +1687,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -420,7 +437,7 @@
+@@ -420,7 +435,7 @@
              i = min(i, i_max);
          }
  
@@ -1698,7 +1696,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ql = get_int_b4(bxi->qs, kqsx);
          const int qh = get_int_b4(bxi->qh, 0) >> (4 * kqsx);
-@@ -458,7 +475,7 @@
+@@ -458,7 +473,7 @@
              i = min(i, i_max);
          }
  
@@ -1707,7 +1705,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_dm[i*sram_stride                     + kbxd] = bxi->dm;
-@@ -469,7 +486,7 @@
+@@ -469,7 +484,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
@@ -1716,7 +1714,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -499,14 +516,15 @@
+@@ -499,14 +514,15 @@
              i = min(i, i_max);
          }
  
@@ -1737,7 +1735,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
      }
  
-@@ -522,7 +540,7 @@
+@@ -522,7 +538,7 @@
              i = min(i, i_max);
          }
  
@@ -1746,7 +1744,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + kbxd] = bxi->d;
-@@ -535,7 +553,7 @@
+@@ -535,7 +551,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_K(
@@ -1755,7 +1753,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -562,7 +580,7 @@
+@@ -562,7 +578,7 @@
              i = min(i, i_max);
          }
  
@@ -1764,7 +1762,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int x_ql_0 = get_int_b2(bxi->qs, kqsx);
  
-@@ -596,7 +614,7 @@
+@@ -596,7 +612,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q3_K(
@@ -1773,7 +1771,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -624,7 +642,7 @@
+@@ -624,7 +640,7 @@
              i = min(i, i_max);
          }
  
@@ -1782,7 +1780,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int x_ql_0 = get_int_b2(bxi->qs,    kqsx);
          const int x_qh_0 = get_int_b2(bxi->hmask, kqsx % (QI3_K/2)) >> (4 * (kqsx / (QI3_K/2)));
-@@ -655,7 +673,7 @@
+@@ -655,7 +671,7 @@
              i = min(i, i_max);
          }
  
@@ -1791,7 +1789,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ksc = threadIdx.x % 4;
  
-@@ -691,7 +709,7 @@
+@@ -691,7 +707,7 @@
              i = min(i, i_max);
          }
  
@@ -1800,7 +1798,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_df[i] = bxi->d;
      }
-@@ -709,7 +727,7 @@
+@@ -709,7 +725,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_K(
@@ -1809,7 +1807,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -737,7 +755,7 @@
+@@ -737,7 +753,7 @@
              i = min(i, i_max);
          }
  
@@ -1818,7 +1816,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int qs0 = get_int_b4(bxi->qs, txi);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -766,7 +784,7 @@
+@@ -766,7 +782,7 @@
                  i = min(i, i_max);
              }
  
@@ -1827,7 +1825,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
              const int * scales = (const int *) bxi->scales;
              const int ksc = threadIdx.x % 2;
-@@ -794,7 +812,7 @@
+@@ -794,7 +810,7 @@
              i = min(i, i_max);
          }
  
@@ -1836,7 +1834,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_dm[i] = bxi->dm;
      }
-@@ -807,7 +825,7 @@
+@@ -807,7 +823,7 @@
              i = min(i, i_max);
          }
  
@@ -1845,7 +1843,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int * scales = (const int *) bxi->scales;
  
-@@ -820,7 +838,7 @@
+@@ -820,7 +836,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_K(
@@ -1854,7 +1852,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -848,7 +866,7 @@
+@@ -848,7 +864,7 @@
              i = min(i, i_max);
          }
  
@@ -1863,7 +1861,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int ky = QR5_K*txi;
  
          const int ql = get_int_b4(bxi->qs, txi);
-@@ -889,7 +907,7 @@
+@@ -889,7 +905,7 @@
                  i = min(i, i_max);
              }
  
@@ -1872,7 +1870,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
              const int * scales = (const int *) bxi->scales;
              const int ksc = threadIdx.x % 2;
-@@ -917,7 +935,7 @@
+@@ -917,7 +933,7 @@
              i = min(i, i_max);
          }
  
@@ -1881,7 +1879,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_dm[i] = bxi->dm;
      }
-@@ -931,7 +949,7 @@
+@@ -931,7 +947,7 @@
              i = min(i, i_max);
          }
  
@@ -1890,7 +1888,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int * scales = (const int *) bxi->scales;
  
-@@ -944,7 +962,7 @@
+@@ -944,7 +960,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q6_K(
@@ -1899,7 +1897,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -973,7 +991,7 @@
+@@ -973,7 +989,7 @@
              i = min(i, i_max);
          }
  
@@ -1908,7 +1906,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ql = get_int_b2(bxi->ql, txi);
          const int ql0 = (ql >> 0) & 0x0F0F0F0F;
-@@ -1003,7 +1021,7 @@
+@@ -1003,7 +1019,7 @@
              i = min(i, i_max);
          }
  
@@ -1917,7 +1915,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride]                     = bxi->d;
-@@ -1021,7 +1039,7 @@
+@@ -1021,7 +1037,7 @@
              i = min(i, i_max);
          }
  
@@ -1926,7 +1924,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_sc[i*sram_stride + threadIdx.x%4] = get_int_b2(bxi->scales, threadIdx.x % (MMQ_TILE_NE_K/8));
-@@ -1034,7 +1052,7 @@
+@@ -1034,7 +1050,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq1_s(
@@ -1935,7 +1933,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1061,7 +1079,7 @@
+@@ -1061,7 +1077,7 @@
              i = min(i, i_max);
          }
  
@@ -1944,7 +1942,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int       qs_packed = get_int_b2(bxi->qs, kqsx);
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1095,8 +1113,78 @@
+@@ -1095,8 +1111,78 @@
      }
  }
  
@@ -2024,7 +2022,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1123,7 +1211,7 @@
+@@ -1123,7 +1209,7 @@
              i = min(i, i_max);
          }
  
@@ -2033,7 +2031,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int q2 = get_int_b2(bxi->qs, 2*kqsx+0);
          const uint8_t * aux8 = (const uint8_t *) &q2;
-@@ -1160,7 +1248,7 @@
+@@ -1160,7 +1246,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_xs(
@@ -2042,7 +2040,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1187,7 +1275,7 @@
+@@ -1187,7 +1273,7 @@
              i = min(i, i_max);
          }
  
@@ -2051,7 +2049,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2 q2_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint16_t * q2 = (const uint16_t *) &q2_packed;
-@@ -1225,7 +1313,7 @@
+@@ -1225,7 +1311,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_s(
@@ -2060,7 +2058,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1251,7 +1339,7 @@
+@@ -1251,7 +1337,7 @@
              i = min(i, i_max);
          }
  
@@ -2069,7 +2067,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int       qs_packed = get_int_b2(bxi->qs, kqsx);
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1293,7 +1381,7 @@
+@@ -1293,7 +1379,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_xxs(
@@ -2078,7 +2076,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1320,7 +1408,7 @@
+@@ -1320,7 +1406,7 @@
              i = min(i, i_max);
          }
  
@@ -2087,7 +2085,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2 q3_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint8_t * q3 = (const uint8_t *) &q3_packed;
-@@ -1357,7 +1445,7 @@
+@@ -1357,7 +1443,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_s(
@@ -2096,7 +2094,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1384,7 +1472,7 @@
+@@ -1384,7 +1470,7 @@
              i = min(i, i_max);
          }
  
@@ -2105,7 +2103,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2      qs_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1426,7 +1514,7 @@
+@@ -1426,7 +1512,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_xs(
@@ -2114,7 +2112,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1453,7 +1541,7 @@
+@@ -1453,7 +1539,7 @@
              i = min(i, i_max);
          }
  
@@ -2123,7 +2121,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int aux_q4 = get_int_b4(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
-@@ -1477,7 +1565,7 @@
+@@ -1477,7 +1563,7 @@
              i = min(i, i_max);
          }
  
@@ -2132,7 +2130,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const float d = __half2float(bxi->d);
  
-@@ -1493,7 +1581,7 @@
+@@ -1493,7 +1579,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_nl(
@@ -2141,7 +2139,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1522,7 +1610,7 @@
+@@ -1522,7 +1608,7 @@
              i = min(i, i_max);
          }
  
@@ -2150,7 +2148,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int aux_q4 = get_int_b2(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
-@@ -1549,7 +1637,7 @@
+@@ -1549,7 +1635,7 @@
              i = min(i, i_max);
          }
  
@@ -2159,7 +2157,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                       + kbxd] = __half2float(bxi->d);
-@@ -1562,7 +1650,7 @@
+@@ -1562,7 +1648,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4(
@@ -2168,7 +2166,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1591,7 +1679,7 @@
+@@ -1591,7 +1677,7 @@
              i = min(i, i_max);
          }
  
@@ -2177,7 +2175,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int aux_q4 = get_int_b1(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_mxfp4);
-@@ -1618,7 +1706,7 @@
+@@ -1618,7 +1704,7 @@
              i = min(i, i_max);
          }
  
@@ -2186,7 +2184,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + kbxd] = ggml_cuda_e8m0_to_fp32(bxi->e)*0.5f;
-@@ -1629,7 +1717,7 @@
+@@ -1629,7 +1715,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4_fp4(
@@ -2195,7 +2193,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
-@@ -1655,7 +1743,7 @@
+@@ -1655,7 +1741,7 @@
              i = min(i, i_max);
          }
  
@@ -2204,7 +2202,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          // quantize_mxfp4_mmq permutes nibbles to match the quantized format
          const int k0 = kbx * 4;
-@@ -1671,7 +1759,7 @@
+@@ -1671,7 +1757,7 @@
  }
  
  template <ggml_type type, int J, bool fallback, ggml_prec prec_src1> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4(
@@ -2213,7 +2211,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -1699,7 +1787,7 @@
+@@ -1699,7 +1785,7 @@
              i = min(i, i_max);
          }
  
@@ -2222,7 +2220,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const uint32_t * __restrict__ src_qs = reinterpret_cast<const uint32_t *>(bxi->qs);
          const int kqs = 16 * kbx;
          const int ksc = 4 * kbx;
-@@ -1727,7 +1815,7 @@
+@@ -1727,7 +1813,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4_nvfp4(
@@ -2231,7 +2229,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size       = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps          = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
      constexpr int I               = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
-@@ -1753,7 +1841,7 @@
+@@ -1753,7 +1839,7 @@
              i = min(i, i_max);
          }
  
