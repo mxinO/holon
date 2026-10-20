@@ -2,9 +2,11 @@
 
 Status: **design rev 6 (2026-10-18); building: steps 0–5 done, at the close before the merge** (§2.1–§2.2, §7.1).
 **Step 5:** 18 of 18 locks propagated (L2 passing, snapshots run-identical ×3); the 5080 offload lock re-pinned with
-its bars met (4K 1.136×, 32K 1.005× gated); acceptance 5's offload decode rows miss by routing under either method
-(one prompt: 4K 0.992×; six prompts: 1K 0.969×; the code at main's numerics 1.000×); the 4090 Q4_K_M lock takes
-`pass_rows` 512, with no value within the batched-decode tolerance; suite time +6% (for the lead). Step 0 tripped no
+its bars met (4K 1.136×, 32K 1.005× gated). **Owner decisions (2026-10-20, §9):** acceptance 5's offload rows are the
+six-prompt geomean (single prompt recorded beside); the 5080 offload decode rows' deviations (six prompts: 1K
+0.969×) are accepted as D3′'s and D5's routing (the code at main's numerics 1.000×, O5); the 4090 Q4_K_M lock takes
+`ggml_cuda.pass_rows` 2,048 (re-propagated); suite time +6% accepted (acceptance 7 restated); no D6 on offload
+locks (O1); O2 closed. Step 0 tripped no
 decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
 keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
 id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is kept: it passes M0.7's rule on the 5090's
@@ -90,6 +92,10 @@ before any code. Every bar is measured by §5.2's method.
    - **Speed:** a same-session ABBA against main's build, `holon_tg` at batch 1 (1K / 4K) and batch 16 / 32 / 64 on
      the 5090, and the gate's offload decode rows — measured on the re-filled lock against main's lock (C). Each must
      stay within ≤ max(0.5%, 2 sd).
+   - **The offload decode rows** (the owner, 2026-10-20) are measured as the geomean over six prompts per context
+     (`ctx.py` prompt shifts 0–5); the single-prompt figure (shift 0) is recorded beside. A deviation that the same
+     counts reproduce with the code at main's prefill numerics at 1.000× is the bounded items' routing, not a cost
+     (O5).
 6. **Memory** (§6):
    - every lock's startup KV pool stays ≥ its `max_model_len` and its recorded capability (each pass size is capped
      per class to keep this);
@@ -97,7 +103,8 @@ before any code. Every bar is measured by §5.2's method.
    - the 5080 offload lock's expert-cache share falls after its re-fill by no more than the growth of its persistent
      buffers (D5's ≈ 25 MB ≈ 9 experts, ≈ 0.3% of the share), and its decode rows meet acceptance 5's tolerance.
 7. **No core diff** and no ABI bump. The std minors are `pass_rows` (§4), the passed buffers (D10) and tail lending
-   (D11). Suite time does not grow (lean tests, §5.1).
+   (D11). Suite time grows only by the track's own L0 cases (the panel's §5.1 list; the owner, 2026-10-20: +6% at the
+   close accepted), every other file within its run-to-run spread (lean tests, §5.1).
 
 ### 1.1 Predictions per item set (A5000 step 0; restated from the bar cards in §2.2)
 
@@ -1017,6 +1024,7 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
   | rtx-4090 | 30B MXFP4_MOE (6 → 7) | moved | 98.447 / 98.469 / ≥ 98.219 | 2.61e-2 / 5.63e-2 | −0.059% ± 0.078% / 0.446% | yes | yes |
   | rtx-4090 | 30B NVFP4 (7 → 8) | moved | 98.310 / 98.359 / ≥ 98.109 | 5.00e-2 / 9.84e-2 | +0.166% ± 0.107% / 0.503% | yes | yes |
   | rtx-4090 | 30B Q4_K_M (`pass_rows` 512) (10 → 11) | moved | 98.380 / 98.219 / ≥ 97.969 | 6.11e-2 / 0.118 | +0.008% ± 0.127% / 0.568% | yes | yes |
+  | rtx-4090 | 30B Q4_K_M (`pass_rows` 2,048, the owner's; 11 → 12) | moved | 98.246 / 98.219 / ≥ 97.969 | 6.19e-2 / 0.118 | +0.091% ± 0.105% / 0.513% | yes | yes |
   | rtx-4090 | 8B NVFP4 (7 → 8) | moved | 98.768 / 98.691 / ≥ 98.441 | 1.24e-2 / 2.49e-2 | −0.059% ± 0.056% / 0.359% | yes | yes |
   | rtx-4090 | 8B Q4_K_M (4 → 5) | moved | 98.511 / 98.356 / ≥ 98.106 | 3.38e-2 / 7.17e-2 | −0.089% ± 0.121% / 0.553% | yes | yes |
   | rtx-5090 | 27B UD-Q4_K_M (5 → 6) | identical | 96.914 / 96.947 / ≥ 96.697 | 0.789 / 1.300 | −0.038% ± 0.493% / 1.483% | yes | yes |
@@ -1026,7 +1034,8 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
   | rtx-3090 | 30B Q4_K_M (4 → 5) | moved | 98.200 / 98.219 / ≥ 97.969 | 6.20e-2 / 0.118 | +0.015% ± 0.103% / 0.506% | yes | yes |
   | rtx-3090 | 8B Q4_K_M (4 → 5) | moved | 98.490 / 98.356 / ≥ 98.106 | 3.70e-2 / 7.17e-2 | −0.092% ± 0.115% / 0.537% | yes | yes |
 
-  **18 of 18 approved (delegated), none escalated; `scripts/ci/check_locks.py --release` green.** 14 traces moved
+  **18 of 18 approved (delegated), none escalated** (the 4090's 30B Q4_K_M twice: at 512, then at the owner's 2,048,
+  whose `12.lock` is the newest); `scripts/ci/check_locks.py --release` green. 14 traces moved
   where D5's or D3′'s bounded numerics changed a generated token, 4 stayed byte-identical; every L2 passes
   against its own floor. The 27B rows' ΔPPL carries its own wide SE (±0.3–1.0%), as at X's close.
 - **The 5080's natural-fit offload lock, re-filled and re-pinned** (`3.lock`):
@@ -1069,8 +1078,12 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     73.7K tokens, more than any pool, so they run in waves of ⌊pool / 1,152⌋ sequences: 23 at main's pool and at 512,
     22 at 2,048 and 4,096 — one sequence fewer per wave is the 4–5%.
   - **No value keeps B32 within max(0.5%, 2 sd)**; 512 comes closest (B32 −2.5% against a 2.1% tolerance) and gives
-    the KV back (+288 tokens). The lock takes **512** (`11.lock`), the rule's nearest value; the 4K prefill gain falls
-    from 1.75× to 1.14× there. The lead decides whether 512 stands or the rule changes.
+    the KV back (+288 tokens), but the 4K prefill gain falls from 1.75× to 1.14× there. The lock was first written at
+    512 (`11.lock`). **Owner decision (2026-10-20): 2,048** — `12.lock`, re-propagated from `11.lock`: L2 passing
+    (top-1 98.246% against ≥ 97.969%, ΔPPL vs floor +0.091% ± 0.105% against ≤ 0.513%), trace moved, snapshots
+    run-identical ×3. **The trade at 2,048:** prefill 1.44 / 1.67× main at 1K / 4K (4,096: 1.44 / 1.75×); batched decode
+    1.005 / 0.964 / 0.956× at B16 / 32 / 64 (six seeds; at 4,096 0.998 / 0.959 / 0.961×); KV 26,464 tokens (main
+    26,752), 22 sequences per B32 / B64 wave against main's 23.
   - At 512, the code at main's prefill numerics (the probe) against main, six seeds: 0.993 (sd 0.003) / 1.002 (0.002)
     / 0.994 (0.002): ≈ 0.6% of code cost at B16 and B64 (C5's per-call 1.004–1.017× on q4_k down, L3-4), just past
     0.5%, and B32's −2.5% is the bounded items' routing.
@@ -1260,6 +1273,7 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
 ## 9. Owner items
 
 - **O1 (escalated by the lead; not blocking): D6 on the 5080 offload lock trades 32K prefill against decode.**
+  **Owner decision (2026-10-20): no D6 on offload locks.**
   - Default: no D6 on offload locks, so decode wins.
   - Then the 32K row is predicted at ≈ 1.00–1.06× against the gated FreeToken arm (modelled until step 0 measures
     it), and ≈ 0.98–0.99× against FreeToken's ungated 8,192-token default (reported, not gated).
@@ -1267,7 +1281,8 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     decode rows go 1.06× → ≈ 1.02× and 1.03× → ≈ 1.005×: still at or above their bar, but with no margin. Taking D6
     there **waives acceptance 5's decode tolerance** (≤ max(0.5%, 2 sd)) on that lock.
 - **O2: the bars and arms.** **Closed at step 4** (the lead): the 5090 resident 4K row met its bar, 1.008× FreeToken
-  gated by more than 2 sd, in one session with every other prefill bar (§7.1, step 4).
+  gated by more than 2 sd, in one session with every other prefill bar (§7.1, step 4). The owner confirms it closed
+  (2026-10-20).
   - Confirm acceptance 1–2, with FreeToken's gated arm at the lock's step budget and its default reported only.
   - Rows at or under their bar in §1.1:
     - 5090 1K and 4K, without D4;
@@ -1280,13 +1295,19 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     that recorded 0.88× (≈ 4–7% modelled). The owner confirms the relabel.
 - **O3: pass size per class.** `ggml_cuda.pass_rows` lowers the step-size gain on classes whose KV capacity cannot
   absorb 4,096 (likely the 24 GB 30B classes at 2,048 and the 16 GB class at 512 or 2,048). The values are set by
-  hand at the close from step 0's measurements.
+  hand at the close from step 0's measurements. **Owner decision (2026-10-20): the 4090 Q4_K_M lock takes 2,048**
+  (§7.1 step 5: KV 26,464 against main's 26,752; prefill 1.44 / 1.67× main at 1K / 4K against 1.44 / 1.75× at 4,096;
+  batched decode 1.005 / 0.964 / 0.956× at B16 / 32 / 64, six seeds, against 0.998 / 0.959 / 0.961× at 4,096 and
+  0.998 / 0.975 / 0.989× at 512).
 - **O4: bf16 expert intermediates** (FreeToken's, ≈ 2.4% at 4K) stay out (m02 D3). The handicap is stated next to the
   bars.
-- **O5 (open; step 5 measured both ways): acceptance 5's decode tolerance on routing-sensitive rows.** One prompt per
-  context or six prompts (geomean)? Under either, one 5080 offload row misses (§7.1 step 5), and at the same counts the
-  code at main's numerics is 1.000× main: the misses are D3′'s and D5's bounded routing. The 4090's batched decode
-  rows show the same mechanism on top of a KV-wave effect and ≈ 0.6% of code at B16 / B64.
+- **O5: acceptance 5's decode tolerance on routing-sensitive rows.** One prompt per context or six prompts (geomean)?
+  Under either, one 5080 offload row misses (§7.1 step 5), and at the same counts the code at main's numerics is
+  1.000× main: the misses are D3′'s and D5's bounded routing. The 4090's batched decode rows show the same mechanism
+  on top of a KV-wave effect and ≈ 0.6% of code at B16 / B64.
+  **Owner decision (2026-10-20): accepted as a routing effect of the bounded items D3′ and D5 (the code at main's
+  numerics 1.000×); the offload rows are measured as the six-prompt geomean, with the single-prompt figures recorded
+  (acceptance 5 restated).**
 - **For the lead (from B-M6, outside this track):** K and FN both claim ABI 1.4 (`v1-kv-tiers.md:450`,
   `v1-flash-next.md:376`).
 

@@ -147,8 +147,8 @@
   },
   {
    "class": "rtx-4090",
-   "lock": "30b-q4_k_m",
-   "from": "10",
+   "lock": "30b-q4_k_m-512",
+   "from": null,
    "to": "11",
    "trace": "moved",
    "top1": "98.380",
@@ -160,6 +160,23 @@
    "dppl_budget": "0.568",
    "verdict": "PASS",
    "x3": true
+  },
+  {
+   "class": "rtx-4090",
+   "lock": "30b-q4_k_m",
+   "from": "11",
+   "to": "12",
+   "trace": "moved",
+   "top1": "98.246",
+   "floor_top1": "98.219",
+   "top1_budget": "97.969",
+   "kl_p99": "6.19e-02",
+   "kl_budget": "1.18e-01",
+   "dppl_vs_floor": "+0.091% \u00b1 0.105%",
+   "dppl_budget": "0.513",
+   "verdict": "PASS",
+   "x3": true,
+   "note": "pass_rows 2048 (owner); 11.lock was 512"
   },
   {
    "class": "rtx-4090",
@@ -4881,6 +4898,17 @@
   ],
   "main": [
    "1522 passed, 66 skipped, 42 warnings in 1317.40s (0:21:57)"
+  ]
+ },
+ "rtx-4090_30b_q4_k_m_owner_2048": {
+  "owner_decision": "2026-10-20: ggml_cuda.pass_rows = 2048",
+  "lock": "11.lock (512) -> 12.lock (2048)",
+  "l2": [
+   "overall     32783  98.246%    99.069%  1.81e-04  6.19e-02  2.42e+00  +0.253% \u00b1 0.090%   4.06%",
+   "floor       32783  98.219%    99.056%  1.81e-04  5.88e-02  4.76e+00  +0.162% \u00b1 0.096%   4.05%",
+   "vs floor                                                             +0.091% \u00b1 0.105%",
+   "budget            \u226597.969%            \u22643.63e-04 \u22641.18e-01                     \u22640.513%",
+   "PASS"
   ]
  }
 }
