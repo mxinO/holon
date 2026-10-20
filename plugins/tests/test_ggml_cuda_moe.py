@@ -325,7 +325,8 @@ def qwen_stacks():
 def test_linear_experts_at_in_640(ctx, lib, name):
     """T6 (docs/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
     but not of 256) on mmvq and mmq with ids, at a chunk and at a pass of two; mmq's last K step stays inside each
-    row (the bytes after the stack are poison)."""
+    row (the bytes after the stack are poison). Both types are `PASS_PROVEN`: a pass gives each row its chunk's bits
+    at 640 too (a small stack, as in the every-type test)."""
     down = experts(ctx, name, 640, H, K)
     sd, t = stack(name, E, H, 640, seed=13), down.mmvq_tokens
     for tokens in (1, t, t + 1, 64, 2 * CHUNK + 1):
@@ -333,6 +334,10 @@ def test_linear_experts_at_in_640(ctx, lib, name):
         h = torch.randn(tokens, K, 640, generator=torch.Generator().manual_seed(tokens)).cuda()
         y = down(h, sd.parts, ids)
         check(y, emulated(down, sd, h, ids), 640, f"down {name} at 640, T={tokens}")
+    small = experts(ctx, name, 640, 256, 1, n=8)
+    if small.pass_rows > CHUNK:
+        h = torch.randn(9 * CHUNK, 1, 640, generator=torch.Generator().manual_seed(9)).cuda()
+        check_pass_rows(small, stack(name, 8, 256, 640, seed=14).parts, h, uniform(9 * CHUNK, 8, seed=9), name)
 
 
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs"])
