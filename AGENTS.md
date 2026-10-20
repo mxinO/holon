@@ -82,7 +82,8 @@ Studying code to write our own needs none of this; a comment naming what we foll
   (nvcc), gcc/g++; `holon prebuild` builds the GGUF kernels and FlashInfer's modules for the visible GPUs.
 - Machine-specific notes (hosts, clusters, paths) live in `AGENTS.local.md`, which is not tracked; read it if
   present. Never commit private infrastructure details — host or cluster names, usernames, absolute paths, machine
-  details beyond the GPU name — to tracked files, results included (`scripts/ci/check_private.py`).
+  details beyond the GPU name — to tracked files, results included (`scripts/ci/check_private.py`), or to commit
+  messages, branch names included (`scripts/ci/check_commit_messages.py`: merges take a neutral `-m`).
 - Consumer performance evidence comes from consumer desktops (RTX 5080/5090/4090/3090); on shared test machines, run
   one persistent container and build/test inside it rather than many short batch jobs.
 - Always pin GPUs explicitly (`CUDA_VISIBLE_DEVICES`) in scripts and spikes so parallel work does not collide.
