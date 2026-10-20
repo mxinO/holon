@@ -45,6 +45,7 @@ Skips without a GPU; builds the extension (prebuild) into the user cache if it i
 import dataclasses
 import math
 import os
+import re
 import types
 from unittest import mock
 
@@ -326,7 +327,8 @@ def test_linear_experts_at_in_640(ctx, lib, name):
     """T6 (docs/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
     but not of 256) on mmvq and mmq with ids, at a chunk and at a pass of two; mmq's last K step stays inside each
     row (the bytes after the stack are poison). Both types are `PASS_PROVEN`: a pass gives each row its chunk's bits
-    at 640 too (a small stack, as in the every-type test)."""
+    at 640 too (a small stack, as in the every-type test). mmq takes its `tail` instances there only: at 768 (whole
+    K steps) upstream's."""
     down = experts(ctx, name, 640, H, K)
     sd, t = stack(name, E, H, 640, seed=13), down.mmvq_tokens
     for tokens in (1, t, t + 1, 64, 2 * CHUNK + 1):
@@ -334,6 +336,13 @@ def test_linear_experts_at_in_640(ctx, lib, name):
         h = torch.randn(tokens, K, 640, generator=torch.Generator().manual_seed(tokens)).cuda()
         y = down(h, sd.parts, ids)
         check(y, emulated(down, sd, h, ids), 640, f"down {name} at 640, T={tokens}")
+    ids = uniform(64, E, seed=64)
+    for k, tail in ((640, "true"), (INTER, "false")):
+        kern, s = (down, sd) if k == 640 else (experts(ctx, name, k, H, K), stack(name, E, H, k, seed=15))
+        h = torch.randn(64, K, k, generator=torch.Generator().manual_seed(k)).cuda()
+        names = [n for n in launched(lambda kern=kern, h=h, s=s: kern(h, s.parts, ids))
+                 if n.startswith("void mul_mat_q<")]
+        assert names and {re.match(r"void mul_mat_q<([^>]*)>", n)[1].split(", ")[-1] for n in names} == {tail}, names
     small = experts(ctx, name, 640, 256, 1, n=8)
     if small.pass_rows > CHUNK:
         h = torch.randn(9 * CHUNK, 1, 640, generator=torch.Generator().manual_seed(9)).cuda()

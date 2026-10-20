@@ -2,7 +2,8 @@
 
 // Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 // x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
-// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments.
+// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
+// through process_tile, mul_mat_q, launch_mul_mat_q and mul_mat_q_switch_J.
 
 #include "common.cuh"
 #include "unary.cuh" // Holon: ggml_cuda_op_silu_single, for the fused gate/up store
@@ -973,6 +974,27 @@ static constexpr __device__ ggml_cuda_mmq_load_tiles_t ggml_cuda_mmq_get_load_ti
     return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().load_tiles;
 }
 
+// Holon: T6 (mmq-load-tiles.cuh, docs/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
+// blocks of 32 or 64 values), and their loaders for such rows
+static constexpr __host__ __device__ bool ggml_cuda_mmq_has_tail(const ggml_type type) {
+    return type == GGML_TYPE_Q2_0 || type == GGML_TYPE_Q4_0 || type == GGML_TYPE_Q4_1 || type == GGML_TYPE_Q5_0 ||
+        type == GGML_TYPE_Q5_1 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_IQ4_NL;
+}
+
+template <ggml_type type, int J, bool fallback>
+static constexpr __device__ ggml_cuda_mmq_load_tiles_t ggml_cuda_mmq_get_load_tiles_tail() {
+    switch (type) {
+        case GGML_TYPE_Q2_0:   return ggml_cuda_mmq_load_tiles_q2_0<type, J, fallback, true>;
+        case GGML_TYPE_Q4_0:   return ggml_cuda_mmq_load_tiles_q4_0<type, J, fallback, true>;
+        case GGML_TYPE_Q4_1:   return ggml_cuda_mmq_load_tiles_q4_1<type, J, fallback, true>;
+        case GGML_TYPE_Q5_0:   return ggml_cuda_mmq_load_tiles_q5_0<type, J, fallback, true>;
+        case GGML_TYPE_Q5_1:   return ggml_cuda_mmq_load_tiles_q5_1<type, J, fallback, true>;
+        case GGML_TYPE_Q8_0:   return ggml_cuda_mmq_load_tiles_q8_0<type, J, fallback, true>;
+        case GGML_TYPE_IQ4_NL: return ggml_cuda_mmq_load_tiles_iq4_nl<type, J, fallback, true>;
+        default:               return nullptr;
+    }
+}
+
 template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
 static constexpr __device__ ggml_cuda_mmq_vec_dot_t ggml_cuda_mmq_get_vec_dot() {
     return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().vec_dot;
@@ -985,7 +1007,7 @@ static constexpr __device__ ggml_cuda_mmq_write_back_t ggml_cuda_mmq_get_write_b
 
 // ---------------------------------------------------------------------------------------------
 
-template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, bool glu = false>
+template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, bool glu = false, bool tail = false>
 static __device__ __forceinline__ void mul_mat_q_process_tile(
         const char * __restrict__ x, const int offset_x, const int * __restrict__ y,
         const int * __restrict__ ids_dst, float * __restrict__ dst, float * __restrict__ tmp_fixup,
@@ -1000,7 +1022,8 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
     constexpr int              qk         = ggml_cuda_type_traits<type>::qk;
     constexpr int              I          = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-    constexpr ggml_cuda_mmq_load_tiles_t load_tiles = ggml_cuda_mmq_get_load_tiles<type, J, fallback, prec_src1>();
+    constexpr ggml_cuda_mmq_load_tiles_t load_tiles = tail ? ggml_cuda_mmq_get_load_tiles_tail<type, J, fallback>() : // Holon: T6
+        ggml_cuda_mmq_get_load_tiles<type, J, fallback, prec_src1>();
     constexpr ggml_cuda_mmq_vec_dot_t    vec_dot    = ggml_cuda_mmq_get_vec_dot<type, J, fallback, prec_src1>();
     constexpr ggml_cuda_mmq_write_back_t write_back = ggml_cuda_mmq_get_write_back<type, J, fallback, prec_src1>();
 
@@ -1114,7 +1137,8 @@ static __device__ __forceinline__ void mmq_tile(
 // 146, 1.6-7.8% slower per call); without it an instance decodes its tiles as upstream's
 // Holon: `glu` (with flat_ids), the fused gate/up store (ggml_cuda_mmq_write_back_glu): a tile covers I/2 gate rows and
 // their up rows, nrows_x/2 apart, and stores I/2 rows of y
-template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, bool glu = false>
+// Holon: `tail`, rows that end inside a K step (T6, mmq-load-tiles.cuh): an instance of its own, launched for those only
+template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, bool glu = false, bool tail = false>
 __launch_bounds__(ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1), ggml_cuda_mmq_get_occupancy(type, J, fallback, prec_src1))
 static __global__ void mul_mat_q(
         const char * __restrict__ x, const int * __restrict__ y, const int32_t * __restrict__ ids_dst,
@@ -1228,7 +1252,7 @@ static __global__ void mul_mat_q(
         const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
         constexpr bool fixup = false;
-        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
+        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
             (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
              stride_row_x, ncols_y, stride_col_dst,
              tile_x_max_i, tile_y_max_j, 0, blocks_per_ne00.z, x_scale, dst_bf16, false,
@@ -1319,7 +1343,7 @@ static __global__ void mul_mat_q(
         const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
         constexpr bool fixup = false; // All but (potentially) the last iterations write their data to dst rather than the fixup buffer.
-        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
+        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
             (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
              stride_row_x, ncols_y, stride_col_dst,
              tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop, x_scale, dst_bf16, !ids_dst && kb0_start != 0,
@@ -1398,7 +1422,7 @@ static __global__ void mul_mat_q(
     const int offset_x = fastdiv(wt, sample_ratio)*stride_sample_x + channel_x*stride_channel_x + it*I_out*stride_row_x; // Holon: slot, glu rows
 
     constexpr bool fixup = true; // Last index writes its data to fixup buffer to avoid data races with other blocks.
-    mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
+    mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
         (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
          stride_row_x, ncols_y, stride_col_dst,
          tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop, x_scale, dst_bf16, false,
@@ -1567,7 +1591,7 @@ static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const i
     return nbs_ids + nbs_x + GGML_PAD(nbs_y, config.nthreads*sizeof(int));
 }
 
-template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
+template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool tail>
 static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
     const int id = ggml_cuda_get_device();
     const int cc = ggml_cuda_info().devices[id].cc;
@@ -1581,12 +1605,12 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
 
     const dim3 block_dims(warp_size, nwarps, 1);
 
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1>), nbytes_shared);
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1>), nbytes_shared);
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true>), nbytes_shared); // Holon: flat_ids
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true>), nbytes_shared);
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, true>), nbytes_shared); // Holon: glu
-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, true>), nbytes_shared);
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, false, false, tail>), nbytes_shared); // Holon: tail
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, false, false, tail>), nbytes_shared);
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, false, tail>), nbytes_shared); // Holon: flat_ids
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, false, tail>), nbytes_shared);
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, true, tail>), nbytes_shared); // Holon: glu
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, true, tail>), nbytes_shared);
 
     const int nty  = (args.nrows_x   + config.I - 1) / config.I;
     // Holon: with ids, where a call's tokens span several column tiles, the column tiles of all nchannels_y compact
@@ -1597,8 +1621,9 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
     const int ntzw = flat ? 1 : args.nchannels_y * args.nsamples_y;
     const dim3 block_nums_xy_tiling(nty, ntx, ntzw);
-    const auto kernel = args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true> :
-                        flat     ? mul_mat_q<type, J, fallback, prec_src1, true>       : mul_mat_q<type, J, fallback, prec_src1>;
+    const auto kernel = args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true, tail>  : // Holon: tail
+                        flat     ? mul_mat_q<type, J, fallback, prec_src1, true, false, tail> :
+                                   mul_mat_q<type, J, fallback, prec_src1, false, false, tail>;
     GGML_ASSERT(!args.glu || (args.ids_dst && !fallback && config.use_mma_data_layout(cc) && args.nrows_x % config.I == 0 &&
                               size_t(config.I/2*config.J)*sizeof(float) <= nbytes_shared - config.J*sizeof(int)));
 
@@ -1680,56 +1705,56 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
          ntx_fd, args.x_scale, args.dst_bf16);
 }
 
-template <ggml_type type, bool fallback, ggml_prec prec_src1>
+template <ggml_type type, bool fallback, ggml_prec prec_src1, bool tail>
 void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
     switch (args.J_best) {
         case   8:
-            launch_mul_mat_q<type,   8, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,   8, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  16:
-            launch_mul_mat_q<type,  16, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  16, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  24:
-            launch_mul_mat_q<type,  24, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  24, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  32:
-            launch_mul_mat_q<type,  32, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  32, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  40:
-            launch_mul_mat_q<type,  40, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  40, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  48:
-            launch_mul_mat_q<type,  48, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  48, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  56:
-            launch_mul_mat_q<type,  56, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  56, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  64:
-            launch_mul_mat_q<type,  64, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  64, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  72:
-            launch_mul_mat_q<type,  72, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  72, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  80:
-            launch_mul_mat_q<type,  80, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  80, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  88:
-            launch_mul_mat_q<type,  88, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  88, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case  96:
-            launch_mul_mat_q<type,  96, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type,  96, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case 104:
-            launch_mul_mat_q<type, 104, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type, 104, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case 112:
-            launch_mul_mat_q<type, 112, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type, 112, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case 120:
-            launch_mul_mat_q<type, 120, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type, 120, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         case 128:
-            launch_mul_mat_q<type, 128, fallback, prec_src1>(ctx, args, stream);
+            launch_mul_mat_q<type, 128, fallback, prec_src1, tail>(ctx, args, stream);
             break;
         default:
             fprintf(stderr, "J_best=%d\n", args.J_best);
@@ -1740,12 +1765,22 @@ void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, 
 
 template <ggml_type type, ggml_prec prec_src1>
 void mul_mat_q_case(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
+    if constexpr (ggml_cuda_mmq_has_tail(type)) { // Holon: T6, rows that end inside a K step take the `tail` instances
+        if (args.ncols_x % MMQ_ITER_K != 0) {
+            if (ggml_cuda_mmq_needs_fallback(args.nrows_x)) {
+                mul_mat_q_switch_J<type, true, prec_src1, true>(ctx, args, stream);
+            } else {
+                mul_mat_q_switch_J<type, false, prec_src1, true>(ctx, args, stream);
+            }
+            return;
+        }
+    }
     if (ggml_cuda_mmq_needs_fallback(args.nrows_x)) {
         constexpr bool fallback = true;
-        mul_mat_q_switch_J<type, fallback, prec_src1>(ctx, args, stream);
+        mul_mat_q_switch_J<type, fallback, prec_src1, false>(ctx, args, stream);
     } else {
         constexpr bool fallback = false;
-        mul_mat_q_switch_J<type, fallback, prec_src1>(ctx, args, stream);
+        mul_mat_q_switch_J<type, fallback, prec_src1, false>(ctx, args, stream);
     }
 }
 

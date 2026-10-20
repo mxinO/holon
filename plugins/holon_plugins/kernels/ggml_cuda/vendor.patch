@@ -823,19 +823,20 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 --- a/ggml/src/ggml-cuda/mmq.cuh
 +++ b/ggml/src/ggml-cuda/mmq.cuh
-@@ -1,6 +1,11 @@
+@@ -1,6 +1,12 @@
  #pragma once
  
 +// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 +// x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
-+// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments.
++// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
++// through process_tile, mul_mat_q, launch_mul_mat_q and mul_mat_q_switch_J.
 +
  #include "common.cuh"
 +#include "unary.cuh" // Holon: ggml_cuda_op_silu_single, for the fused gate/up store
  
  #include <climits>
  #include <cstdint>
-@@ -10,10 +15,25 @@
+@@ -10,10 +16,25 @@
  #define MMQ_ITER_K_FP4         512
  #define MMQ_NWARPS               8
  
@@ -863,7 +864,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
  enum mmq_q8_1_ds_layout {
      MMQ_Q8_1_DS_LAYOUT_D4,
-@@ -91,6 +111,8 @@
+@@ -91,6 +112,8 @@
              return MMQ_Q8_1_DS_LAYOUT_D4;
          case GGML_TYPE_IQ1_S:
              return MMQ_Q8_1_DS_LAYOUT_DS4;
@@ -872,7 +873,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          case GGML_TYPE_IQ4_XS:
          case GGML_TYPE_IQ4_NL:
              return MMQ_Q8_1_DS_LAYOUT_D4;
-@@ -410,6 +432,7 @@
+@@ -410,6 +433,7 @@
          case GGML_TYPE_IQ3_XXS: return MMQ_DP4A_TXS_Q8_0;
          case GGML_TYPE_IQ3_S:   return MMQ_DP4A_TXS_Q8_0;
          case GGML_TYPE_IQ1_S:   return MMQ_DP4A_TXS_Q8_0;
@@ -880,7 +881,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          case GGML_TYPE_IQ4_XS:  return MMQ_DP4A_TXS_Q8_0;
          case GGML_TYPE_IQ4_NL:  return MMQ_DP4A_TXS_Q8_0;
          default:                return tile_x_sizes{0, 0, 0};
-@@ -430,9 +453,29 @@
+@@ -430,9 +454,29 @@
  #include "mmq-load-tiles.cuh"
  #include "mmq-vec-dot.cuh"
  
@@ -911,7 +912,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      constexpr int warp_size = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps    = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
      constexpr int I         = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -457,12 +500,12 @@
+@@ -457,12 +501,12 @@
  
              if constexpr (type == GGML_TYPE_NVFP4) {
                  if (y_scale_used) {
@@ -927,7 +928,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
                  GGML_UNUSED(y_scale_used);
              }
          }
-@@ -472,7 +515,8 @@
+@@ -472,7 +516,8 @@
  template<ggml_type type, int J, bool fallback, ggml_prec prec_src1>
  static __device__ __forceinline__ void ggml_cuda_mmq_write_back_mma(
              const float * __restrict__ sum, const int * __restrict__ ids_dst, float * __restrict__ dst,
@@ -937,7 +938,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
      typedef tile<16, 16, int, DATA_LAYOUT_J_MAJOR> tile_C;
-@@ -507,12 +551,12 @@
+@@ -507,12 +552,12 @@
  
                  if constexpr (type == GGML_TYPE_NVFP4) {
                      if (y_scale_used) {
@@ -953,7 +954,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
                      GGML_UNUSED(y_scale_used);
                  }
              }
-@@ -520,6 +564,65 @@
+@@ -520,6 +565,65 @@
      }
  }
  
@@ -1019,7 +1020,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  // -------------------------------------------------------------------------------------------------------------------------------------
  
  // TODO remove this struct and use ggml_cuda_mmq_sram_layout instead.
-@@ -618,6 +721,12 @@
+@@ -618,6 +722,12 @@
                      ggml_cuda_mmq_load_tiles_iq1_s<type, J, fallback>,
                      ggml_cuda_mmq_vec_dot_q8_1_q8_1_dp4a<type, J, fallback>,
                      ggml_cuda_mmq_write_back_dp4a<type, J, fallback, prec_src1>);
@@ -1032,7 +1033,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              case GGML_TYPE_IQ2_XXS:
                  return ggml_cuda_mmq_util_funcs(
                      VDR_IQ2_XXS_Q8_1_MMQ,
-@@ -788,6 +897,12 @@
+@@ -788,6 +898,12 @@
                  ggml_cuda_mmq_load_tiles_iq1_s<type, J, fallback>,
                  ggml_cuda_mmq_vec_dot_q8_1_q8_1_mma<type, J, fallback>,
                  ggml_cuda_mmq_write_back_mma<type, J, fallback, prec_src1>);
@@ -1045,12 +1046,40 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          case GGML_TYPE_IQ2_XXS:
              return ggml_cuda_mmq_util_funcs(
                  -1,
-@@ -870,13 +985,16 @@
+@@ -858,6 +974,27 @@
+     return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().load_tiles;
+ }
+ 
++// Holon: T6 (mmq-load-tiles.cuh, docs/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
++// blocks of 32 or 64 values), and their loaders for such rows
++static constexpr __host__ __device__ bool ggml_cuda_mmq_has_tail(const ggml_type type) {
++    return type == GGML_TYPE_Q2_0 || type == GGML_TYPE_Q4_0 || type == GGML_TYPE_Q4_1 || type == GGML_TYPE_Q5_0 ||
++        type == GGML_TYPE_Q5_1 || type == GGML_TYPE_Q8_0 || type == GGML_TYPE_IQ4_NL;
++}
++
++template <ggml_type type, int J, bool fallback>
++static constexpr __device__ ggml_cuda_mmq_load_tiles_t ggml_cuda_mmq_get_load_tiles_tail() {
++    switch (type) {
++        case GGML_TYPE_Q2_0:   return ggml_cuda_mmq_load_tiles_q2_0<type, J, fallback, true>;
++        case GGML_TYPE_Q4_0:   return ggml_cuda_mmq_load_tiles_q4_0<type, J, fallback, true>;
++        case GGML_TYPE_Q4_1:   return ggml_cuda_mmq_load_tiles_q4_1<type, J, fallback, true>;
++        case GGML_TYPE_Q5_0:   return ggml_cuda_mmq_load_tiles_q5_0<type, J, fallback, true>;
++        case GGML_TYPE_Q5_1:   return ggml_cuda_mmq_load_tiles_q5_1<type, J, fallback, true>;
++        case GGML_TYPE_Q8_0:   return ggml_cuda_mmq_load_tiles_q8_0<type, J, fallback, true>;
++        case GGML_TYPE_IQ4_NL: return ggml_cuda_mmq_load_tiles_iq4_nl<type, J, fallback, true>;
++        default:               return nullptr;
++    }
++}
++
+ template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
+ static constexpr __device__ ggml_cuda_mmq_vec_dot_t ggml_cuda_mmq_get_vec_dot() {
+     return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().vec_dot;
+@@ -870,19 +1007,23 @@
  
  // ---------------------------------------------------------------------------------------------
  
 -template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1>
-+template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, bool glu = false>
++template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, bool glu = false, bool tail = false>
  static __device__ __forceinline__ void mul_mat_q_process_tile(
          const char * __restrict__ x, const int offset_x, const int * __restrict__ y,
          const int * __restrict__ ids_dst, float * __restrict__ dst, float * __restrict__ tmp_fixup,
@@ -1064,7 +1093,15 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      constexpr int              warp_size  = ggml_cuda_get_physical_warp_size();
      constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
-@@ -907,7 +1025,7 @@
+     constexpr int              qk         = ggml_cuda_type_traits<type>::qk;
+     constexpr int              I          = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
+-    constexpr ggml_cuda_mmq_load_tiles_t load_tiles = ggml_cuda_mmq_get_load_tiles<type, J, fallback, prec_src1>();
++    constexpr ggml_cuda_mmq_load_tiles_t load_tiles = tail ? ggml_cuda_mmq_get_load_tiles_tail<type, J, fallback>() : // Holon: T6
++        ggml_cuda_mmq_get_load_tiles<type, J, fallback, prec_src1>();
+     constexpr ggml_cuda_mmq_vec_dot_t    vec_dot    = ggml_cuda_mmq_get_vec_dot<type, J, fallback, prec_src1>();
+     constexpr ggml_cuda_mmq_write_back_t write_back = ggml_cuda_mmq_get_write_back<type, J, fallback, prec_src1>();
+ 
+@@ -907,7 +1048,7 @@
      constexpr int sz = sizeof(block_q8_1_mmq) / sizeof(int);
  
      for (int kb0 = kb0_start; kb0 < kb0_stop; kb0 += blocks_per_iter) {
@@ -1073,7 +1110,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          {
              const int * by0 = y + ncols_y * (kb0 * qk / ne_block) * sz;
  #pragma unroll
-@@ -941,17 +1059,62 @@
+@@ -941,17 +1082,63 @@
          __syncthreads();
      }
  
@@ -1136,11 +1173,12 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +// 146, 1.6-7.8% slower per call); without it an instance decodes its tiles as upstream's
 +// Holon: `glu` (with flat_ids), the fused gate/up store (ggml_cuda_mmq_write_back_glu): a tile covers I/2 gate rows and
 +// their up rows, nrows_x/2 apart, and stores I/2 rows of y
-+template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, bool glu = false>
++// Holon: `tail`, rows that end inside a K step (T6, mmq-load-tiles.cuh): an instance of its own, launched for those only
++template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, bool glu = false, bool tail = false>
  __launch_bounds__(ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1), ggml_cuda_mmq_get_occupancy(type, J, fallback, prec_src1))
  static __global__ void mul_mat_q(
          const char * __restrict__ x, const int * __restrict__ y, const int32_t * __restrict__ ids_dst,
-@@ -960,7 +1123,8 @@
+@@ -960,7 +1147,8 @@
          const uint3 blocks_per_ne00, const int nrows_x, const int ncols_dst, const int stride_row_x, const int ncols_y, const int stride_col_dst,
          const uint3 channel_ratio, const uint3 nchannels_y, const int stride_channel_x, const int stride_channel_y, const int stride_channel_dst,
          const uint3 sample_ratio, const uint3 nsamples_y, const int stride_sample_x, const int stride_sample_y, const int stride_sample_dst,
@@ -1150,7 +1188,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      // Skip unused template specializations for faster compilation:
      if (ggml_cuda_mmq_get_config(type, J, fallback, prec_src1).type == GGML_TYPE_COUNT) {
-@@ -974,6 +1138,8 @@
+@@ -974,6 +1162,8 @@
      constexpr int I         = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
  
      const uint32_t nty = (nrows_x + I - 1) / I; // Number of tiles y
@@ -1159,7 +1197,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      // Initialize the ids for writing back data with just the index.
      // For regular matrix multiplications this is never changed.
-@@ -992,14 +1158,21 @@
+@@ -992,14 +1182,21 @@
      __syncthreads();
  
      if constexpr (!ggml_cuda_mmq_get_stream_k(type, J, fallback, prec_src1)) {
@@ -1186,7 +1224,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          int col_high   = ncols_dst;
          int col_diff   = ncols_dst;
          int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1013,6 +1186,7 @@
+@@ -1013,6 +1210,7 @@
  
          if (ids_dst) {
              col_low  = expert_bounds[zt + 0];
@@ -1194,7 +1232,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              col_high = expert_bounds[zt + 1];
              col_diff = col_high - col_low;
  
-@@ -1041,7 +1215,7 @@
+@@ -1041,7 +1239,7 @@
          }
  
          offset_y   += (col_low + jt*J)*(sizeof(block_q8_1_mmq)/sizeof(int));
@@ -1203,7 +1241,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          const float * y_scale_tile = nullptr;
          if constexpr (type == GGML_TYPE_NVFP4) {
              offset_y_scale += col_low + jt*J;
-@@ -1051,13 +1225,14 @@
+@@ -1051,13 +1249,14 @@
          const int tile_x_max_i = nrows_x  - it*I - 1;
          const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -1213,7 +1251,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          constexpr bool fixup = false;
 -        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1>
 -            (x, offset_x, y + offset_y, ids_dst_shared, dst + offset_dst, tmp_fixup, y_scale_tile,
-+        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
++        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
 +            (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
               stride_row_x, ncols_y, stride_col_dst,
 -             tile_x_max_i, tile_y_max_j, 0, blocks_per_ne00.z);
@@ -1222,7 +1260,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          return;
      }
  
-@@ -1065,8 +1240,10 @@
+@@ -1065,8 +1264,10 @@
      constexpr int blocks_per_iter = ITER_K / qk;
  
      // kbc == k block continuous, current index in continuous ijk space.
@@ -1235,7 +1273,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
      kbc      -= fastmodulo(kbc,      blocks_per_ne00) % blocks_per_iter;
      kbc_stop -= fastmodulo(kbc_stop, blocks_per_ne00) % blocks_per_iter;
-@@ -1075,19 +1252,12 @@
+@@ -1075,19 +1276,12 @@
      int kb0_start = fastmodulo(kbc, blocks_per_ne00);
      int kb0_stop  = min(blocks_per_ne00.z, uint32_t(kb0_start + kbc_stop - kbc));
      while (kbc < kbc_stop && kb0_stop == int(blocks_per_ne00.z)) {
@@ -1258,7 +1296,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          int col_high   = ncols_dst;
          int col_diff   = ncols_dst;
          int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1101,6 +1271,7 @@
+@@ -1101,6 +1295,7 @@
  
          if (ids_dst) {
              col_low  = expert_bounds[zt + 0];
@@ -1266,7 +1304,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              col_high = expert_bounds[zt + 1];
              col_diff = col_high - col_low;
  
-@@ -1135,7 +1306,7 @@
+@@ -1135,7 +1330,7 @@
          }
  
          offset_y += (col_low + jt * J) * (sizeof(block_q8_1_mmq) / sizeof(int));
@@ -1275,7 +1313,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          const float * y_scale_tile = nullptr;
          if constexpr (type == GGML_TYPE_NVFP4) {
              offset_y_scale += col_low + jt * J;
-@@ -1145,13 +1316,14 @@
+@@ -1145,13 +1340,14 @@
          const int tile_x_max_i = nrows_x  - it*I - 1;
          const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -1285,7 +1323,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          constexpr bool fixup = false; // All but (potentially) the last iterations write their data to dst rather than the fixup buffer.
 -        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1>
 -            (x, offset_x, y + offset_y, ids_dst_shared, dst + offset_dst, tmp_fixup, y_scale_tile,
-+        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
++        mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
 +            (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
               stride_row_x, ncols_y, stride_col_dst,
 -             tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop);
@@ -1294,7 +1332,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
          kbc += blocks_per_ne00.z;
          kbc -= fastmodulo(kbc, blocks_per_ne00);
-@@ -1164,19 +1336,12 @@
+@@ -1164,19 +1360,12 @@
          return;
      }
  
@@ -1317,7 +1355,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      int col_high   = ncols_dst;
      int col_diff   = ncols_dst;
      int offset_y       = wt*stride_sample_y   + zt*stride_channel_y;
-@@ -1190,6 +1355,7 @@
+@@ -1190,6 +1379,7 @@
  
      if (ids_dst) {
          col_low  = expert_bounds[zt + 0];
@@ -1325,7 +1363,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          col_high = expert_bounds[zt + 1];
          col_diff = col_high - col_low;
  
-@@ -1219,7 +1385,7 @@
+@@ -1219,7 +1409,7 @@
      }
  
      offset_y += (col_low + jt * J) * (sizeof(block_q8_1_mmq) / sizeof(int));
@@ -1334,7 +1372,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      const float * y_scale_tile = nullptr;
      if constexpr (type == GGML_TYPE_NVFP4) {
          offset_y_scale += col_low + jt * J;
-@@ -1229,13 +1395,14 @@
+@@ -1229,13 +1419,14 @@
      const int tile_x_max_i = nrows_x  - it*I - 1;
      const int tile_y_max_j = col_diff - jt*J - 1;
  
@@ -1344,7 +1382,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      constexpr bool fixup = true; // Last index writes its data to fixup buffer to avoid data races with other blocks.
 -    mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1>
 -        (x, offset_x, y + offset_y, ids_dst_shared, dst + offset_dst, tmp_fixup, y_scale_tile,
-+    mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu>
++    mul_mat_q_process_tile<type, J, fallback, fixup, prec_src1, glu, tail>
 +        (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
           stride_row_x, ncols_y, stride_col_dst,
 -         tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop);
@@ -1353,7 +1391,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  }
  
  template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
-@@ -1244,7 +1411,7 @@
+@@ -1244,7 +1435,7 @@
          const int32_t * __restrict__ ids_dst, const int32_t * __restrict__ expert_bounds, float * __restrict__ dst,
          float * __restrict__ tmp_last_tile, const uint3 blocks_per_ne00, const int nrows_x, const int ncols_dst,
          const int stride_col_dst, const uint3 nchannels_y, const int stride_channel_dst, const uint3 nsamples_y,
@@ -1362,7 +1400,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      constexpr int warp_size       = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps          = (ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / 2) / warp_size;
      constexpr int I               = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -1324,7 +1491,9 @@
+@@ -1324,7 +1515,9 @@
  
      if (!ids_dst) {
          const int offset_dst = wt*stride_sample_dst + zt*stride_channel_dst + jt*J*stride_col_dst + it*I;
@@ -1373,7 +1411,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  
          const int i_max = nrows_x   - it*I - 1;
          const int j_max = ncols_dst - jt*J - 1;
-@@ -1340,7 +1509,7 @@
+@@ -1340,7 +1533,7 @@
                  return;
              }
  
@@ -1382,7 +1420,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          }
          return;
      }
-@@ -1384,6 +1553,11 @@
+@@ -1384,6 +1577,11 @@
      int64_t nsamples_x; int64_t nsamples_y; int64_t stride_sample_x; int64_t stride_sample_y; int64_t stride_sample_dst;
      int64_t ncols_max;
      int J_best; // Tile width in ne11(dense)/ne12(MoE) direction to use for optimal performance.
@@ -1394,14 +1432,27 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  };
  
  static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const int cc) {
-@@ -1409,11 +1583,24 @@
+@@ -1393,7 +1591,7 @@
+     return nbs_ids + nbs_x + GGML_PAD(nbs_y, config.nthreads*sizeof(int));
+ }
  
-     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1>), nbytes_shared);
-     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1>), nbytes_shared);
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true>), nbytes_shared); // Holon: flat_ids
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true>), nbytes_shared);
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, true>), nbytes_shared); // Holon: glu
-+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, true>), nbytes_shared);
+-template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
++template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool tail>
+ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
+     const int id = ggml_cuda_get_device();
+     const int cc = ggml_cuda_info().devices[id].cc;
+@@ -1407,13 +1605,27 @@
+ 
+     const dim3 block_dims(warp_size, nwarps, 1);
+ 
+-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1>), nbytes_shared);
+-    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1>), nbytes_shared);
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, false, false, tail>), nbytes_shared); // Holon: tail
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, false, false, tail>), nbytes_shared);
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, false, tail>), nbytes_shared); // Holon: flat_ids
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, false, tail>), nbytes_shared);
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, true, tail>), nbytes_shared); // Holon: glu
++    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, true, tail>), nbytes_shared);
  
      const int nty  = (args.nrows_x   + config.I - 1) / config.I;
 -    const int ntx  = (args.ncols_max + config.J - 1) / config.J;
@@ -1414,14 +1465,15 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +    const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
 +    const int ntzw = flat ? 1 : args.nchannels_y * args.nsamples_y;
      const dim3 block_nums_xy_tiling(nty, ntx, ntzw);
-+    const auto kernel = args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true> :
-+                        flat     ? mul_mat_q<type, J, fallback, prec_src1, true>       : mul_mat_q<type, J, fallback, prec_src1>;
++    const auto kernel = args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true, tail>  : // Holon: tail
++                        flat     ? mul_mat_q<type, J, fallback, prec_src1, true, false, tail> :
++                                   mul_mat_q<type, J, fallback, prec_src1, false, false, tail>;
 +    GGML_ASSERT(!args.glu || (args.ids_dst && !fallback && config.use_mma_data_layout(cc) && args.nrows_x % config.I == 0 &&
 +                              size_t(config.I/2*config.J)*sizeof(float) <= nbytes_shared - config.J*sizeof(int)));
  
      GGML_ASSERT(args.nchannels_y % args.nchannels_x == 0);
      GGML_ASSERT(args.nsamples_y  % args.nsamples_x  == 0);
-@@ -1428,12 +1615,12 @@
+@@ -1428,12 +1640,12 @@
      const uint3 sample_ratio_fd    = init_fastdiv_values(sample_ratio);
  
      if (!config.stream_k) {
@@ -1436,7 +1488,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
          return;
      }
  
-@@ -1442,37 +1629,55 @@
+@@ -1442,89 +1654,107 @@
      const int ntiles_dst = ntx * nty * ntzw;
      const int tiles_nwaves = (ntiles_dst + nsm - 1) / nsm;
      const int tiles_efficiency_percent = 100 * ntiles_dst / (nsm*tiles_nwaves);
@@ -1497,8 +1549,102 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +         ntx_fd, args.x_scale, args.dst_bf16);
  }
  
- template <ggml_type type, bool fallback, ggml_prec prec_src1>
-@@ -1566,6 +1771,7 @@
+-template <ggml_type type, bool fallback, ggml_prec prec_src1>
++template <ggml_type type, bool fallback, ggml_prec prec_src1, bool tail>
+ void mul_mat_q_switch_J(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
+     switch (args.J_best) {
+         case   8:
+-            launch_mul_mat_q<type,   8, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,   8, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  16:
+-            launch_mul_mat_q<type,  16, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  16, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  24:
+-            launch_mul_mat_q<type,  24, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  24, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  32:
+-            launch_mul_mat_q<type,  32, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  32, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  40:
+-            launch_mul_mat_q<type,  40, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  40, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  48:
+-            launch_mul_mat_q<type,  48, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  48, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  56:
+-            launch_mul_mat_q<type,  56, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  56, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  64:
+-            launch_mul_mat_q<type,  64, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  64, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  72:
+-            launch_mul_mat_q<type,  72, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  72, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  80:
+-            launch_mul_mat_q<type,  80, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  80, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  88:
+-            launch_mul_mat_q<type,  88, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  88, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case  96:
+-            launch_mul_mat_q<type,  96, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type,  96, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case 104:
+-            launch_mul_mat_q<type, 104, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type, 104, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case 112:
+-            launch_mul_mat_q<type, 112, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type, 112, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case 120:
+-            launch_mul_mat_q<type, 120, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type, 120, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         case 128:
+-            launch_mul_mat_q<type, 128, fallback, prec_src1>(ctx, args, stream);
++            launch_mul_mat_q<type, 128, fallback, prec_src1, tail>(ctx, args, stream);
+             break;
+         default:
+             fprintf(stderr, "J_best=%d\n", args.J_best);
+@@ -1535,12 +1765,22 @@
+ 
+ template <ggml_type type, ggml_prec prec_src1>
+ void mul_mat_q_case(ggml_backend_cuda_context & ctx, const mmq_args & args, cudaStream_t stream) {
++    if constexpr (ggml_cuda_mmq_has_tail(type)) { // Holon: T6, rows that end inside a K step take the `tail` instances
++        if (args.ncols_x % MMQ_ITER_K != 0) {
++            if (ggml_cuda_mmq_needs_fallback(args.nrows_x)) {
++                mul_mat_q_switch_J<type, true, prec_src1, true>(ctx, args, stream);
++            } else {
++                mul_mat_q_switch_J<type, false, prec_src1, true>(ctx, args, stream);
++            }
++            return;
++        }
++    }
+     if (ggml_cuda_mmq_needs_fallback(args.nrows_x)) {
+         constexpr bool fallback = true;
+-        mul_mat_q_switch_J<type, fallback, prec_src1>(ctx, args, stream);
++        mul_mat_q_switch_J<type, fallback, prec_src1, false>(ctx, args, stream);
+     } else {
+         constexpr bool fallback = false;
+-        mul_mat_q_switch_J<type, fallback, prec_src1>(ctx, args, stream);
++        mul_mat_q_switch_J<type, fallback, prec_src1, false>(ctx, args, stream);
+     }
+ }
+ 
+@@ -1566,6 +1806,7 @@
  extern DECL_MMQ_CASE(GGML_TYPE_Q6_K);
  // -----------------------------------------
  extern DECL_MMQ_CASE(GGML_TYPE_IQ1_S);
@@ -1506,7 +1652,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  extern DECL_MMQ_CASE(GGML_TYPE_IQ2_XXS);
  extern DECL_MMQ_CASE(GGML_TYPE_IQ2_XS);
  extern DECL_MMQ_CASE(GGML_TYPE_IQ2_S);
-@@ -1581,7 +1787,16 @@
+@@ -1581,7 +1822,16 @@
  
  // -------------------------------------------------------------------------------------------------------------------------
  
@@ -1527,23 +1673,28 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
 --- a/ggml/src/ggml-cuda/mmq-load-tiles.cuh
 +++ b/ggml/src/ggml-cuda/mmq-load-tiles.cuh
-@@ -4,8 +4,23 @@
+@@ -4,8 +4,28 @@
  
  #include "mmq.cuh"
  
 +// Holon: `split` (docs/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
 +// fused gate/up tile loads gate rows i... in its upper half and the matching up rows (split rows on) in its lower half;
 +// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/v1-moe-prefill.md D8): `split` in every
-+// loader's signature and row offset, marked at each signature only
++// loader's signature and row offset, marked at each signature only; T6's `tail` in its loaders' template parameters,
++// marked at each use
 +
-+// Holon: T6 (docs/v1-moe-prefill.md §10). A row of `stride` blocks whose width is not a multiple of MMQ_ITER_K: the
-+// last K step's blocks past the row re-read the row's last block, not the next row's (or past the buffer). The
-+// activations there are q8_1's zero padding, so those products are 0 either way: the same bits as upstream's padded
-+// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block. Always applied: the
-+// clamp never binds at whole K steps, and a fast exit for them measured slower (its branch; the record in §10).
-+template <int qk> static __device__ __forceinline__ int ggml_cuda_mmq_kblock(const int kbx0, const int stride, const int kbx) {
++// Holon: T6 (docs/v1-moe-prefill.md §10). `tail`: the instance for rows of `stride` blocks whose width is not a
++// multiple of MMQ_ITER_K (mul_mat_q_case picks it at launch; every other row width runs upstream's loads, `tail`
++// false): the last K step's blocks past the row re-read the row's last block, not the next row's (or past the
++// buffer). The activations there are q8_1's zero padding, so those products are 0 either way: the same bits as
++// upstream's padded allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block;
++// the helper gives the block's offset from it.
++template <int qk, bool tail> static __device__ __forceinline__ int ggml_cuda_mmq_kblock(const int kbx0, const int stride, const int kbx) {
++    if (!tail) {
++        return kbx;                                     // upstream's offset in the K step
++    }
 +    const int kb0 = kbx0 % stride;
-+    return kbx0 - kb0 + min(kb0 + kbx, stride - 1);
++    return min(kb0 + kbx, stride - 1) - kb0;
 +}
 +
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q1_0(
@@ -1552,7 +1703,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -38,7 +53,7 @@
+@@ -38,7 +58,7 @@
              i = min(i, i_max);
          }
  
@@ -1561,7 +1712,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int16_t    * qxi = (const int16_t *) bxi->qs + kqsx * 2;
  
          const int dst_offset = kbx*(scale_entries_per_block*QI8_0) + kqsx*QI8_0;
-@@ -85,7 +100,7 @@
+@@ -85,7 +105,7 @@
              i = min(i, i_max);
          }
  
@@ -1570,157 +1721,169 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + ksx] = bxi->d;
-@@ -96,7 +111,7 @@
+@@ -95,8 +115,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_0(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_0(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_0(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -129,7 +144,7 @@
+@@ -129,7 +149,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + i*stride + kbx;
-+        const block_q2_0 * bxi = (const block_q2_0 *) x + ggml_cuda_mmq_kblock<QK2_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK2_0, tail>(kbx0, stride, kbx); // Holon: T6
          const int16_t    * qxi = (const int16_t *) bxi->qs + kqsx * 4;
  
          const int dst_offset = kbx*(scale_entries_per_block*QI8_0) + kqsx*QI8_0;
-@@ -174,7 +189,7 @@
+@@ -174,7 +194,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + i*stride + scale_block;
-+        const block_q2_0 * bxi = (const block_q2_0 *) x + ggml_cuda_mmq_kblock<QK2_0>(kbx0, stride, scale_block) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK2_0, tail>(kbx0, stride, scale_block); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + ksx] = bxi->d;
-@@ -185,7 +200,7 @@
+@@ -184,8 +204,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_0(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -214,7 +229,7 @@
+@@ -214,7 +234,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + i*stride + kbx;
-+        const block_q4_0 * bxi = (const block_q4_0 *) x + ggml_cuda_mmq_kblock<QK4_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_0, tail>(kbx0, stride, kbx); // Holon: T6
          const int qs0 = get_int_b2(bxi->qs, kqsx);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -237,7 +252,7 @@
+@@ -237,7 +257,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + i*stride + kbxd;
-+        const block_q4_0 * bxi = (const block_q4_0 *) x + ggml_cuda_mmq_kblock<QK4_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_0, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                     + kbxd] = bxi->d;
-@@ -248,7 +263,7 @@
+@@ -247,8 +267,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_1(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_1(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_1(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -277,7 +292,7 @@
+@@ -277,7 +297,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + i*stride + kbx;
-+        const block_q4_1 * bxi = (const block_q4_1 *) x + ggml_cuda_mmq_kblock<QK4_1>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_1, tail>(kbx0, stride, kbx); // Holon: T6
          const int qs0 = get_int_b4(bxi->qs, kqsx);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -300,7 +315,7 @@
+@@ -300,7 +320,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + i*stride + kbxd;
-+        const block_q4_1 * bxi = (const block_q4_1 *) x + ggml_cuda_mmq_kblock<QK4_1>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_1, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_dm[i*sram_stride                     + kbxd] = bxi->dm;
-@@ -311,7 +326,7 @@
+@@ -310,8 +330,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_0(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_0(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_0(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -340,7 +355,7 @@
+@@ -340,7 +360,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + i*stride + kbx;
-+        const block_q5_0 * bxi = (const block_q5_0 *) x + ggml_cuda_mmq_kblock<QK5_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK5_0, tail>(kbx0, stride, kbx); // Holon: T6
  
          const int ql = get_int_b2(bxi->qs, kqsx);
          const int qh = get_int_b2(bxi->qh, 0) >> (4 * kqsx);
-@@ -380,7 +395,7 @@
+@@ -380,7 +400,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + i*stride + kbxd;
-+        const block_q5_0 * bxi = (const block_q5_0 *) x + ggml_cuda_mmq_kblock<QK5_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK5_0, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                     + kbxd] = bxi->d;
-@@ -391,7 +406,7 @@
+@@ -390,8 +410,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_1(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_1(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_1(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -420,7 +435,7 @@
+@@ -420,7 +440,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + i*stride + kbx;
-+        const block_q5_1 * bxi = (const block_q5_1 *) x + ggml_cuda_mmq_kblock<QK5_1>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK5_1, tail>(kbx0, stride, kbx); // Holon: T6
  
          const int ql = get_int_b4(bxi->qs, kqsx);
          const int qh = get_int_b4(bxi->qh, 0) >> (4 * kqsx);
-@@ -458,7 +473,7 @@
+@@ -458,7 +478,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + i*stride + kbxd;
-+        const block_q5_1 * bxi = (const block_q5_1 *) x + ggml_cuda_mmq_kblock<QK5_1>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK5_1, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_dm[i*sram_stride                     + kbxd] = bxi->dm;
-@@ -469,7 +484,7 @@
+@@ -468,8 +488,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q8_0(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -499,14 +514,15 @@
+@@ -499,14 +519,15 @@
              i = min(i, i_max);
          }
  
 -        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + i*stride + kbx;
-+        const block_q8_0 * bxi = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
-+        const block_q8_0 * bxj = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbx + MMQ_TILE_NE_K/QI8_0) + (i*stride + (i >= I/2)*split); // Holon: T6, the second half
++        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK8_0, tail>(kbx0, stride, kbx); // Holon: T6
++        const block_q8_0 * bxj = tail ? (const block_q8_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK8_0, tail>(kbx0, stride, kbx + MMQ_TILE_NE_K/QI8_0) : bxi + MMQ_TILE_NE_K/QI8_0; // Holon: T6, the second half
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
 -        x_qs[i*sram_stride + 0             + txi] = get_int_b2(bxi[0].qs,                   kqsx);
@@ -1735,16 +1898,16 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
      }
  
-@@ -522,7 +538,7 @@
+@@ -522,7 +543,7 @@
              i = min(i, i_max);
          }
  
 -        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + i*stride + kbxd;
-+        const block_q8_0 * bxi = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK8_0, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + kbxd] = bxi->d;
-@@ -535,7 +551,7 @@
+@@ -535,7 +556,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q2_K(
@@ -1753,7 +1916,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -562,7 +578,7 @@
+@@ -562,7 +583,7 @@
              i = min(i, i_max);
          }
  
@@ -1762,7 +1925,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int x_ql_0 = get_int_b2(bxi->qs, kqsx);
  
-@@ -596,7 +612,7 @@
+@@ -596,7 +617,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q3_K(
@@ -1771,7 +1934,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -624,7 +640,7 @@
+@@ -624,7 +645,7 @@
              i = min(i, i_max);
          }
  
@@ -1780,7 +1943,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int x_ql_0 = get_int_b2(bxi->qs,    kqsx);
          const int x_qh_0 = get_int_b2(bxi->hmask, kqsx % (QI3_K/2)) >> (4 * (kqsx / (QI3_K/2)));
-@@ -655,7 +671,7 @@
+@@ -655,7 +676,7 @@
              i = min(i, i_max);
          }
  
@@ -1789,7 +1952,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ksc = threadIdx.x % 4;
  
-@@ -691,7 +707,7 @@
+@@ -691,7 +712,7 @@
              i = min(i, i_max);
          }
  
@@ -1798,7 +1961,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_df[i] = bxi->d;
      }
-@@ -709,7 +725,7 @@
+@@ -709,7 +730,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q4_K(
@@ -1807,7 +1970,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -737,7 +753,7 @@
+@@ -737,7 +758,7 @@
              i = min(i, i_max);
          }
  
@@ -1816,7 +1979,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int qs0 = get_int_b4(bxi->qs, txi);
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-@@ -766,7 +782,7 @@
+@@ -766,7 +787,7 @@
                  i = min(i, i_max);
              }
  
@@ -1825,7 +1988,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
              const int * scales = (const int *) bxi->scales;
              const int ksc = threadIdx.x % 2;
-@@ -794,7 +810,7 @@
+@@ -794,7 +815,7 @@
              i = min(i, i_max);
          }
  
@@ -1834,7 +1997,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_dm[i] = bxi->dm;
      }
-@@ -807,7 +823,7 @@
+@@ -807,7 +828,7 @@
              i = min(i, i_max);
          }
  
@@ -1843,7 +2006,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int * scales = (const int *) bxi->scales;
  
-@@ -820,7 +836,7 @@
+@@ -820,7 +841,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q5_K(
@@ -1852,7 +2015,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -848,7 +864,7 @@
+@@ -848,7 +869,7 @@
              i = min(i, i_max);
          }
  
@@ -1861,7 +2024,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const int ky = QR5_K*txi;
  
          const int ql = get_int_b4(bxi->qs, txi);
-@@ -889,7 +905,7 @@
+@@ -889,7 +910,7 @@
                  i = min(i, i_max);
              }
  
@@ -1870,7 +2033,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
              const int * scales = (const int *) bxi->scales;
              const int ksc = threadIdx.x % 2;
-@@ -917,7 +933,7 @@
+@@ -917,7 +938,7 @@
              i = min(i, i_max);
          }
  
@@ -1879,7 +2042,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          x_dm[i] = bxi->dm;
      }
-@@ -931,7 +947,7 @@
+@@ -931,7 +952,7 @@
              i = min(i, i_max);
          }
  
@@ -1888,7 +2051,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int * scales = (const int *) bxi->scales;
  
-@@ -944,7 +960,7 @@
+@@ -944,7 +965,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q6_K(
@@ -1897,7 +2060,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -973,7 +989,7 @@
+@@ -973,7 +994,7 @@
              i = min(i, i_max);
          }
  
@@ -1906,7 +2069,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int ql = get_int_b2(bxi->ql, txi);
          const int ql0 = (ql >> 0) & 0x0F0F0F0F;
-@@ -1003,7 +1019,7 @@
+@@ -1003,7 +1024,7 @@
              i = min(i, i_max);
          }
  
@@ -1915,7 +2078,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride]                     = bxi->d;
-@@ -1021,7 +1037,7 @@
+@@ -1021,7 +1042,7 @@
              i = min(i, i_max);
          }
  
@@ -1924,7 +2087,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_sc[i*sram_stride + threadIdx.x%4] = get_int_b2(bxi->scales, threadIdx.x % (MMQ_TILE_NE_K/8));
-@@ -1034,7 +1050,7 @@
+@@ -1034,7 +1055,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq1_s(
@@ -1933,7 +2096,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1061,7 +1077,7 @@
+@@ -1061,7 +1082,7 @@
              i = min(i, i_max);
          }
  
@@ -1942,7 +2105,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int       qs_packed = get_int_b2(bxi->qs, kqsx);
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1095,8 +1111,78 @@
+@@ -1095,8 +1116,78 @@
      }
  }
  
@@ -2022,7 +2185,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1123,7 +1209,7 @@
+@@ -1123,7 +1214,7 @@
              i = min(i, i_max);
          }
  
@@ -2031,7 +2194,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int q2 = get_int_b2(bxi->qs, 2*kqsx+0);
          const uint8_t * aux8 = (const uint8_t *) &q2;
-@@ -1160,7 +1246,7 @@
+@@ -1160,7 +1251,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_xs(
@@ -2040,7 +2203,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1187,7 +1273,7 @@
+@@ -1187,7 +1278,7 @@
              i = min(i, i_max);
          }
  
@@ -2049,7 +2212,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2 q2_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint16_t * q2 = (const uint16_t *) &q2_packed;
-@@ -1225,7 +1311,7 @@
+@@ -1225,7 +1316,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq2_s(
@@ -2058,7 +2221,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1251,7 +1337,7 @@
+@@ -1251,7 +1342,7 @@
              i = min(i, i_max);
          }
  
@@ -2067,7 +2230,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int       qs_packed = get_int_b2(bxi->qs, kqsx);
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1293,7 +1379,7 @@
+@@ -1293,7 +1384,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_xxs(
@@ -2076,7 +2239,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1320,7 +1406,7 @@
+@@ -1320,7 +1411,7 @@
              i = min(i, i_max);
          }
  
@@ -2085,7 +2248,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2 q3_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint8_t * q3 = (const uint8_t *) &q3_packed;
-@@ -1357,7 +1443,7 @@
+@@ -1357,7 +1448,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq3_s(
@@ -2094,7 +2257,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1384,7 +1470,7 @@
+@@ -1384,7 +1475,7 @@
              i = min(i, i_max);
          }
  
@@ -2103,7 +2266,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int2      qs_packed = make_int2(get_int_b2(bxi->qs, 2*kqsx+0), get_int_b2(bxi->qs, 2*kqsx+1));
          const uint8_t * qs        = (const uint8_t *) &qs_packed;
-@@ -1426,7 +1512,7 @@
+@@ -1426,7 +1517,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_xs(
@@ -2112,7 +2275,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1453,7 +1539,7 @@
+@@ -1453,7 +1544,7 @@
              i = min(i, i_max);
          }
  
@@ -2121,7 +2284,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int aux_q4 = get_int_b4(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
-@@ -1477,7 +1563,7 @@
+@@ -1477,7 +1568,7 @@
              i = min(i, i_max);
          }
  
@@ -2130,34 +2293,36 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const float d = __half2float(bxi->d);
  
-@@ -1493,7 +1579,7 @@
+@@ -1492,8 +1583,8 @@
+     }
  }
  
- template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_nl(
+-template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_nl(
 -        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride) {
++template <ggml_type type, int J, bool fallback, bool tail = false> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_iq4_nl(
 +        const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1522,7 +1608,7 @@
+@@ -1522,7 +1613,7 @@
              i = min(i, i_max);
          }
  
 -        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + i*stride + kbx;
-+        const block_iq4_nl * bxi = (const block_iq4_nl *) x + ggml_cuda_mmq_kblock<QK4_NL>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_NL, tail>(kbx0, stride, kbx); // Holon: T6
  
          const int aux_q4 = get_int_b2(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
-@@ -1549,7 +1635,7 @@
+@@ -1549,7 +1640,7 @@
              i = min(i, i_max);
          }
  
 -        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + i*stride + kbxd;
-+        const block_iq4_nl * bxi = (const block_iq4_nl *) x + ggml_cuda_mmq_kblock<QK4_NL>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
++        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + (i*stride + (i >= I/2)*split) + ggml_cuda_mmq_kblock<QK4_NL, tail>(kbx0, stride, kbxd); // Holon: T6
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                       + kbxd] = __half2float(bxi->d);
-@@ -1562,7 +1648,7 @@
+@@ -1562,7 +1653,7 @@
  // ---------------------------------------------------------------------------------------------
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4(
@@ -2166,7 +2331,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q8) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q8);
-@@ -1591,7 +1677,7 @@
+@@ -1591,7 +1682,7 @@
              i = min(i, i_max);
          }
  
@@ -2175,7 +2340,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          const int aux_q4 = get_int_b1(bxi->qs, kqsx);
          const int2 v = get_int_from_table_16(aux_q4, kvalues_mxfp4);
-@@ -1618,7 +1704,7 @@
+@@ -1618,7 +1709,7 @@
              i = min(i, i_max);
          }
  
@@ -2184,7 +2349,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
          x_df[i*sram_stride                           + kbxd] = ggml_cuda_e8m0_to_fp32(bxi->e)*0.5f;
-@@ -1629,7 +1715,7 @@
+@@ -1629,7 +1720,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_mxfp4_fp4(
@@ -2193,7 +2358,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
-@@ -1655,7 +1741,7 @@
+@@ -1655,7 +1746,7 @@
              i = min(i, i_max);
          }
  
@@ -2202,7 +2367,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
          // quantize_mxfp4_mmq permutes nibbles to match the quantized format
          const int k0 = kbx * 4;
-@@ -1671,7 +1757,7 @@
+@@ -1671,7 +1762,7 @@
  }
  
  template <ggml_type type, int J, bool fallback, ggml_prec prec_src1> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4(
@@ -2211,7 +2376,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps      = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
      constexpr int I           = ggml_cuda_mmq_get_I(type, J, fallback, prec_src1);
-@@ -1699,7 +1785,7 @@
+@@ -1699,7 +1790,7 @@
              i = min(i, i_max);
          }
  
@@ -2220,7 +2385,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
          const uint32_t * __restrict__ src_qs = reinterpret_cast<const uint32_t *>(bxi->qs);
          const int kqs = 16 * kbx;
          const int ksc = 4 * kbx;
-@@ -1727,7 +1813,7 @@
+@@ -1727,7 +1818,7 @@
  }
  
  template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_nvfp4_nvfp4(
@@ -2229,7 +2394,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      constexpr int warp_size       = ggml_cuda_get_physical_warp_size();
      constexpr int nwarps          = ggml_cuda_mmq_get_nthreads(type, J, fallback, GGML_PREC_Q4) / warp_size;
      constexpr int I               = ggml_cuda_mmq_get_I(type, J, fallback, GGML_PREC_Q4);
-@@ -1753,7 +1839,7 @@
+@@ -1753,7 +1844,7 @@
              i = min(i, i_max);
          }
  
