@@ -45,6 +45,11 @@ def _norm(x: torch.Tensor, weight: torch.Tensor, streams: int, eps: float) -> to
     return y.reshape(x.shape) * (1.0 + weight.float())
 
 
+def _gate(u: torch.Tensor) -> torch.Tensor:
+    """The signed-√ gate per (token, stream)."""
+    return torch.sigmoid(u.sign() * u.abs().clamp_min(1e-6).sqrt())
+
+
 def ple_block(key: torch.Tensor, value: torch.Tensor, r: torch.Tensor, w_key: torch.Tensor, w_query: torch.Tensor,
               w_conv: torch.Tensor, conv: torch.Tensor, state: torch.Tensor, slots: torch.Tensor,
               query_start: torch.Tensor, has_init: torch.Tensor, streams: int, dilation: int, eps: float
@@ -52,8 +57,7 @@ def ple_block(key: torch.Tensor, value: torch.Tensor, r: torch.Tensor, w_key: to
     hidden = value.shape[1]
     k = _norm(key.float(), w_key, streams, eps).reshape(len(key), streams, hidden)
     q = _norm(r.float(), w_query, streams, eps).reshape(len(r), streams, hidden)
-    u = (k * q).sum(-1) / math.sqrt(hidden)
-    g = torch.sigmoid(u.sign() * u.abs().clamp_min(1e-6).sqrt())
+    g = _gate((k * q).sum(-1) / math.sqrt(hidden))
     gated = (g[:, :, None] * value.float()[:, None, :]).reshape(r.shape)
     c = _norm(gated, w_conv, streams, eps)
     taps, window = conv.shape[1], state.shape[1]

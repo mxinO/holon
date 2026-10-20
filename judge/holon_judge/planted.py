@@ -138,6 +138,70 @@ def qsa_select_shift(decode_only: bool) -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def qsa_pool_rope_last() -> Iterator[None]:
+    """QSA (docs/v1-flash-next.md §6.3): every pooled key rotated at its block's last position ratio·b + ratio − 1, not
+    its first (`qsa_index@1` handed the rope table from row ratio − 1 on). Reports how often it fired."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.QSA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        index = self._index
+
+        def late(k, raw, pooled, table, seq, positions, weight, cos_sin):
+            fired[_when()] += 1
+            index(k, raw, pooled, table, seq, positions, weight, cos_sin[self.ratio - 1:])
+        self._index = late
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self._index = index
+    with mock.patch.object(units.QSA, "forward", planted):
+        yield
+    print(f"plant qsa-pool-rope-last fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def hc_inject_unscaled() -> Iterator[None]:
+    """The gated residual (§6.3): its combine weights 2σ(norm(R)·injectᵀ) without the 1/n (the mix kernel handed
+    n · inject). Reports how often it fired."""
+    from holon_std.hyper import units
+
+    mix, fired = units._HC.mix, collections.Counter()
+
+    def planted(self, r, y_prev=None, w_prev=None):
+        if self.inject is None:
+            return mix(self, r, y_prev, w_prev)
+        fired[_when()] += 1
+        return self._mix(r, self.norm, self.down, self.up, self.inject * self.inject.shape[0], y_prev, w_prev)
+    with mock.patch.object(units._HC, "mix", planted):
+        yield
+    print(f"plant hc-inject-unscaled fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ple_gate_no_sqrt() -> Iterator[None]:
+    """PLE (§6.3): its gate σ(u) without the signed √: the unit's `qwen4_exp.ple_block@1` instance replaced by the
+    oracle (torch, on the unit's device) with that gate. Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import reference, units
+
+    init, fired = units.PLE.__init__, collections.Counter()
+
+    def planted(self, ctx, **params):
+        init(self, ctx, **params)
+        streams, eps, dilation = self.n, self.eps, self.window // (params.get("kernel", 4) - 1)
+
+        def block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init):
+            fired[_when()] += 1
+            return reference.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start,
+                                       has_init, streams, dilation, eps)
+        self._block = block
+    with mock.patch.object(units.PLE, "__init__", planted), mock.patch.object(reference, "_gate", torch.sigmoid):
+        yield
+    print(f"plant ple-gate-no-sqrt fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def verify_writes_state() -> Iterator[None]:
     """Speculation on a recurrent mixer: a verify row's delta rule writes its final state over the live one (no
     sink), so the replay starts from the state after every draft, rejected ones included. Reports how often it fired:
@@ -1793,6 +1857,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
     "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
+    "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
+    "ple_gate_no_sqrt": ple_gate_no_sqrt,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

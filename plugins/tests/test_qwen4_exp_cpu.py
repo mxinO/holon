@@ -18,7 +18,8 @@ prefilled one-shot and in chunks of 7, 10 and 13 tokens, and as its 100-token pr
   rarely right): verify rows accept 0, 1, 2 and 3 drafts, and GDN, PLE and QSA rewind.
   `drafters.dflash` refuses the target (its residual is not hidden-size).
 - Plants that must fail: `qsa_dense_limit_off_by_one` (a 20-token step runs dense), `ple_conv_dilation_1`,
-  `ple_eos_cut_off`.
+  `ple_eos_cut_off`, and §6.3's (the judge's, for L2 on the full model): `qsa_select_shift`, `qsa_pool_rope_last`,
+  `hc_inject_unscaled`, `ple_gate_no_sqrt`.
 
 Needs the tiny GGUF: `FN_TINY_GGUF=<…/tiny-qwen4exp-f32.gguf>`, the MTP pack beside it (both built by
 `python -m holon_testing.qwen4exp_files` in the golden venv; their sha256 are pinned), else skipped.
@@ -201,12 +202,21 @@ def test_dflash_refuses_a_wide_residual(tiny, tmp_path):
         _engine(tiny[0], 128, mtp=draft, drafter="dflash")
 
 
-@pytest.mark.parametrize("plant", ["qsa_dense_limit_off_by_one", "ple_conv_dilation_1", "ple_eos_cut_off"])
+JUDGE_PLANTS = ("qsa_select_shift", "qsa_pool_rope_last", "hc_inject_unscaled", "ple_gate_no_sqrt")     # §6.3's
+
+
+@pytest.mark.parametrize("plant", ["qsa_dense_limit_off_by_one", "ple_conv_dilation_1", "ple_eos_cut_off",
+                                   *JUDGE_PLANTS])
 def test_plants_fail(tiny, plant, monkeypatch):
+    from holon_judge.planted import PLANTS
     from holon_plugins.models.qwen4_exp import plugin
     from holon_std.mixers.qsa import kernels as qsa_kernels
     from holon_std.mixers.qsa import units as qsa_units
 
+    if plant in JUDGE_PLANTS:
+        with PLANTS[plant](), pytest.raises(AssertionError):
+            _check(tiny, 10)
+        return
     if plant == "qsa_dense_limit_off_by_one":
         limit = qsa_kernels.dense_limit
         monkeypatch.setattr(qsa_units.kernels, "dense_limit", lambda budget, ratio: limit(budget, ratio) + 1)
