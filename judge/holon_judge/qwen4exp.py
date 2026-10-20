@@ -16,6 +16,7 @@ needs beyond its forward, through `archs`' hooks.
   dense parts, F32 norms stored as w, Q2_0 experts)."""
 from __future__ import annotations
 
+import contextlib
 import copy
 import pathlib
 from collections.abc import Callable
@@ -134,3 +135,21 @@ def mtp_pooled(state: dict[str, torch.Tensor], config, embeds: torch.Tensor, hid
                      dtype=torch.long)).last_hidden_state[0]
     finally:
         hook.remove()
+
+
+# ---- the decode-divergence gate's dense control (docs/v1-flash-next.md acceptance 2) ----
+
+@contextlib.contextmanager
+def forced_dense():
+    """A test-only mode: every QSA step of the engines built inside runs gqa's dense attention (the index planner's
+    limit unbounded: identity selection, in prefill and decode alike), the gate's control."""
+    from unittest import mock
+
+    from holon_std.mixers.qsa import units
+
+    init = units.IndexPlanner.__init__
+
+    def unbounded(self, limit):
+        init(self, 1 << 40)
+    with mock.patch.object(units.IndexPlanner, "__init__", unbounded):
+        yield

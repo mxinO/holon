@@ -17,10 +17,10 @@
     python -m holon_judge retokenize --prompts <jsonl> --model <hf dir or id> --out <jsonl>
                                    # the same texts in another model's tokenizer (each must decode back exactly)
     python -m holon_judge snapshot-diff <a.json> <b.json>
-    python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--json <file>]
+    python -m holon_judge snapshot --model <hf dir or id> --prompts <jsonl> [--runs 3] [--long-len N] [--json <file>]
                                    # the snapshot trace on fresh engines: run-identical?
     python -m holon_judge bounded  --model <hf dir or id | .gguf> --prompts <jsonl> [--json <file>] [--plant <bug>]
-                                   [--sessions N] [--graphs-vs-eager]
+                                   [--sessions N] [--system-len N] [--graphs-vs-eager]
                                    # prefix cache on/off x overlap depth 1/0 on a multi-turn trace; or decode
                                    # graphs on vs off at a batch of N sessions
                                    [--policies [--late N]]
@@ -199,7 +199,7 @@ def _snapshot(a: argparse.Namespace) -> int:
     from . import snapshot
 
     path = golden.resolve_model(a.model)
-    requests = snapshot.trace(PromptSet.load(a.prompts))
+    requests = snapshot.trace(PromptSet.load(a.prompts), long_len=a.long_len)
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     config = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
@@ -307,7 +307,8 @@ def _bounded(a: argparse.Namespace) -> int:
     if a.late is not None and not a.policies:
         raise SystemExit("bounded: --late goes with --policies")
     late = (a.late if a.late is not None else max(2, a.sessions // 2)) if a.policies else 0
-    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions, late=late)
+    trace = bounded.Trace.from_prompts(PromptSet.load(a.prompts), sessions=a.sessions, late=late,
+                                       system_len=a.system_len)
     flags = argparse.ArgumentParser()
     engine_flags(flags)
     base = dataclasses.replace(engine_config(str(path), flags.parse_args(shlex.split(a.engine_args))),
@@ -596,6 +597,8 @@ def main(argv: list[str] | None = None) -> int:
     t.add_argument("--prompts", required=True)
     t.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     t.add_argument("--runs", type=int, default=3)
+    t.add_argument("--long-len", type=int, default=2048, help="request 0's tokens at most (the longest prompt's); "
+                   "the default is every recorded snapshot's")
     t.add_argument("--engine-args", default="", help="EngineConfig flags, as for `holon serve` (a class's settings)")
     t.add_argument("--json", help="write the machine-readable report here")
     t.set_defaults(run=_snapshot)
@@ -618,6 +621,8 @@ def main(argv: list[str] | None = None) -> int:
     b.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     b.add_argument("--prompts", required=True)
     b.add_argument("--sessions", type=int, default=48, help="concurrent sessions: the decode batch")
+    b.add_argument("--system-len", type=int, default=512, help="the shared system prompt's tokens (from the set's "
+                   "longest prompt; e.g. 4096 from v1-long: decode past a sparse-attention dense limit)")
     b.add_argument("--graphs-vs-eager", action="store_true", help="judge graphed decode against an eager baseline")
     b.add_argument("--chunked", type=int, help="also judge prefill in chunks of this many tokens")
     b.add_argument("--mixed", type=int, help="judge mixed steps (this chunk_with_decode) against today's schedule")

@@ -106,6 +106,38 @@ def replay_off_by_one() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def qsa_select_shift(decode_only: bool) -> Iterator[None]:
+    """QSA (docs/v1-flash-next.md §6.3): every selected complete block b read as its successor b + 1 (still complete;
+    the open block kept), in every sparse step, or with `decode_only` in decode and verify steps only (prefill rows
+    right: L2's teacher-forced prompts never see it, the decode-divergence gate must). Reports how often it fired,
+    eagerly and in graph captures (a captured shift fires on every replay)."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.QSA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        plan = getattr(getattr(ctx, "batch", None), "plan", None)
+        decode = plan is not None and bool(((plan.n_query == 1) | (plan.n_logits == plan.n_query)).all())
+        if decode_only and not decode or getattr(self, "_idx", None) is None:
+            return forward(self, x, ctx)
+        select, ratio = self._select, self.ratio
+
+        def shifted(q, pooled, table, seq, positions):
+            blocks = select(q, pooled, table, seq, positions)
+            complete = ((positions + 1) // ratio).to(blocks.dtype)[:, None]
+            fired[_when()] += 1
+            return torch.where((blocks >= 0) & (blocks < complete), torch.minimum(blocks + 1, complete - 1), blocks)
+        self._select = shifted
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self._select = select
+    with mock.patch.object(units.QSA, "forward", planted):
+        yield
+    print(f"plant qsa-{'decode-' if decode_only else ''}select-shift fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def verify_writes_state() -> Iterator[None]:
     """Speculation on a recurrent mixer: a verify row's delta rule writes its final state over the live one (no
     sink), so the replay starts from the state after every draft, rejected ones included. Reports how often it fired:
@@ -1759,6 +1791,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "lent-slot-still-mapped": lent_slot_still_mapped, "tail-unmap-undone": tail_unmap_undone,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
+    # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
+    "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

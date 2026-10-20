@@ -239,3 +239,34 @@ def test_plants_fail(tiny, plant, monkeypatch):
         monkeypatch.setattr(reference, "ple_rows", no_cut)
     with pytest.raises(AssertionError):
         _check(tiny, 10)
+
+
+def test_the_decode_gates_plant_and_control(tiny, capsys):
+    """The decode-divergence gate's tools (judge: `qsa_decode_select_shift`, `qwen4exp.forced_dense`): the plant
+    leaves prompt logprobs bitwise and changes decode's; the control never selects."""
+    from holon_judge import planted, qwen4exp
+
+    path, fixtures, _, _ = tiny
+    ids = fixtures["p0.ids"].tolist()[: q.PROMPT]
+    params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True, logprobs=1, prompt_logprobs=1)
+
+    def run():
+        engine = _engine(path, 128)
+        engine.add(ids, params)
+        prompt, decode = None, []
+        while engine.has_work():
+            for d in engine.step():
+                prompt = d.prompt_logprobs.token if d.prompt_logprobs is not None else prompt
+                decode += d.logprobs.token if d.logprobs is not None else []
+        engine.close()
+        return prompt, decode
+    plain = run()
+    with planted.PLANTS["qsa_decode_select_shift"]():
+        shifted = run()
+    assert shifted[0] == plain[0] and shifted[1] != plain[1] and "fired" in capsys.readouterr().err
+    with qwen4exp.forced_dense():
+        engine = _engine(path, 128)
+        seen = _record(engine)
+        _ask(engine, ids, DECODE)
+        assert all(not seen[layer] for layer in (3, 7))                                   # dense: no selection
+        engine.close()
