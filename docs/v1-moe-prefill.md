@@ -1,6 +1,10 @@
 # v1 — MoE prefill speed
 
-Status: **design rev 6 (2026-10-18); building: steps 0–3, 3b, 3c and 3d done** (§2.1–§2.2, §7.1). Step 0 tripped no
+Status: **design rev 6 (2026-10-18); building: steps 0–5 done, at the close before the merge** (§2.1–§2.2, §7.1).
+**Step 5:** 18 of 18 locks propagated (L2 passing, snapshots run-identical ×3); the 5080 offload lock re-pinned with
+its bars met (4K 1.136×, 32K 1.005× gated); acceptance 5's offload decode rows miss by routing under either method
+(one prompt: 4K 0.992×; six prompts: 1K 0.969×; the code at main's numerics 1.000×); the 4090 Q4_K_M lock takes
+`pass_rows` 512, with no value within the batched-decode tolerance; suite time +6% (for the lead). Step 0 tripped no
 decision rule; C-M6's fallback is taken (J against T up to 16 tokens; 64 on sm_89, B-dec). **Step 3: D3 fails M0.7's
 keep rule on both lock classes** and is reverted (§10 L3-1); steps 3b / 3c's 0.1–0.3% prefill cost is gone (L3-2: the
 id workspace at `pass_rows` again). **Step 3d:** D3′ (the router per pass) is kept: it passes M0.7's rule on the 5090's
@@ -982,8 +986,99 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
     0 after; the least free device memory 192 MiB; allocation peak 14.13 GiB. `ggml_cuda.pass_rows` stays at the
     class's 2,048 (no retries).
   - Allocator counters zero in steady state on every timed prompt of every Holon arm, both cards.
-- **sm_89:** still blocked (every 4090 we can reach is held by other jobs or in maintenance);
-  the gate before step 5 (§10 L3-4) is unrun.
+- **sm_89:** blocked at step 4; the gate ran after it and passes (§10 L3-4).
+
+**Step 5 (the close, 2026-10-20).** Records: `evidence/mp5_close_2026-10-20.json` (every class). The code the locks
+pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq instances) and FN's qembedding commit.
+- **Checks at the tree.**
+  - L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`) and memcheck: sm_86 (3090 and A5000) 305 passed, sm_89 (4090) 316,
+    sm_120 (5080) 318; memcheck 0 errors on each.
+  - Every kernel of the step-4 build is in this one with the same SASS on sm_86, sm_89 and sm_120 (T6, §10).
+  - The full suite on the A5000: 1,585 passed, 66 skipped (main: 1,522 and 66). **Suite time grew 6%** (main's tree and
+    this one side by side on two A5000s: 1,317 → 1,396 s): +53 s in `test_ggml_cuda_moe.py` (38 new tests; D2's
+    tile checks the most: 13.5 s, +10.9 s, +5.9 s) and +7 s in `test_ggml_cuda.py` (21 new); every other file within its
+    run-to-run ±8 s. Acceptance 7's "suite time does not grow" is not met as written: the lead's call (the new cases
+    are the panel's §5.1 list).
+  - `scripts/ci/run_all.sh`: green (core diff empty, ABI 1.3 unchanged, `vendor.sh --check`, import contracts); acceptance 7's
+    core and ABI items **met**.
+- **The propagation round** (D8: one round over the 18 locks `holon_tools impact b5b1e7f..c281d8c` lists, class by class
+  on its desktop, `holon_tools propagate --approve` at each lock's own `[engine]`: L2 against its floor, the trace,
+  the lock written only on a passing verdict, then snapshots ×3 at the new lock; approval delegated as at X's close):
+
+  | Class | Lock | Trace | L2 top-1 / floor / budget | KL p99 / budget | ΔPPL vs floor / budget | Approved | ×3 |
+  |---|---|---|---|---|---|---|---|
+  | rtx-5080 | 27B UD-IQ3_S (10 → 11) | identical | 97.519 / 97.540 / ≥ 97.290 | 0.591 / 1.420 | +0.111% ± 0.331% / 1.078% | yes | yes |
+  | rtx-5080 | 30B Q4_K_M (natural-fit offload, re-pinned) (2 → 3) | moved | 98.368 / 98.219 / ≥ 97.969 | 5.52e-2 / 0.118 | −0.084% ± 0.105% / 0.512% | yes | yes |
+  | rtx-5080 | 30B UD-IQ3_XXS (10 → 11) | identical | 98.463 / 98.331 / ≥ 98.081 | 5.60e-2 / 0.119 | −0.141% ± 0.126% / 0.566% | yes | yes |
+  | rtx-5080 | 8B NVFP4 (7 → 8) | moved | 98.746 / 98.691 / ≥ 98.441 | 1.28e-2 / 2.49e-2 | −0.121% ± 0.048% / 0.359% | yes | yes |
+  | rtx-5080 | 8B Q4_K_M (12 → 13) | moved | 98.496 / 98.356 / ≥ 98.106 | 3.62e-2 / 7.17e-2 | −0.115% ± 0.134% / 0.586% | yes | yes |
+  | rtx-5080 | 8B UD-IQ3_XXS (12 → 13) | moved | 98.929 / 98.871 / ≥ 98.621 | 1.30e-2 / 3.06e-2 | +0.037% ± 0.088% / 0.471% | yes | yes |
+  | rtx-4090 | 27B UD-Q4_K_M (10 → 11) | identical | 97.306 / 96.947 / ≥ 96.697 | 0.759 / 1.300 | −0.661% ± 0.960% / 2.650% | yes | yes |
+  | rtx-4090 | 30B MXFP4_MOE (6 → 7) | moved | 98.447 / 98.469 / ≥ 98.219 | 2.61e-2 / 5.63e-2 | −0.059% ± 0.078% / 0.446% | yes | yes |
+  | rtx-4090 | 30B NVFP4 (7 → 8) | moved | 98.310 / 98.359 / ≥ 98.109 | 5.00e-2 / 9.84e-2 | +0.166% ± 0.107% / 0.503% | yes | yes |
+  | rtx-4090 | 30B Q4_K_M (`pass_rows` 512) (10 → 11) | moved | 98.380 / 98.219 / ≥ 97.969 | 6.11e-2 / 0.118 | +0.008% ± 0.127% / 0.568% | yes | yes |
+  | rtx-4090 | 8B NVFP4 (7 → 8) | moved | 98.768 / 98.691 / ≥ 98.441 | 1.24e-2 / 2.49e-2 | −0.059% ± 0.056% / 0.359% | yes | yes |
+  | rtx-4090 | 8B Q4_K_M (4 → 5) | moved | 98.511 / 98.356 / ≥ 98.106 | 3.38e-2 / 7.17e-2 | −0.089% ± 0.121% / 0.553% | yes | yes |
+  | rtx-5090 | 27B UD-Q4_K_M (5 → 6) | identical | 96.914 / 96.947 / ≥ 96.697 | 0.789 / 1.300 | −0.038% ± 0.493% / 1.483% | yes | yes |
+  | rtx-5090 | 30B Q4_K_M (4 → 5) | moved | 98.331 / 98.219 / ≥ 97.969 | 5.48e-2 / 0.118 | +0.022% ± 0.100% / 0.500% | yes | yes |
+  | rtx-5090 | 8B Q4_K_M (4 → 5) | moved | 98.414 / 98.356 / ≥ 98.106 | 3.76e-2 / 7.17e-2 | −0.092% ± 0.110% / 0.526% | yes | yes |
+  | rtx-3090 | 27B UD-Q4_K_M (6 → 7) | moved | 97.162 / 96.947 / ≥ 96.697 | 0.826 / 1.300 | −1.161% ± 0.677% / 1.943% | yes | yes |
+  | rtx-3090 | 30B Q4_K_M (4 → 5) | moved | 98.200 / 98.219 / ≥ 97.969 | 6.20e-2 / 0.118 | +0.015% ± 0.103% / 0.506% | yes | yes |
+  | rtx-3090 | 8B Q4_K_M (4 → 5) | moved | 98.490 / 98.356 / ≥ 98.106 | 3.70e-2 / 7.17e-2 | −0.092% ± 0.115% / 0.537% | yes | yes |
+
+  **18 of 18 approved (delegated), none escalated; `scripts/ci/check_locks.py --release` green.** 14 traces moved
+  where D5's or D3′'s bounded numerics changed a generated token, 4 stayed byte-identical; every L2 passes
+  against its own floor. The 27B rows' ΔPPL carries its own wide SE (±0.3–1.0%), as at X's close.
+- **The 5080's natural-fit offload lock, re-filled and re-pinned** (`3.lock`):
+  - The fill at the lock's settings, main's tree and this one in one session: main 3,224 / 1,695 / 1,529, this tree
+    3,229 / 1,700 / 1,529 (gate/up / q6_k down / q4_k down slots).
+  - `propagate` records the trace on the stored snapshot's pools (`state_memory` = its `pool_bytes`), and its L2 engine
+    is the process's second: the fill did not fit there (the arena 8.651 of 8.668 GiB). The pin is the fill scaled
+    until it does, **3,216 / 1,693 / 1,523**: 21.6 MB under main's lock's 3,236 / 1,618 / 1,618 in bytes, within D5's
+    ≈ 25 MB (acceptance 6: **met**). L2 passing, the trace moved, snapshots run-identical ×3.
+  - **Acceptance 1 at the re-pinned lock** (§5.2's method, one session, 6 balanced rounds, clocks 2,767 MHz every arm;
+    one flagged repetition, FreeToken default 1K): against FreeToken gated 1.850× (sd 0.014) / **1.136×** (0.0005) /
+    **1.0053×** (0.0001) at 1K / 4K / 32K: **met**; FreeToken default at 32K 0.959× (reported); against main 1.020 /
+    1.226 / 1.097×. The llama.cpp rows are step 4's (prefill moved < 0.1% with the pin).
+  - **Acceptance 5's offload decode rows, both ways** (the re-pinned lock on this tree against main's lock on main's
+    tree; `ctx.py`, 256 decode tokens, 3 rounds; the owner has not yet chosen the method):
+
+    | Context | One prompt (shift 0) | Six prompts, geomean | Per prompt |
+    |---|---|---|---|
+    | 1K | 1.0046 (sd 0.0001): within | **0.9687** (sd 0.0001): misses by 2.6 pp | 0.856–1.013 |
+    | 4K | **0.9917** (sd 0.0001): misses by 0.33 pp | 1.0075: within | 0.961–1.122 |
+    | 32K | 1.0012: within | 1.0055: within | 0.990–1.035 |
+
+    Decode follows the misses per token prompt by prompt (1K, shift 1: 9.6 → 19.4 misses, 0.856×).
+  - **The split at the re-pinned counts** (main, this tree, and this tree at main's prefill numerics — the probe of
+    step 4 — all three at 3,216 / 1,693 / 1,523; six prompts, 2 rounds): this tree at main's numerics against main is
+    1.0000 / 1.0004 / 1.0000× (geomean; every prompt within 0.1%), so the code costs nothing; this tree against main
+    0.9678 / 1.005 / 1.004×, the same as against main's lock: **every deviation is the bounded items' routing**, not the
+    code and not the pin. Under either method one row misses by routing; the method is the owner's (the tolerance
+    as written has no term for prompt variance).
+- **The 4090 Q4_K_M lock's `ggml_cuda.pass_rows`** (the lead's decision 2; one RTX 4090 desktop, p50 2,520 MHz under
+  load; a first desktop ran at 345 MHz, 90 °C, and its perf rows are void — its L0, SASS and five propagations stand):
+
+  | `pass_rows` | Startup KV (main 26,752) | Prefill vs main, 1K / 4K | B16 / B32 / B64 vs main: seed 0 | six seeds, geomean (sd) |
+  |---|---|---|---|---|
+  | 4,096 | 25,888 | 1.439 / 1.746× | 0.963 / 0.945 / 0.958 | 0.998 (0.034) / **0.959** (0.012) / **0.961** (0.012) |
+  | 2,048 | 26,464 | 1.437 / 1.673× | 0.983 / 0.948 / 0.959 | 1.005 (0.030) / **0.964** (0.012) / **0.956** (0.018) |
+  | 512 | 27,040 | 1.137 / 1.139× | 0.980 / 0.967 / 0.994 | 0.998 (0.030) / **0.975** (0.011) / 0.989 (0.013) |
+
+  - Every pool holds the lock's `max_model_len` (8,192) and its recorded rows. B32 and B64 at depth 1,024 need 36.9K /
+    73.7K tokens, more than any pool, so they run in waves of ⌊pool / 1,152⌋ sequences: 23 at main's pool and at 512,
+    22 at 2,048 and 4,096 — one sequence fewer per wave is the 4–5%.
+  - **No value keeps B32 within max(0.5%, 2 sd)**; 512 comes closest (B32 −2.5% against a 2.1% tolerance) and gives
+    the KV back (+288 tokens). The lock takes **512** (`11.lock`), the rule's nearest value; the 4K prefill gain falls
+    from 1.75× to 1.14× there. The lead decides whether 512 stands or the rule changes.
+  - At 512, the code at main's prefill numerics (the probe) against main, six seeds: 0.993 (sd 0.003) / 1.002 (0.002)
+    / 0.994 (0.002): ≈ 0.6% of code cost at B16 and B64 (C5's per-call 1.004–1.017× on q4_k down, L3-4), just past
+    0.5%, and B32's −2.5% is the bounded items' routing.
+- **Batched decode on the 3090's 30B Q4_K_M lock** (4,096, its default; six seeds, 3 repetitions each): B16 0.968×
+  (seed 0) / 0.985× (geomean, sd 0.014), B32 1.090 / 1.085×, B64 1.181 / 1.171× — the 3090's pool (42K tokens) holds
+  B32, and D2 gains past it.
+- **RTX 5090:** the resident bar rows at this tree 0.9998× the step-4 tree's (T6 above), so step 4's 5090 bars and
+  decode rows stand (every kernel's SASS unchanged).
 
 **Step 3b (D10, D11).**
 - **What landed.**
@@ -1188,6 +1283,10 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
   hand at the close from step 0's measurements.
 - **O4: bf16 expert intermediates** (FreeToken's, ≈ 2.4% at 4K) stay out (m02 D3). The handicap is stated next to the
   bars.
+- **O5 (open; step 5 measured both ways): acceptance 5's decode tolerance on routing-sensitive rows.** One prompt per
+  context or six prompts (geomean)? Under either, one 5080 offload row misses (§7.1 step 5), and at the same counts the
+  code at main's numerics is 1.000× main: the misses are D3′'s and D5's bounded routing. The 4090's batched decode
+  rows show the same mechanism on top of a KV-wave effect and ≈ 0.6% of code at B16 / B64.
 - **For the lead (from B-M6, outside this track):** K and FN both claim ABI 1.4 (`v1-kv-tiers.md:450`,
   `v1-flash-next.md:376`).
 
@@ -1203,10 +1302,16 @@ Records: the sm_89 rows in `evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
 | Item | Done | Result |
 |---|---|---|
 | The real constraint, per type and path | — | mmvq reads whole blocks: any whole number of the type's blocks. mmq's tile loaders step K by 256 values (`MMQ_ITER_K`), so a narrower row's last step reads the next row's blocks, and the last row's read past the buffer (upstream pads the allocation). The 256-value types (the K-quants, IQ1–IQ3, IQ4_XS) hold no 640-wide row at all: IQ4_XS and Q6_K stay refused there (L0 asserts it). FP4 keeps 256 (native W4A4 steps K by 512; D8's `tail_bytes`) |
-| `ROW_BLOCKS` | `2b0fc68`, `3b949c7` | `_supports_matmul` takes `in` as a multiple of the block for Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, IQ4_NL (32) and Q2_0 (64), 256 otherwise. `vendor.patch`: those seven loaders clamp each block index to the row's last block (`ggml_cuda_mmq_kblock`; Q8_0's second half on its own). The q8_1 activations past `in` are zero padding, so the clamped products are 0: upstream's bits. At whole K steps the clamp never binds |
-| The clamp's form, per call (A5000, dense mmq at `in` 2,048, 8 interleaved rounds, against the step-4 tree; Q4_0 / Q8_0 / IQ4_NL / Q5_0 at T = 4,096) | three built | a fast exit for rows of whole K steps: 1.015 / 1.087 / 1.022 / 1.022×; a `tail` loader instance taken on a row's last step only: 1.022 / 1.030 / 1.014 / 1.022×; **always clamping: 1.002 / 1.015 / 1.008 / 1.000×, taken**. T = 512 swings ±8% between processes in every form. Every form, and one that only reassociates the address, moves the mmq kernels' registers by up to ±20 (cuobjdump): about 1–2% per call is the noise of any edit to these loaders |
-| L0 and memcheck | `dedc4b3`, `3b949c7` | `test_qlinear_at_in_640` (Q2_0, IQ4_NL, Q4_0, Q8_0) and `test_linear_experts_at_in_640` (Q2_0, IQ4_NL: mmvq, mmq with ids at a chunk and past it, and `check_pass_rows` at 640, so both `PASS_PROVEN` entries hold there too), the bytes after the weights poisoned; memcheck at 640 with buffers of exactly the weights' size (both paths, four types). sm_86: 305 passed, memcheck 0 errors; sm_89 (4090): 316 passed, memcheck 0 errors. Per call on the 4090 (6 rounds, T = 512 / 4,096): Q4_0 1.002 / 1.006×, Q8_0 1.023 / 1.021×, IQ4_NL 1.015 / 1.014×, Q5_0 0.98 / 0.98× (±5%). End to end on the 4090 (the MXFP4 lock's model, whose dense tensors are Q8_0; prefill at its 2,048 budget, 6 balanced rounds): 0.996 / 0.998× the step-4 tree's speed at 1K / 4K (sd 0.0018 / 0.0008): the clamp costs 0.4% / 0.2% where Q8_0 dense layers run. A form with no cost at whole K steps by construction needs a second mmq kernel instance for rows that end inside a K step (selected at launch; more `vendor.patch` plumbing): not built, the lead's call |
+| `ROW_BLOCKS` | `2b0fc68`, `3b949c7`, `c281d8c` | `_supports_matmul` takes `in` as a multiple of the block for Q4_0, Q4_1, Q5_0, Q5_1, Q8_0, IQ4_NL (32) and Q2_0 (64), 256 otherwise. `vendor.patch` (the lead's decision after the first form): a row that ends inside a K step runs mmq instances of its own (`tail`, a template argument of `mul_mat_q` and its process loop, picked in `mul_mat_q_case` for those seven types when `in % 256 ≠ 0`); their loaders clamp each block index to the row's last block (`ggml_cuda_mmq_kblock`; Q8_0's second half on its own). The q8_1 activations past `in` are zero padding, so the clamped products are 0: upstream's bits. Every other width runs the instances as they were |
+| The form, per call and in SASS | three loader forms measured, then the `tail` instances | The loader forms (A5000, dense mmq at `in` 2,048, 8 interleaved rounds, Q4_0 / Q8_0 / IQ4_NL / Q5_0 at T = 4,096, against the step-4 tree): a fast exit for whole K steps 1.015 / 1.087 / 1.022 / 1.022×; a `tail` loader on a row's last step only 1.022 / 1.030 / 1.014 / 1.022×; always clamping 1.002 / 1.015 / 1.008 / 1.000× (`3b949c7`; on the 4090 1.006 / 1.021 / 1.014 / 0.98×, and 0.996 / 0.998× prefill at 1K / 4K on the MXFP4 lock, whose dense tensors are Q8_0). Any edit to the shared loaders moved the kernels' registers by up to ±20. **The `tail` instances (`c281d8c`) leave the existing ones as they were: every kernel of the step-4 build is in this one with the same SASS, sm_86, sm_89 and sm_120 (3,803 kernels each: 2,603 byte for byte, 1,200 differing only as below; `cuobjdump -sass`), the only differences an assert's line number loaded as a constant and global addresses (`c[0x4]`); 672 `tail` instances are added per SM.** Measured as well (the lead's checks): per call on a 4090 against the step-4 tree (6 interleaved rounds, T = 512 / 4,096) Q4_0 1.011 / 1.000×, Q8_0 1.000 / 1.001×, IQ4_NL 1.006 / 1.000×, Q5_0 1.002 / 1.000× (the 0.05 ms calls at T = 512 within their ±1% spread; identical SASS); the 5090's resident bar rows (the bar's flags, §5.2's method, 6 balanced rounds, clocks 2,557–2,580 MHz): 0.9998× the step-4 tree at 1K and at 4K (sd 0.001), so step 4's 4K bar (1.008×) stands |
+| L0 and memcheck | `dedc4b3`, `3b949c7` | `test_qlinear_at_in_640` (Q2_0, IQ4_NL, Q4_0, Q8_0) and `test_linear_experts_at_in_640` (Q2_0, IQ4_NL: mmvq, mmq with ids at a chunk and past it, and `check_pass_rows` at 640, so both `PASS_PROVEN` entries hold there too), the bytes after the weights poisoned; at 640 every launched mmq kernel is a `tail` instance and at 768 none (the launched names); memcheck at 640 with buffers of exactly the weights' size (both paths, four types). At `c281d8c`: sm_86 305 passed, memcheck 0 errors; sm_120 (5080) 318 passed, memcheck 0 errors; sm_89 (4090) 316 passed, memcheck 0 errors |
 | Bitwise for the locks | — | `prompt_logprobs` hashes of the T6 tree equal the step-4 tree's (A5000, Q4_K_M resident and natural fit, run-identical ×2). The locks' expert types are not T6's; their Q8_0 / IQ4_NL dense tensors (the 4090 MXFP4 lock, the 5080 27B IQ3_S lock) are 256-multiples, where the clamp never binds |
+
+### Building: items handed to FN (the lead's decision, 2026-10-20)
+
+| # | For | Item |
+|---|---|---|
+| FN-7a | FN's step 7 (`docs/v1-flash-next.md`) | **IQ2_S's mmq with ids on sm_89 at T = 16–32: 1.25–1.37× main's time per call** (C5's sweep as shipped, L3-4; gate/up and down alike; from T = 48 on 1.00×). No lock uses IQ2_S today, and nothing else in the sweep is past 1.025×. The instances' registers and stack equal main's, so the cause is not isolated. FN's step 7 measures it on an RTX 4090 lock that uses IQ2_S, at its batched decode, and isolates it there if that decode needs it |
 
 ### Building: the step-3 panel's code review (2026-10-19; A, B, C) and step 3d
 
