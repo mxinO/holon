@@ -254,8 +254,9 @@ def emulate_q8_1(model: torch.nn.Module, path: str | pathlib.Path, kernel_path: 
     for t in _tensors(path):
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue
-        if t.name.endswith("_exps.weight") or t.tensor_type in _DENSE:   # expert stacks: the floors' D3 block
-            continue                                   # (`q8_1_experts`); unquantized tensors (norms, BF16 projections)
+        if t.name.endswith("_exps.weight") or t.tensor_type in _DENSE or t.name == PLE_TABLE:
+            continue                                   # expert stacks: the floors' D3 block (`q8_1_experts`);
+            # unquantized tensors (norms, BF16 projections); PLE's table, whose rows are gathered exactly (get_rows)
         owner = _linear(t.name).removesuffix(".weight")
         if owner not in linears:
             continue                                   # the embedding (get_rows reads it exactly)
@@ -286,7 +287,7 @@ def engine_shapes(path: str | pathlib.Path) -> dict[str, tuple[str, int, int]]:
     result."""
     q35 = _qwen35(gguf.GGUFReader(path).fields)
     linears = {_linear(t.name).removesuffix(".weight"): (t.tensor_type.name.lower(), int(t.shape[0]), int(t.shape[1]))
-               for t in _tensors(path) if t.tensor_type not in _DENSE and t.name != "token_embd.weight"
+               for t in _tensors(path) if t.tensor_type not in _DENSE and t.name not in ("token_embd.weight", PLE_TABLE)
                and not t.name.endswith("_exps.weight")
                and not (q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name))}
     return merged(linears)
