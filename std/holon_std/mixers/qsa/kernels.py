@@ -9,7 +9,9 @@ ratio·b … ratio·b + ratio − 1. A query at position p sees n = (p + 1) // r
 **State** (two paged specs of the mixer, in separate page groups, `page % ratio == 0`): the gqa KV cache (`"kv"`, any
 of `std.mixers.gqa`'s layouts) and the index keys (`"idx"`): per unit, `raw` [units, page, Dk] in the model dtype —
 every token's index key as projected (unnormed, unrotated) — and `pooled` [units, page / ratio, Dk] float32, one key per
-complete block. Block b of a sequence lives in its page (ratio·b) // page, at (ratio·b % page) / ratio.
+complete block. Block b of a sequence lives in its page (ratio·b) // page, at (ratio·b % page) / ratio. Within a unit
+both are dense rows; units may be strided (a layer's segment of a unit holds its raw keys, then its pooled keys):
+kernels address units by `raw.stride(0)` and `pooled.stride(0)`.
 
 **Addressing** (every op): `seq` [T] int32, each token's row of `table` [slots, max_pages] (int32 unit ids; −1: a
 padding token, which reads nothing and writes nothing), and `positions` [T] int64, its position in that sequence.

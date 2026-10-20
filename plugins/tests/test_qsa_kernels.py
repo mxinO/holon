@@ -5,7 +5,8 @@ budget 2,048), through the build context.
 - `qsa_index@1` (one launch): prefill in two chunks per sequence, the second starting inside a block (its pooled keys
   read raw keys of the first chunk and of its own), and padding tokens; k in bf16 and in f32 (pooled from k as raw
   stores it). `raw` bitwise; `pooled` within
-  `l0.check(f32, Dk)`; slots no token writes stay untouched.
+  `l0.check(f32, Dk)`; slots no token writes stay untouched. The kernels read `raw` and `pooled` as the unit lays them
+  out: views of one segment per unit (raw keys, then pooled; units strided), as `std.mixers.qsa@1`'s `_idx_layer`.
 - `qsa_select@1`, exactly equal to the oracle where its float32 scores have no near-ties: pooled keys drawn from six
   vectors, one of them zero, so every boundary is a large tie that D2's lower-block rule decides, a tie at ReLU's 0.0
   among them (asserted). Rows: 32K-token queries (8,192 blocks, and 8,195: past the kernel's in-register row), queries
@@ -54,6 +55,15 @@ def _table(max_len: int, seed: int) -> torch.Tensor:
     return torch.from_numpy(units.astype(np.int32)).view(SLOTS, pages)
 
 
+def _segments(units: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """`raw` [units, PAGE, DK] bf16 and `pooled` [units, PAGE / RATIO, DK] f32 on the GPU, as the unit views its pool:
+    one byte segment per unit, raw keys then pooled keys, so units are strided in both (`QSA._idx_layer`)."""
+    raw_bytes = PAGE * DK * 2
+    seg = torch.empty(units, raw_bytes + PAGE // RATIO * DK * 4, dtype=torch.uint8, device="cuda")
+    return (seg[:, :raw_bytes].view(torch.bfloat16).view(-1, PAGE, DK),
+            seg[:, raw_bytes:].view(torch.float32).view(-1, PAGE // RATIO, DK))
+
+
 def _addresses(rows: list[tuple[int, int, int]]) -> tuple[torch.Tensor, torch.Tensor]:
     """rows: (slot, first position, tokens); slot −1 gives that many padding tokens."""
     seq = [s for s, _, n in rows for _ in range(n)]
@@ -72,7 +82,9 @@ def test_index(k_dtype):
     cos_sin = ref.cos_sin(max(lengths.values()), ROT, THETA)
     raw = torch.full((units, PAGE, DK), 7.0, dtype=torch.bfloat16)
     pooled = torch.full((units, PAGE // RATIO, DK), float("nan"))
-    ours = [x.cuda() for x in (raw, pooled)]
+    ours = _segments(units)
+    for view, init in zip(ours, (raw, pooled), strict=True):
+        view.copy_(init)
     kernel = _kernel(qsa_kernels.INDEX, head_dim=DK, ratio=RATIO, page=PAGE, rotary_dim=ROT,
                      max_positions=len(cos_sin), eps=1e-6, dtype="bfloat16")
     for chunk in (lambda s: (0, cut[s]), lambda s: (cut[s], lengths[s])):
@@ -118,6 +130,8 @@ def _select(palette: int | None, seed: int = 0):
     q = torch.randn(len(seq), HI, DK, generator=torch.Generator().manual_seed(seed + 1)).bfloat16()
     kernel = _kernel(qsa_kernels.SELECT, heads=HI, head_dim=DK, ratio=RATIO, budget=BUDGET, page=PAGE)
     args = [x.cuda() for x in (q, pooled, table, seq, pos)]
+    args[1] = _segments(len(pooled))[1]
+    args[1].copy_(pooled)
     return kernel(*args).cpu(), ref.qsa_select(q, pooled, table, seq, pos, RATIO, BUDGET), (q, pooled, table), args
 
 

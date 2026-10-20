@@ -31,7 +31,7 @@ SCORE_BLOCKS, SCORE_CHUNK = 64, 8  # fixed for every shape (shape invariance); o
 
 @triton.jit
 def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_ptr, eps, stride_k, stride_table,
-           PAGE: tl.constexpr, D: tl.constexpr, RATIO: tl.constexpr, ROT: tl.constexpr):
+           raw_unit, pooled_unit, PAGE: tl.constexpr, D: tl.constexpr, RATIO: tl.constexpr, ROT: tl.constexpr):
     """One token: store its raw key; when it completes a block, pool the block: mean (f32, rounded to raw's dtype),
     norm, rope. The block's keys are what the cache holds after this call: a position this call stores is read from
     k in raw's dtype (the value it stores; its row is t − (p − position): each sequence's tokens are consecutive rows
@@ -42,11 +42,11 @@ def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_pt
     d = tl.arange(0, D)
     if s >= 0:
         unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + p // PAGE).to(tl.int64)
-        tl.store(raw_ptr + (unit * PAGE + p % PAGE) * D + d, tl.load(k_ptr + t * stride_k + d))
+        tl.store(raw_ptr + unit * raw_unit + (p % PAGE) * D + d, tl.load(k_ptr + t * stride_k + d))
         if p % RATIO == RATIO - 1:
             start = p - RATIO + 1                   # page % RATIO == 0: the block is in one page
             unit = tl.load(table_ptr + s.to(tl.int64) * stride_table + start // PAGE).to(tl.int64)
-            base = raw_ptr + (unit * PAGE + start % PAGE) * D
+            base = raw_ptr + unit * raw_unit + (start % PAGE) * D
             half: tl.constexpr = ROT // 2
             partner = tl.where(d < half, d + half, tl.where(d < ROT, d - half, d))
             x = tl.zeros((D,), tl.float32)
@@ -70,7 +70,7 @@ def _index(k_ptr, raw_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, w_ptr, cs_pt
             cos = tl.load(cs_ptr + start * ROT + c, mask=d < ROT, other=1.0)
             sin = tl.load(cs_ptr + start * ROT + half + c, mask=d < ROT, other=0.0)
             out = tl.where(d < half, x * cos - y * sin, tl.where(d < ROT, x * cos + y * sin, x))
-            tl.store(pooled_ptr + (unit * (PAGE // RATIO) + (start % PAGE) // RATIO) * D + d, out)
+            tl.store(pooled_ptr + unit * pooled_unit + ((start % PAGE) // RATIO) * D + d, out)
 
 
 @triton.jit
@@ -92,8 +92,8 @@ def _relu_dots(rowp, q, h0, ok, H: tl.constexpr, D: tl.constexpr, DC: tl.constex
 
 
 @triton.jit
-def _score(q_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_ptr, stride_q, stride_table, stride_ws, scale,
-           H: tl.constexpr, D: tl.constexpr, PAGE: tl.constexpr, RATIO: tl.constexpr, BB: tl.constexpr,
+def _score(q_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_ptr, stride_q, stride_table, stride_ws, pooled_unit,
+           scale, H: tl.constexpr, D: tl.constexpr, PAGE: tl.constexpr, RATIO: tl.constexpr, BB: tl.constexpr,
            DC: tl.constexpr):
     """Scores of BB of a query's complete blocks: Σ_h relu(⟨q_h, k_b⟩) / √D, float32 products and sums."""
     t = tl.program_id(0).to(tl.int64)
@@ -105,7 +105,7 @@ def _score(q_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_ptr, stride_q, str
         tok = b.to(tl.int64) * RATIO
         unit = tl.load(table_ptr + tl.maximum(s, 0).to(tl.int64) * stride_table + tok // PAGE, mask=ok,
                        other=0).to(tl.int64)
-        rowp = pooled_ptr + (unit * (PAGE // RATIO) + (tok % PAGE) // RATIO) * D
+        rowp = pooled_ptr + unit * pooled_unit + ((tok % PAGE) // RATIO) * D
         score = tl.zeros((BB,), tl.float32)
         for h0 in tl.static_range(0, H, 4):
             score += _relu_dots(rowp, q_ptr + t * stride_q, h0, ok, H, D, DC)
@@ -287,7 +287,7 @@ def qsa_index(k, raw, pooled, table, seq, positions, weight, cos_sin, ratio: int
     t, d = k.shape
     if t:
         _index[(t,)](k, raw, pooled, table, seq, positions, weight, cos_sin, eps, k.stride(0), table.stride(0),
-                     raw.shape[1], d, ratio, cos_sin.shape[1])
+                     raw.stride(0), pooled.stride(0), raw.shape[1], d, ratio, cos_sin.shape[1])
 
 
 def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor) -> None:
@@ -296,7 +296,8 @@ def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor) -> No
     t, heads, d = q.shape
     page = pooled.shape[1] * ratio
     _score[(t, triton.cdiv(ws.shape[1], SCORE_BLOCKS))](
-        q, pooled, table, seq, positions, ws, q.stride(0), table.stride(0), ws.stride(0), 1.0 / math.sqrt(d), heads,
+        q, pooled, table, seq, positions, ws, q.stride(0), table.stride(0), ws.stride(0), pooled.stride(0),
+        1.0 / math.sqrt(d), heads,
         d, page, ratio, SCORE_BLOCKS, SCORE_CHUNK, num_warps=1)
 
 
