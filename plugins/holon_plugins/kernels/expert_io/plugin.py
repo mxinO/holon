@@ -4,7 +4,7 @@ first updates the policy's state and admits misses into victims' slots —, and 
 of missed units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1,
 docs/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
 rows, the CPU's output rows into the experts' output). Op contracts: std.moe.kernels, and the placement plugins'
-(placement.lfu, placement.lru). A variant's `lend`
+(placement.lfu, placement.lru). A variant's `lend` (and F11's `lend_tail`)
 runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
 plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
 variant ships its own CUDA provider, docs/v1-offload.md D3).
@@ -73,6 +73,15 @@ class MoeResolve:
 
 
 STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state, as its contract names it
+
+
+class MoeResolveLfu(MoeResolve):
+    """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/v1-moe-prefill.md D11): F11 keeps no
+    spares, so the experts holding the range are all it picks. Device ops, no host sync."""
+
+    def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
+                  **state) -> torch.Tensor:
+        return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
 
 
 class ExpertFetch:
@@ -146,7 +155,8 @@ class Plugin:
             def supports(f, w=words) -> bool:
                 return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES
             regs.kernels.add(op, KernelSpec(
-                op=op, provider="kernels.expert_io", impl=functools.partial(MoeResolve, modules, op),
+                op=op, provider="kernels.expert_io",
+                impl=functools.partial(MoeResolveLfu if op == "moe_resolve.lfu" else MoeResolve, modules, op),
                 requires=requires, props=props, priority=10, supports=supports))
         regs.kernels.add(PREFETCH, KernelSpec(
             op=PREFETCH, provider="kernels.expert_io", impl=functools.partial(ExpertPrefetch, modules),

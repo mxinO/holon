@@ -12,7 +12,8 @@
   output equals its f32 output cast (docs/m07-perf.md D4: the fixup's partials stay f32 until one rounding), and
   NVFP4's `scale2` multiplies the f32 sum before that rounding (`torch.equal`, the fixup forced; native W4A4 too on
   sm_120).
-- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize`: bit-identical for every type. FMA
+- `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize` (Q2_0, which gguf-py 0.19 lacks: against
+  `dequantize`'s reading of its block): bit-identical for every type. FMA
   decision, measured on sm_86: with llama.cpp's flags (`-use_fast_math`, FMA contraction on) every value matches
   gguf-py bit for bit, affine types (Q4_1, Q5_1, Q2_K, Q4_K, Q5_K, IQ1_S) included, so nothing is built with
   `-fmad=false`; the one exception is the sign of zero in Q4_0's convert ((8 - 8) * d is +0 for negative d).
@@ -76,9 +77,12 @@ NMSE = 5e-4                     # llama.cpp test-backend-ops MUL_MAT threshold
 OUTLIER = 1000.0
 GGUF_DIR = pathlib.Path(HF_HUB_CACHE) / "models--unsloth--Qwen3-8B-GGUF" / "snapshots"
 FILES = sorted(GGUF_DIR.glob("*/*.gguf"))
-# Byte offsets of each block's fp16 scales (d, and dmin / m where the type has one); d at 0 otherwise.
+# Byte offsets of each block's fp16 scales (d, and dmin / m where the type has one); d at 0 otherwise. IQ1_M's d is
+# the top nibbles of the four uint16 scales at 48.
 SCALES = {"q4_1": (0, 2), "q5_1": (0, 2), "q2_k": (80, 82), "q3_k": (108,), "q4_k": (0, 2), "q5_k": (0, 2),
-          "q6_k": (208,)}
+          "q6_k": (208,), "iq1_m": (48,)}
+# The (values, bytes) per block of the types gguf-py 0.19 lacks: Q2_0 (ggml-common.h's block_q2_0).
+BLOCK_SIZES = {"q2_0": (64, 18)}
 
 
 @pytest.fixture(scope="module")
@@ -120,7 +124,7 @@ def qlinear(ctx, name: str, k: int, out_dtype: str = "bfloat16", out: int = OUT,
     spec = ctx.select_kernel(op, site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
-    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(_rows(x)), CHUNK)))
+    return Sized(kernel, lambda x, parts: kernel.lib.workspace_bytes(device, k, min(len(_rows(x)), kernel.call_rows)))
 
 
 def _rows(x) -> torch.Tensor:
@@ -139,9 +143,9 @@ class Sized:
     def __getattr__(self, name: str):
         return getattr(self.kernel, name)
 
-    def __call__(self, *args):
+    def __call__(self, *args, **kw):
         self.kernel.lib.workspace_high_water()                  # reset
-        y = self.kernel(*args)
+        y = self.kernel(*args, **kw)
         used, sized = self.kernel.lib.workspace_high_water(), self.sized(*args)
         assert used <= sized, f"a call took {used} workspace bytes, sized for {sized}"
         return y
@@ -151,8 +155,7 @@ def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
     """Random bytes, with every fp16 scale realistic: |d| log-uniform in [1e-6, 1] (fp16 subnormals below 6e-5),
     random sign, 3 % exact zeros; FP4 scales as `fp4_scales`."""
     rng = np.random.default_rng(seed)
-    qtype = gguf.GGMLQuantizationType[name.upper()]
-    block, size = gguf.GGML_QUANT_SIZES[qtype]
+    block, size = BLOCK_SIZES.get(name) or gguf.GGML_QUANT_SIZES[gguf.GGMLQuantizationType[name.upper()]]
     b = rng.integers(0, 256, size=(rows, k // block, size), dtype=np.uint8)
     if name in FP4:
         n = 4 if name == "nvfp4" else 1
@@ -161,7 +164,13 @@ def random_blocks(name: str, rows: int, k: int, seed: int) -> np.ndarray:
     for off in SCALES.get(name, (0,)):
         d = rng.choice([-1.0, 1.0], size=b.shape[:2]) * 10 ** rng.uniform(-6, 0, size=b.shape[:2])
         d[rng.random(d.shape) < 0.03] = 0
-        b[..., off:off + 2] = d.astype(np.float16).view(np.uint8).reshape(*b.shape[:2], 2)
+        h = d.astype(np.float16).view(np.uint16)
+        if name == "iq1_m":
+            sc = b[..., off:off + 8].copy().view(np.uint16)
+            sc[:] = sc & 0x0FFF | (h[..., None] >> 4 * np.arange(4) & 0xF) << 12
+            b[..., off:off + 8] = sc.view(np.uint8)
+        else:
+            b[..., off:off + 2] = h.view(np.uint8).reshape(*b.shape[:2], 2)
     return b.reshape(rows, -1)
 
 
@@ -217,6 +226,13 @@ def device_blocks(blocks: np.ndarray) -> torch.Tensor:
 
 
 def dequantize(name: str, blocks: np.ndarray) -> torch.Tensor:
+    """gguf-py's dequantization; Q2_0's, which gguf-py 0.19 lacks, as ggml-cuda's `dequantize_q2_0` reads the block:
+    fp16 d, then 2-bit codes c (4 per byte, from the low bits), value (c − 1)·d."""
+    if name == "q2_0":
+        b = blocks.reshape(len(blocks), -1, 18)
+        d = b[..., :2].copy().view(np.float16).astype(np.float32)
+        c = b[..., 2:, None] >> np.arange(0, 8, 2, dtype=np.uint8) & 3
+        return torch.from_numpy(((c.reshape(*b.shape[:2], 64) - 1.0).astype(np.float32) * d).reshape(len(b), -1)).cuda()
     return torch.from_numpy(gguf.quants.dequantize(blocks, gguf.GGMLQuantizationType[name.upper()])).cuda()
 
 
@@ -298,6 +314,20 @@ def test_qlinear_random_blocks(ctx, name, k):
     assert halves_of_150(x, w) is None and (name in GLU_TYPES or glu(x, w) is None)       # the others compose
 
 
+@pytest.mark.parametrize("name", ["q2_0", "iq4_nl", "q4_0", "q8_0"])
+def test_qlinear_at_in_640(ctx, name):
+    """T6 (docs/v1-moe-prefill.md §10): `in` a whole number of the type's blocks but not of 256 (FN's down
+    projections, 640 wide) on both paths; mmq's last K step stays inside each row (the bytes after the weights are
+    poison: a read past them gives NaN). A 256-value type cannot hold such a row and is not served."""
+    kernel = qlinear(ctx, name, 640)
+    t = kernel.mmvq_rows
+    check_qlinear(kernel, name, random_blocks(name, OUT, 640, seed=11), (1, t, t + 1, 64, CHUNK + 1))
+    for other in ("q6_k", "iq4_xs"):
+        facts = {"layout": f"ggml.{other}/gguf.native", "in": 640, "out": OUT, "act_dtype": "bfloat16",
+                 "out_dtype": "bfloat16", "act_quant": "a8"}
+        assert not [s for s in ctx.candidates("qlinear@2", facts) if s.provider == "kernels.ggml_cuda"], other
+
+
 def test_qlinear_real_tensors(ctx, real):
     tested = {(name, k) for name, k in real if name in TYPES}
     if not tested:
@@ -371,6 +401,26 @@ def test_mmq_schedules(ctx, sm, name):
             plain = f32(x, {"blocks": parts["blocks"]}) * parts["scale2"]          # today's: f32, then the multiply
             assert torch.equal(f32(x, parts), plain) and torch.equal(kernel(x, parts), plain.to(torch.bfloat16))
             assert kernel.calls == {f"mmq/{kernel.act['mmq']}": 1}
+
+
+def test_the_large_call_plants_fire_on_the_fixup(ctx, sm):
+    """docs/v1-moe-prefill.md D5's plants (judge `qlinear-partials-bf16`, `qlinear-large-no-fixup`): on a dense call
+    of two chunks that takes the stream-k fixup, the counter sees the fixup, and each plant changes the output (the
+    partials rounded to bf16; the fixup skipped) and is counted; a one-chunk call is never planted."""
+    lib, k, rows = extension.load(sm), 4096, 2 * CHUNK
+    assert lib.mmq_schedule(0, TYPES["q4_k"], PREC["q8_1"], OUT, rows)[0] == 2
+    kernel = qlinear(ctx, "q4_k", k, "float32")
+    w, x = {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=3))}, activations(rows, k, seed=3)
+    lib.mmq_fixups()
+    clean, one = kernel(x, w), kernel(x[:CHUNK], w)
+    assert lib.mmq_fixups() == (1, 0)
+    for bits in (1, 2):
+        lib.mmq_plant(bits)
+        try:
+            planted, chunk = kernel(x, w), kernel(x[:CHUNK], w)
+        finally:
+            lib.mmq_plant(0)
+        assert lib.mmq_fixups() == (1, 1) and not torch.equal(planted, clean) and torch.equal(chunk, one), bits
 
 
 def _launches(kernel, x: torch.Tensor, w: dict[str, torch.Tensor]) -> set[str]:

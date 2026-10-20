@@ -3,9 +3,10 @@
 the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its MoE routing and combine as
 `moe_topk@1`, `moe_router@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
-`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in 512-row chunks (llama.cpp's
-ubatch); both write `out_dtype` (bf16 or f32) directly, mmq's stream-k partials kept in f32 until its one rounding
-(docs/m07-perf.md D4).
+`qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in calls of whole 512-row chunks
+(llama.cpp's ubatch) up to `call_rows`, the last partial chunk a call of its own (docs/v1-moe-prefill.md D5: bounded,
+as mmq's stream-k split points move with a call's rows); both write `out_dtype` (bf16 or f32) directly, mmq's
+stream-k partials kept in f32 until its one rounding (docs/m07-perf.md D4).
 `mmvq_rows` is llama.cpp's threshold for the type at the class's compute capability, or the class's entry for the
 shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
 Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
@@ -18,14 +19,20 @@ mmvq call of the same `in` and rows reads it while the buffer's last write is st
 counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate at one row on a merged gate/up
 (`silu(gate) · up` from the f32 sums, NVFP4's scale2 on both halves), None at more rows (std's SwiGLU composes).
 
-`linear_experts` is llama.cpp's MUL_MAT_ID per 512-token chunk: mmvq with ids up to the type's limit
-(`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else mmq with ids into
-f32, followed for swiglu by our f32 SwiGLU. Its workspace (`ggml_cuda.id[…]`) holds mmq's id maps besides the
-activations. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel beside it
-(the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
-`moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16
-into the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md
-§14, step 3c).
+`linear_experts` is llama.cpp's MUL_MAT_ID per call of up to `pass_rows` rows (docs/v1-moe-prefill.md D0): mmvq with ids
+up to the type's limit (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else
+mmq with ids into f32, followed for swiglu by our f32 SwiGLU — or, where mmq can (`mmq_glu`: the stack's rows in whole
+tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/v1-moe-prefill.md D4: no f32 gate/up
+output). `pass_rows` is 512 (llama.cpp's ubatch), or on an (SM, type, mode) whose L0 proves a row's bits the same in any
+call of whole 512-row chunks (`PASS_PROVEN`) up to `PASS_ROWS`, capped by the id helper's pairs, the step budget and the
+`ggml_cuda.pass_rows` option; a call's last partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for
+`pass_rows`) holds mmq's id maps besides the activations; gate/up's f32 output, where SwiGLU is not in mmq's store,
+comes from the caller's `scratch` (`scratch_bytes`, docs/v1-moe-prefill.md D10) or is allocated, and a call writes into
+the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel
+beside it (the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
+`moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16 into
+the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md §14, step
+3c).
 
 Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
@@ -36,13 +43,13 @@ llama.cpp's default, native W4A4 on Blackwell), and each instance asks llama.cpp
 which precision it will use (`mmq_prec`): a mismatch is an error.
 
 FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`, llama.cpp's converter layouts);
-NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before
-SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above
-one row in the unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one
-rounding to `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a
-multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need no padding (L0
-poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
-`prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
+NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before SwiGLU
+on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above one row in the
+unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one rounding to
+`out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a multiple of 256, or of
+a `ROW_BLOCKS` type's block (its loaders keep the last K step inside the row: T6), no q8_1 kernel reads past the weight
+blocks, so they need no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4`
+spec's `prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
 (`tail_bytes`), after each FP4 tensor or stack, and its calls check it is there.
 
 Calls are counted per path and mode (`calls["mmq/fp4"]`, …; counted when called, not on graph replay).
@@ -71,18 +78,28 @@ LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offl
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
 PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/v1-offload.md D8)
-# An offload arena's calls carry one expert pass of a large prefill chunk (D8): mmq takes the pass's rows in one call
-# where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384 pairs), in whole
-# CHUNKs, so a row's chunk and path stay the reference's (the pass's caller cuts its last partial chunk off); a
-# call's rows are bitwise the same at any rows per call.
+PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest [options]; KV capacity per class)
+# An expert pass of a prefill chunk (docs/v1-moe-prefill.md D0, D1; v1-offload.md D8): mmq with ids takes the pass's
+# rows in one call where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384
+# pairs), in whole CHUNKs, so a row's chunk and path stay the reference's (a call's last partial chunk runs as a call
+# of its own: `LinearExperts.__call__` cuts it, whatever its caller passes). That holds on the (SM, ggml type, mmq
+# activation mode) pairs whose L0 shows a row's bits the same in a call of any whole number of CHUNKs as in its own
+# chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
+# classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
+# (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
+_FN_TYPES = ("iq1_m", "iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs", "q2_0")
+PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
+                        | {(89, t, "q8_1") for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
+                        | {(120, t, "q8_1") for t in ("q4_k", "q5_k", "q6_k", *_FN_TYPES)})
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots
              "columns": 4}      # a slot with more pairs than mmq's column tiles (an id repeated in a row)
-# Supported ggml types (design §4.6) and their ggml type ids.
+# Supported ggml types (design §4.6) and their ggml type ids. IQ1_M's mmq is vendor.patch's tile loader
+# (docs/v1-moe-prefill.md D9).
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
-         "iq4_xs": 23, "mxfp4": 39, "nvfp4": 40}
+         "iq4_xs": 23, "iq1_m": 29, "mxfp4": 39, "nvfp4": 40, "q2_0": 42}
 FP4 = ("mxfp4", "nvfp4")
 # ggml type -> (values per block, block bytes)
 BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
@@ -90,6 +107,11 @@ BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
 # whole 32-value blocks; IQ4_NL's reads 256-value groups, so a row of whole blocks narrower than that (FN: PLE's
 # 160-wide rows) is gathered as bytes and converted (`QEmbedding`), bitwise the same values.
 QK = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32}
+# The `in` widths qlinear and linear_experts serve, as multiples (256 unless listed; T6, docs/v1-moe-prefill.md §10):
+# these types' mmq tile loaders keep a row's last K step (MMQ_ITER_K = 256 values) inside the row, so any whole number
+# of their blocks serves (FN: the down projections at 640, Q2_0 and IQ4_NL); mmvq reads whole blocks only. The
+# 256-value types and FP4 keep 256 (their blocks, or native W4A4's K step).
+ROW_BLOCKS = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32, "q2_0": 64}
 DTYPES = ("bfloat16", "float32")
 ACT_QUANT = ("a4", "a8")                    # q8_1 activations (8 bits) serve either
 # Each spec's activation format per path, and the ggml_prec each format asks mmq for (GGML_PREC_Q8, GGML_PREC_Q4).
@@ -98,6 +120,7 @@ NATIVE_FP4 = {"mmvq": "q8_1", "mmq": "fp4"}
 PREC = {"q8_1": 30, "fp4": 40}
 ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
 MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most activation rows
+POOL_ALIGN = 256                # csrc/api.cu's workspace pool: its base, and each of its allocations, at this boundary
 # The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/m07-perf.md D6, §13.4, §17): where
 # bench/glu_sweep.py found it faster per call than the matmul and FlashInfer's silu_and_mul at the locks' gate/up
 # shapes on the RTX 5080 and 4090 by more than a sweep's noise, and within 0.4% on the 5090
@@ -148,6 +171,13 @@ CROSSOVER: dict[tuple[str, str, int, int, str], int] = {
     ("rtx-5090", "iq4_xs", 5120, 34816, "q8_1"): 7,
     ("rtx-5090", "q6_k", 5120, 248320, "q8_1"): 6,
 }
+
+# D2's batched-decode rule per SM (docs/v1-moe-prefill.md B-dec): mmq with ids picks its tile width against a call's
+# tokens up to this many, above against the launch's mean rows per entry. 16 where D2's per-call sweep and the paired
+# batched-decode rounds measured it (sm_86 RTX A5000, sm_120 RTX 5080 / 5090); step 2's 64 elsewhere — on sm_89
+# provisional until the 4090's sweep runs.
+IDS_J_TOKENS: dict[int, int] = {86: 16, 120: 16}
+IDS_J_TOKENS_DEFAULT = 64
 
 
 def ggml_type(layout: str) -> int | None:
@@ -226,6 +256,29 @@ def mmvq_rows(fingerprint, name: str, mode: str, k: int, out: int, lib=None) -> 
         raise RuntimeError(f"kernels.ggml_cuda: the {fingerprint.gpu} entry for {name} {k}x{out} ({mode}) is "
                            f"{entry} rows, not within 1..{llama} (llama.cpp's)")
     return entry
+
+
+def _cap(ctx) -> int:
+    """The most rows one mmq call may take in this build: PASS_ROWS within the build's `max_step_tokens` and the
+    `ggml_cuda.pass_rows` option (each where set)."""
+    caps = [PASS_ROWS, ctx.options.get("max_step_tokens"), ctx.options.get("plugins", {}).get(PASS_OPTION)]
+    return min(int(c) for c in caps if c is not None)
+
+
+def pass_rows(ctx, name: str, mode: str, top_k: int) -> int:
+    """The most rows a `linear_experts` call of ggml type `name` in mmq activation mode `mode` takes at its CHUNK-row
+    calls' bits (D0): CHUNK unless (SM, type, mode) is in PASS_PROVEN, else the most whole CHUNKs within `_cap` and
+    the id helper's pairs."""
+    if (ctx.fingerprint.sm, name, mode) not in PASS_PROVEN:
+        return CHUNK
+    return max(CHUNK, min(_cap(ctx), ID_PAIRS // top_k) // CHUNK * CHUNK)
+
+
+def calls(rows: int, size: int) -> list[tuple[int, int]]:
+    """A call of `rows` rows cut into calls of whole CHUNKs, up to `size` (a multiple of CHUNK) rows each, then the
+    last partial chunk as a call of its own: each row's kernel path is its chunk's, whatever the caller's cut."""
+    full = rows // CHUNK * CHUNK
+    return [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, rows)] * (full < rows)
 
 
 def rule_module(sm: int):
@@ -334,8 +387,11 @@ class QLinear(_Matmul):
         # mmvq up to `mmvq_rows` (the class's, for this shape and mode; fixed per graph bucket), else mmq
         self.mmvq_rows = mmvq_rows(ctx.fingerprint, self.name, act["mmq"], self.k, self.out, self.lib)
         self._uses_mmq(self.mmvq_rows, facts["layout"])
-        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k}]", self.lib.workspace_bytes(self.device, self.k, CHUNK))
-        self.f32 = self._f32_workspace(ctx, CHUNK, facts["act_dtype"])
+        # mmq's rows per call (D5), which size its workspaces
+        self.call_rows = max(CHUNK, _cap(ctx) // CHUNK * CHUNK)
+        self.workspace = ctx.workspace(f"ggml_cuda[in={self.k},rows={self.call_rows}]",
+                                       self.lib.workspace_bytes(self.device, self.k, self.call_rows))
+        self.f32 = self._f32_workspace(ctx, self.call_rows, facts["act_dtype"])
         self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))   # prepared inputs
 
     def prepare_input(self, x: torch.Tensor) -> Prepared:
@@ -369,9 +425,9 @@ class QLinear(_Matmul):
             return y
         self._count("mmq")
         blocks = self._mmq_blocks(parts)
-        for start in range(0, rows, CHUNK):              # scale2 in f32, then one rounding to out_dtype (D4)
-            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:start + CHUNK], self.f32),
-                         y[start:start + CHUNK], scale2, self.workspace)
+        for start, end in calls(rows, self.call_rows):     # scale2 in f32, then one rounding to out_dtype (D4)
+            self.lib.mmq(self.type, self.prec, blocks, self._mmq_input(x[start:end], self.f32), y[start:end], scale2,
+                         self.workspace)
         return y
 
 
@@ -390,6 +446,11 @@ class QLinearGlu(QLinear):
         self.lib.mmvq(self.type, blocks[half:], x.contiguous(), y, parts.get("scale2"), self.workspace,
                       gate=blocks[:half])
         return y
+
+
+def _overlap(a: torch.Tensor, b: torch.Tensor) -> bool:
+    """Whether two contiguous tensors share a byte."""
+    return a.data_ptr() < b.data_ptr() + b.nbytes and b.data_ptr() < a.data_ptr() + a.nbytes
 
 
 def q8_1_bytes(rows: int, k: int) -> int:
@@ -420,20 +481,27 @@ class LinearExperts(_Matmul):
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
-        self.chunk = max(CHUNK, min(PASS_ROWS, ID_PAIRS // self.top_k) // CHUNK * CHUNK) if "slots" in facts else CHUNK
+        # rows per mmq call (std.moe.kernels' `pass_rows`), which sizes `scratch` and native FP4's f32 copy
+        self.pass_rows = pass_rows(ctx, self.name, act["mmq"], self.top_k)
         self._uses_mmq(self.mmvq_tokens, facts["layout"])
         # the most distinct slots a call's ids name: one per expert, plus per routing rank one standing in for a miss
         # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which
         # is how a stack of more slots than experts (a class arena) costs no more than the layer's own stack
         self.slots = self.experts + self.top_k
+        # D4: SwiGLU in mmq's store (bitwise our SwiGLU of its unfused output), where mmq can for this stack
+        self.glu_store = self.swiglu and self.lib.mmq_glu(self.device, self.type, self.prec, self.out)
+        self.ids_j_tokens = IDS_J_TOKENS.get(ctx.fingerprint.sm, IDS_J_TOKENS_DEFAULT)      # D2's batched-decode rule
         # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
         # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
-        # its size depends on in, k (the id maps, the activations per slot) and E (expert_bounds): all three name it
+        # The persistent id workspace holds every call's id maps and q8_1 activations, up to `pass_rows` rows: one per
+        # `in` (the 5080 offload lock's prefill pays 0.2% when a call's come from a buffer gate/up and down share, the
+        # caller's `scratch`, or a fresh one: docs/v1-moe-prefill.md §10 L3-2). Its size depends on in, k (the id maps,
+        # the activations per slot), E (expert_bounds) and the rows: all four name it.
         self.workspace = ctx.workspace(
-            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.chunk}]",
-            self.lib.workspace_bytes_id(self.device, self.k, self.chunk, self.top_k, self.slots))
-        self.f32 = self._f32_workspace(ctx, self.chunk * facts["rows_per_token"], facts["act_dtype"])
+            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.pass_rows}]",
+            self.lib.workspace_bytes_id(self.device, self.k, self.pass_rows, self.top_k, self.slots))
+        self.f32 = self._f32_workspace(ctx, self.pass_rows * facts["rows_per_token"], facts["act_dtype"])
         # prepared inputs (`MoeRouter.route_prepare`): QLinear's buffer for this `in`, the same generations
         self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))
 
@@ -456,7 +524,48 @@ class LinearExperts(_Matmul):
             return None
         return x.buffer if self.ext.written.get(x.buffer.data_ptr()) == x.generation else None
 
-    def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor) -> torch.Tensor:
+    def _mmq_rows(self, tokens: int) -> int:
+        """The rows of a call's largest mmq launch (0: it runs mmvq only)."""
+        return max((b - a for a, b in calls(tokens, self.pass_rows) if b - a > self.mmvq_tokens), default=0)
+
+    def scratch_bytes(self, tokens: int) -> int:
+        """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/v1-moe-prefill.md D10): its mmq
+        launches' transient, one launch at a time: gate/up's f32 output before our SwiGLU (none where D4's store
+        applies SwiGLU; the id maps and q8_1 rows are the persistent workspace's); 0 where it runs mmvq only."""
+        return self._gate_up_bytes(self._mmq_rows(tokens))
+
+    def _gate_up_bytes(self, rows: int) -> int:
+        return -(-rows * self.top_k * self.out * 4 // POOL_ALIGN) * POOL_ALIGN if self.swiglu and not self.glu_store \
+            else 0
+
+    def _check_buffers(self, x: torch.Tensor, tokens: int, out, scratch) -> None:
+        """D10's terms on passed buffers, before any launch."""
+        if out is not None and (out.dtype != torch.float32 or out.device != x.device or not out.is_contiguous()
+                                or tuple(out.shape) != (tokens, self.top_k, self.out_y)):
+            raise ValueError(f"kernels.ggml_cuda: out {out.dtype} {tuple(out.shape)} on {out.device}: a contiguous f32 "
+                             f"[{tokens}, {self.top_k}, {self.out_y}] on {x.device}")
+        if scratch is not None and (scratch.dtype != torch.uint8 or scratch.device != x.device or scratch.dim() != 1
+                                    or not scratch.is_contiguous() or scratch.data_ptr() % POOL_ALIGN
+                                    or len(scratch) < self.scratch_bytes(tokens)):
+            raise ValueError(f"kernels.ggml_cuda: scratch {scratch.dtype} of {scratch.numel()} bytes at "
+                             f"{scratch.data_ptr() % POOL_ALIGN} past {POOL_ALIGN}: contiguous uint8 on {x.device}, "
+                             f"{POOL_ALIGN}-byte aligned, at least {self.scratch_bytes(tokens)} bytes")
+        if out is not None and (_overlap(out, x) or scratch is not None and _overlap(out, scratch)):
+            raise ValueError("kernels.ggml_cuda: out overlaps x or scratch")
+        if scratch is not None and _overlap(scratch, x):
+            raise ValueError("kernels.ggml_cuda: scratch overlaps x")
+
+    def _gate_up_out(self, tokens: int, device: torch.device, scratch: torch.Tensor | None) -> torch.Tensor | None:
+        """Gate/up's f32 output before our SwiGLU (D10) from `scratch`, or a new buffer where the caller passed none;
+        None where D4's store applies SwiGLU or the call runs mmvq only."""
+        rows = self._mmq_rows(tokens)
+        if not (nbytes := self._gate_up_bytes(rows)):
+            return None
+        buf = scratch if scratch is not None else torch.empty(nbytes, dtype=torch.uint8, device=device)
+        return buf[:nbytes].view(torch.float32)[:rows * self.top_k * self.out].view(rows, self.top_k, self.out)
+
+    def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor, *, out: torch.Tensor | None = None,
+                 scratch: torch.Tensor | None = None) -> torch.Tensor:
         xq = None
         if not isinstance(x, torch.Tensor):            # a prepared handle: ours (maybe stale: then x), or another's
             xq, x = self._prepared(x) if isinstance(x, Prepared) else None, x.x
@@ -468,10 +577,21 @@ class LinearExperts(_Matmul):
                              f"{'swiglu' if self.swiglu else 'none'}")
         gate_scale, up_scale = (scale2[0], scale2[1]) if scale2 is not None and self.swiglu else (None, scale2)
         tokens = len(ids)
-        y = torch.empty(tokens, self.top_k, self.out_y, device=x.device)
-        gate_up = None          # mmq's f32 gate/up output before our SwiGLU, a per-call activation
-        for start in range(0, tokens, self.chunk):
-            xs, ids_c, ys = x[start:start + self.chunk], ids[start:start + self.chunk], y[start:start + self.chunk]
+        # Decode and verify: mmvq only, which reads no `scratch`. An eager small step is host-bound, so this path does
+        # none of D10's carving.
+        if tokens <= self.mmvq_tokens:
+            self._check_buffers(x, tokens, out, None)
+            y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
+            if tokens:
+                self._count("mmvq")
+                self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), x, ids, y, self.swiglu, gate_scale,
+                                 up_scale, self.workspace, xq=xq)
+            return y
+        self._check_buffers(x, tokens, out, scratch)
+        y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
+        gate_up = self._gate_up_out(tokens, x.device, scratch)
+        for start, end in calls(tokens, self.pass_rows):
+            xs, ids_c, ys = x[start:end], ids[start:end], y[start:end]
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
@@ -480,14 +600,17 @@ class LinearExperts(_Matmul):
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
-                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors)
+                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                                self.ids_j_tokens)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
-            if gate_up is None:
-                gate_up = torch.empty(min(tokens, self.chunk), self.top_k, self.out, device=x.device)
+            if self.glu_store:
+                self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                                    gate_scale, up_scale, self.ids_j_tokens)
+                continue
             self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots,
-                            self.errors)
+                            self.errors, self.ids_j_tokens)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
 
@@ -517,10 +640,14 @@ class MoeTopk:
 class MoeRouter:
     """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
     through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
-    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile;
-    larger calls (prompt chunks) as `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its
-    call's path, as `qlinear`'s mmvq / mmq). Its logits scratch is a workspace, its tile counters a static buffer each
-    call leaves zeroed."""
+    warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile.
+    Prompt chunks (calls of at least CHUNK rows, experts a multiple of 64; docs/v1-moe-prefill.md D3): our router
+    GEMM, per logit a fixed number of f32 fma chains (2,048 / experts) over equal parts of hidden ascending, added in
+    order, from x's values as given (`moe_router_logits`, no f32 copy), then `moe_topk`'s selection; calls between, as
+    `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its call's path, as `qlinear`'s mmvq /
+    mmq: batched decode and verify keep their bits). The GEMM's rows do not depend on the call, so it declares
+    `pass_rows` (D3′): std.moe routes an expert pass of whole CHUNKs in one launch. Its logits scratch is a
+    workspace, its tile counters a static buffer each call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
                  dtype: str) -> None:
@@ -529,8 +656,15 @@ class MoeRouter:
         self.rows = self.lib.moe_router_rows()
         self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
         self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
+        # the router GEMM's expert tile and hidden steps
+        self.prefill = experts % 64 == 0 and hidden % (32 * self.lib.moe_router_partials(experts)) == 0
+        # D3′: the GEMM is row-invariant, so a call of whole CHUNKs gives each row its chunk's bits, up to an expert
+        # pass (std.moe.kernels' `pass_rows` term: std routes a pass in one call)
+        self.pass_rows = max(CHUNK, _cap(ctx) // CHUNK * CHUNK) if self.prefill else CHUNK
 
     def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
+        if len(x) >= CHUNK and self.prefill:
+            return self.topk(self._logits(x, router))
         if not 0 < len(x) <= self.rows:
             return self.topk(torch.nn.functional.linear(x.float(), router))
         x = x.contiguous()
@@ -541,6 +675,13 @@ class MoeRouter:
         logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
         self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
         return weights, ids
+
+    def _logits(self, x: torch.Tensor, router: torch.Tensor) -> torch.Tensor:
+        """A prompt chunk's f32 logits [T, E] (the router GEMM, D3)."""
+        logits = torch.empty(len(x), router.shape[0], device=x.device)
+        partials = torch.empty(self.lib.moe_router_partials(len(router)), *logits.shape, device=x.device)
+        self.lib.moe_router_logits(x.contiguous(), router.contiguous(), partials, logits)
+        return logits
 
     def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
         """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance
@@ -566,7 +707,8 @@ class MoeCombine:
 
 
 def _supports_matmul(f: dict, act_quant: tuple[str, ...], types) -> bool:
-    return (weight_type(f["layout"]) in types and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
+    name = weight_type(f["layout"])
+    return (name in types and f["in"] % ROW_BLOCKS.get(name, 256) == 0 and f["act_dtype"] in DTYPES
             and f["act_quant"] in act_quant)
 
 

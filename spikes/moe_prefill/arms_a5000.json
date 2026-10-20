@@ -1,0 +1,27 @@
+[
+ {
+  "name": "holon_ship",
+  "engine": "holon",
+  "args": ""
+ },
+ {
+  "name": "holon_pass4k",
+  "engine": "holon",
+  "args": "--pass-tokens 4096"
+ },
+ {
+  "name": "holon_all4k",
+  "engine": "holon",
+  "args": "--pass-tokens 4096 --expert-rows 4096 --dense-rows 4096"
+ },
+ {
+  "name": "ft_fused",
+  "engine": "freetoken",
+  "args": "--flags '--moe-strategy fused'"
+ },
+ {
+  "name": "ft_fused_g4096",
+  "engine": "freetoken",
+  "args": "--flags '--moe-strategy fused --max-extend-length 4096'"
+ }
+]

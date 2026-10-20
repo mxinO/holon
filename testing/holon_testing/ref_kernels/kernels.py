@@ -14,6 +14,7 @@ from holon_std.mixers.gdn import reference as gdn
 from holon_std.mixers.gqa import reference as gqa
 from holon_std.mixers.qsa import reference as qsa
 from holon_std.moe import reference as moe
+from holon_std.moe.kernels import CHUNK
 from holon_std.ops import reference as ops
 from holon_std.weights.hf import reference as hf
 
@@ -134,23 +135,49 @@ class QEmbedding(_Dequantized):
 # Tier A fits a 64 GB budget, at the cost of a decode per layer and step (MXFP4 in torch: ≈ 1 s a layer; gguf-py's
 # k-quants and i-quants, on one core: ≈ 10–20 s a layer, so a 30B GGUF Tier A of those types takes hours).
 CACHE_BYTES = 128 << 20
+PASS_ROWS = 4096                # `LinearExperts.pass_rows` without a step budget (kernels.ggml_cuda's at top-8)
 
 
 class LinearExperts:
     """Expert stacks: ggml layouts dequantized per expert (gguf-py, MXFP4 in torch), HF layouts per expert and unit by
     std.weights.hf's reference — cached when small (`CACHE_BYTES`), else per call; dense ones as stored, the
     activation rounded to their dtype (the contract). A cached decode is checked against the stack's bytes: an offload
-    store's arena (up to `experts` slots) changes between calls."""
+    store's arena (up to `experts` slots) changes between calls. A call runs CHUNK rows at a time, so it declares
+    `pass_rows` (PASS_ROWS, within the step budget): std.moe's CPU tests take large passes, at the chunks' bits. It
+    takes passed buffers (docs/v1-moe-prefill.md D10): each chunk's f32 result is staged in `scratch` (`scratch_bytes`:
+    a chunk's), then written into `out`, so a buffer lent where it should not be shows in the outputs."""
 
-    def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, **facts) -> None:
+    def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, top_k: int,
+                 **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
+        self.top_k, self.out_y = top_k, out // 2 if glu == "swiglu" else out
         self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
         self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
+        steps = ctx.options.get("max_step_tokens") or PASS_ROWS
+        self.pass_rows = max(CHUNK, min(PASS_ROWS, steps) // CHUNK * CHUNK)
 
-    def __call__(self, x, parts, ids):
+    def scratch_bytes(self, tokens: int) -> int:
+        return min(tokens, CHUNK) * self.top_k * self.out_y * 4
+
+    def __call__(self, x, parts, ids, *, out=None, scratch=None):
         if not isinstance(x, torch.Tensor):            # another provider's prepared handle: the tensor it stands for
             x = x.x
+        if out is None and scratch is None:
+            if len(ids) <= CHUNK:
+                return self._chunk(x, parts, ids)
+            return torch.cat([self._chunk(x[a:a + CHUNK], parts, ids[a:a + CHUNK]) for a in range(0, len(ids), CHUNK)])
+        _check_buffers(x, out, scratch, (len(ids), self.top_k, self.out_y), self.scratch_bytes(len(ids)))
+        y = torch.empty(len(ids), self.top_k, self.out_y, dtype=self.out_dtype) if out is None else out
+        for a in range(0, len(ids), CHUNK):
+            part = self._chunk(x[a:a + CHUNK], parts, ids[a:a + CHUNK])
+            if scratch is not None:
+                staged = scratch[:part.numel() * 4].view(torch.float32).view(part.shape)
+                part = staged.copy_(part)
+            y[a:a + len(part)] = part
+        return y
+
+    def _chunk(self, x, parts, ids):
         if self.quantized is None:
             weight = parts["weight"]
             y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
@@ -158,25 +185,42 @@ class LinearExperts:
             first = next(iter(parts.values()))
             if len(first) * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
                 key = (first.data_ptr(), first.shape)          # the decode is kept while the bytes stay the same
-                if key not in self._stacks or not torch.equal(self._stacks[key][0], first):
+                if key not in self._stacks:
                     self._stacks[key] = first.clone(), self._decode(parts, range(len(first)))
-                stack = self._stacks[key][1]
+                held, stack = self._stacks[key]
+                if changed := (held != first).flatten(1).any(1).nonzero()[:, 0].tolist():   # an arena's slots
+                    stack[changed], held[changed] = self._decode(parts, changed), first[changed]
             else:
-                stack = self._decode(parts, ids.unique().tolist())
+                experts = ids.unique().tolist()
+                stack = x.new_zeros(len(first), self.out, x.shape[-1], dtype=torch.float32)
+                stack[experts] = self._decode(parts, experts)
             y = moe.linear_experts(x, stack, ids, self.glu)
         return y.to(self.out_dtype)
 
     def _decode(self, parts, experts) -> torch.Tensor:
-        """The f32 stack [E, out, in] with `experts` decoded (the others zero)."""
+        """The f32 weights [len(experts), out, in] of `experts`."""
         q, n = self.quantized, len(next(iter(parts.values())))
         if q.ggml is not None:
-            rows = [q._dequantize({"blocks": parts["blocks"][e]}) for e in experts]
-        else:
-            units = moe.expert_parts(parts, n, merged=self.glu == "swiglu")
-            rows = [torch.cat([hf.dequantize(q.elem, u) for u in units[e]]) for e in experts]
-        stack = rows[0].new_zeros(n, *rows[0].shape)
-        stack[list(experts)] = torch.stack(rows)
-        return stack
+            return torch.stack([q._dequantize({"blocks": parts["blocks"][e]}) for e in experts])
+        units = moe.expert_parts(parts, n, merged=self.glu == "swiglu")
+        return torch.stack([torch.cat([hf.dequantize(q.elem, u) for u in units[e]]) for e in experts])
+
+
+def _check_buffers(x: torch.Tensor, out, scratch, shape: tuple, nbytes: int) -> None:
+    """`linear_experts@2`'s terms on passed buffers (std.moe.kernels, D10), before anything is computed."""
+    if out is not None and (out.dtype != torch.float32 or tuple(out.shape) != shape or not out.is_contiguous()):
+        raise ValueError(f"out {out.dtype} {tuple(out.shape)}: a contiguous f32 {list(shape)}")
+    if scratch is not None and (scratch.dtype != torch.uint8 or scratch.dim() != 1 or not scratch.is_contiguous()
+                                or scratch.data_ptr() % 256 or len(scratch) < nbytes):
+        raise ValueError(f"scratch {scratch.dtype} of {scratch.numel()} bytes: contiguous uint8, 256-byte aligned, "
+                         f"at least {nbytes} bytes")
+
+    def overlap(a, b):
+        return a.data_ptr() < b.data_ptr() + b.nbytes and b.data_ptr() < a.data_ptr() + a.nbytes
+    if out is not None and (overlap(out, x) or scratch is not None and overlap(out, scratch)):
+        raise ValueError("out overlaps x or scratch")
+    if scratch is not None and overlap(scratch, x):
+        raise ValueError("scratch overlaps x")
 
 
 class MoeTopk:

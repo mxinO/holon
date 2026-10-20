@@ -1,0 +1,2281 @@
+{
+ "name": "moe_prefill",
+ "gpu": "RTX A5000",
+ "date": "2026-10-18",
+ "commit": "b5b1e7f",
+ "engines": {
+  "holon": "this repository at the record's commit (all-resident: std.moe@1 with the default resident store)",
+  "freetoken": "FreeToken 21d9578bde22 (bench/setup_baselines.sh offload: torch 2.14.1+cu130, [accel]), --moe-strategy fused (all experts resident)",
+  "model": "Qwen3-30B-A3B Q4_K_M (unsloth/Qwen3-30B-A3B-GGUF)"
+ },
+ "method": "spikes/moe_prefill/README.md",
+ "commands": [
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms.json --model <gguf> --out <dir>/timed --rounds 2 --holon-python <holon venv python> --freetoken-python <freetoken venv python>",
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_nsys.json --model <gguf> --out <dir>/nsys --rounds 1 ...",
+  "nsys export --type sqlite -o <report>.sqlite <report>.nsys-rep; python spikes/moe_prefill/breakdown.py <report>.sqlite > <report>.json",
+  "python spikes/moe_prefill/gemm.py --model <gguf> --layer 0|6 [--freetoken | --j-check] --json <out>"
+ ],
+ "timed_summary": {
+  "holon_ship": {
+   "1024": {
+    "median_s": 0.2793,
+    "tok_s": 3666.3,
+    "min_s": 0.2652,
+    "max_s": 0.288,
+    "n": 6
+   },
+   "4096": {
+    "median_s": 1.1797,
+    "tok_s": 3472.2,
+    "min_s": 1.1588,
+    "max_s": 1.2388,
+    "n": 6
+   },
+   "32768": {
+    "median_s": 14.0316,
+    "tok_s": 2335.3,
+    "min_s": 13.7502,
+    "max_s": 14.157,
+    "n": 6
+   }
+  },
+  "holon_pass4k": {
+   "1024": {
+    "median_s": 0.2812,
+    "tok_s": 3641.5,
+    "min_s": 0.2692,
+    "max_s": 0.2877,
+    "n": 6
+   },
+   "4096": {
+    "median_s": 1.1811,
+    "tok_s": 3468.0,
+    "min_s": 1.1722,
+    "max_s": 1.2375,
+    "n": 6
+   },
+   "32768": {
+    "median_s": 14.1277,
+    "tok_s": 2319.4,
+    "min_s": 14.0141,
+    "max_s": 14.1588,
+    "n": 6
+   }
+  },
+  "holon_e4k": {
+   "1024": {
+    "median_s": 0.2152,
+    "tok_s": 4757.3,
+    "min_s": 0.2034,
+    "max_s": 0.2187,
+    "n": 6
+   },
+   "4096": {
+    "median_s": 0.7029,
+    "tok_s": 5826.9,
+    "min_s": 0.7003,
+    "max_s": 0.7082,
+    "n": 6
+   },
+   "32768": {
+    "median_s": 10.2,
+    "tok_s": 3212.6,
+    "min_s": 10.1574,
+    "max_s": 10.2296,
+    "n": 6
+   }
+  },
+  "holon_all4k": {
+   "1024": {
+    "median_s": 0.2116,
+    "tok_s": 4840.5,
+    "min_s": 0.2008,
+    "max_s": 0.2153,
+    "n": 6
+   },
+   "4096": {
+    "median_s": 0.683,
+    "tok_s": 5996.6,
+    "min_s": 0.6792,
+    "max_s": 0.6886,
+    "n": 6
+   },
+   "32768": {
+    "median_s": 10.0331,
+    "tok_s": 3266.0,
+    "min_s": 9.9702,
+    "max_s": 10.0677,
+    "n": 6
+   }
+  },
+  "ft_fused": {
+   "1024": {
+    "median_s": 0.176,
+    "tok_s": 5818.2,
+    "min_s": 0.1716,
+    "max_s": 0.193,
+    "n": 6
+   },
+   "4096": {
+    "median_s": 0.5822,
+    "tok_s": 7034.8,
+    "min_s": 0.5778,
+    "max_s": 0.5838,
+    "n": 6
+   },
+   "32768": {
+    "median_s": 9.2267,
+    "tok_s": 3551.4,
+    "min_s": 9.1718,
+    "max_s": 9.2979,
+    "n": 6
+   }
+  }
+ },
+ "holon_over_freetoken_speed": {
+  "holon_ship": {
+   "1024": 0.63,
+   "4096": 0.494,
+   "32768": 0.658
+  },
+  "holon_pass4k": {
+   "1024": 0.626,
+   "4096": 0.493,
+   "32768": 0.653
+  },
+  "holon_e4k": {
+   "1024": 0.818,
+   "4096": 0.828,
+   "32768": 0.905
+  },
+  "holon_all4k": {
+   "1024": 0.832,
+   "4096": 0.852,
+   "32768": 0.92
+  }
+ },
+ "timed_raw": [
+  {
+   "round": 0,
+   "arm": "holon_ship",
+   "1024": {
+    "s": [
+     0.2777,
+     0.2809,
+     0.2652
+    ],
+    "tok_s": [
+     3687.6,
+     3646.1,
+     3860.5
+    ]
+   },
+   "4096": {
+    "s": [
+     1.2054,
+     1.1588,
+     1.1596
+    ],
+    "tok_s": [
+     3398.1,
+     3534.6,
+     3532.2
+    ]
+   },
+   "32768": {
+    "s": [
+     13.7502,
+     13.9206,
+     13.9989
+    ],
+    "tok_s": [
+     2383.1,
+     2353.9,
+     2340.8
+    ]
+   },
+   "peak_alloc_gib": 22.2
+  },
+  {
+   "round": 0,
+   "arm": "holon_pass4k",
+   "1024": {
+    "s": [
+     0.2804,
+     0.2862,
+     0.2692
+    ],
+    "tok_s": [
+     3651.6,
+     3577.7,
+     3803.8
+    ]
+   },
+   "4096": {
+    "s": [
+     1.2324,
+     1.1798,
+     1.1722
+    ],
+    "tok_s": [
+     3323.7,
+     3471.9,
+     3494.2
+    ]
+   },
+   "32768": {
+    "s": [
+     14.0141,
+     14.1188,
+     14.1367
+    ],
+    "tok_s": [
+     2338.2,
+     2320.9,
+     2317.9
+    ]
+   },
+   "peak_alloc_gib": 22.38
+  },
+  {
+   "round": 0,
+   "arm": "holon_e4k",
+   "1024": {
+    "s": [
+     0.2153,
+     0.2176,
+     0.2034
+    ],
+    "tok_s": [
+     4756.2,
+     4706.3,
+     5034.1
+    ]
+   },
+   "4096": {
+    "s": [
+     0.7003,
+     0.7082,
+     0.7023
+    ],
+    "tok_s": [
+     5848.7,
+     5783.4,
+     5832.7
+    ]
+   },
+   "32768": {
+    "s": [
+     10.1605,
+     10.1958,
+     10.2162
+    ],
+    "tok_s": [
+     3225.0,
+     3213.9,
+     3207.5
+    ]
+   },
+   "peak_alloc_gib": 22.37
+  },
+  {
+   "round": 0,
+   "arm": "holon_all4k",
+   "1024": {
+    "s": [
+     0.2116,
+     0.2153,
+     0.2008
+    ],
+    "tok_s": [
+     4838.3,
+     4756.4,
+     5099.9
+    ]
+   },
+   "4096": {
+    "s": [
+     0.682,
+     0.6886,
+     0.6828
+    ],
+    "tok_s": [
+     6005.5,
+     5948.0,
+     5998.6
+    ]
+   },
+   "32768": {
+    "s": [
+     10.0132,
+     10.0453,
+     10.0627
+    ],
+    "tok_s": [
+     3272.5,
+     3262.0,
+     3256.4
+    ]
+   },
+   "peak_alloc_gib": 22.36
+  },
+  {
+   "round": 0,
+   "arm": "ft_fused",
+   "1024": {
+    "s": [
+     0.1753,
+     0.193,
+     0.1716
+    ],
+    "tok_s": [
+     5840.4,
+     5307.0,
+     5966.2
+    ]
+   },
+   "4096": {
+    "s": [
+     0.5778,
+     0.5834,
+     0.5815
+    ],
+    "tok_s": [
+     7089.2,
+     7020.6,
+     7044.4
+    ]
+   },
+   "32768": {
+    "s": [
+     9.1867,
+     9.2343,
+     9.2979
+    ],
+    "tok_s": [
+     3566.9,
+     3548.5,
+     3524.2
+    ]
+   },
+   "peak_alloc_gib": 21.72
+  },
+  {
+   "round": 1,
+   "arm": "ft_fused",
+   "1024": {
+    "s": [
+     0.1767,
+     0.1919,
+     0.1722
+    ],
+    "tok_s": [
+     5795.5,
+     5337.1,
+     5946.4
+    ]
+   },
+   "4096": {
+    "s": [
+     0.5792,
+     0.5838,
+     0.583
+    ],
+    "tok_s": [
+     7072.4,
+     7016.2,
+     7026.3
+    ]
+   },
+   "32768": {
+    "s": [
+     9.1718,
+     9.2191,
+     9.2949
+    ],
+    "tok_s": [
+     3572.7,
+     3554.4,
+     3525.4
+    ]
+   },
+   "peak_alloc_gib": 21.72
+  },
+  {
+   "round": 1,
+   "arm": "holon_all4k",
+   "1024": {
+    "s": [
+     0.2115,
+     0.2141,
+     0.2012
+    ],
+    "tok_s": [
+     4842.6,
+     4783.8,
+     5088.9
+    ]
+   },
+   "4096": {
+    "s": [
+     0.6792,
+     0.6876,
+     0.6833
+    ],
+    "tok_s": [
+     6031.0,
+     5957.2,
+     5994.6
+    ]
+   },
+   "32768": {
+    "s": [
+     9.9702,
+     10.021,
+     10.0677
+    ],
+    "tok_s": [
+     3286.6,
+     3269.9,
+     3254.8
+    ]
+   },
+   "peak_alloc_gib": 22.36
+  },
+  {
+   "round": 1,
+   "arm": "holon_e4k",
+   "1024": {
+    "s": [
+     0.2152,
+     0.2187,
+     0.2051
+    ],
+    "tok_s": [
+     4757.5,
+     4681.7,
+     4991.8
+    ]
+   },
+   "4096": {
+    "s": [
+     0.7013,
+     0.7073,
+     0.7036
+    ],
+    "tok_s": [
+     5840.2,
+     5790.8,
+     5821.8
+    ]
+   },
+   "32768": {
+    "s": [
+     10.1574,
+     10.2041,
+     10.2296
+    ],
+    "tok_s": [
+     3226.0,
+     3211.3,
+     3203.2
+    ]
+   },
+   "peak_alloc_gib": 22.37
+  },
+  {
+   "round": 1,
+   "arm": "holon_pass4k",
+   "1024": {
+    "s": [
+     0.282,
+     0.2877,
+     0.2693
+    ],
+    "tok_s": [
+     3630.7,
+     3558.9,
+     3801.8
+    ]
+   },
+   "4096": {
+    "s": [
+     1.2375,
+     1.1824,
+     1.1752
+    ],
+    "tok_s": [
+     3310.0,
+     3464.3,
+     3485.3
+    ]
+   },
+   "32768": {
+    "s": [
+     14.0558,
+     14.1489,
+     14.1588
+    ],
+    "tok_s": [
+     2331.3,
+     2315.9,
+     2314.3
+    ]
+   },
+   "peak_alloc_gib": 22.38
+  },
+  {
+   "round": 1,
+   "arm": "holon_ship",
+   "1024": {
+    "s": [
+     0.2825,
+     0.288,
+     0.2697
+    ],
+    "tok_s": [
+     3625.2,
+     3555.2,
+     3797.1
+    ]
+   },
+   "4096": {
+    "s": [
+     1.2388,
+     1.1836,
+     1.1757
+    ],
+    "tok_s": [
+     3306.3,
+     3460.7,
+     3483.9
+    ]
+   },
+   "32768": {
+    "s": [
+     14.0644,
+     14.1491,
+     14.157
+    ],
+    "tok_s": [
+     2329.9,
+     2315.9,
+     2314.6
+    ]
+   },
+   "peak_alloc_gib": 22.2
+  }
+ ],
+ "nsys_breakdown_ms": {
+  "nsys_ft_fused": {
+   "1024": {
+    "wall_ms": 225.8,
+    "busy_ms": 172.1,
+    "kernel_ms": 172.1,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      113.5,
+      96
+     ],
+     "dense: GEMM": [
+      28.7,
+      145
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      11.8,
+      240
+     ],
+     "experts: id helper": [
+      3.6,
+      192
+     ],
+     "experts: act quant (q8_1)": [
+      3.4,
+      96
+     ],
+     "experts: combine": [
+      2.7,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      2.6,
+      48
+     ],
+     "other: norms": [
+      2.2,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      1.8,
+      121
+     ],
+     "other: embedding / glue": [
+      0.7,
+      59
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      0.6,
+      48
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.2,
+      48
+     ],
+     "other: sampling / logits": [
+      0.2,
+      49
+     ],
+     "dense: glue": [
+      0.1,
+      24
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      113.5
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      28.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      8.7
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      3.4
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      3.3
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      2.7
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      2.6
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      2.2
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.8
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      1.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      1.4
+     ],
+     [
+      "other: embedding / glue",
+      "vectorized_elementwise_kernel",
+      0.6
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 588.0,
+    "busy_ms": 583.7,
+    "kernel_ms": 583.6,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      298.8,
+      96
+     ],
+     "dense: GEMM": [
+      108.5,
+      121
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      107.5,
+      240
+     ],
+     "experts: act quant (q8_1)": [
+      13.5,
+      96
+     ],
+     "experts: id helper": [
+      13.3,
+      192
+     ],
+     "experts: combine": [
+      10.6,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      10.5,
+      48
+     ],
+     "other: norms": [
+      9.5,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      6.7,
+      121
+     ],
+     "other: embedding / glue": [
+      2.4,
+      61
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      1.8,
+      48
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.5,
+      48
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      298.8
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      108.1
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      92.7
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      13.5
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      12.9
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      10.6
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      10.5
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      9.4
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      8.1
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      6.7
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      5.5
+     ],
+     [
+      "other: embedding / glue",
+      "vectorized_elementwise_kernel",
+      2.3
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 9198.6,
+    "busy_ms": 9184.2,
+    "kernel_ms": 9183.9,
+    "memcpy_ms": 0.3,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5605.4,
+      960
+     ],
+     "experts: GEMM": [
+      2151.0,
+      384
+     ],
+     "dense: GEMM": [
+      880.6,
+      484
+     ],
+     "experts: act quant (q8_1)": [
+      109.1,
+      384
+     ],
+     "experts: id helper": [
+      105.7,
+      768
+     ],
+     "experts: SwiGLU / act": [
+      84.5,
+      192
+     ],
+     "experts: combine": [
+      84.2,
+      192
+     ],
+     "other: norms": [
+      75.9,
+      388
+     ],
+     "dense: act quant (q8_1)": [
+      52.5,
+      484
+     ],
+     "other: embedding / glue": [
+      18.9,
+      234
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      12.4,
+      192
+     ],
+     "other: router (gate GEMV + top-k)": [
+      3.7,
+      192
+     ],
+     "other: sampling / logits": [
+      0.0,
+      4
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      5505.6
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      2151.0
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      878.6
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      109.1
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      104.3
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      84.5
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      84.2
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      75.5
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      52.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheKernel",
+      46.6
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      43.4
+     ],
+     [
+      "other: embedding / glue",
+      "vectorized_elementwise_kernel",
+      18.4
+     ]
+    ]
+   }
+  },
+  "nsys_holon_all4k": {
+   "1024": {
+    "wall_ms": 217.0,
+    "busy_ms": 212.4,
+    "kernel_ms": 212.4,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      143.7,
+      96
+     ],
+     "dense: GEMM": [
+      29.9,
+      145
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      10.4,
+      96
+     ],
+     "combine": [
+      5.6,
+      48
+     ],
+     "router": [
+      5.4,
+      384
+     ],
+     "experts: SwiGLU / act": [
+      5.3,
+      48
+     ],
+     "experts: act quant (q8_1)": [
+      4.2,
+      96
+     ],
+     "experts: id helper": [
+      3.6,
+      96
+     ],
+     "dense: act quant (q8_1)": [
+      1.8,
+      121
+     ],
+     "other: norms": [
+      1.6,
+      97
+     ],
+     "other: embedding / glue": [
+      0.9,
+      156
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      143.7
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      29.1
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      8.4
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      5.6
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      5.3
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      4.2
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_compact",
+      3.6
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      3.3
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      2.0
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.8
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      1.1
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      1.1
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 691.9,
+    "busy_ms": 686.3,
+    "kernel_ms": 686.3,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      383.4,
+      96
+     ],
+     "dense: GEMM": [
+      108.0,
+      121
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      94.8,
+      96
+     ],
+     "router": [
+      21.9,
+      1536
+     ],
+     "combine": [
+      21.5,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      21.0,
+      48
+     ],
+     "experts: act quant (q8_1)": [
+      16.5,
+      96
+     ],
+     "other: norms": [
+      7.0,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      6.7,
+      121
+     ],
+     "other: embedding / glue": [
+      2.6,
+      156
+     ],
+     "experts: glue": [
+      2.0,
+      480
+     ],
+     "experts: id helper": [
+      0.8,
+      384
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      383.4
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      107.6
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      86.4
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      21.5
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      21.0
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      16.5
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      13.3
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      8.4
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      6.7
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      4.7
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      4.6
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKer",
+      2.3
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 10049.5,
+    "busy_ms": 10013.2,
+    "kernel_ms": 10013.1,
+    "memcpy_ms": 0.2,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5252.3,
+      768
+     ],
+     "experts: GEMM": [
+      3083.8,
+      768
+     ],
+     "dense: GEMM": [
+      874.7,
+      961
+     ],
+     "router": [
+      177.0,
+      12288
+     ],
+     "combine": [
+      171.9,
+      384
+     ],
+     "experts: SwiGLU / act": [
+      167.7,
+      384
+     ],
+     "experts: act quant (q8_1)": [
+      132.5,
+      768
+     ],
+     "other: norms": [
+      56.3,
+      769
+     ],
+     "dense: act quant (q8_1)": [
+      53.7,
+      961
+     ],
+     "other: embedding / glue": [
+      20.8,
+      1220
+     ],
+     "experts: glue": [
+      15.9,
+      3840
+     ],
+     "experts: id helper": [
+      6.5,
+      3072
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      5185.0
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      3083.8
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      874.3
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      171.9
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      167.7
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      132.5
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      107.8
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      67.3
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      53.7
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      37.6
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      37.0
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKer",
+      18.7
+     ]
+    ]
+   }
+  },
+  "nsys_holon_ship": {
+   "1024": {
+    "wall_ms": 289.9,
+    "busy_ms": 283.7,
+    "kernel_ms": 283.7,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      211.5,
+      192
+     ],
+     "dense: GEMM": [
+      33.5,
+      385
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      10.5,
+      96
+     ],
+     "combine": [
+      5.8,
+      96
+     ],
+     "router": [
+      5.5,
+      384
+     ],
+     "experts: SwiGLU / act": [
+      5.2,
+      96
+     ],
+     "experts: act quant (q8_1)": [
+      4.2,
+      192
+     ],
+     "experts: id helper": [
+      3.0,
+      192
+     ],
+     "dense: act quant (q8_1)": [
+      2.2,
+      241
+     ],
+     "other: norms": [
+      1.7,
+      97
+     ],
+     "other: embedding / glue": [
+      0.7,
+      60
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      211.5
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      30.7
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      8.5
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      5.8
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      5.2
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      4.2
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      3.4
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      3.0
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      2.3
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      2.2
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      2.0
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      1.1
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 1184.8,
+    "busy_ms": 1175.6,
+    "kernel_ms": 1175.5,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      832.1,
+      768
+     ],
+     "dense: GEMM": [
+      132.5,
+      1537
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      97.2,
+      96
+     ],
+     "combine": [
+      23.4,
+      384
+     ],
+     "router": [
+      22.2,
+      1536
+     ],
+     "experts: SwiGLU / act": [
+      20.8,
+      384
+     ],
+     "experts: act quant (q8_1)": [
+      16.6,
+      768
+     ],
+     "experts: id helper": [
+      12.2,
+      768
+     ],
+     "dense: act quant (q8_1)": [
+      9.0,
+      961
+     ],
+     "other: norms": [
+      7.1,
+      97
+     ],
+     "other: embedding / glue": [
+      2.4,
+      60
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      832.1
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      123.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      88.8
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      23.4
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      20.8
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      16.6
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      13.7
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      12.2
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      9.0
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      9.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      8.5
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      4.7
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 14164.5,
+    "busy_ms": 14101.1,
+    "kernel_ms": 14100.8,
+    "memcpy_ms": 0.3,
+    "components_ms": {
+     "experts: GEMM": [
+      6809.4,
+      6144
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5318.2,
+      768
+     ],
+     "dense: GEMM": [
+      1062.8,
+      12289
+     ],
+     "combine": [
+      187.1,
+      3072
+     ],
+     "router": [
+      178.8,
+      12288
+     ],
+     "experts: SwiGLU / act": [
+      166.0,
+      3072
+     ],
+     "experts: act quant (q8_1)": [
+      133.2,
+      6144
+     ],
+     "experts: id helper": [
+      97.9,
+      6144
+     ],
+     "dense: act quant (q8_1)": [
+      71.8,
+      7681
+     ],
+     "other: norms": [
+      56.6,
+      769
+     ],
+     "other: embedding / glue": [
+      18.9,
+      452
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      6809.4
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      5250.1
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      989.6
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      187.1
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      166.0
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      133.2
+     ],
+     [
+      "router",
+      "ampere_sgemm_32x128_tn",
+      110.0
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      97.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      72.7
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      71.8
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      68.2
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      38.0
+     ]
+    ]
+   }
+  }
+ },
+ "gemm_per_call": [
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 1.5247,
+     "dense_mmq_ms": 0.4372,
+     "bf16_mm_ms": 0.2913,
+     "dequant_stack_ms": 1.6282,
+     "mmq_id_tops": 16.9,
+     "dense_mmq_tops": 58.9,
+     "bf16_mm_tflops": 88.5,
+     "grouping_overhead": 3.49,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 1.7229,
+     "dense_mmq_ms": 0.8499,
+     "bf16_mm_ms": 0.6062,
+     "dequant_stack_ms": 1.6282,
+     "mmq_id_tops": 29.9,
+     "dense_mmq_tops": 60.6,
+     "bf16_mm_tflops": 85.0,
+     "grouping_overhead": 2.03,
+     "tiles_used": 137,
+     "tiles_launched": 1088,
+     "column_fill": 0.467
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 2.6194,
+     "dense_mmq_ms": 1.7203,
+     "bf16_mm_ms": 1.2032,
+     "dequant_stack_ms": 1.6282,
+     "mmq_id_tops": 39.4,
+     "dense_mmq_tops": 59.9,
+     "bf16_mm_tflops": 85.7,
+     "grouping_overhead": 1.52,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 4.9505,
+     "dense_mmq_ms": 3.4391,
+     "bf16_mm_ms": 2.3572,
+     "dequant_stack_ms": 1.6282,
+     "mmq_id_tops": 41.6,
+     "dense_mmq_tops": 59.9,
+     "bf16_mm_tflops": 87.5,
+     "grouping_overhead": 1.44,
+     "tiles_used": 331,
+     "tiles_launched": 4352,
+     "column_fill": 0.773
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 512,
+     "mmq_id_ms": 1.0399,
+     "dense_mmq_ms": 0.2703,
+     "bf16_mm_ms": 0.1772,
+     "dequant_stack_ms": 0.8704,
+     "mmq_id_tops": 12.4,
+     "dense_mmq_tops": 47.7,
+     "bf16_mm_tflops": 72.7,
+     "grouping_overhead": 3.85,
+     "tiles_used": 129,
+     "tiles_launched": 544,
+     "column_fill": 0.248
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 1024,
+     "mmq_id_ms": 1.2283,
+     "dense_mmq_ms": 0.5053,
+     "bf16_mm_ms": 0.3287,
+     "dequant_stack_ms": 0.8704,
+     "mmq_id_tops": 21.0,
+     "dense_mmq_tops": 51.0,
+     "bf16_mm_tflops": 78.4,
+     "grouping_overhead": 2.43,
+     "tiles_used": 136,
+     "tiles_launched": 1088,
+     "column_fill": 0.471
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 2048,
+     "mmq_id_ms": 1.7341,
+     "dense_mmq_ms": 0.9861,
+     "bf16_mm_ms": 0.6477,
+     "dequant_stack_ms": 0.8704,
+     "mmq_id_tops": 29.7,
+     "dense_mmq_tops": 52.3,
+     "bf16_mm_tflops": 79.6,
+     "grouping_overhead": 1.76,
+     "tiles_used": 174,
+     "tiles_launched": 2176,
+     "column_fill": 0.736
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 4096,
+     "mmq_id_ms": 3.5666,
+     "dense_mmq_ms": 1.9901,
+     "bf16_mm_ms": 1.2862,
+     "dequant_stack_ms": 0.8704,
+     "mmq_id_tops": 28.9,
+     "dense_mmq_tops": 51.8,
+     "bf16_mm_tflops": 80.1,
+     "grouping_overhead": 1.79,
+     "tiles_used": 332,
+     "tiles_launched": 4352,
+     "column_fill": 0.771
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 1.5181,
+     "dense_mmq_ms": 0.4332,
+     "bf16_mm_ms": 0.2882,
+     "dequant_stack_ms": 1.6271,
+     "mmq_id_tops": 17.0,
+     "dense_mmq_tops": 59.5,
+     "bf16_mm_tflops": 89.4,
+     "grouping_overhead": 3.5,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 1.687,
+     "dense_mmq_ms": 0.8591,
+     "bf16_mm_ms": 0.6083,
+     "dequant_stack_ms": 1.6271,
+     "mmq_id_tops": 30.6,
+     "dense_mmq_tops": 60.0,
+     "bf16_mm_tflops": 84.7,
+     "grouping_overhead": 1.96,
+     "tiles_used": 137,
+     "tiles_launched": 1088,
+     "column_fill": 0.467
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 2.6409,
+     "dense_mmq_ms": 1.7178,
+     "bf16_mm_ms": 1.2032,
+     "dequant_stack_ms": 1.6271,
+     "mmq_id_tops": 39.0,
+     "dense_mmq_tops": 60.0,
+     "bf16_mm_tflops": 85.7,
+     "grouping_overhead": 1.54,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 4.9551,
+     "dense_mmq_ms": 3.4345,
+     "bf16_mm_ms": 2.3803,
+     "dequant_stack_ms": 1.6271,
+     "mmq_id_tops": 41.6,
+     "dense_mmq_tops": 60.0,
+     "bf16_mm_tflops": 86.6,
+     "grouping_overhead": 1.44,
+     "tiles_used": 331,
+     "tiles_launched": 4352,
+     "column_fill": 0.773
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 1.026,
+     "dense_mmq_ms": 0.258,
+     "bf16_mm_ms": 0.1751,
+     "dequant_stack_ms": 0.981,
+     "mmq_id_tops": 12.6,
+     "dense_mmq_tops": 49.9,
+     "bf16_mm_tflops": 73.6,
+     "grouping_overhead": 3.98,
+     "tiles_used": 129,
+     "tiles_launched": 544,
+     "column_fill": 0.248
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 1.1397,
+     "dense_mmq_ms": 0.4582,
+     "bf16_mm_ms": 0.3226,
+     "dequant_stack_ms": 0.981,
+     "mmq_id_tops": 22.6,
+     "dense_mmq_tops": 56.2,
+     "bf16_mm_tflops": 79.9,
+     "grouping_overhead": 2.49,
+     "tiles_used": 136,
+     "tiles_launched": 1088,
+     "column_fill": 0.471
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 1.6323,
+     "dense_mmq_ms": 0.8678,
+     "bf16_mm_ms": 0.6604,
+     "dequant_stack_ms": 0.981,
+     "mmq_id_tops": 31.6,
+     "dense_mmq_tops": 59.4,
+     "bf16_mm_tflops": 78.0,
+     "grouping_overhead": 1.88,
+     "tiles_used": 174,
+     "tiles_launched": 2176,
+     "column_fill": 0.736
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 3.3004,
+     "dense_mmq_ms": 1.7695,
+     "bf16_mm_ms": 1.2933,
+     "dequant_stack_ms": 0.981,
+     "mmq_id_tops": 31.2,
+     "dense_mmq_tops": 58.3,
+     "bf16_mm_tflops": 79.7,
+     "grouping_overhead": 1.87,
+     "tiles_used": 332,
+     "tiles_launched": 4352,
+     "column_fill": 0.771
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.9518,
+     "tops": 27.1
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 1.3742,
+     "tops": 37.5
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 2.3168,
+     "tops": 44.5
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 4.1108,
+     "tops": 50.2
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 7.7082,
+     "tops": 53.5
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.6124,
+     "tops": 21.0
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.983,
+     "tops": 26.2
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 1.5089,
+     "tops": 34.2
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 2.814,
+     "tops": 36.6
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 5.0319,
+     "tops": 41.0
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.9523,
+     "tops": 27.1
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 1.3741,
+     "tops": 37.5
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 2.304,
+     "tops": 44.7
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 4.4513,
+     "tops": 46.3
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 7.7133,
+     "tops": 53.5
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.6543,
+     "tops": 19.7
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.9052,
+     "tops": 28.5
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 1.3251,
+     "tops": 38.9
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 2.5354,
+     "tops": 40.7
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 4.5727,
+     "tops": 45.1
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA RTX A5000",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 16,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 32,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "rows": 64,
+     "bitwise": true,
+     "max_abs_diff": 0.0
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,4089 @@
+{
+ "gpu": "NVIDIA GeForce RTX 5090",
+ "date": "2026-10-19",
+ "arms": [
+  {
+   "name": "holon_main",
+   "engine": "holon",
+   "args": "--flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer' --warm-set",
+   "tree": "base"
+  },
+  {
+   "name": "holon_f",
+   "engine": "holon",
+   "args": "--flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn kv_write=kernels.triton_attn linear_experts=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer' --warm-set",
+   "tree": "s4"
+  },
+  {
+   "name": "ft_default",
+   "engine": "freetoken",
+   "args": "--flags '--moe-strategy fused' --warm-set"
+  },
+  {
+   "name": "ft_gated",
+   "engine": "freetoken",
+   "args": "--flags '--moe-strategy fused --max-extend-length 4096' --warm-set"
+  }
+ ],
+ "trees": {
+  "holon_main": "b5b1e7f (main)",
+  "holon_f": "22717b3 (the step-4 tree; code as fed13f1)",
+  "ft_default": "FreeToken 21d9578, default chunks",
+  "ft_gated": "FreeToken 21d9578, --max-extend-length 4096"
+ },
+ "method": "prefill.py --warm-set (distinct warm-up prompts) --reps 5 5 3; 6 balanced rounds (ABCD, DCBA, ...), 60 s idle between arms, each arm's SM clock sampled while busy; statistic: median over rounds of the round geomean of paired ratios (the reference's time over holon_f's)",
+ "session_clock": [
+  [
+   "2602",
+   "2632"
+  ],
+  [
+   "2565",
+   "2587"
+  ]
+ ],
+ "bars": {
+  "cells": {
+   "ft_default 1024": {
+    "median_ms": 50.65,
+    "n": 30,
+    "round_medians_ms": [
+     50.5,
+     50.9,
+     50.7,
+     50.6,
+     50.7,
+     50.8
+    ],
+    "drift": 0.0079
+   },
+   "ft_default 4096": {
+    "median_ms": 171.65,
+    "n": 30,
+    "round_medians_ms": [
+     171.3,
+     171.8,
+     171.8,
+     171.6,
+     171.9,
+     172.1
+    ],
+    "drift": 0.0047
+   },
+   "ft_default 32768": {
+    "median_ms": 3019.35,
+    "n": 18,
+    "round_medians_ms": [
+     3019.0,
+     3022.0,
+     3015.6,
+     3013.4,
+     3017.3,
+     3038.2
+    ],
+    "drift": 0.0082
+   },
+   "ft_gated 1024": {
+    "median_ms": 50.6,
+    "n": 30,
+    "round_medians_ms": [
+     50.5,
+     50.6,
+     50.6,
+     50.5,
+     50.6,
+     50.6
+    ],
+    "drift": 0.002
+   },
+   "ft_gated 4096": {
+    "median_ms": 171.65,
+    "n": 30,
+    "round_medians_ms": [
+     171.6,
+     171.8,
+     171.6,
+     171.7,
+     171.8,
+     171.8
+    ],
+    "drift": 0.0012
+   },
+   "ft_gated 32768": {
+    "median_ms": 3227.1,
+    "n": 18,
+    "round_medians_ms": [
+     3239.1,
+     3232.4,
+     3226.1,
+     3226.4,
+     3227.0,
+     3226.8
+    ],
+    "drift": 0.004
+   },
+   "holon_f 1024": {
+    "median_ms": 50.7,
+    "n": 30,
+    "round_medians_ms": [
+     50.7,
+     50.8,
+     50.7,
+     50.7,
+     50.7,
+     50.8
+    ],
+    "drift": 0.002
+   },
+   "holon_f 4096": {
+    "median_ms": 170.45,
+    "n": 30,
+    "round_medians_ms": [
+     170.0,
+     170.6,
+     170.7,
+     170.2,
+     170.8,
+     170.4
+    ],
+    "drift": 0.0047
+   },
+   "holon_f 32768": {
+    "median_ms": 3177.95,
+    "n": 18,
+    "round_medians_ms": [
+     3179.9,
+     3183.0,
+     3178.5,
+     3171.9,
+     3177.4,
+     3174.8
+    ],
+    "drift": 0.0035
+   },
+   "holon_main 1024": {
+    "median_ms": 80.2,
+    "n": 30,
+    "round_medians_ms": [
+     80.1,
+     80.3,
+     80.2,
+     80.2,
+     80.2,
+     80.2
+    ],
+    "drift": 0.0025
+   },
+   "holon_main 4096": {
+    "median_ms": 341.65,
+    "n": 30,
+    "round_medians_ms": [
+     339.6,
+     342.1,
+     342.0,
+     341.3,
+     341.9,
+     341.4
+    ],
+    "drift": 0.0074
+   },
+   "holon_main 32768": {
+    "median_ms": 4526.5,
+    "n": 18,
+    "round_medians_ms": [
+     4520.3,
+     4537.5,
+     4532.8,
+     4524.8,
+     4531.6,
+     4528.2
+    ],
+    "drift": 0.0038
+   }
+  },
+  "pairs": {
+   "holon_f vs ft_default 1024": {
+    "round_geomeans": [
+     1.3237,
+     1.031,
+     1.0277,
+     1.0274,
+     1.028,
+     1.0548
+    ],
+    "median": 1.0295,
+    "sd": 0.1188,
+    "median_paired": 1.002
+   },
+   "holon_f vs ft_default 4096": {
+    "round_geomeans": [
+     1.0071,
+     1.0082,
+     1.007,
+     1.0086,
+     1.0076,
+     1.0126
+    ],
+    "median": 1.0079,
+    "sd": 0.0021,
+    "median_paired": 1.0088
+   },
+   "holon_f vs ft_default 32768": {
+    "round_geomeans": [
+     0.9487,
+     0.9494,
+     0.9497,
+     0.9503,
+     0.9498,
+     0.9566
+    ],
+    "median": 0.9497,
+    "sd": 0.0029,
+    "median_paired": 0.9499
+   },
+   "holon_f vs ft_gated 1024": {
+    "round_geomeans": [
+     1.0278,
+     1.0294,
+     1.0307,
+     1.0279,
+     1.0315,
+     1.0284
+    ],
+    "median": 1.0289,
+    "sd": 0.0015,
+    "median_paired": 1.0
+   },
+   "holon_f vs ft_gated 4096": {
+    "round_geomeans": [
+     1.0091,
+     1.0081,
+     1.0063,
+     1.0086,
+     1.007,
+     1.0088
+    ],
+    "median": 1.0083,
+    "sd": 0.0011,
+    "median_paired": 1.0083
+   },
+   "holon_f vs ft_gated 32768": {
+    "round_geomeans": [
+     1.019,
+     1.0156,
+     1.0156,
+     1.0173,
+     1.0158,
+     1.0162
+    ],
+    "median": 1.016,
+    "sd": 0.0013,
+    "median_paired": 1.0168
+   },
+   "holon_f vs holon_main 1024": {
+    "round_geomeans": [
+     1.5972,
+     1.5996,
+     1.5992,
+     1.5995,
+     1.5992,
+     1.5984
+    ],
+    "median": 1.5992,
+    "sd": 0.0009,
+    "median_paired": 1.5813
+   },
+   "holon_f vs holon_main 4096": {
+    "round_geomeans": [
+     2.0069,
+     2.0134,
+     2.0103,
+     2.0109,
+     2.0089,
+     2.0109
+    ],
+    "median": 2.0106,
+    "sd": 0.0022,
+    "median_paired": 2.0035
+   },
+   "holon_f vs holon_main 32768": {
+    "round_geomeans": [
+     1.4218,
+     1.424,
+     1.4253,
+     1.4257,
+     1.4246,
+     1.4237
+    ],
+    "median": 1.4243,
+    "sd": 0.0014,
+    "median_paired": 1.424
+   }
+  },
+  "flagged": [
+   [
+    "ft_default",
+    "1024",
+    0,
+    1,
+    0.2085
+   ]
+  ],
+  "clocks": [
+   {
+    "round": 0,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2715,
+     "p50": 2782,
+     "n": 159
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2752,
+     "p50": 2812,
+     "n": 105
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 103
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 108
+    }
+   },
+   {
+    "round": 1,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2752,
+     "p50": 2812,
+     "n": 107
+    }
+   },
+   {
+    "round": 1,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 102
+    }
+   },
+   {
+    "round": 1,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2752,
+     "p50": 2812,
+     "n": 107
+    }
+   },
+   {
+    "round": 1,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2707,
+     "p50": 2775,
+     "n": 161
+    }
+   },
+   {
+    "round": 2,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2707,
+     "p50": 2775,
+     "n": 161
+    }
+   },
+   {
+    "round": 2,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2752,
+     "p50": 2820,
+     "n": 108
+    }
+   },
+   {
+    "round": 2,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 103
+    }
+   },
+   {
+    "round": 2,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2760,
+     "p50": 2820,
+     "n": 110
+    }
+   },
+   {
+    "round": 3,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2752,
+     "p50": 2820,
+     "n": 108
+    }
+   },
+   {
+    "round": 3,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2820,
+     "n": 103
+    }
+   },
+   {
+    "round": 3,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2760,
+     "p50": 2820,
+     "n": 107
+    }
+   },
+   {
+    "round": 3,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2722,
+     "p50": 2782,
+     "n": 159
+    }
+   },
+   {
+    "round": 4,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2715,
+     "p50": 2782,
+     "n": 159
+    }
+   },
+   {
+    "round": 4,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2737,
+     "p50": 2812,
+     "n": 108
+    }
+   },
+   {
+    "round": 4,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2805,
+     "n": 100
+    }
+   },
+   {
+    "round": 4,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 107
+    }
+   },
+   {
+    "round": 5,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2745,
+     "p50": 2812,
+     "n": 110
+    }
+   },
+   {
+    "round": 5,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2745,
+     "p50": 2790,
+     "n": 102
+    }
+   },
+   {
+    "round": 5,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2752,
+     "p50": 2820,
+     "n": 105
+    }
+   },
+   {
+    "round": 5,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2715,
+     "p50": 2775,
+     "n": 157
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2730,
+     "p50": 2782,
+     "n": 159
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2760,
+     "p50": 2812,
+     "n": 108
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2812,
+     "n": 100
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2745,
+     "p50": 2812,
+     "n": 108
+    }
+   }
+  ],
+  "memory": {
+   "ft_default": {},
+   "ft_gated": {},
+   "holon_f": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "holon_main": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0833,
+     0.049,
+     0.0507,
+     0.0505
+    ],
+    "tok_s": [
+     20162.5,
+     12299.9,
+     20901.6,
+     20193.1,
+     20257.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1715,
+     0.1725,
+     0.1714,
+     0.1718,
+     0.1717
+    ],
+    "tok_s": [
+     23888.5,
+     23738.1,
+     23896.9,
+     23834.9,
+     23856.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0186,
+     3.0207,
+     3.0187
+    ],
+    "tok_s": [
+     10855.5,
+     10847.9,
+     10855.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 1,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0509,
+     0.0594,
+     0.049,
+     0.0509,
+     0.0506
+    ],
+    "tok_s": [
+     20127.3,
+     17237.1,
+     20881.4,
+     20129.3,
+     20255.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1713,
+     0.1726,
+     0.1714,
+     0.172,
+     0.1718
+    ],
+    "tok_s": [
+     23915.0,
+     23728.6,
+     23891.0,
+     23812.7,
+     23836.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0197,
+     3.0222,
+     3.022
+    ],
+    "tok_s": [
+     10851.4,
+     10842.3,
+     10843.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 2,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0509,
+     0.0586,
+     0.049,
+     0.0507,
+     0.0505
+    ],
+    "tok_s": [
+     20136.4,
+     17467.7,
+     20910.6,
+     20178.8,
+     20274.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1713,
+     0.1726,
+     0.1714,
+     0.1718,
+     0.1718
+    ],
+    "tok_s": [
+     23912.6,
+     23736.5,
+     23903.2,
+     23842.8,
+     23844.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0131,
+     3.0156,
+     3.0226
+    ],
+    "tok_s": [
+     10875.1,
+     10866.2,
+     10840.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 3,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0585,
+     0.049,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20202.3,
+     17509.8,
+     20915.1,
+     20252.9,
+     20285.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1711,
+     0.1724,
+     0.1713,
+     0.1717,
+     0.1716
+    ],
+    "tok_s": [
+     23934.2,
+     23763.0,
+     23917.1,
+     23855.5,
+     23865.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0134,
+     3.0109,
+     3.0174
+    ],
+    "tok_s": [
+     10874.1,
+     10883.2,
+     10859.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 4,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0588,
+     0.049,
+     0.0507,
+     0.0505
+    ],
+    "tok_s": [
+     20159.3,
+     17425.1,
+     20894.5,
+     20197.8,
+     20258.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1714,
+     0.1727,
+     0.1715,
+     0.1721,
+     0.1719
+    ],
+    "tok_s": [
+     23893.5,
+     23712.3,
+     23880.1,
+     23806.4,
+     23826.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0173,
+     3.0169,
+     3.0205
+    ],
+    "tok_s": [
+     10860.2,
+     10861.6,
+     10848.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 5,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0511,
+     0.0658,
+     0.0493,
+     0.0508,
+     0.0506
+    ],
+    "tok_s": [
+     20027.0,
+     15571.1,
+     20788.4,
+     20138.7,
+     20229.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1727,
+     0.1737,
+     0.1716,
+     0.1721,
+     0.172
+    ],
+    "tok_s": [
+     23715.1,
+     23586.8,
+     23868.7,
+     23799.7,
+     23808.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0367,
+     3.0382,
+     3.0429
+    ],
+    "tok_s": [
+     10790.8,
+     10785.5,
+     10768.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 0,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.0505,
+     0.2085,
+     0.049,
+     0.0505,
+     0.0504
+    ],
+    "tok_s": [
+     20258.3,
+     4912.2,
+     20894.5,
+     20260.0,
+     20306.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1705,
+     0.1716,
+     0.171,
+     0.1713,
+     0.1714
+    ],
+    "tok_s": [
+     24025.4,
+     23865.0,
+     23952.4,
+     23904.9,
+     23892.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.0047,
+     3.019,
+     3.0213
+    ],
+    "tok_s": [
+     10905.7,
+     10853.8,
+     10845.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 0,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0583,
+     0.049,
+     0.0506,
+     0.0506
+    ],
+    "tok_s": [
+     20154.0,
+     17553.1,
+     20902.4,
+     20244.9,
+     20253.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1712,
+     0.1726,
+     0.1713,
+     0.1719,
+     0.1718
+    ],
+    "tok_s": [
+     23920.6,
+     23729.4,
+     23908.3,
+     23834.1,
+     23847.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2319,
+     3.232,
+     3.2301
+    ],
+    "tok_s": [
+     10138.8,
+     10138.7,
+     10144.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 1,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0509,
+     0.0593,
+     0.0491,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20136.0,
+     17273.4,
+     20863.3,
+     20250.6,
+     20281.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1713,
+     0.1726,
+     0.1714,
+     0.1719,
+     0.1718
+    ],
+    "tok_s": [
+     23915.1,
+     23730.2,
+     23891.0,
+     23833.5,
+     23843.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.233,
+     3.231,
+     3.2324
+    ],
+    "tok_s": [
+     10135.4,
+     10141.8,
+     10137.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 2,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0598,
+     0.049,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20194.4,
+     17136.9,
+     20914.5,
+     20220.1,
+     20282.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1711,
+     0.1726,
+     0.1713,
+     0.1717,
+     0.1716
+    ],
+    "tok_s": [
+     23937.8,
+     23737.0,
+     23908.2,
+     23860.0,
+     23864.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2261,
+     3.2259,
+     3.2272
+    ],
+    "tok_s": [
+     10157.2,
+     10157.8,
+     10153.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 3,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0506,
+     0.059,
+     0.0489,
+     0.0505,
+     0.0505
+    ],
+    "tok_s": [
+     20219.9,
+     17363.3,
+     20928.4,
+     20262.1,
+     20292.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1709,
+     0.1724,
+     0.1714,
+     0.1717,
+     0.1717
+    ],
+    "tok_s": [
+     23968.5,
+     23753.3,
+     23899.1,
+     23856.2,
+     23857.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2262,
+     3.2264,
+     3.2268
+    ],
+    "tok_s": [
+     10156.7,
+     10156.2,
+     10155.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 4,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0598,
+     0.0491,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20141.2,
+     17122.7,
+     20861.8,
+     20238.6,
+     20260.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1713,
+     0.1726,
+     0.1715,
+     0.1718,
+     0.1719
+    ],
+    "tok_s": [
+     23917.1,
+     23731.5,
+     23888.7,
+     23835.9,
+     23827.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2333,
+     3.227,
+     3.2236
+    ],
+    "tok_s": [
+     10134.5,
+     10154.3,
+     10165.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 5,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0589,
+     0.0491,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20144.1,
+     17396.3,
+     20858.7,
+     20255.5,
+     20259.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1713,
+     0.1726,
+     0.1714,
+     0.1718,
+     0.1718
+    ],
+    "tok_s": [
+     23909.1,
+     23734.3,
+     23900.4,
+     23846.7,
+     23845.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2331,
+     3.2268,
+     3.2259
+    ],
+    "tok_s": [
+     10135.1,
+     10155.1,
+     10157.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 0,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0585,
+     0.049,
+     0.0505,
+     0.0505
+    ],
+    "tok_s": [
+     20203.2,
+     17490.0,
+     20911.8,
+     20275.0,
+     20290.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1707,
+     0.1725,
+     0.1711,
+     0.1716,
+     0.1716
+    ],
+    "tok_s": [
+     23989.1,
+     23740.7,
+     23933.6,
+     23872.1,
+     23868.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.2365,
+     3.2391,
+     3.2398
+    ],
+    "tok_s": [
+     10124.6,
+     10116.5,
+     10114.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0508,
+     0.0491,
+     0.0506,
+     0.051
+    ],
+    "tok_s": [
+     20199.0,
+     20152.7,
+     20852.2,
+     20225.8,
+     20071.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1698,
+     0.1713,
+     0.1698,
+     0.1708,
+     0.1713
+    ],
+    "tok_s": [
+     24117.7,
+     23916.8,
+     24117.4,
+     23980.4,
+     23907.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.1703,
+     3.1795,
+     3.1853
+    ],
+    "tok_s": [
+     10335.8,
+     10306.2,
+     10287.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 1,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0509,
+     0.049,
+     0.0507,
+     0.051
+    ],
+    "tok_s": [
+     20175.2,
+     20102.7,
+     20884.9,
+     20196.6,
+     20082.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1697,
+     0.1711,
+     0.1697,
+     0.1706,
+     0.171
+    ],
+    "tok_s": [
+     24131.2,
+     23943.6,
+     24134.5,
+     24006.9,
+     23950.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.18,
+     3.1842,
+     3.183
+    ],
+    "tok_s": [
+     10304.5,
+     10290.8,
+     10294.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 2,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0508,
+     0.0491,
+     0.0506,
+     0.051
+    ],
+    "tok_s": [
+     20197.0,
+     20170.3,
+     20868.6,
+     20233.8,
+     20081.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1697,
+     0.1712,
+     0.17,
+     0.1707,
+     0.1713
+    ],
+    "tok_s": [
+     24138.5,
+     23928.2,
+     24098.6,
+     23992.8,
+     23916.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.172,
+     3.1785,
+     3.1804
+    ],
+    "tok_s": [
+     10330.3,
+     10309.4,
+     10303.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 3,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0508,
+     0.049,
+     0.0505,
+     0.0509
+    ],
+    "tok_s": [
+     20200.7,
+     20147.8,
+     20887.4,
+     20258.7,
+     20136.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1695,
+     0.1709,
+     0.1696,
+     0.1702,
+     0.1706
+    ],
+    "tok_s": [
+     24161.7,
+     23968.2,
+     24147.0,
+     24059.8,
+     24007.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.1719,
+     3.1694,
+     3.1732
+    ],
+    "tok_s": [
+     10330.8,
+     10338.8,
+     10326.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 4,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0508,
+     0.0491,
+     0.0506,
+     0.051
+    ],
+    "tok_s": [
+     20180.1,
+     20160.6,
+     20853.1,
+     20230.3,
+     20070.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1698,
+     0.1712,
+     0.17,
+     0.1708,
+     0.1713
+    ],
+    "tok_s": [
+     24117.5,
+     23923.5,
+     24099.3,
+     23982.2,
+     23917.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.174,
+     3.1774,
+     3.1819
+    ],
+    "tok_s": [
+     10323.9,
+     10312.8,
+     10298.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 5,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0508,
+     0.0508,
+     0.049,
+     0.0507,
+     0.0509
+    ],
+    "tok_s": [
+     20174.6,
+     20142.3,
+     20889.9,
+     20187.3,
+     20125.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1695,
+     0.171,
+     0.1698,
+     0.1704,
+     0.1707
+    ],
+    "tok_s": [
+     24158.6,
+     23950.8,
+     24127.1,
+     24036.2,
+     23989.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.1746,
+     3.1748,
+     3.182
+    ],
+    "tok_s": [
+     10321.8,
+     10321.4,
+     10298.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.0507,
+     0.0507,
+     0.049,
+     0.0505,
+     0.0508
+    ],
+    "tok_s": [
+     20208.9,
+     20210.4,
+     20878.4,
+     20264.1,
+     20152.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.1693,
+     0.1707,
+     0.1693,
+     0.17,
+     0.1705
+    ],
+    "tok_s": [
+     24197.5,
+     23993.9,
+     24188.2,
+     24088.6,
+     24024.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     3.1742,
+     3.1804,
+     3.1799
+    ],
+    "tok_s": [
+     10323.3,
+     10303.0,
+     10304.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 29.14,
+   "memory": {
+    "kv_tokens": 121184,
+    "profiled_peak_gib": 0.416,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.748,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.78
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 0,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0802,
+     0.081,
+     0.0768,
+     0.0852,
+     0.0801
+    ],
+    "tok_s": [
+     12774.4,
+     12634.5,
+     13339.5,
+     12013.0,
+     12786.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3496,
+     0.3352,
+     0.3332,
+     0.3417,
+     0.353
+    ],
+    "tok_s": [
+     11715.2,
+     12218.7,
+     12292.8,
+     11986.3,
+     11602.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5129,
+     4.5298,
+     4.5294
+    ],
+    "tok_s": [
+     7260.9,
+     7233.8,
+     7234.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 1,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0803,
+     0.0811,
+     0.077,
+     0.0853,
+     0.0802
+    ],
+    "tok_s": [
+     12754.8,
+     12629.2,
+     13303.6,
+     12000.0,
+     12768.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3501,
+     0.3356,
+     0.3347,
+     0.3421,
+     0.3535
+    ],
+    "tok_s": [
+     11698.3,
+     12206.0,
+     12237.6,
+     11974.1,
+     11587.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5171,
+     4.5375,
+     4.5403
+    ],
+    "tok_s": [
+     7254.2,
+     7221.6,
+     7217.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 2,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0802,
+     0.0811,
+     0.0768,
+     0.0852,
+     0.0802
+    ],
+    "tok_s": [
+     12761.3,
+     12623.5,
+     13331.0,
+     12012.8,
+     12767.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3501,
+     0.3357,
+     0.3337,
+     0.342,
+     0.3535
+    ],
+    "tok_s": [
+     11698.9,
+     12201.2,
+     12275.7,
+     11977.1,
+     11585.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5163,
+     4.5354,
+     4.5328
+    ],
+    "tok_s": [
+     7255.4,
+     7224.9,
+     7229.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 3,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0802,
+     0.081,
+     0.0767,
+     0.0852,
+     0.08
+    ],
+    "tok_s": [
+     12773.8,
+     12642.5,
+     13343.6,
+     12019.0,
+     12806.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3496,
+     0.3349,
+     0.3329,
+     0.3413,
+     0.3526
+    ],
+    "tok_s": [
+     11717.1,
+     12231.6,
+     12304.1,
+     12000.7,
+     11616.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5115,
+     4.5248,
+     4.5289
+    ],
+    "tok_s": [
+     7263.2,
+     7241.9,
+     7235.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 4,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0802,
+     0.0811,
+     0.0768,
+     0.0853,
+     0.0801
+    ],
+    "tok_s": [
+     12762.4,
+     12631.4,
+     13335.4,
+     12008.6,
+     12778.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3499,
+     0.3356,
+     0.3335,
+     0.3419,
+     0.3533
+    ],
+    "tok_s": [
+     11706.5,
+     12205.8,
+     12282.0,
+     11981.8,
+     11593.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5155,
+     4.5344,
+     4.5316
+    ],
+    "tok_s": [
+     7256.7,
+     7226.6,
+     7231.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 5,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0802,
+     0.0811,
+     0.0767,
+     0.0852,
+     0.0801
+    ],
+    "tok_s": [
+     12769.0,
+     12633.6,
+     13345.5,
+     12015.2,
+     12785.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3498,
+     0.335,
+     0.3333,
+     0.3414,
+     0.353
+    ],
+    "tok_s": [
+     11709.8,
+     12225.2,
+     12289.2,
+     11998.6,
+     11601.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5121,
+     4.5282,
+     4.5296
+    ],
+    "tok_s": [
+     7262.3,
+     7236.4,
+     7234.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 0,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.0801,
+     0.0811,
+     0.0765,
+     0.0849,
+     0.0796
+    ],
+    "tok_s": [
+     12781.1,
+     12628.1,
+     13378.9,
+     12064.1,
+     12867.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3491,
+     0.3344,
+     0.3319,
+     0.3396,
+     0.3509
+    ],
+    "tok_s": [
+     11734.5,
+     12250.0,
+     12341.6,
+     12061.5,
+     11671.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     4.5147,
+     4.5216,
+     4.5203
+    ],
+    "tok_s": [
+     7258.1,
+     7246.9,
+     7249.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   },
+   "arm_dir": "holon_main"
+  }
+ ],
+ "round0_rerun_clock": [
+  "{\"p10\": 2730, \"p50\": 2782, \"n\": 159}",
+  "{\"p10\": 2760, \"p50\": 2812, \"n\": 108}",
+  "{\"p10\": 2767, \"p50\": 2812, \"n\": 100}",
+  "{\"p10\": 2745, \"p50\": 2812, \"n\": 108}"
+ ],
+ "decode_holon_tg": {
+  "batch1": {
+   "tg128 @ d1024": {
+    "paired_ratios": [
+     1.0007,
+     1.0024,
+     1.0015,
+     1.0026
+    ],
+    "median": 1.0019,
+    "mean": 1.0018,
+    "sd": 0.0009
+   },
+   "tg128 @ d4096": {
+    "paired_ratios": [
+     0.9976,
+     0.9976,
+     0.997,
+     0.9976
+    ],
+    "median": 0.9976,
+    "mean": 0.9974,
+    "sd": 0.0003
+   }
+  },
+  "batched": {
+   "tg128 @ d1024 b16": {
+    "paired_ratios": [
+     1.0195,
+     1.0215,
+     1.0201,
+     1.0195
+    ],
+    "median": 1.0198,
+    "mean": 1.0201,
+    "sd": 0.0009
+   },
+   "tg128 @ d1024 b32": {
+    "paired_ratios": [
+     1.0215,
+     1.0228,
+     1.0225,
+     1.021
+    ],
+    "median": 1.022,
+    "mean": 1.022,
+    "sd": 0.0008
+   },
+   "tg128 @ d1024 b64": {
+    "paired_ratios": [
+     1.054,
+     1.0558,
+     1.0541,
+     1.0537
+    ],
+    "median": 1.0541,
+    "mean": 1.0544,
+    "sd": 0.0009
+   }
+  },
+  "method": "holon_tg -n 128, -r 3, main against the step-4 tree, 4 alternating rounds; batch 1 at depth 1,024 / 4,096; batch 16 / 32 / 64 at 1,024 (the 5090 lock's flags at max_seqs 64)"
+ },
+ "llama_rows_ctx": [
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 19846.6455,
+     "decode_tps": 419.6485
+    },
+    "4096": {
+     "prefill_tps": 23888.1314,
+     "decode_tps": 387.6602
+    },
+    "32768": {
+     "prefill_tps": 10232.3482,
+     "decode_tps": 233.2947
+    }
+   },
+   "peak_vram_mib": 30952,
+   "wall_s": 27.4
+  },
+  {
+   "round": 0,
+   "arm": "llama_res",
+   "results": {
+    "1024": {
+     "prefill_tps": 11129.467,
+     "decode_tps": 335.145
+    },
+    "4096": {
+     "prefill_tps": 10134.525,
+     "decode_tps": 290.079
+    },
+    "32768": {
+     "prefill_tps": 7073.631,
+     "decode_tps": 170.604
+    }
+   },
+   "peak_vram_mib": 21448,
+   "wall_s": 15.3
+  },
+  {
+   "round": 1,
+   "arm": "llama_res",
+   "results": {
+    "1024": {
+     "prefill_tps": 10988.893,
+     "decode_tps": 334.81
+    },
+    "4096": {
+     "prefill_tps": 10120.702,
+     "decode_tps": 290.041
+    },
+    "32768": {
+     "prefill_tps": 7062.011,
+     "decode_tps": 199.048
+    }
+   },
+   "peak_vram_mib": 21448,
+   "wall_s": 12.1
+  },
+  {
+   "round": 1,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 19634.3486,
+     "decode_tps": 419.8343
+    },
+    "4096": {
+     "prefill_tps": 23936.6564,
+     "decode_tps": 388.0526
+    },
+    "32768": {
+     "prefill_tps": 10231.7189,
+     "decode_tps": 233.2692
+    }
+   },
+   "peak_vram_mib": 30952,
+   "wall_s": 19.1
+  },
+  {
+   "round": 2,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 19855.306,
+     "decode_tps": 420.2297
+    },
+    "4096": {
+     "prefill_tps": 24015.3741,
+     "decode_tps": 388.0622
+    },
+    "32768": {
+     "prefill_tps": 10266.6047,
+     "decode_tps": 233.475
+    }
+   },
+   "peak_vram_mib": 30952,
+   "wall_s": 27.3
+  },
+  {
+   "round": 2,
+   "arm": "llama_res",
+   "results": {
+    "1024": {
+     "prefill_tps": 11048.174,
+     "decode_tps": 335.956
+    },
+    "4096": {
+     "prefill_tps": 10179.913,
+     "decode_tps": 290.658
+    },
+    "32768": {
+     "prefill_tps": 7124.16,
+     "decode_tps": 199.202
+    }
+   },
+   "peak_vram_mib": 21448,
+   "wall_s": 12.1
+  }
+ ]
+}

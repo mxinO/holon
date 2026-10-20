@@ -1,0 +1,3315 @@
+{
+ "name": "mp0_prefill",
+ "gpu": "RTX 5090",
+ "date": "2026-10-18",
+ "commit": "61f2545",
+ "engines": {
+  "holon": "this repository at the record's commit (std.moe@1; the store and kernels per arm: arms_*.json)",
+  "freetoken": "FreeToken 21d9578bde22 (bench/setup_baselines.sh offload: torch 2.14.1+cu130, [accel]); --moe-strategy fused (all experts resident) or --moe-cache-rate (offload); the gated arm adds --max-extend-length 4096, its default chunk is 8,192",
+  "model": "Qwen3-30B-A3B Q4_K_M (unsloth/Qwen3-30B-A3B-GGUF); the 16 GB lock's: UD-IQ3_XXS"
+ },
+ "method": "spikes/moe_prefill/README.md; docs/v1-moe-prefill.md \u00a72.1",
+ "commands": [
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>.json --model <gguf> --out <dir>/timed --rounds 2 --reps 5 5 3 --holon-python <holon venv python> --freetoken-python <freetoken venv python>",
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>_nsys.json --model <gguf> --out <dir>/nsys --rounds 1 --reps 1 ...",
+  "nsys export --type sqlite -o <report>.sqlite <report>.nsys-rep; python spikes/moe_prefill/breakdown.py <report>.sqlite > <report>.json",
+  "python spikes/moe_prefill/gemm.py --model <gguf> --layer 0|6 --tokens 16 24 32 40 48 56 64 512 1024 2048 4096 8192 [--freetoken [--f32]] --json <out>",
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/kv_<lock>.json --model <gguf> --out <dir>/kv --rounds 1 --reps 1 --lengths <a prompt below the lock's context>"
+ ],
+ "timed": {
+  "summary": {
+   "holon_ship": {
+    "1024": {
+     "median_s": 0.0801,
+     "min_s": 0.0765,
+     "max_s": 0.0854,
+     "n": 10
+    },
+    "4096": {
+     "median_s": 0.3407,
+     "min_s": 0.3322,
+     "max_s": 0.352,
+     "n": 10
+    },
+    "32768": {
+     "median_s": 4.5339,
+     "min_s": 4.518,
+     "max_s": 4.5473,
+     "n": 6
+    }
+   },
+   "holon_all4k": {
+    "1024": {
+     "median_s": 0.06,
+     "min_s": 0.0567,
+     "max_s": 0.0605,
+     "n": 10
+    },
+    "4096": {
+     "median_s": 0.201,
+     "min_s": 0.1996,
+     "max_s": 0.2012,
+     "n": 10
+    },
+    "32768": {
+     "median_s": 3.4343,
+     "min_s": 3.4257,
+     "max_s": 3.4407,
+     "n": 6
+    }
+   },
+   "ft_fused": {
+    "1024": {
+     "median_s": 0.0506,
+     "min_s": 0.049,
+     "max_s": 0.9748,
+     "n": 10
+    },
+    "4096": {
+     "median_s": 0.1713,
+     "min_s": 0.1707,
+     "max_s": 0.1723,
+     "n": 10
+    },
+    "32768": {
+     "median_s": 3.0218,
+     "min_s": 3.0082,
+     "max_s": 3.0286,
+     "n": 6
+    }
+   },
+   "ft_fused_g4096": {
+    "1024": {
+     "median_s": 0.0506,
+     "min_s": 0.0489,
+     "max_s": 0.0582,
+     "n": 10
+    },
+    "4096": {
+     "median_s": 0.1713,
+     "min_s": 0.1702,
+     "max_s": 0.1722,
+     "n": 10
+    },
+    "32768": {
+     "median_s": 3.2404,
+     "min_s": 3.2376,
+     "max_s": 3.2414,
+     "n": 6
+    }
+   }
+  },
+  "holon_over_freetoken_default": {
+   "holon_ship": {
+    "1024": 0.632,
+    "4096": 0.503,
+    "32768": 0.666
+   },
+   "holon_all4k": {
+    "1024": 0.843,
+    "4096": 0.852,
+    "32768": 0.88
+   }
+  },
+  "freetoken_default_arm": "ft_fused",
+  "holon_over_freetoken_gated_4096": {
+   "holon_ship": {
+    "1024": 0.632,
+    "4096": 0.503,
+    "32768": 0.715
+   },
+   "holon_all4k": {
+    "1024": 0.843,
+    "4096": 0.852,
+    "32768": 0.944
+   }
+  },
+  "freetoken_gated_4096_arm": "ft_fused_g4096"
+ },
+ "timed_raw": [
+  {
+   "round": 0,
+   "arm": "holon_ship",
+   "1024": {
+    "s": [
+     0.0797,
+     0.0809,
+     0.0765,
+     0.0851,
+     0.0797
+    ],
+    "tok_s": [
+     12840.7,
+     12661.5,
+     13379.2,
+     12027.0,
+     12846.4
+    ]
+   },
+   "4096": {
+    "s": [
+     0.3485,
+     0.3343,
+     0.3322,
+     0.3402,
+     0.3511
+    ],
+    "tok_s": [
+     11754.4,
+     12250.9,
+     12331.6,
+     12038.4,
+     11665.5
+    ]
+   },
+   "32768": {
+    "s": [
+     4.518,
+     4.5295,
+     4.5305
+    ],
+    "tok_s": [
+     7252.7,
+     7234.4,
+     7232.8
+    ]
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122512,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.76,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.455
+   }
+  },
+  {
+   "round": 0,
+   "arm": "holon_all4k",
+   "1024": {
+    "s": [
+     0.0598,
+     0.0603,
+     0.0569,
+     0.0605,
+     0.06
+    ],
+    "tok_s": [
+     17111.5,
+     16973.4,
+     17981.3,
+     16920.9,
+     17052.9
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1996,
+     0.2011,
+     0.2006,
+     0.201,
+     0.2011
+    ],
+    "tok_s": [
+     20517.4,
+     20371.1,
+     20414.4,
+     20381.5,
+     20367.1
+    ]
+   },
+   "32768": {
+    "s": [
+     3.4278,
+     3.4361,
+     3.4407
+    ],
+    "tok_s": [
+     9559.6,
+     9536.3,
+     9523.7
+    ]
+   },
+   "peak_alloc_gib": 29.11,
+   "memory": {
+    "kv_tokens": 120816,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.722,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.786
+   }
+  },
+  {
+   "round": 0,
+   "arm": "ft_fused",
+   "1024": {
+    "s": [
+     0.0552,
+     0.9748,
+     0.049,
+     0.0505,
+     0.0504
+    ],
+    "tok_s": [
+     18538.6,
+     1050.5,
+     20890.6,
+     20288.8,
+     20305.3
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1715,
+     0.1713,
+     0.1708,
+     0.1713,
+     0.1712
+    ],
+    "tok_s": [
+     23888.4,
+     23913.3,
+     23978.3,
+     23917.7,
+     23926.0
+    ]
+   },
+   "32768": {
+    "s": [
+     3.0082,
+     3.0239,
+     3.0286
+    ],
+    "tok_s": [
+     10893.0,
+     10836.4,
+     10819.6
+    ]
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {}
+  },
+  {
+   "round": 0,
+   "arm": "ft_fused_g4096",
+   "1024": {
+    "s": [
+     0.0509,
+     0.0582,
+     0.0489,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20109.7,
+     17603.9,
+     20930.2,
+     20224.8,
+     20290.3
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1702,
+     0.1719,
+     0.1709,
+     0.1713,
+     0.1712
+    ],
+    "tok_s": [
+     24064.2,
+     23823.7,
+     23971.3,
+     23910.6,
+     23924.4
+    ]
+   },
+   "32768": {
+    "s": [
+     3.2412,
+     3.2394,
+     3.2404
+    ],
+    "tok_s": [
+     10109.9,
+     10115.5,
+     10112.2
+    ]
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {}
+  },
+  {
+   "round": 1,
+   "arm": "ft_fused_g4096",
+   "1024": {
+    "s": [
+     0.051,
+     0.0578,
+     0.049,
+     0.0506,
+     0.0505
+    ],
+    "tok_s": [
+     20082.8,
+     17717.4,
+     20916.0,
+     20254.7,
+     20269.2
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1704,
+     0.1722,
+     0.171,
+     0.1715,
+     0.1716
+    ],
+    "tok_s": [
+     24038.8,
+     23787.5,
+     23950.4,
+     23886.5,
+     23868.9
+    ]
+   },
+   "32768": {
+    "s": [
+     3.2376,
+     3.2403,
+     3.2414
+    ],
+    "tok_s": [
+     10121.2,
+     10112.7,
+     10109.2
+    ]
+   },
+   "peak_alloc_gib": 28.2,
+   "memory": {}
+  },
+  {
+   "round": 1,
+   "arm": "ft_fused",
+   "1024": {
+    "s": [
+     0.0511,
+     0.0661,
+     0.0491,
+     0.0507,
+     0.0505
+    ],
+    "tok_s": [
+     20058.0,
+     15502.1,
+     20869.0,
+     20197.7,
+     20264.9
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1707,
+     0.1723,
+     0.1713,
+     0.1716,
+     0.1717
+    ],
+    "tok_s": [
+     23997.8,
+     23778.9,
+     23916.5,
+     23864.8,
+     23862.1
+    ]
+   },
+   "32768": {
+    "s": [
+     3.0187,
+     3.0199,
+     3.0238
+    ],
+    "tok_s": [
+     10855.0,
+     10850.6,
+     10836.8
+    ]
+   },
+   "peak_alloc_gib": 28.46,
+   "memory": {}
+  },
+  {
+   "round": 1,
+   "arm": "holon_all4k",
+   "1024": {
+    "s": [
+     0.06,
+     0.0604,
+     0.0567,
+     0.0604,
+     0.06
+    ],
+    "tok_s": [
+     17079.8,
+     16952.1,
+     18052.2,
+     16966.6,
+     17077.0
+    ]
+   },
+   "4096": {
+    "s": [
+     0.1997,
+     0.2012,
+     0.1999,
+     0.2009,
+     0.2012
+    ],
+    "tok_s": [
+     20510.0,
+     20359.6,
+     20492.4,
+     20384.1,
+     20354.8
+    ]
+   },
+   "32768": {
+    "s": [
+     3.4257,
+     3.4325,
+     3.4381
+    ],
+    "tok_s": [
+     9565.2,
+     9546.4,
+     9530.7
+    ]
+   },
+   "peak_alloc_gib": 29.11,
+   "memory": {
+    "kv_tokens": 120816,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.722,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.786
+   }
+  },
+  {
+   "round": 1,
+   "arm": "holon_ship",
+   "1024": {
+    "s": [
+     0.0802,
+     0.0813,
+     0.0769,
+     0.0854,
+     0.08
+    ],
+    "tok_s": [
+     12760.5,
+     12591.3,
+     13315.4,
+     11993.5,
+     12807.5
+    ]
+   },
+   "4096": {
+    "s": [
+     0.3496,
+     0.3362,
+     0.3336,
+     0.3412,
+     0.352
+    ],
+    "tok_s": [
+     11717.4,
+     12182.0,
+     12278.0,
+     12005.6,
+     11635.7
+    ]
+   },
+   "32768": {
+    "s": [
+     4.5374,
+     4.5473,
+     4.5426
+    ],
+    "tok_s": [
+     7221.8,
+     7206.1,
+     7213.5
+    ]
+   },
+   "peak_alloc_gib": 28.89,
+   "memory": {
+    "kv_tokens": 122528,
+    "profiled_peak_gib": 0.339,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 28.761,
+    "run_peak_over_start_gib": 0.125,
+    "reserved_over_start_gib": 0.453
+   }
+  }
+ ],
+ "memory": {
+  "holon_ship": {
+   "kv_tokens": 122528,
+   "profiled_peak_gib": 0.339,
+   "max_model_len": 33792,
+   "allocated_after_start_gib": 28.761,
+   "run_peak_over_start_gib": 0.125,
+   "reserved_over_start_gib": 0.453
+  },
+  "holon_all4k": {
+   "kv_tokens": 120816,
+   "profiled_peak_gib": 0.425,
+   "max_model_len": 33792,
+   "allocated_after_start_gib": 28.722,
+   "run_peak_over_start_gib": 0.391,
+   "reserved_over_start_gib": 0.786
+  }
+ },
+ "nsys_breakdown_ms": {
+  "nsys_ft_fused": {
+   "1024": {
+    "wall_ms": 99.5,
+    "busy_ms": 48.9,
+    "kernel_ms": 48.9,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      28.3,
+      96
+     ],
+     "dense: GEMM": [
+      8.4,
+      217
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5.4,
+      240
+     ],
+     "experts: id helper": [
+      2.6,
+      192
+     ],
+     "experts: act quant (q8_1)": [
+      0.9,
+      96
+     ],
+     "experts: combine": [
+      0.6,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      0.6,
+      48
+     ],
+     "dense: glue": [
+      0.5,
+      96
+     ],
+     "other: norms": [
+      0.5,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      0.5,
+      121
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      0.3,
+      48
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.2,
+      48
+     ],
+     "other: embedding / glue": [
+      0.2,
+      59
+     ],
+     "other: sampling / logits": [
+      0.1,
+      49
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      28.3
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      7.3
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      4.7
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      2.4
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      0.9
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.9
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      0.6
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      0.6
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      0.5
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      0.5
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      0.3
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 172.3,
+    "busy_ms": 169.8,
+    "kernel_ms": 169.8,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      74.6,
+      96
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      42.5,
+      240
+     ],
+     "dense: GEMM": [
+      26.6,
+      193
+     ],
+     "experts: id helper": [
+      9.8,
+      192
+     ],
+     "experts: combine": [
+      4.5,
+      48
+     ],
+     "experts: act quant (q8_1)": [
+      3.3,
+      96
+     ],
+     "experts: SwiGLU / act": [
+      3.0,
+      48
+     ],
+     "other: norms": [
+      1.7,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      1.5,
+      121
+     ],
+     "dense: glue": [
+      1.0,
+      72
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      0.7,
+      48
+     ],
+     "other: embedding / glue": [
+      0.5,
+      59
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.2,
+      48
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      74.6
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      40.3
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      25.8
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      9.6
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      4.5
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      3.3
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      3.0
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      1.7
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      1.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      1.0
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      1.0
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 3033.8,
+    "busy_ms": 3023.9,
+    "kernel_ms": 3023.9,
+    "memcpy_ms": 0.1,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      2037.6,
+      960
+     ],
+     "experts: GEMM": [
+      543.9,
+      384
+     ],
+     "dense: GEMM": [
+      206.6,
+      772
+     ],
+     "experts: id helper": [
+      77.4,
+      768
+     ],
+     "experts: act quant (q8_1)": [
+      40.4,
+      384
+     ],
+     "experts: combine": [
+      36.5,
+      192
+     ],
+     "experts: SwiGLU / act": [
+      29.4,
+      192
+     ],
+     "other: norms": [
+      14.6,
+      388
+     ],
+     "dense: act quant (q8_1)": [
+      13.1,
+      484
+     ],
+     "dense: glue": [
+      10.9,
+      288
+     ],
+     "other: embedding / glue": [
+      6.7,
+      233
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      5.7,
+      192
+     ],
+     "other: router (gate GEMV + top-k)": [
+      1.1,
+      192
+     ],
+     "other: sampling / logits": [
+      0.0,
+      4
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      2014.4
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      543.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      201.7
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      76.6
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      40.4
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      36.5
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      29.4
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      14.6
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      13.1
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      12.7
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      10.9
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      8.4
+     ]
+    ]
+   }
+  },
+  "nsys_ft_fused_g4096": {
+   "1024": {
+    "wall_ms": 94.5,
+    "busy_ms": 48.9,
+    "kernel_ms": 48.9,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      28.3,
+      96
+     ],
+     "dense: GEMM": [
+      8.4,
+      217
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5.4,
+      240
+     ],
+     "experts: id helper": [
+      2.6,
+      192
+     ],
+     "experts: act quant (q8_1)": [
+      0.9,
+      96
+     ],
+     "experts: combine": [
+      0.6,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      0.6,
+      48
+     ],
+     "dense: glue": [
+      0.5,
+      96
+     ],
+     "other: norms": [
+      0.5,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      0.5,
+      121
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      0.3,
+      48
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.2,
+      48
+     ],
+     "other: embedding / glue": [
+      0.2,
+      59
+     ],
+     "other: sampling / logits": [
+      0.1,
+      49
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      28.3
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      7.3
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      4.7
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      2.4
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      0.9
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.9
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      0.6
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      0.6
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      0.5
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      0.5
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      0.3
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 172.5,
+    "busy_ms": 170.0,
+    "kernel_ms": 170.0,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      74.6,
+      96
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      42.6,
+      240
+     ],
+     "dense: GEMM": [
+      26.6,
+      193
+     ],
+     "experts: id helper": [
+      9.8,
+      192
+     ],
+     "experts: combine": [
+      4.5,
+      48
+     ],
+     "experts: act quant (q8_1)": [
+      3.3,
+      96
+     ],
+     "experts: SwiGLU / act": [
+      3.0,
+      48
+     ],
+     "other: norms": [
+      1.7,
+      97
+     ],
+     "dense: act quant (q8_1)": [
+      1.5,
+      121
+     ],
+     "dense: glue": [
+      1.0,
+      72
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      0.7,
+      48
+     ],
+     "other: embedding / glue": [
+      0.5,
+      59
+     ],
+     "other: router (gate GEMV + top-k)": [
+      0.2,
+      48
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      74.6
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      40.4
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      25.8
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      9.6
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      4.5
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      3.3
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      3.0
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      1.7
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.5
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      1.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      1.0
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      1.0
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 3251.8,
+    "busy_ms": 3237.0,
+    "kernel_ms": 3236.9,
+    "memcpy_ms": 0.1,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      2220.1,
+      1920
+     ],
+     "experts: GEMM": [
+      592.5,
+      768
+     ],
+     "dense: GEMM": [
+      214.5,
+      1544
+     ],
+     "experts: id helper": [
+      78.4,
+      1536
+     ],
+     "experts: combine": [
+      35.7,
+      384
+     ],
+     "experts: act quant (q8_1)": [
+      26.5,
+      768
+     ],
+     "experts: SwiGLU / act": [
+      23.9,
+      384
+     ],
+     "other: norms": [
+      13.7,
+      776
+     ],
+     "dense: act quant (q8_1)": [
+      11.9,
+      968
+     ],
+     "dense: glue": [
+      7.8,
+      576
+     ],
+     "other: cuBLAS / CUTLASS GEMM": [
+      6.0,
+      384
+     ],
+     "other: embedding / glue": [
+      4.3,
+      465
+     ],
+     "other: router (gate GEMV + top-k)": [
+      1.6,
+      384
+     ],
+     "other: sampling / logits": [
+      0.0,
+      8
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      2202.7
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      592.5
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      208.2
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper",
+      76.9
+     ],
+     [
+      "experts: combine",
+      "moe_weighted_sum_kernel",
+      35.7
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      26.5
+     ],
+     [
+      "experts: SwiGLU / act",
+      "act_and_mul_kernel",
+      23.9
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      13.6
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      11.9
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormQKRMSNormK",
+      8.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel",
+      7.9
+     ],
+     [
+      "dense: glue",
+      "mmq_store_dst",
+      7.8
+     ]
+    ]
+   }
+  },
+  "nsys_holon_all4k": {
+   "1024": {
+    "wall_ms": 61.0,
+    "busy_ms": 58.9,
+    "kernel_ms": 59.0,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      36.4,
+      96
+     ],
+     "dense: GEMM": [
+      8.5,
+      217
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5.4,
+      96
+     ],
+     "router": [
+      1.9,
+      384
+     ],
+     "combine": [
+      1.7,
+      48
+     ],
+     "experts: id helper": [
+      1.7,
+      96
+     ],
+     "experts: SwiGLU / act": [
+      1.4,
+      48
+     ],
+     "experts: act quant (q8_1)": [
+      0.9,
+      96
+     ],
+     "dense: act quant (q8_1)": [
+      0.5,
+      121
+     ],
+     "other: norms": [
+      0.4,
+      97
+     ],
+     "other: embedding / glue": [
+      0.3,
+      157
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      36.4
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      7.4
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      4.5
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      1.7
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_compact",
+      1.7
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      1.4
+     ],
+     [
+      "router",
+      "Kernel2",
+      1.1
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      0.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      0.9
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.9
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.5
+     ],
+     [
+      "router",
+      "topk_moe_cuda",
+      0.4
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 203.1,
+    "busy_ms": 200.2,
+    "kernel_ms": 200.5,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      96.9,
+      96
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      42.7,
+      96
+     ],
+     "dense: GEMM": [
+      26.8,
+      193
+     ],
+     "combine": [
+      9.1,
+      48
+     ],
+     "experts: SwiGLU / act": [
+      7.5,
+      48
+     ],
+     "router": [
+      7.5,
+      1536
+     ],
+     "experts: act quant (q8_1)": [
+      4.9,
+      96
+     ],
+     "dense: act quant (q8_1)": [
+      1.5,
+      121
+     ],
+     "other: norms": [
+      1.3,
+      97
+     ],
+     "experts: glue": [
+      1.2,
+      480
+     ],
+     "other: embedding / glue": [
+      0.6,
+      157
+     ],
+     "experts: id helper": [
+      0.5,
+      384
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      96.9
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      39.2
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      26.0
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      9.1
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      7.5
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      4.9
+     ],
+     [
+      "router",
+      "Kernel2",
+      4.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      3.5
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.5
+     ],
+     [
+      "router",
+      "topk_moe_cuda",
+      1.4
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      1.4
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      0.9
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 3452.3,
+    "busy_ms": 3435.7,
+    "kernel_ms": 3438.6,
+    "memcpy_ms": 0.1,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      2178.2,
+      768
+     ],
+     "experts: GEMM": [
+      771.9,
+      768
+     ],
+     "dense: GEMM": [
+      214.6,
+      1537
+     ],
+     "combine": [
+      73.2,
+      384
+     ],
+     "experts: SwiGLU / act": [
+      60.3,
+      384
+     ],
+     "router": [
+      60.1,
+      12288
+     ],
+     "experts: act quant (q8_1)": [
+      39.4,
+      768
+     ],
+     "dense: act quant (q8_1)": [
+      11.9,
+      961
+     ],
+     "other: norms": [
+      10.4,
+      769
+     ],
+     "experts: glue": [
+      9.6,
+      3840
+     ],
+     "other: embedding / glue": [
+      5.0,
+      1221
+     ],
+     "experts: id helper": [
+      3.8,
+      3072
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      2150.2
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      771.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      209.4
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      73.2
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      60.3
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      39.4
+     ],
+     [
+      "router",
+      "Kernel2",
+      32.4
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      28.1
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      11.9
+     ],
+     [
+      "router",
+      "topk_moe_cuda",
+      11.3
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      11.1
+     ],
+     [
+      "other: norms",
+      "kernel_cutlass_kernel_flashinfernormkernelsfused_add_rmsnorm",
+      7.0
+     ]
+    ]
+   }
+  },
+  "nsys_holon_ship": {
+   "1024": {
+    "wall_ms": 82.1,
+    "busy_ms": 79.4,
+    "kernel_ms": 79.5,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      53.7,
+      192
+     ],
+     "dense: GEMM": [
+      9.8,
+      433
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      5.4,
+      96
+     ],
+     "experts: id helper": [
+      3.9,
+      192
+     ],
+     "router": [
+      2.1,
+      384
+     ],
+     "combine": [
+      1.2,
+      96
+     ],
+     "experts: SwiGLU / act": [
+      1.2,
+      96
+     ],
+     "experts: act quant (q8_1)": [
+      1.0,
+      192
+     ],
+     "dense: act quant (q8_1)": [
+      0.6,
+      241
+     ],
+     "other: norms": [
+      0.4,
+      97
+     ],
+     "other: embedding / glue": [
+      0.2,
+      61
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      53.7
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      7.8
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      4.5
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      3.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      1.8
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      1.2
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      1.2
+     ],
+     [
+      "router",
+      "Kernel2",
+      1.1
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      1.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      0.9
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      0.6
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      0.4
+     ]
+    ]
+   },
+   "4096": {
+    "wall_ms": 336.2,
+    "busy_ms": 331.5,
+    "kernel_ms": 331.9,
+    "memcpy_ms": 0.0,
+    "components_ms": {
+     "experts: GEMM": [
+      211.2,
+      768
+     ],
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      42.3,
+      96
+     ],
+     "dense: GEMM": [
+      36.3,
+      1729
+     ],
+     "experts: id helper": [
+      15.8,
+      768
+     ],
+     "router": [
+      8.5,
+      1536
+     ],
+     "combine": [
+      4.8,
+      384
+     ],
+     "experts: SwiGLU / act": [
+      4.7,
+      384
+     ],
+     "experts: act quant (q8_1)": [
+      4.0,
+      768
+     ],
+     "dense: act quant (q8_1)": [
+      2.3,
+      961
+     ],
+     "other: norms": [
+      1.5,
+      97
+     ],
+     "other: embedding / glue": [
+      0.5,
+      61
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      211.2
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      38.9
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      29.0
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      15.8
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      7.1
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      4.8
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      4.7
+     ],
+     [
+      "router",
+      "Kernel2",
+      4.3
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      4.0
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      3.4
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      2.3
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      2.0
+     ]
+    ]
+   },
+   "32768": {
+    "wall_ms": 4552.9,
+    "busy_ms": 4522.7,
+    "kernel_ms": 4525.5,
+    "memcpy_ms": 0.1,
+    "components_ms": {
+     "other: attention (incl. q/k norm, RoPE, KV write)": [
+      2171.6,
+      768
+     ],
+     "experts: GEMM": [
+      1723.6,
+      6144
+     ],
+     "dense: GEMM": [
+      291.1,
+      13825
+     ],
+     "experts: id helper": [
+      126.8,
+      6144
+     ],
+     "router": [
+      68.1,
+      12288
+     ],
+     "combine": [
+      39.3,
+      3072
+     ],
+     "experts: SwiGLU / act": [
+      38.1,
+      3072
+     ],
+     "experts: act quant (q8_1)": [
+      31.9,
+      6144
+     ],
+     "dense: act quant (q8_1)": [
+      19.0,
+      7681
+     ],
+     "other: norms": [
+      11.8,
+      769
+     ],
+     "other: embedding / glue": [
+      4.2,
+      453
+     ],
+     "other: sampling / logits": [
+      0.0,
+      1
+     ]
+    },
+    "top_kernels_ms": [
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "BatchPrefillWithPagedKVCacheKernel",
+      2144.2
+     ],
+     [
+      "experts: GEMM",
+      "mul_mat_q",
+      1723.6
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q",
+      233.5
+     ],
+     [
+      "experts: id helper",
+      "mm_ids_helper_per_slot",
+      126.8
+     ],
+     [
+      "dense: GEMM",
+      "mul_mat_q_stream_k_fixup",
+      57.4
+     ],
+     [
+      "combine",
+      "moe_weighted_reduction_f32",
+      39.3
+     ],
+     [
+      "experts: SwiGLU / act",
+      "swiglu_f32",
+      38.1
+     ],
+     [
+      "router",
+      "Kernel2",
+      34.8
+     ],
+     [
+      "experts: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      31.9
+     ],
+     [
+      "other: attention (incl. q/k norm, RoPE, KV write)",
+      "_qk_rope_kv",
+      27.4
+     ],
+     [
+      "dense: act quant (q8_1)",
+      "quantize_mmq_q8_1",
+      19.0
+     ],
+     [
+      "router",
+      "unrolled_elementwise_kernel",
+      15.6
+     ]
+    ]
+   }
+  }
+ },
+ "gemm_per_call": [
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "activations": "f32",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 16,
+     "mul_mat_id_ms": 0.1042,
+     "tops": 7.7
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 24,
+     "mul_mat_id_ms": 0.132,
+     "tops": 9.1
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 32,
+     "mul_mat_id_ms": 0.1404,
+     "tops": 11.5
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 40,
+     "mul_mat_id_ms": 0.1578,
+     "tops": 12.8
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 48,
+     "mul_mat_id_ms": 0.1566,
+     "tops": 15.4
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 56,
+     "mul_mat_id_ms": 0.1669,
+     "tops": 16.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 64,
+     "mul_mat_id_ms": 0.1707,
+     "tops": 18.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2875,
+     "tops": 89.6
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.3968,
+     "tops": 129.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.6299,
+     "tops": 163.6
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 1.1949,
+     "tops": 172.5
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 2.2244,
+     "tops": 185.4
+    },
+    {
+     "stack": "down",
+     "tokens": 16,
+     "mul_mat_id_ms": 0.0632,
+     "tops": 6.4
+    },
+    {
+     "stack": "down",
+     "tokens": 24,
+     "mul_mat_id_ms": 0.1034,
+     "tops": 5.8
+    },
+    {
+     "stack": "down",
+     "tokens": 32,
+     "mul_mat_id_ms": 0.1117,
+     "tops": 7.2
+    },
+    {
+     "stack": "down",
+     "tokens": 40,
+     "mul_mat_id_ms": 0.1178,
+     "tops": 8.5
+    },
+    {
+     "stack": "down",
+     "tokens": 48,
+     "mul_mat_id_ms": 0.1232,
+     "tops": 9.8
+    },
+    {
+     "stack": "down",
+     "tokens": 56,
+     "mul_mat_id_ms": 0.1296,
+     "tops": 10.9
+    },
+    {
+     "stack": "down",
+     "tokens": 64,
+     "mul_mat_id_ms": 0.1305,
+     "tops": 12.3
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2346,
+     "tops": 54.9
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.3285,
+     "tops": 78.4
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.4919,
+     "tops": 104.8
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 0.8716,
+     "tops": 118.3
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 1.664,
+     "tops": 123.9
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "activations": "f32",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 16,
+     "mul_mat_id_ms": 0.1081,
+     "tops": 7.4
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 24,
+     "mul_mat_id_ms": 0.132,
+     "tops": 9.2
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 32,
+     "mul_mat_id_ms": 0.1416,
+     "tops": 11.4
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 40,
+     "mul_mat_id_ms": 0.1588,
+     "tops": 12.7
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 48,
+     "mul_mat_id_ms": 0.1576,
+     "tops": 15.3
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 56,
+     "mul_mat_id_ms": 0.1655,
+     "tops": 17.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 64,
+     "mul_mat_id_ms": 0.1701,
+     "tops": 18.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2867,
+     "tops": 89.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.394,
+     "tops": 130.8
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.6278,
+     "tops": 164.2
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 1.192,
+     "tops": 173.0
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 2.2176,
+     "tops": 185.9
+    },
+    {
+     "stack": "down",
+     "tokens": 16,
+     "mul_mat_id_ms": 0.055,
+     "tops": 7.3
+    },
+    {
+     "stack": "down",
+     "tokens": 24,
+     "mul_mat_id_ms": 0.0644,
+     "tops": 9.4
+    },
+    {
+     "stack": "down",
+     "tokens": 32,
+     "mul_mat_id_ms": 0.0695,
+     "tops": 11.6
+    },
+    {
+     "stack": "down",
+     "tokens": 40,
+     "mul_mat_id_ms": 0.0736,
+     "tops": 13.7
+    },
+    {
+     "stack": "down",
+     "tokens": 48,
+     "mul_mat_id_ms": 0.0827,
+     "tops": 14.6
+    },
+    {
+     "stack": "down",
+     "tokens": 56,
+     "mul_mat_id_ms": 0.0938,
+     "tops": 15.0
+    },
+    {
+     "stack": "down",
+     "tokens": 64,
+     "mul_mat_id_ms": 0.0962,
+     "tops": 16.7
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.19,
+     "tops": 67.8
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.2603,
+     "tops": 99.0
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.4123,
+     "tops": 125.0
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 0.7434,
+     "tops": 138.7
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 1.4241,
+     "tops": 144.8
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "activations": "as the engine calls it",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2812,
+     "tops": 91.6
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.3895,
+     "tops": 132.3
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.6224,
+     "tops": 165.6
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 1.1525,
+     "tops": 178.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 2.1439,
+     "tops": 192.3
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2255,
+     "tops": 57.1
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.3131,
+     "tops": 82.3
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.4827,
+     "tops": 106.8
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 0.8316,
+     "tops": 124.0
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 1.519,
+     "tops": 135.7
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "freetoken",
+   "activations": "as the engine calls it",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.2819,
+     "tops": 91.4
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.3886,
+     "tops": 132.6
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.6213,
+     "tops": 165.9
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 4096,
+     "mul_mat_id_ms": 1.154,
+     "tops": 178.7
+    },
+    {
+     "stack": "gate_up",
+     "tokens": 8192,
+     "mul_mat_id_ms": 2.1459,
+     "tops": 192.1
+    },
+    {
+     "stack": "down",
+     "tokens": 512,
+     "mul_mat_id_ms": 0.1827,
+     "tops": 70.5
+    },
+    {
+     "stack": "down",
+     "tokens": 1024,
+     "mul_mat_id_ms": 0.2552,
+     "tops": 101.0
+    },
+    {
+     "stack": "down",
+     "tokens": 2048,
+     "mul_mat_id_ms": 0.4062,
+     "tops": 126.9
+    },
+    {
+     "stack": "down",
+     "tokens": 4096,
+     "mul_mat_id_ms": 0.7032,
+     "tops": 146.6
+    },
+    {
+     "stack": "down",
+     "tokens": 8192,
+     "mul_mat_id_ms": 1.286,
+     "tops": 160.3
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 0,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "activations": "as the engine calls it",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 16,
+     "mmq_id_ms": 0.0989,
+     "dense_mmq_ms": 0.0259,
+     "bf16_mm_ms": 0.0166,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 8.1,
+     "dense_mmq_tops": 31.1,
+     "bf16_mm_tflops": 48.6,
+     "grouping_overhead": 3.82,
+     "tiles_used": 74,
+     "tiles_launched": 128,
+     "column_fill": 0.014
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 24,
+     "mmq_id_ms": 0.13,
+     "dense_mmq_ms": 0.0266,
+     "bf16_mm_ms": 0.0186,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 9.3,
+     "dense_mmq_tops": 45.4,
+     "bf16_mm_tflops": 65.1,
+     "grouping_overhead": 4.89,
+     "tiles_used": 92,
+     "tiles_launched": 136,
+     "column_fill": 0.016
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 32,
+     "mmq_id_ms": 0.1586,
+     "dense_mmq_ms": 0.0299,
+     "bf16_mm_ms": 0.0215,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 10.2,
+     "dense_mmq_tops": 53.8,
+     "bf16_mm_tflops": 75.0,
+     "grouping_overhead": 5.3,
+     "tiles_used": 100,
+     "tiles_launched": 136,
+     "column_fill": 0.02
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 40,
+     "mmq_id_ms": 0.2015,
+     "dense_mmq_ms": 0.0259,
+     "bf16_mm_ms": 0.0214,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 10.0,
+     "dense_mmq_tops": 77.8,
+     "bf16_mm_tflops": 94.2,
+     "grouping_overhead": 7.79,
+     "tiles_used": 115,
+     "tiles_launched": 136,
+     "column_fill": 0.022
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 48,
+     "mmq_id_ms": 0.2017,
+     "dense_mmq_ms": 0.028,
+     "bf16_mm_ms": 0.0215,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 12.0,
+     "dense_mmq_tops": 86.4,
+     "bf16_mm_tflops": 112.3,
+     "grouping_overhead": 7.21,
+     "tiles_used": 114,
+     "tiles_launched": 136,
+     "column_fill": 0.026
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 56,
+     "mmq_id_ms": 0.2337,
+     "dense_mmq_ms": 0.0301,
+     "bf16_mm_ms": 0.0237,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 12.1,
+     "dense_mmq_tops": 93.8,
+     "bf16_mm_tflops": 118.7,
+     "grouping_overhead": 7.77,
+     "tiles_used": 121,
+     "tiles_launched": 136,
+     "column_fill": 0.029
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 64,
+     "mmq_id_ms": 0.2344,
+     "dense_mmq_ms": 0.0338,
+     "bf16_mm_ms": 0.0332,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 13.7,
+     "dense_mmq_tops": 95.3,
+     "bf16_mm_tflops": 96.9,
+     "grouping_overhead": 6.93,
+     "tiles_used": 124,
+     "tiles_launched": 136,
+     "column_fill": 0.032
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 0.4519,
+     "dense_mmq_ms": 0.1159,
+     "bf16_mm_ms": 0.1363,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 57.0,
+     "dense_mmq_tops": 222.3,
+     "bf16_mm_tflops": 189.1,
+     "grouping_overhead": 3.9,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 0.4796,
+     "dense_mmq_ms": 0.215,
+     "bf16_mm_ms": 0.2552,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 107.5,
+     "dense_mmq_tops": 239.7,
+     "bf16_mm_tflops": 202.0,
+     "grouping_overhead": 2.23,
+     "tiles_used": 139,
+     "tiles_launched": 1088,
+     "column_fill": 0.46
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 0.6491,
+     "dense_mmq_ms": 0.4306,
+     "bf16_mm_ms": 0.5034,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 158.8,
+     "dense_mmq_tops": 239.4,
+     "bf16_mm_tflops": 204.8,
+     "grouping_overhead": 1.51,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 1.2376,
+     "dense_mmq_ms": 0.8675,
+     "bf16_mm_ms": 0.9658,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": 166.6,
+     "dense_mmq_tops": 237.6,
+     "bf16_mm_tflops": 213.5,
+     "grouping_overhead": 1.43,
+     "tiles_used": 329,
+     "tiles_launched": 4352,
+     "column_fill": 0.778
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 8192,
+     "mmq_id_ms": null,
+     "dense_mmq_ms": 1.8518,
+     "bf16_mm_ms": 1.826,
+     "dequant_stack_ms": 0.746,
+     "mmq_id_tops": null,
+     "dense_mmq_tops": 222.7,
+     "bf16_mm_tflops": 225.8,
+     "grouping_overhead": null,
+     "tiles_used": 580,
+     "tiles_launched": 8704,
+     "column_fill": 0.883
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 16,
+     "mmq_id_ms": 0.0588,
+     "dense_mmq_ms": 0.0217,
+     "bf16_mm_ms": 0.0138,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 6.8,
+     "dense_mmq_tops": 18.5,
+     "bf16_mm_tflops": 29.2,
+     "grouping_overhead": 2.71,
+     "tiles_used": 76,
+     "tiles_launched": 128,
+     "column_fill": 0.013
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 24,
+     "mmq_id_ms": 0.0982,
+     "dense_mmq_ms": 0.021,
+     "bf16_mm_ms": 0.0156,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 6.2,
+     "dense_mmq_tops": 28.7,
+     "bf16_mm_tflops": 38.8,
+     "grouping_overhead": 4.67,
+     "tiles_used": 95,
+     "tiles_launched": 136,
+     "column_fill": 0.016
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 32,
+     "mmq_id_ms": 0.1116,
+     "dense_mmq_ms": 0.025,
+     "bf16_mm_ms": 0.0157,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 7.2,
+     "dense_mmq_tops": 32.3,
+     "bf16_mm_tflops": 51.4,
+     "grouping_overhead": 4.47,
+     "tiles_used": 105,
+     "tiles_launched": 136,
+     "column_fill": 0.019
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 40,
+     "mmq_id_ms": 0.1302,
+     "dense_mmq_ms": 0.0249,
+     "bf16_mm_ms": 0.0154,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 7.7,
+     "dense_mmq_tops": 40.4,
+     "bf16_mm_tflops": 65.4,
+     "grouping_overhead": 5.22,
+     "tiles_used": 110,
+     "tiles_launched": 136,
+     "column_fill": 0.023
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 48,
+     "mmq_id_ms": 0.1467,
+     "dense_mmq_ms": 0.0241,
+     "bf16_mm_ms": 0.0193,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 8.2,
+     "dense_mmq_tops": 50.0,
+     "bf16_mm_tflops": 62.4,
+     "grouping_overhead": 6.08,
+     "tiles_used": 117,
+     "tiles_launched": 136,
+     "column_fill": 0.026
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 56,
+     "mmq_id_ms": 0.1763,
+     "dense_mmq_ms": 0.0296,
+     "bf16_mm_ms": 0.0194,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 8.0,
+     "dense_mmq_tops": 47.5,
+     "bf16_mm_tflops": 72.7,
+     "grouping_overhead": 5.95,
+     "tiles_used": 124,
+     "tiles_launched": 136,
+     "column_fill": 0.028
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 64,
+     "mmq_id_ms": 0.1782,
+     "dense_mmq_ms": 0.03,
+     "bf16_mm_ms": 0.0196,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 9.0,
+     "dense_mmq_tops": 53.7,
+     "bf16_mm_tflops": 82.2,
+     "grouping_overhead": 5.94,
+     "tiles_used": 126,
+     "tiles_launched": 136,
+     "column_fill": 0.032
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 512,
+     "mmq_id_ms": 0.3303,
+     "dense_mmq_ms": 0.0882,
+     "bf16_mm_ms": 0.0851,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 39.0,
+     "dense_mmq_tops": 146.0,
+     "bf16_mm_tflops": 151.4,
+     "grouping_overhead": 3.74,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 1024,
+     "mmq_id_ms": 0.3684,
+     "dense_mmq_ms": 0.1586,
+     "bf16_mm_ms": 0.1629,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 70.0,
+     "dense_mmq_tops": 162.5,
+     "bf16_mm_tflops": 158.2,
+     "grouping_overhead": 2.32,
+     "tiles_used": 137,
+     "tiles_launched": 1088,
+     "column_fill": 0.467
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 2048,
+     "mmq_id_ms": 0.5251,
+     "dense_mmq_ms": 0.2824,
+     "bf16_mm_ms": 0.2762,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 98.2,
+     "dense_mmq_tops": 182.5,
+     "bf16_mm_tflops": 186.6,
+     "grouping_overhead": 1.86,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 4096,
+     "mmq_id_ms": 1.0063,
+     "dense_mmq_ms": 0.5393,
+     "bf16_mm_ms": 0.5016,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": 102.4,
+     "dense_mmq_tops": 191.1,
+     "bf16_mm_tflops": 205.5,
+     "grouping_overhead": 1.87,
+     "tiles_used": 330,
+     "tiles_launched": 4352,
+     "column_fill": 0.776
+    },
+    {
+     "stack": "down",
+     "type": 14,
+     "tokens": 8192,
+     "mmq_id_ms": null,
+     "dense_mmq_ms": 1.1223,
+     "bf16_mm_ms": 0.9518,
+     "dequant_stack_ms": 0.4083,
+     "mmq_id_tops": null,
+     "dense_mmq_tops": 183.7,
+     "bf16_mm_tflops": 216.6,
+     "grouping_overhead": null,
+     "tiles_used": 581,
+     "tiles_launched": 8704,
+     "column_fill": 0.881
+    }
+   ]
+  },
+  {
+   "gpu": "NVIDIA GeForce RTX 5090",
+   "layer": 6,
+   "experts": 128,
+   "top_k": 8,
+   "inter": 768,
+   "hidden": 2048,
+   "skew": 0.5,
+   "engine": "holon",
+   "activations": "as the engine calls it",
+   "rows": [
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 16,
+     "mmq_id_ms": 0.0986,
+     "dense_mmq_ms": 0.0257,
+     "bf16_mm_ms": 0.0166,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 8.2,
+     "dense_mmq_tops": 31.3,
+     "bf16_mm_tflops": 48.5,
+     "grouping_overhead": 3.84,
+     "tiles_used": 74,
+     "tiles_launched": 128,
+     "column_fill": 0.014
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 24,
+     "mmq_id_ms": 0.1291,
+     "dense_mmq_ms": 0.0262,
+     "bf16_mm_ms": 0.0186,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 9.4,
+     "dense_mmq_tops": 46.1,
+     "bf16_mm_tflops": 64.9,
+     "grouping_overhead": 4.93,
+     "tiles_used": 92,
+     "tiles_launched": 136,
+     "column_fill": 0.016
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 32,
+     "mmq_id_ms": 0.1574,
+     "dense_mmq_ms": 0.0299,
+     "bf16_mm_ms": 0.0213,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 10.2,
+     "dense_mmq_tops": 53.8,
+     "bf16_mm_tflops": 75.5,
+     "grouping_overhead": 5.26,
+     "tiles_used": 100,
+     "tiles_launched": 136,
+     "column_fill": 0.02
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 40,
+     "mmq_id_ms": 0.1992,
+     "dense_mmq_ms": 0.0259,
+     "bf16_mm_ms": 0.0213,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 10.1,
+     "dense_mmq_tops": 77.7,
+     "bf16_mm_tflops": 94.5,
+     "grouping_overhead": 7.69,
+     "tiles_used": 115,
+     "tiles_launched": 136,
+     "column_fill": 0.022
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 48,
+     "mmq_id_ms": 0.1997,
+     "dense_mmq_ms": 0.0293,
+     "bf16_mm_ms": 0.0212,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 12.1,
+     "dense_mmq_tops": 82.5,
+     "bf16_mm_tflops": 113.7,
+     "grouping_overhead": 6.82,
+     "tiles_used": 114,
+     "tiles_launched": 136,
+     "column_fill": 0.026
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 56,
+     "mmq_id_ms": 0.2334,
+     "dense_mmq_ms": 0.0298,
+     "bf16_mm_ms": 0.0235,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 12.1,
+     "dense_mmq_tops": 94.5,
+     "bf16_mm_tflops": 120.0,
+     "grouping_overhead": 7.83,
+     "tiles_used": 121,
+     "tiles_launched": 136,
+     "column_fill": 0.029
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 64,
+     "mmq_id_ms": 0.2314,
+     "dense_mmq_ms": 0.0327,
+     "bf16_mm_ms": 0.0329,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 13.9,
+     "dense_mmq_tops": 98.6,
+     "bf16_mm_tflops": 97.8,
+     "grouping_overhead": 7.08,
+     "tiles_used": 124,
+     "tiles_launched": 136,
+     "column_fill": 0.032
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 0.4511,
+     "dense_mmq_ms": 0.116,
+     "bf16_mm_ms": 0.1362,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 57.1,
+     "dense_mmq_tops": 222.2,
+     "bf16_mm_tflops": 189.2,
+     "grouping_overhead": 3.89,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 0.478,
+     "dense_mmq_ms": 0.2152,
+     "bf16_mm_ms": 0.255,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 107.8,
+     "dense_mmq_tops": 239.5,
+     "bf16_mm_tflops": 202.1,
+     "grouping_overhead": 2.22,
+     "tiles_used": 139,
+     "tiles_launched": 1088,
+     "column_fill": 0.46
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 0.6472,
+     "dense_mmq_ms": 0.4288,
+     "bf16_mm_ms": 0.5001,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 159.3,
+     "dense_mmq_tops": 240.4,
+     "bf16_mm_tflops": 206.1,
+     "grouping_overhead": 1.51,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 1.2352,
+     "dense_mmq_ms": 0.8652,
+     "bf16_mm_ms": 0.9644,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": 166.9,
+     "dense_mmq_tops": 238.3,
+     "bf16_mm_tflops": 213.8,
+     "grouping_overhead": 1.43,
+     "tiles_used": 329,
+     "tiles_launched": 4352,
+     "column_fill": 0.778
+    },
+    {
+     "stack": "gate_up",
+     "type": 12,
+     "tokens": 8192,
+     "mmq_id_ms": null,
+     "dense_mmq_ms": 1.8616,
+     "bf16_mm_ms": 1.8247,
+     "dequant_stack_ms": 0.7457,
+     "mmq_id_tops": null,
+     "dense_mmq_tops": 221.5,
+     "bf16_mm_tflops": 226.0,
+     "grouping_overhead": null,
+     "tiles_used": 580,
+     "tiles_launched": 8704,
+     "column_fill": 0.883
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 16,
+     "mmq_id_ms": 0.0471,
+     "dense_mmq_ms": 0.0194,
+     "bf16_mm_ms": 0.0139,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 8.5,
+     "dense_mmq_tops": 20.7,
+     "bf16_mm_tflops": 29.0,
+     "grouping_overhead": 2.43,
+     "tiles_used": 76,
+     "tiles_launched": 128,
+     "column_fill": 0.013
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 24,
+     "mmq_id_ms": 0.0641,
+     "dense_mmq_ms": 0.0201,
+     "bf16_mm_ms": 0.0176,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 9.4,
+     "dense_mmq_tops": 30.1,
+     "bf16_mm_tflops": 34.2,
+     "grouping_overhead": 3.19,
+     "tiles_used": 95,
+     "tiles_launched": 136,
+     "column_fill": 0.016
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 32,
+     "mmq_id_ms": 0.078,
+     "dense_mmq_ms": 0.0221,
+     "bf16_mm_ms": 0.0156,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 10.3,
+     "dense_mmq_tops": 36.4,
+     "bf16_mm_tflops": 51.7,
+     "grouping_overhead": 3.52,
+     "tiles_used": 105,
+     "tiles_launched": 136,
+     "column_fill": 0.019
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 40,
+     "mmq_id_ms": 0.0983,
+     "dense_mmq_ms": 0.0221,
+     "bf16_mm_ms": 0.0159,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 10.2,
+     "dense_mmq_tops": 45.5,
+     "bf16_mm_tflops": 63.4,
+     "grouping_overhead": 4.45,
+     "tiles_used": 110,
+     "tiles_launched": 136,
+     "column_fill": 0.023
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 48,
+     "mmq_id_ms": 0.1096,
+     "dense_mmq_ms": 0.0242,
+     "bf16_mm_ms": 0.0198,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 11.0,
+     "dense_mmq_tops": 50.0,
+     "bf16_mm_tflops": 61.0,
+     "grouping_overhead": 4.54,
+     "tiles_used": 117,
+     "tiles_launched": 136,
+     "column_fill": 0.026
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 56,
+     "mmq_id_ms": 0.1323,
+     "dense_mmq_ms": 0.0262,
+     "bf16_mm_ms": 0.0187,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 10.7,
+     "dense_mmq_tops": 53.8,
+     "bf16_mm_tflops": 75.5,
+     "grouping_overhead": 5.05,
+     "tiles_used": 124,
+     "tiles_launched": 136,
+     "column_fill": 0.028
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 64,
+     "mmq_id_ms": 0.1332,
+     "dense_mmq_ms": 0.0282,
+     "bf16_mm_ms": 0.0186,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 12.1,
+     "dense_mmq_tops": 57.1,
+     "bf16_mm_tflops": 86.7,
+     "grouping_overhead": 4.72,
+     "tiles_used": 126,
+     "tiles_launched": 136,
+     "column_fill": 0.032
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 512,
+     "mmq_id_ms": 0.2765,
+     "dense_mmq_ms": 0.0711,
+     "bf16_mm_ms": 0.0842,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 46.6,
+     "dense_mmq_tops": 181.2,
+     "bf16_mm_tflops": 153.0,
+     "grouping_overhead": 3.89,
+     "tiles_used": 130,
+     "tiles_launched": 544,
+     "column_fill": 0.246
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 1024,
+     "mmq_id_ms": 0.3073,
+     "dense_mmq_ms": 0.13,
+     "bf16_mm_ms": 0.1621,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 83.9,
+     "dense_mmq_tops": 198.2,
+     "bf16_mm_tflops": 159.0,
+     "grouping_overhead": 2.36,
+     "tiles_used": 137,
+     "tiles_launched": 1088,
+     "column_fill": 0.467
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 2048,
+     "mmq_id_ms": 0.4416,
+     "dense_mmq_ms": 0.2333,
+     "bf16_mm_ms": 0.2745,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 116.7,
+     "dense_mmq_tops": 220.9,
+     "bf16_mm_tflops": 187.7,
+     "grouping_overhead": 1.89,
+     "tiles_used": 177,
+     "tiles_launched": 2176,
+     "column_fill": 0.723
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 4096,
+     "mmq_id_ms": 0.8604,
+     "dense_mmq_ms": 0.4464,
+     "bf16_mm_ms": 0.5009,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": 119.8,
+     "dense_mmq_tops": 230.9,
+     "bf16_mm_tflops": 205.8,
+     "grouping_overhead": 1.93,
+     "tiles_used": 330,
+     "tiles_launched": 4352,
+     "column_fill": 0.776
+    },
+    {
+     "stack": "down",
+     "type": 12,
+     "tokens": 8192,
+     "mmq_id_ms": null,
+     "dense_mmq_ms": 0.9508,
+     "bf16_mm_ms": 0.9528,
+     "dequant_stack_ms": 0.3764,
+     "mmq_id_tops": null,
+     "dense_mmq_tops": 216.8,
+     "bf16_mm_tflops": 216.4,
+     "grouping_overhead": null,
+     "tiles_used": 581,
+     "tiles_launched": 8704,
+     "column_fill": 0.881
+    }
+   ]
+  }
+ ]
+}

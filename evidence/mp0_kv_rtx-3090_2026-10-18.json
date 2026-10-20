@@ -1,0 +1,107 @@
+{
+ "name": "mp0_kv",
+ "gpu": "RTX 3090",
+ "date": "2026-10-18",
+ "commit": "61f2545",
+ "engines": {
+  "holon": "this repository at the record's commit (std.moe@1; the store and kernels per arm: arms_*.json)",
+  "freetoken": "FreeToken 21d9578bde22 (bench/setup_baselines.sh offload: torch 2.14.1+cu130, [accel]); --moe-strategy fused (all experts resident) or --moe-cache-rate (offload); the gated arm adds --max-extend-length 4096, its default chunk is 8,192",
+  "model": "Qwen3-30B-A3B Q4_K_M (unsloth/Qwen3-30B-A3B-GGUF); the 16 GB lock's: UD-IQ3_XXS"
+ },
+ "method": "spikes/moe_prefill/README.md; docs/v1-moe-prefill.md \u00a72.1",
+ "commands": [
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>.json --model <gguf> --out <dir>/timed --rounds 2 --reps 5 5 3 --holon-python <holon venv python> --freetoken-python <freetoken venv python>",
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>_nsys.json --model <gguf> --out <dir>/nsys --rounds 1 --reps 1 ...",
+  "nsys export --type sqlite -o <report>.sqlite <report>.nsys-rep; python spikes/moe_prefill/breakdown.py <report>.sqlite > <report>.json",
+  "python spikes/moe_prefill/gemm.py --model <gguf> --layer 0|6 --tokens 16 24 32 40 48 56 64 512 1024 2048 4096 8192 [--freetoken [--f32]] --json <out>",
+  "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/kv_<lock>.json --model <gguf> --out <dir>/kv --rounds 1 --reps 1 --lengths <a prompt below the lock's context>"
+ ],
+ "startup_memory": {
+  "kv-kv_3090": [
+   {
+    "round": 0,
+    "arm": "holon_ship",
+    "8000": {
+     "s": [
+      1.8359
+     ],
+     "tok_s": [
+      4357.5
+     ]
+    },
+    "peak_alloc_gib": 21.87,
+    "memory": {
+     "kv_tokens": 42800,
+     "profiled_peak_gib": 0.974,
+     "max_model_len": 8192,
+     "allocated_after_start_gib": 21.397,
+     "run_peak_over_start_gib": 0.125,
+     "reserved_over_start_gib": 0.943
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_p4096",
+    "8000": {
+     "s": [
+      1.2687
+     ],
+     "tok_s": [
+      6305.7
+     ]
+    },
+    "peak_alloc_gib": 21.91,
+    "memory": {
+     "kv_tokens": 42224,
+     "profiled_peak_gib": 0.974,
+     "max_model_len": 8192,
+     "allocated_after_start_gib": 21.438,
+     "run_peak_over_start_gib": 0.391,
+     "reserved_over_start_gib": 1.234
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_p2048",
+    "8000": {
+     "s": [
+      1.3466
+     ],
+     "tok_s": [
+      5940.8
+     ]
+    },
+    "peak_alloc_gib": 21.88,
+    "memory": {
+     "kv_tokens": 42416,
+     "profiled_peak_gib": 0.974,
+     "max_model_len": 8192,
+     "allocated_after_start_gib": 21.401,
+     "run_peak_over_start_gib": 0.36,
+     "reserved_over_start_gib": 1.231
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_p2048_dense",
+    "8000": {
+     "s": [
+      1.3067
+     ],
+     "tok_s": [
+      6122.4
+     ]
+    },
+    "peak_alloc_gib": 21.89,
+    "memory": {
+     "kv_tokens": 42416,
+     "profiled_peak_gib": 0.974,
+     "max_model_len": 8192,
+     "allocated_after_start_gib": 21.411,
+     "run_peak_over_start_gib": 0.36,
+     "reserved_over_start_gib": 1.261
+    }
+   }
+  ]
+ }
+}

@@ -84,7 +84,7 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
              at::Tensor & y, bool swiglu, const std::optional<at::Tensor> & gate_scale,
              const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0,
              const std::optional<at::Tensor> & errors = std::nullopt,
-             const std::optional<at::Tensor> & xq = std::nullopt) {
+             const std::optional<at::Tensor> & xq = std::nullopt, int64_t ids_j_tokens = INT64_MAX) {
     const c10::cuda::CUDAGuard guard(x.device());
     TORCH_CHECK(x.dim() == 3 && ids.dim() == 2 && y.dim() == 3, "x, ids, y: 3, 2 and 3 dimensions");
     const int64_t tokens = ids.size(0), k = ids.size(1), rows = x.size(1), in = x.size(2), out_y = y.size(2);
@@ -109,10 +109,13 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
                            scale(gate_scale, x, n, "gate_scale"),
                            scale(up_scale, x, n, "up_scale"), ws.data_ptr(), ws.numel(), stream());
     } else {
-        TORCH_CHECK(!swiglu && !gate_scale && !up_scale, "mmq with ids: no fused SwiGLU or scales");
-        holon_ggml_mmq_id(type, prec, w.data_ptr(), w.size(0) / out, out, in, x.data_ptr(), bf16(x, "x"), rows,
+        const int64_t n = w.size(0) / out;
+        TORCH_CHECK(swiglu || !gate_scale, "mmq with ids: a gate scale needs the fused SwiGLU");
+        TORCH_CHECK(!swiglu || holon_ggml_mmq_glu(type, prec, out), "mmq with ids: no fused SwiGLU for this stack");
+        holon_ggml_mmq_id(type, prec, w.data_ptr(), n, out, in, x.data_ptr(), bf16(x, "x"), rows,
                           ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), slots,
-                          errors ? errors->data_ptr<int32_t>() : nullptr, ws.data_ptr(), ws.numel(), stream());
+                          errors ? errors->data_ptr<int32_t>() : nullptr, swiglu, scale(gate_scale, x, n, "gate_scale"),
+                          scale(up_scale, x, n, "up_scale"), ids_j_tokens, ws.data_ptr(), ws.numel(), stream());
     }
 }
 
@@ -140,6 +143,12 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         return holon_ggml_workspace_bytes(in, rows);
     });
     m.def("workspace_high_water", [] { return holon_ggml_workspace_high_water(); });
+    m.def("mmq_plant", [](int64_t bits) { return holon_ggml_mmq_plant(int(bits)); });
+    m.def("mmq_fixups", [] {
+        long long launched = 0, planted = 0;
+        holon_ggml_mmq_fixups(&launched, &planted);
+        return std::make_tuple(int64_t(launched), int64_t(planted));
+    });
     m.def("mmvq", [](int64_t type, const at::Tensor & w, const at::Tensor & x, at::Tensor & y,
                      const std::optional<at::Tensor> & s, at::Tensor & ws, const std::optional<at::Tensor> & gate,
                      const std::optional<at::Tensor> & xq) { matmul(true, type, 0, w, x, y, s, ws, gate, xq); },
@@ -198,12 +207,33 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         experts(true, type, 0, w, x, ids, y, swiglu, gate_scale, up_scale, ws, 0, std::nullopt, xq);
     }, py::arg("type"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("swiglu"),
        py::arg("gate_scale"), py::arg("up_scale"), py::arg("ws"), py::arg("xq") = py::none());
+    // `ids_j_tokens`: D2's batched-decode rule (the plugin's IDS_J_TOKENS); upstream's (J against the tokens) without
     m.def("mmq_id", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
-                       at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors) {
+                       at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
+                       int64_t ids_j_tokens) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
         TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
                     "errors: one int32 on x's device");
-        experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots, errors);
+        experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots, errors, std::nullopt,
+                ids_j_tokens);
+    }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
+       py::arg("slots") = 0, py::arg("errors") = py::none(), py::arg("ids_j_tokens") = INT64_MAX);
+    m.def("mmq_id_glu", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
+                           at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
+                           const std::optional<at::Tensor> & gate_scale, const std::optional<at::Tensor> & up_scale,
+                           int64_t ids_j_tokens) {
+        TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
+        TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
+                    "errors: one int32 on x's device");
+        TORCH_CHECK(!gate_scale == !up_scale, "gate_scale and up_scale: both or neither");
+        experts(false, type, prec, w, x, ids, y, true, gate_scale, up_scale, ws, slots, errors, std::nullopt,
+                ids_j_tokens);
+    }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
+       py::arg("slots"), py::arg("errors"), py::arg("gate_scale"), py::arg("up_scale"),
+       py::arg("ids_j_tokens") = INT64_MAX);
+    m.def("mmq_glu", [](int64_t device, int64_t type, int64_t prec, int64_t out) {
+        const c10::cuda::CUDAGuard guard(device);
+        return holon_ggml_mmq_glu(type, prec, out) != 0;
     });
     m.def("swiglu", [](const at::Tensor & x, at::Tensor & y, const std::optional<at::Tensor> & gate_scale,
                        const std::optional<at::Tensor> & up_scale, const std::optional<at::Tensor> & ids) {
@@ -244,6 +274,25 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                             ids.data_ptr<int32_t>(), stream());
     });
     m.def("moe_router_rows", [] { return holon_ggml_moe_router_rows(); });
+    m.def("moe_router_partials", [](int64_t experts) { return holon_ggml_moe_router_partials(experts); });
+    m.def("moe_router_logits", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & partials,
+                                  at::Tensor & logits) {
+        const c10::cuda::CUDAGuard guard(x.device());
+        TORCH_CHECK(x.dim() == 2 && router.dim() == 2, "x, router: 2 dimensions");
+        const int64_t tokens = x.size(0), hidden = x.size(1), experts = router.size(0);
+        check(x, x, {tokens, hidden}, "x");
+        check(router, x, {experts, hidden}, "router");
+        check(partials, x, {holon_ggml_moe_router_partials(experts), tokens, experts}, "partials");
+        check(logits, x, {tokens, experts}, "logits");
+        check_f32(router, "router");
+        check_f32(partials, "partials");
+        check_f32(logits, "logits");
+        TORCH_CHECK(x.scalar_type() == at::kBFloat16 || x.scalar_type() == at::kFloat, "x: bf16 or f32");
+        TORCH_CHECK(tokens > 0 && hidden % (32*holon_ggml_moe_router_partials(experts)) == 0 && experts % 64 == 0,
+                    "tokens > 0; hidden a multiple of 32 x the chains, experts of 64");
+        holon_ggml_moe_router_logits(x.data_ptr(), x.scalar_type() == at::kBFloat16, router.data_ptr<float>(), tokens,
+                                     hidden, experts, partials.data_ptr<float>(), logits.data_ptr<float>(), stream());
+    });
     m.def("moe_router_tiles", [](int64_t tokens) { return holon_ggml_moe_router_tiles(tokens); });
     m.def("moe_router", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & logits, at::Tensor & done,
                            at::Tensor & weights, at::Tensor & ids, bool renormalize,

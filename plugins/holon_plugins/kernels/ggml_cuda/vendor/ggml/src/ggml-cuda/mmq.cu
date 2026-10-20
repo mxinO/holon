@@ -1,3 +1,7 @@
+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// src1's type to the q8_1 quantizers (bf16 activations); x_scale and the bf16 dst in mmq_args; glu, gate_scale,
+// up_scale and ids_j_tokens through ggml_cuda_mul_mat_q to the launch.
+
 #include "common.cuh"
 #include "mmq.cuh"
 #include "quantize.cuh"
@@ -47,6 +51,9 @@ static void ggml_cuda_mul_mat_q_switch_type(ggml_backend_cuda_context & ctx, con
 // -----------------------------------------------------------------------
         case GGML_TYPE_IQ1_S:
             mul_mat_q_case<GGML_TYPE_IQ1_S, GGML_PREC_Q8>(ctx, args, stream);
+            break;
+        case GGML_TYPE_IQ1_M: // Holon: D9
+            mul_mat_q_case<GGML_TYPE_IQ1_M, GGML_PREC_Q8>(ctx, args, stream);
             break;
         case GGML_TYPE_IQ2_XXS:
             mul_mat_q_case<GGML_TYPE_IQ2_XXS, GGML_PREC_Q8>(ctx, args, stream);
@@ -134,7 +141,9 @@ ggml_prec ggml_cuda_mmq_get_prec_src1(const ggml_tensor * src0, const ggml_tenso
 
 void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
-        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors) {
+        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
+        const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
+        const int64_t ids_j_tokens) { // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -190,19 +199,20 @@ void ggml_cuda_mul_mat_q(
     const size_t y_block_size       = use_native_fp4 ? sizeof(block_fp4_mmq) : sizeof(block_q8_1_mmq);
     const size_t y_values_per_block = use_native_fp4 ? QK_FP4_MMQ            : QK8_1_MMQ;
 
+    // Holon: the launch's compact z entries (mmid.cuh), here first: the tile width is chosen against them
+    const int n_z = ids ? ggml_cuda_mm_ids_nz(ne02, ne12, ids->ne[0], ids_slots) : 0;
+
     int J_best        = 0;
     int nthreads_best = 0;
     {
         int64_t ncols_opt = ne11;
         if (ids) {
-            const int64_t n_expert_used = ids->ne[0];
-            ncols_opt = ne12;
-
-            // Each expert only sees ne12*n_expert_used/ne02 tokens on average.
-            // On RDNA3 and RDNA4 it is faster to pick the tile size against this value instead of ne12.
-            if (GGML_CUDA_CC_IS_RDNA3(cc) || GGML_CUDA_CC_IS_RDNA4(cc)) {
-                ncols_opt = (ne12*n_expert_used + ne02 - 1) / ne02;
-            }
+            // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
+            // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
+            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
+            // ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the weights of the
+            // experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
+            ncols_opt = ne12 <= ids_j_tokens ? ne12 : (ne12*ids->ne[0] + n_z - 1) / std::max(n_z, 1);
         }
 
         int ntiles_J_best = INT_MAX;
@@ -287,8 +297,7 @@ void ggml_cuda_mul_mat_q(
 
     ggml_cuda_pool_alloc<int32_t> ids_src1(ctx.pool(), ne_get_rows);
     ggml_cuda_pool_alloc<int32_t> ids_dst(ctx.pool(), ne_get_rows + J_best-1); // Needs to be padded for unconditional memory access.
-    const int n_z = ggml_cuda_mm_ids_nz(ne02, ne12, n_expert_used, ids_slots); // Holon: compact z entries, then their slots (mmid.cuh)
-    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1);
+    ggml_cuda_pool_alloc<int32_t> expert_bounds(ctx.pool(), 2*n_z + 1); // Holon: the compact launch's bounds and slots
 
     // gate/up activations are broadcast across experts (ne11 == 1): quantize each token once and
     // scatter to its slots. ids_src1 then holds the inverse map (token slot -> compact row).
@@ -352,13 +361,18 @@ void ggml_cuda_mul_mat_q(
 
     // Note that n_z is used instead of ne12 because the number of y channels determines the z dimension of the CUDA grid.
     // Holon: n_z compact entries, not the ne02 slots; each names its slot after expert_bounds (mmid.cuh)
-    const mmq_args args = {
+    mmq_args args = {
         src0_d, src0->type, (const int *) src1_q8_1.get(), ids_dst.get(), expert_bounds.get(), dst_d,
         src1_scale.ptr,
         ne00, ne01, ne_get_rows, s01, ne_get_rows, s1,
         n_z, n_z, s02, s12, s2,
         ne03, ne13, s03, s13, s3,
         ne12, J_best};
+    GGML_ASSERT(!glu || (dst->ne[0] == ne01/2 && ne01 % 2 == 0)); // Holon: glu stores silu(gate) * up, out/2 rows
+    GGML_ASSERT(!gate_scale == !up_scale && (glu || !gate_scale));
+    args.glu = glu;
+    args.gate_scale = gate_scale;
+    args.up_scale = up_scale;
 
     ggml_cuda_mul_mat_q_switch_type(ctx, args, stream, prec_src1);
 }
@@ -386,6 +400,7 @@ bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t
         case GGML_TYPE_Q6_K:
 // -------------------------------------------------
         case GGML_TYPE_IQ1_S:
+        case GGML_TYPE_IQ1_M: // Holon: D9
         case GGML_TYPE_IQ2_XXS:
         case GGML_TYPE_IQ2_XS:
         case GGML_TYPE_IQ2_S:

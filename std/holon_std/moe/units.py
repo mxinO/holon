@@ -7,7 +7,8 @@ from torch import nn
 
 from . import kernels
 
-CHUNK = 512                        # tokens per pass through the expert path: bounds its f32 activations
+CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
+ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/v1-moe-prefill.md D10)
 
 
 def _dtype(t: torch.dtype) -> str:
@@ -141,9 +142,41 @@ class ExpertLinear(nn.Module):
         """Its bound `linear_experts@2` instance."""
         return self._kernel
 
-    def forward(self, x, ids: torch.Tensor) -> torch.Tensor:
-        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels)."""
-        return self._kernel(x, self.parts, ids)
+    def forward(self, x, ids: torch.Tensor, out: torch.Tensor | None = None,
+                scratch: torch.Tensor | None = None) -> torch.Tensor:
+        """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels); D10's
+        buffers where the kernel takes them."""
+        return self._kernel(x, self.parts, ids, **passed(self._kernel, out=out, scratch=scratch))
+
+
+def takes_buffers(kernel) -> bool:
+    """Whether a `linear_experts@2` instance takes passed buffers (it defines `scratch_bytes`, docs/v1-moe-prefill.md
+    D10)."""
+    return hasattr(kernel, "scratch_bytes")
+
+
+def passed(kernel, **given) -> dict:
+    """The keywords of D10's buffers `given` for a call of `kernel`: those passed, if it takes them; else none."""
+    return {k: v for k, v in given.items() if v is not None} if takes_buffers(kernel) else {}
+
+
+def pass_scratch(stacks, tokens: int, device: torch.device) -> torch.Tensor | None:
+    """D10's allocating fallback, where no tail is lent: one buffer for a pass of `tokens`, of the larger of its
+    stacks' kernels' `scratch_bytes`, for both calls (gate/up, then down); None where none needs any."""
+    nbytes = max((s.kernel.scratch_bytes(tokens) for s in stacks if takes_buffers(s.kernel)), default=0)
+    if not nbytes:
+        return None
+    buf = torch.empty(nbytes + ALIGN - 1, dtype=torch.uint8, device=device)
+    at = -buf.data_ptr() % ALIGN
+    return buf[at:at + nbytes]
+
+
+def pass_rows(stacks) -> int:
+    """The rows per call every one of `stacks`' bound kernels takes at its chunks' bits (`pass_rows`, a multiple of
+    CHUNK; CHUNK where a kernel does not say)."""
+    rows = min(getattr(s.kernel, "pass_rows", CHUNK) for s in stacks)
+    assert rows >= CHUNK and rows % CHUNK == 0, f"std.moe: pass_rows {rows} is not a whole number of {CHUNK}-row chunks"
+    return rows
 
 
 def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str = "std.moe.experts"):
@@ -156,22 +189,34 @@ def bind_experts(ctx, facts: dict, op: str = kernels.LINEAR_EXPERTS, site: str =
 
 class Resident:
     """std.moe.resident@1, the default expert store: every expert in VRAM, as the weight source stacked it (docs/
-    v1-offload.md D5: the merge is the store's)."""
+    v1-offload.md D5: the merge is the store's).
+
+    An expert store's members, as `MoE` calls them (std.moe.offload@1 is the other store):
+    - `merge(gate, up)` / `stack(down)`: the layer's gate/up and down stacks, at `finalize_weights`;
+    - `transform(ids, weights, first)`: the route transform's ids and weights for tokens `first`…, per pass;
+    - `route(ids, first, x)`: the ids each stack reads (an arena's slots), per pass;
+    - `patch(y)`: down's outputs with any rows computed elsewhere written in (F5b's CPU share);
+    - `pass_tokens(tokens)`: the tokens per expert pass of a step of `tokens` (whole CHUNKs);
+    - `pass_buffers(tokens)`: D10's lent `(gate/up's out, down's out, scratch)` for a pass, or None: the pass
+      allocates its own (`pass_scratch`);
+    - `finish()`: after the layer's last pass of the step."""
 
     def __init__(self, ctx, **site) -> None:
         self.device = ctx.device                       # where expert stacks are held
+        self._stacks: list[ExpertLinear] = []          # the layer's gate/up and down stacks (`pass_tokens`)
 
-    @staticmethod
-    def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
-        return ExpertLinear.merge(gate, up)
+    def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
+        merged = ExpertLinear.merge(gate, up)
+        self._stacks += [merged] if merged is not None else []
+        return merged
 
-    @staticmethod
-    def fused(gate_up: ExpertLinear) -> ExpertLinear:
+    def fused(self, gate_up: ExpertLinear) -> ExpertLinear:
         gate_up.glu = "swiglu"
+        self._stacks.append(gate_up)
         return gate_up
 
-    @staticmethod
-    def stack(down: ExpertLinear) -> ExpertLinear:
+    def stack(self, down: ExpertLinear) -> ExpertLinear:
+        self._stacks.append(down)
         return down
 
     @staticmethod
@@ -188,10 +233,15 @@ class Resident:
     def transform(ids: torch.Tensor, weights: torch.Tensor, first: int) -> tuple[torch.Tensor, torch.Tensor]:
         return ids, weights
 
+    def pass_tokens(self, tokens: int) -> int:
+        """Tokens per expert pass: as many as both stacks' kernels take at their chunks' bits (docs/v1-moe-prefill.md
+        D1), on a step of at least a chunk."""
+        return pass_rows(self._stacks) if tokens >= CHUNK else CHUNK
+
     @staticmethod
-    def pass_tokens(tokens: int) -> int:
-        """Tokens per expert pass: one chunk."""
-        return CHUNK
+    def pass_buffers(tokens: int) -> None:
+        """No lent memory: the pass allocates its buffers (D10's fallback)."""
+        return None
 
     @staticmethod
     def finish() -> None:
@@ -207,8 +257,9 @@ def _store(ctx, **site):
 
 class MoE(nn.Module):
     """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
-    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The expert path runs in f32 (design
-    D3), CHUNK tokens at a time. `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
+    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
+    time, or a whole pass where it declares `pass_rows` (D3′); the expert path, in f32 (design D3), a pass of the
+    store's size (whole CHUNKs). `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
     up's (transformers' `gate_up_proj`; e.g. Qwen3.8-Flash-Next's MTP pack, FN D9), loaded as `gate_up`."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
@@ -243,6 +294,7 @@ class MoE(nn.Module):
                         if ctx.candidates(kernels.MOE_ROUTER, router) else None)
         self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
         self._prepare = getattr(self._router, "route_prepare", None)
+        self._route_rows = getattr(self._router, "pass_rows", CHUNK)  # rows one router call takes at its chunks' bits
         combine = {"hidden": hidden, "top_k": top_k, "dtype": dtype, "y_dtype": "float32"}
         self._combine = ctx.select_kernel(kernels.MOE_COMBINE, site=f"std.moe[hidden={hidden},top_k={top_k}]",
                                           **combine).impl(ctx, **combine)
@@ -279,15 +331,17 @@ class MoE(nn.Module):
         return self._forward(x, residual)
 
     def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
-        """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (a CHUNK, or whole
-        CHUNKs in a streaming offload step: the step's last partial chunk is a pass of its own, so every row's chunk
-        and kernel path are a chunk's); with `residual`, its add in the combine."""
+        """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (whole CHUNKs, up to
+        what the stacks' kernels take at their chunks' bits: the step's last partial chunk is a pass of its own, so
+        every row's chunk and kernel path are a chunk's); with `residual`, its add in the combine."""
         out, tokens = torch.empty_like(x), x.shape[0]
         size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
         passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
         for a, b in passes:
             xc = x[a:b]
-            routes = [self._route(xc[c:c + CHUNK]) for c in range(0, b - a, CHUNK)]
+            # the router per CHUNK, or per pass where its rows' bits do not depend on the call (its `pass_rows`)
+            step = b - a if (b - a) % CHUNK == 0 and b - a <= self._route_rows else CHUNK
+            routes = [self._route(xc[c:c + step]) for c in range(0, b - a, step)]
             if len(routes) == 1:                       # the gate/up input: maybe prepared by the router's launch
                 weights, ids, xin = routes[0]
             else:
@@ -295,8 +349,11 @@ class MoE(nn.Module):
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             gate_up, down = self._store.route(ids, a, xc)
-            h = self._gate_up(xin, gate_up)                           # [t, k, inter] f32, SwiGLU applied
-            y = self._store.patch(self._down(h, down))                # (F5b: the CPU's rows in place)
+            # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
+            out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
+                None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
+            h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
+            y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
             if residual is None:
                 self._combine(y, weights, out[a:b])
             else:

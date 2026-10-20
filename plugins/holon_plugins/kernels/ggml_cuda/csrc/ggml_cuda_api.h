@@ -37,6 +37,12 @@ int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int *
 // current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 
+// The judge's plants on a dense mmq call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5): `bits`
+// 1 rounds the partials to bf16 before the fixup, 2 skips it, 0 none; returns the previous bits. One process-wide
+// setting. `holon_ggml_mmq_fixups` reads (then zeroes) such fixups launched, and of them those planted.
+int holon_ggml_mmq_plant(int bits);
+void holon_ggml_mmq_fixups(long long * launched, long long * planted);
+
 // Tests only: the most bytes one call took from its workspace since the last read (then 0), to hold the sizes above
 // to what llama.cpp allocates on every call. One process-wide counter: not per device, not thread-safe.
 size_t holon_ggml_workspace_high_water(void);
@@ -95,10 +101,17 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
 // mmq: any tokens (one call is sized by the workspace), out_y = out. `ids` name at most `slots` distinct slots of the
 // stack (it bounds the launch). A violated precondition (more slots, an id out of range, a slot repeated inside rows
 // beyond mmq's column tiles) leaves the rows it names uncomputed and ors its bit (mmid.cuh, GGML_CUDA_MM_IDS_ERR_*)
-// into the device word `errors` (if not NULL).
+// into the device word `errors` (if not NULL). `swiglu` (docs/v1-moe-prefill.md D4): `w` a merged gate/up stack and y
+// [tokens, k, out/2] = up * silu(gate), each first scaled by its expert's `gate_scale` / `up_scale` (NVFP4; NULL: none),
+// in mmq's store: bitwise holon_ggml_swiglu of the unfused y; only where holon_ggml_mmq_glu says so. The tile width is
+// chosen against the tokens up to `ids_j_tokens` of them, above against the launch's mean rows per entry (D2).
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
-                       int64_t slots, int32_t * errors, void * workspace, size_t workspace_bytes, void * stream);
+                       int64_t slots, int32_t * errors, int swiglu, const float * gate_scale, const float * up_scale,
+                       int64_t ids_j_tokens, void * workspace, size_t workspace_bytes, void * stream);
+// Whether mmq with ids can fuse SwiGLU into its store for a merged gate/up stack of `out` rows of `type` at `prec` here
+// (every tile width's config: MMA layout, no fallback, whole row tiles, room for the exchange).
+int holon_ggml_mmq_glu(int type, int prec, int64_t out);
 
 // y[r, i] = silu(x[r, i]) * x[r, n + i] for `rows` rows of 2n f32 values (gate, then up), y f32; with `ids` (one
 // expert per row), gate and up first times gate_scale[ids[r]] and up_scale[ids[r]].
@@ -118,6 +131,15 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
 // zeroed counters, zeroed again on return. `x_q8_1`, if not NULL, receives x as holon_ggml_quantize_q8_1 writes it,
 // in the same launch.
 int64_t holon_ggml_moe_router_rows(void);
+
+// moe_router@1's logits for prompt chunks (docs/v1-moe-prefill.md D3): logits [tokens, experts] f32 = x · router.T,
+// x [tokens, hidden] bf16 (x_bf16) or f32, router [experts, hidden] f32; each logit
+// holon_ggml_moe_router_partials(experts) f32 fma chains over equal parts of hidden ascending, added in order (a row's
+// logits are the same at any tokens), `partials` [that many, tokens, experts] f32 scratch; hidden a multiple of 32
+// times that many, experts a multiple of 64.
+void holon_ggml_moe_router_logits(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
+                                  int64_t experts, float * partials, float * logits, void * stream);
+int64_t holon_ggml_moe_router_partials(int64_t experts);
 int64_t holon_ggml_moe_router_tiles(int64_t tokens);
 void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
                            int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,

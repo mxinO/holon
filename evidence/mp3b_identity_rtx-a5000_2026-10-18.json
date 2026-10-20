@@ -1,0 +1,134 @@
+{
+ "what": "docs/v1-moe-prefill.md step 3b: the prompt-logprob identity (spikes/moe_prefill/identity.py) of the natural-fit offload configuration, main against the branch, with and without moe.ring_lend=tail, and the branch with tail under the plant tail-unmap-undone (fired 695: experts lent and left mapped)",
+ "command": "python spikes/moe_prefill/identity.py run --model Qwen3-30B-A3B-Q4_K_M.gguf --config natural [--flags '<natural, plus moe.ring_lend=tail>'] --json <out> (the plant: the same run inside holon_judge.planted.tail_unmap_undone(), --runs 1)",
+ "trees": "branch and branch_tail at 78a6cca (its `+`: the doc record, uncommitted); branch_tail_planted at 588d3ea's code, before its commit (`7cd24de+`); the same hashes at 588d3ea for branch and branch_tail",
+ "records": {
+  "main": {
+   "expert_pass": {
+    "Offload": 4096
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "tree": "b5b1e7f",
+   "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+   "config": "natural",
+   "flags": "--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480",
+   "lengths": [
+    1027,
+    4096
+   ],
+   "logprobs": 5,
+   "runs": [
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    },
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    }
+   ],
+   "run_identical": true
+  },
+  "branch": {
+   "expert_pass": {
+    "Offload": 4096
+   },
+   "lending": {
+    "borrowed": {
+     "ring": 4,
+     "stage": 0
+    },
+    "tail": null
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "tree": "78a6cca",
+   "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+   "config": "natural",
+   "flags": "--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480",
+   "lengths": [
+    1027,
+    4096
+   ],
+   "logprobs": 5,
+   "runs": [
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    },
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    }
+   ],
+   "run_identical": true
+  },
+  "branch_tail": {
+   "expert_pass": {
+    "Offload": 4096
+   },
+   "lending": {
+    "borrowed": {
+     "ring": 4,
+     "stage": 0
+    },
+    "tail": [
+     0,
+     366
+    ]
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "tree": "78a6cca+",
+   "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+   "config": null,
+   "flags": "--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.ring_lend=tail moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480",
+   "lengths": [
+    1027,
+    4096
+   ],
+   "logprobs": 5,
+   "runs": [
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    },
+    {
+     "1027": "3a7308bf840c69fec742fe7c76836512133b1d1c34116cc3888f6655739bb345",
+     "4096": "e7670f73bea33b9d28888b87cd655e691ee38d65fe4b5ad38cf98e85294531de"
+    }
+   ],
+   "run_identical": true
+  },
+  "branch_tail_planted": {
+   "expert_pass": {
+    "Offload": 4096
+   },
+   "lending": {
+    "borrowed": {
+     "ring": 2,
+     "stage": 0
+    },
+    "tail": [
+     0,
+     366
+    ]
+   },
+   "gpu": "NVIDIA RTX A5000",
+   "tree": "7cd24de+",
+   "model": "Qwen3-30B-A3B-Q4_K_M.gguf",
+   "config": null,
+   "flags": "--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.ring_lend=tail moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480",
+   "lengths": [
+    1027,
+    4096
+   ],
+   "logprobs": 5,
+   "runs": [
+    {
+     "1027": "ed55a19a2009481420da3eb3d684852c12fdc0b075cd91e006ab24a4670294d4",
+     "4096": "1e8e5ecfa4a42fa1db84d60f3bbe593216e8a41170178584cf137475f23ad504"
+    }
+   ],
+   "run_identical": true
+  }
+ }
+}
