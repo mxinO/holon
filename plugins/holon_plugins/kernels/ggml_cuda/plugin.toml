@@ -29,3 +29,6 @@ files = ["vendor/", "vendor.patch", "SHA256SUMS", "vendor.sh", "csrc/shim.cu", "
 
 [build]
 module = "prebuild"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"ggml_cuda.pass_rows" = { help = "the most rows one call takes: mmq with ids on a proven (SM, type) pair (docs/v1-moe-prefill.md D0), dense qlinear mmq (D5) and the router GEMM's pass (D3′); at most max_step_tokens: a lock's setting where KV capacity needs it", default = "4096", choices = ["512", "2048", "4096"] }

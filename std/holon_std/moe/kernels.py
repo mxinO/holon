@@ -14,6 +14,9 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
   `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
   `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
+  It may expose `pass_rows` (a multiple of `CHUNK`; else `CHUNK`): a row's result is the same in any call of whole
+  `CHUNK`s up to that many rows as in its own chunk's call, so std.moe routes an expert pass in one call
+  (docs/v1-moe-prefill.md D3′).
 - `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token t
   applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role, as
   `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
@@ -27,6 +30,22 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
   quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
   shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
+  An instance may expose `pass_rows` (an int, a multiple of `CHUNK`; `CHUNK` without it), the most rows a call may
+  carry at its `CHUNK`-row calls' bits (docs/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤ `pass_rows`, a
+  call of n·`CHUNK` rows gives each row the bits the `CHUNK`-row call of that row's own chunk gives it. Nothing is
+  promised for a call that is not a whole number of `CHUNK`s, nor across placements (`linear_experts_arena@1`'s own
+  term). std.moe passes at most the smaller of a layer's two stacks' `pass_rows` per call.
+  Passed buffers (docs/v1-moe-prefill.md D10): an instance that defines `scratch_bytes(tokens) -> int` (the bytes of
+  scratch a call of `tokens` tokens takes; 0 where it needs none) accepts the optional keywords `out` (the result, [T,
+  k, out_y] f32, contiguous: written and returned) and `scratch` (a contiguous uint8 buffer of at least
+  `scratch_bytes(T)` bytes, 256-byte aligned, for the call's transients); std calls every other instance without them.
+  The instance keeps no reference to either past the call; both are read and written on the current stream, after the
+  work enqueued before the call; one `scratch` may serve the successive calls of a pass (gate/up, then down); neither
+  `out` nor `scratch` may overlap `x`, nor each other. Where the call uses a buffer, a short, misaligned or
+  overlapping one is refused (ValueError) before anything is launched (a call that needs no `scratch`, e.g. a
+  decode-size one, may leave it unchecked). The results are bitwise those of the call without them, wherever they
+  live. Without `scratch` the instance allocates what it needs (a buffer passed inside a captured graph is the
+  graph's: static); with it, it may still use its own persistent workspaces (its calls run in order on the stream).
 - `moe_combine@1`: instance `(y [T, k, H] of y_dtype, weights [T, k] f32, out [T, H])`: writes `Σ_j w[t, j] · y[t,
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
@@ -42,7 +61,8 @@ then `staging` slots, then cache slots.
   ids name at most `experts + top_k` distinct slots (a layer's E experts, plus one null slot per rank). Its facts are
   @2's for the layer (`experts` = E) plus `slots`, the most slots an arena of the stack's class holds (a call's may
   hold fewer). It may accept a prepared handle in place of `x` as @2's (exposing `.x`, the tensor it stands for, which
-  a consumer that does not know the handle reads instead). An instance has `errors`, a device int32 word [1] its
+  a consumer that does not know the handle reads instead). It may expose `pass_rows` as @2's (the same promise, at the
+  bits of its `CHUNK`-row calls over the same slots). An instance has `errors`, a device int32 word [1] its
   calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
   over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
 
@@ -92,7 +112,16 @@ then `staging` slots, then cache slots.
   bool`, on the device without a host sync: the whole experts (resident in every role) in its policy's order, ties by
   expert id then group; for each class c (`classes[g, r]`: role r's slots of group g are in class c) the first
   `need[c]` of them holding a slot of c; the caller unmaps and logs them, and later returns their slots to their
-  layers as empty.
+  layers as empty. Its instance may also have `lend_tail(cls: int, n: int, residency [G, E, R] int32, classes [G, R]
+  int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/v1-moe-prefill.md D11), on the
+  device without a host sync: the experts holding any of class `cls`'s last `n` slots (a role r of class `cls` at a
+  slot ≥ `limits[g, r]` − n, the class's arena size less n), whole — the caller evicts them in every role, unmaps,
+  logs and returns them as `lend`'s —, after the policy has released its own slots in that range that no expert maps
+  (spares: such a slot stops being one). The caller lends the range itself to the step's expert passes (D10's `out`
+  and `scratch`), and the experts' other slots and the layer's empty slots outside it to the step's ring and staging,
+  until the step's end. Its class is the store's choice, the same under every policy: the largest class arena — the
+  class of the first role (gate/up) that the most layers have, ties to the lower class index. A policy without
+  `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
@@ -184,3 +213,4 @@ PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants); the CPU's share past its job table
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized stacks (`a16` is not offered for them)
+CHUNK = 512                          # tokens per router call, and the expert path's unit of rows (`pass_rows`)

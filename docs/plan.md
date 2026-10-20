@@ -679,11 +679,31 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
-- **MoE prefill speed** (owner, 2026-10-18; `docs/v1-offload.md` §13): offload's development gate passed every decode row
-  but trails FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause is the expert GEMMs, not offload — FreeToken's
-  all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
-  a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
-  and offloaded.
+- **MoE prefill speed — closed (2026-10-20)** (owner, 2026-10-18; `docs/v1-offload.md` §13; the design and its record
+  are `docs/v1-moe-prefill.md`). Offload's gate had trailed FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause
+  was mmq's launch shape, not int8 against tensor cores. Built (steps 0–5): exact larger calls per class (`pass_rows`),
+  a compact grouped launch, SwiGLU fused into the gate/up store, the router per pass and larger dense calls
+  (bounded), FN's needs (IQ1_M's mmq loader, Q2_0, passed buffers, tail lending, T6's 640-wide rows); D3 failed its
+  keep rule and was reverted. No core diff, ABI 1.3.
+  - **Final rows:** the 5080 natural-fit offload lock (re-pinned at the close) 1.850 / 1.136 / 1.005× FreeToken gated
+    at 1K / 4K / 32K; the 5090 resident 1.029 / 1.008 / 1.016×; llama.cpp ≥ 1.45× resident, ≥ 2.51× offload. 18 of 18
+    locks propagated, L2 passing.
+  - **Owner decisions (2026-10-20):** O1 no D6 on offload locks; O3 the 4090 Q4_K_M lock at `ggml_cuda.pass_rows` 2,048;
+    O5 the 5080 offload decode deviations are D3′'s and D5's routing (the code at main's numerics 1.000×), measured as
+    the six-prompt geomean with the single prompt beside; acceptance 7's suite time +6% accepted.
+  - **Follow-ups:**
+    - the 4090 Q4_K_M lock's KV pages: at 2,048 its pool is 32 tokens (2 pages, ≈ 3 MB) short of a 23rd sequence per
+      B32 / B64 wave at depth 1,024 (−3.6% / −4.4% batched decode); give ≥ 3 MB back in kernels.ggml_cuda at the next
+      round that moves its source (no lock-level setting can);
+    - with it, A's close review's host assert on `tail` launches (T6's clamp precondition);
+    - FN-7a (FN's step 7): IQ2_S's mmq with ids on sm_89 at T = 16–32, 1.25–1.37× main's time per call;
+    - sm_89's batched-decode J rule per type (one threshold, 64, today: forcing 16 helps MXFP4 / IQ3 / IQ2_XXS from 32
+      tokens and costs Q4_K 5–9% at 17–48);
+    - a prompt-variance term for routing-sensitive decode rows (acceptance tolerances today have only a rounds term;
+      one prompt swings ±5% by routing);
+    - deferred levers: D4's fused q8_1 store, attention at 4K steps, D6 on resident locks;
+    - bench method: per-call A/Bs of sub-50 µs kernels swing ±1–8% between processes; read them over many
+      interleaved rounds, or by SASS when the question is "unchanged".
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock

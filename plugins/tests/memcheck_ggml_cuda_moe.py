@@ -7,9 +7,11 @@ Without torch's caching allocator every tensor is its own cudaMalloc of exactly 
 stack (expert E−1's last row), the ids, the activations, the outputs or the workspace is outside any allocation.
 Every type at E = 16, k = 8, with experts 0 and E−1 in every row: the merged gate/up stack (`in` 768 and 2304, glu
 none and swiglu) and down (one input per slot) on mmvq (1, 2 and the limit) and mmq (the limit + 1, 513 tokens:
-a 512-token mmq chunk and a 1-token mmvq one); the FP4 types also at `act_quant` a4 through `prepare` (native W4A4
-on sm_120 reads the zeroed tail after expert E−1), NVFP4 with per-expert scale2 ([2, E] gate/up, [E] down); `moe_topk`
-at E 16, 128 and 512; `moe_combine`.
+a 512-token mmq chunk and a 1-token mmvq one; where `pass_rows` is above a chunk, docs/v1-moe-prefill.md D0, also
+2,048 and 4,608: the compact and device-wide id helpers, a 4,096-row call then a chunk's), each call also with
+passed buffers of exactly their sizes (`out`, and `scratch` of `scratch_bytes`: docs/v1-moe-prefill.md D10); the
+FP4 types also at `act_quant` a4 through `prepare` (native W4A4 on sm_120 reads the zeroed tail after expert E−1),
+NVFP4 with per-expert scale2 ([2, E] gate/up, [E] down); `moe_topk` at E 16, 128 and 512; `moe_combine`.
 """
 import torch
 from holon.api import Layout, QTensor, Scheme
@@ -61,20 +63,34 @@ def main() -> None:
                           2 * INTER, hidden) for kern in gate_up]
             w_dn = stack(down, layout, dn, hidden, INTER)
             t = down.mmvq_tokens
-            for tokens in (1, 2, t, t + 1, 513):
+            for tokens in (1, 2, t, t + 1, 513) + ((2048, 4608) if down.pass_rows > 512 else ()):
                 route = ids(tokens)
                 x = (1e-3 * torch.randn(tokens, 1, hidden, generator=gen)).bfloat16().cuda()
-                for kern, w in zip(gate_up, w_gu, strict=True):
-                    kern(x, w, route)
-                down(torch.randn(tokens, K, INTER, generator=gen).cuda(), w_dn, route)
+                h = torch.randn(tokens, K, INTER, generator=gen).cuda()
+                for kern, w, xs in (*((k, w, x) for k, w in zip(gate_up, w_gu, strict=True)), (down, w_dn, h)):
+                    y = kern(xs, w, route)
+                    # D10's passed buffers, each its own allocation of exactly its size
+                    kern(xs, w, route, out=torch.empty_like(y),
+                         scratch=torch.empty(kern.scratch_bytes(tokens), dtype=torch.uint8, device="cuda"))
+    # T6: `in` 640 (FN's down projections), weights in buffers of exactly their size: mmq's last K step stays inside
+    for name in ("q2_0", "iq4_nl", "q4_0", "q8_0"):
+        layout = f"ggml.{name}/gguf.native"
+        down = experts(layout, 640, 1024, K)
+        w = {"blocks": torch.from_numpy(random_blocks(name, E * 1024, 640, seed=7)).unflatten(0, (E, -1)).cuda()}
+        dense = select("qlinear@2", layout=layout, out=1024, act_dtype="bfloat16", out_dtype="bfloat16",
+                       act_quant="a8", **{"in": 640})
+        wd = {"blocks": torch.from_numpy(random_blocks(name, 1024, 640, seed=8)).cuda()}
+        for tokens in (1, down.mmvq_tokens + 1, 513):
+            down(torch.randn(tokens, K, 640, generator=gen).cuda(), w, ids(tokens))
+            dense((1e-3 * torch.randn(tokens, 640, generator=gen)).bfloat16().cuda(), wd)
     for n in (16, 128, 512):
         select("moe_topk@1", experts=n, top_k=K, renormalize=True)(torch.randn(13, n, generator=gen).cuda())
     out = torch.empty(13, 2048, dtype=torch.bfloat16, device="cuda")
     select("moe_combine@1", hidden=2048, top_k=K, dtype="bfloat16", y_dtype="float32")(
         torch.randn(13, K, 2048, generator=gen).cuda(), torch.rand(13, K, generator=gen).cuda(), out)
     torch.cuda.synchronize()
-    print(f"memcheck run: {len(cases)} layouts and modes x in 768, 2304, E {E}, k {K}, topk, combine on sm "
-          f"{ctx.fingerprint.sm}")
+    print(f"memcheck run: {len(cases)} layouts and modes x in 768, 2304, E {E}, k {K}; in 640 (T6), topk, combine on "
+          f"sm {ctx.fingerprint.sm}")
 
 
 if __name__ == "__main__":

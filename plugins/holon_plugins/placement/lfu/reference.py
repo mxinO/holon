@@ -18,7 +18,9 @@ does.
 
 `lend(need, residency, classes, score)` picks whole resident experts in their order — coldest by score first, ties by
 expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's role slots go
-together, so one picked for a class lends its slots of the others too)."""
+together, so one picked for a class lends its slots of the others too). `lend_tail(cls, n, residency, classes,
+limits)` picks the experts holding any of class `cls`'s last n slots (docs/v1-moe-prefill.md D11; F11 keeps no spares
+to release there)."""
 from __future__ import annotations
 
 import numpy as np
@@ -136,6 +138,12 @@ def lend(need, residency: torch.Tensor, classes: torch.Tensor, score: torch.Tens
     return _pick(order, np.asarray(need), classes, (groups, experts))
 
 
+def lend_tail(cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor) -> torch.Tensor:
+    """`picked [G, E] bool`: the experts with a role of class `cls` at one of its last n slots (`limits` [G, R]: each
+    role's arena size)."""
+    return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
+
+
 def _pick(order: list[tuple], need: np.ndarray, classes: torch.Tensor, shape: tuple[int, int]) -> torch.Tensor:
     """The first need[c] experts of `order` ((key, expert, layer)) holding a slot of class c, for every c."""
     picked, taken = torch.zeros(shape, dtype=torch.bool), np.zeros(len(need), dtype=np.int64)
@@ -149,44 +157,66 @@ def _pick(order: list[tuple], need: np.ndarray, classes: torch.Tensor, shape: tu
 
 
 def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
-           classes: np.ndarray | None = None) -> list[dict]:
-    """The L1 parity oracle: F11's residency [G, E] (whole experts) and empty slots per layer [G] after each step of
-    a trace, from the seeded residency (and scores, zero at a seed). A step holds its routing `counts` [G, E] of decode
-    rows, the experts any of its rows routed (`needed` [G, E]; default: the counts'), those the CPU took (`cpu` [G, E],
-    F5b: never candidates; default none), and `lends` (None: the step
-    borrowed no slots): a borrowing step takes every empty slot at its start, then makes its `lend(need)` calls (each
-    `need` per class, `classes` [G, R] the slot classes), as the module's text says; all those slots return empty to
-    their layers at the step's end.
-    The M6 replay's `lfu` (`simulate`, `_pair_swap` with gain 0), with the scores in f32 (× 0.915, then + 1.0 per
-    entry), decayed only on steps with decode rows, empty slots filled first."""
-    res = seed.astype(bool).copy()
+           classes: np.ndarray | None = None, slots: np.ndarray | None = None, sizes: np.ndarray | None = None,
+           stacks: list | None = None) -> list[dict]:
+    """The L1 parity oracle: F11's residency [G, E] (whole experts), empty slots per layer [G] and their stacks after
+    each step of a trace, from the seeded residency (and scores, zero at a seed). A step holds its routing `counts`
+    [G, E] of decode rows, the experts any of its rows routed (`needed` [G, E]; default: the counts'), those the CPU
+    took (`cpu` [G, E], F5b: never candidates; default none), and `lends` (None: the step borrowed no slots): a
+    borrowing step takes every empty slot at its start, then makes its calls — row 0, where non-zero (n at one class
+    c), `lend_tail(c, n)` (D11), then each row's `lend(need)` (`classes` [G, R] the slot classes) —, as the module's
+    text says; all those slots return empty to their layers at the step's end, on top of the empty slots it found, by
+    call then expert id. The tail needs the slots: `slots` [G, E, R] each resident's arena slots at the trace's start
+    (default: a stand-in slot per expert), `sizes` [C] the classes' arena slots, `stacks` each layer's empty slots then
+    ([R] each, bottom first; default none).
+    The M6 replay's `lfu` (`simulate`, `_pick_swap` with gain 0), with the scores in f32 (× 0.915, then + 1.0 per
+    entry), decayed only on steps with decode rows, empty slots filled first (from the top of the stack)."""
+    groups, experts = seed.shape
+    roles = 1 if classes is None else classes.shape[1]
+    at = np.where(seed[..., None], np.arange(experts)[:, None], -1).repeat(roles, -1) if slots is None else \
+        np.asarray(slots, dtype=np.int64).copy()                       # [G, E, R]: each piece's slot, −1 none
     u = np.zeros(seed.shape, dtype=np.float32) if score is None else score.astype(np.float32).copy()
-    empty = np.zeros(len(seed), dtype=np.int64)
+    stack = [[np.asarray(e) for e in s] for s in stacks] if stacks is not None else [[] for _ in range(groups)]
     out = []
     for step in steps:
-        c, lent = step["counts"], np.zeros(len(seed), dtype=np.int64)
-        if step.get("lends") is not None:                              # the empty slots, borrowed first
-            lent, empty = empty, np.zeros_like(empty)
-        for need in () if step.get("lends") is None else step["lends"]:
-            whole = torch.from_numpy(np.where(res, 0, -1)[..., None].repeat(classes.shape[1], -1))
-            picked = lend(need, whole, torch.from_numpy(classes), torch.from_numpy(u)).numpy()
-            res &= ~picked
-            lent += picked.sum(1)
+        c, lends = step["counts"], step.get("lends")
+        lent: list[list] = [[] for _ in range(groups)]                 # per layer: (call, expert, its slots)
+        if lends is not None:                                          # the empty slots, borrowed first
+            found, stack = stack, [[] for _ in range(groups)]
+        for call, need in enumerate(() if lends is None else lends):
+            if call == 0:
+                if not np.any(need):
+                    continue
+                cls = int(np.flatnonzero(need)[0])
+                picked = lend_tail(cls, int(need[cls]), torch.from_numpy(at), torch.from_numpy(classes),
+                                   torch.from_numpy(np.asarray(sizes)[classes])).numpy()
+            else:
+                whole = torch.from_numpy(np.where((at >= 0).all(-1), 0, -1)[..., None].repeat(roles, -1))
+                picked = lend(need, whole, torch.from_numpy(classes), torch.from_numpy(u)).numpy()
+            for g, e in np.argwhere(picked):
+                lent[g].append((call, e, at[g, e].copy()))
+            at[picked] = -1
         if c.any():
             u = u * DECAY
             for n in range(int(c.max())):
                 u = np.where(c > n, u + np.float32(1.0), u)
-            need, cpu = step.get("needed", c > 0), step.get("cpu", np.zeros_like(res))
-            for g in range(len(res)):
-                cands = sorted(np.flatnonzero((c[g] > 0) & ~res[g] & ~cpu[g]), key=lambda e: (-u[g, e], e))
-                spare = min(len(cands), empty[g])
-                res[g, cands[:spare]] = True
-                empty[g] -= spare
-                victims = sorted(np.flatnonzero(res[g] & ~need[g]), key=lambda e: (u[g, e], e))   # not the new ones
+            need, cpu = step.get("needed", c > 0), step.get("cpu", np.zeros(seed.shape, dtype=bool))
+            for g in range(groups):
+                res = (at[g] >= 0).all(-1)
+                cands = sorted(np.flatnonzero((c[g] > 0) & ~res & ~cpu[g]), key=lambda e: (-u[g, e], e))
+                spare = min(len(cands), len(stack[g]))
+                for i, a in enumerate(cands[:spare]):                  # from the top of the stack
+                    at[g, a] = stack[g][-1 - i]
+                del stack[g][len(stack[g]) - spare:]
+                res = (at[g] >= 0).all(-1)
+                victims = sorted(np.flatnonzero(res & ~need[g]), key=lambda e: (u[g, e], e))   # not the new ones
                 for a, b in zip(cands[spare:], victims, strict=False):
                     if not u[g, a] > u[g, b]:
                         break
-                    res[g, a], res[g, b] = True, False
-        empty += lent
-        out.append({"resident": res.copy(), "empty": empty.copy()})
+                    at[g, a], at[g, b] = at[g, b], -1
+        if lends is not None:
+            stack = [f + [s for *_, s in sorted(back, key=lambda x: x[:2])]
+                     for f, back in zip(found, lent, strict=True)]
+        out.append({"resident": (at >= 0).all(-1), "empty": np.array([len(s) for s in stack]),
+                    "stacks": [np.array(s).reshape(-1, roles) for s in stack]})
     return out

@@ -1,7 +1,8 @@
 """placement.lfu@1 (F11, docs/v1-offload.md D1, D4): decayed-count admission on fetch, the offload store's default
 placement policy. The cache is the device's: the host seeds it (F2's warm start) and never edits it; in the graph,
 the policy's own resolve contract `moe_resolve.lfu@1` (reference.py) decays and counts each layer's routes and
-gathers a miss straight into the slot of the coldest resident the step does not need, when the miss is hotter.
+gathers a miss straight into the slot of the coldest resident the step does not need, when the miss is hotter. It
+lends a streaming step its coldest experts, or first a tail (`lend_tail`, docs/v1-moe-prefill.md D11).
 CUDA provider: kernels.expert_io; the CPU provider here is the oracle."""
 from __future__ import annotations
 
@@ -63,6 +64,9 @@ class Resolve:
 
     def lend(self, need, residency, classes, score) -> torch.Tensor:
         return reference.lend(need.cpu().numpy(), residency, classes, score)
+
+    def lend_tail(self, cls, n, residency, classes, limits, score) -> torch.Tensor:
+        return reference.lend_tail(cls, n, residency, classes, limits)
 
 
 class Plugin:

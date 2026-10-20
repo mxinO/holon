@@ -19,7 +19,8 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
   `moe-weighted-reduction`), unmodified upstream files fetched by
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.sh`, then modified by
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, also with mmvq's fused
-  scale, no environment reads, top-k ids at row stride k, a bf16 combine, mmq's src1 precision exported);
+  scale, no environment reads, top-k ids at row stride k, a bf16 combine, mmq's src1 precision exported, an IQ1_M
+  mmq tile loader after IQ2_S's with its own template instance);
   `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/shim.cu` — adapted: ggml's type traits, tensor helpers and device
   table, after `ggml/src/ggml.c` and `ggml/src/ggml-cuda/ggml-cuda.cu`.

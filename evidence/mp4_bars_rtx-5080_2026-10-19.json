@@ -1,0 +1,4565 @@
+{
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "date": "2026-10-19",
+ "arms": [
+  {
+   "name": "holon_main",
+   "engine": "holon",
+   "args": "--flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3236,down.q6_k.2048x768=1618,down.q4_k.2048x768=1618 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480' --warm-set",
+   "tree": "base"
+  },
+  {
+   "name": "holon_f",
+   "engine": "holon",
+   "args": "--flags '--chunk-with-decode 0 --cuda-graphs --dtype bfloat16 --max-draft-tokens 0 --max-step-tokens 4096 --overlap --page-size 16 --plugin-options moe.cache=gate_up.q4_k.1536x2048=3229,down.q6_k.2048x768=1700,down.q4_k.2048x768=1529 moe.placement=placement.lfu@1 moe.placement.profile=profile_x4_gate.json moe.ring_copy=dma moe.store=std.moe.offload@1 --slots logits_processor=grammar.xgrammar --source gguf --kernels add_rmsnorm=kernels.flashinfer attention.paged_decode=kernels.triton_attn attention.paged_prefill=kernels.flashinfer attention.paged_verify=kernels.triton_attn attention.qk_rope_kv=kernels.triton_attn expert_fetch=kernels.expert_io expert_prefetch=kernels.expert_io kv_write=kernels.triton_attn linear_experts_arena=kernels.ggml_cuda moe_combine=kernels.ggml_cuda moe_resolve.lfu=kernels.expert_io moe_router=kernels.ggml_cuda qembedding=kernels.ggml_cuda qlinear=kernels.ggml_cuda rmsnorm=kernels.flashinfer rope=kernels.flashinfer --host-memory 21474836480' --warm-set",
+   "tree": "s4"
+  },
+  {
+   "name": "ft_default",
+   "engine": "freetoken",
+   "args": "--flags '--moe-cache-rate 0.527' --warm-set"
+  },
+  {
+   "name": "ft_gated",
+   "engine": "freetoken",
+   "args": "--flags '--moe-cache-rate 0.527 --max-extend-length 4096' --warm-set"
+  }
+ ],
+ "trees": {
+  "holon_main": "b5b1e7f (main)",
+  "holon_f": "22717b3 (the step-4 tree; code as fed13f1)",
+  "ft_default": "FreeToken 21d9578, default chunks",
+  "ft_gated": "FreeToken 21d9578, --max-extend-length 4096"
+ },
+ "method": "prefill.py --warm-set (distinct warm-up prompts) --reps 5 5 3; 6 balanced rounds (ABCD, DCBA, ...), 60 s idle between arms, each arm's SM clock sampled while busy; statistic: median over rounds of the round geomean of paired ratios (the reference's time over holon_f's)",
+ "session_clock": [
+  [
+   "2760",
+   "2760"
+  ]
+ ],
+ "bars": {
+  "cells": {
+   "ft_default 1024": {
+    "median_ms": 376.2,
+    "n": 30,
+    "round_medians_ms": [
+     377.7,
+     376.3,
+     375.0,
+     376.2,
+     375.6,
+     376.0
+    ],
+    "drift": 0.0072
+   },
+   "ft_default 4096": {
+    "median_ms": 381.2,
+    "n": 30,
+    "round_medians_ms": [
+     383.7,
+     380.2,
+     381.4,
+     380.2,
+     381.3,
+     379.7
+    ],
+    "drift": 0.0105
+   },
+   "ft_default 32768": {
+    "median_ms": 5988.4,
+    "n": 18,
+    "round_medians_ms": [
+     5987.9,
+     5988.9,
+     5988.8,
+     5987.8,
+     5988.8,
+     5987.9
+    ],
+    "drift": 0.0002
+   },
+   "ft_gated 1024": {
+    "median_ms": 376.25,
+    "n": 30,
+    "round_medians_ms": [
+     376.7,
+     376.2,
+     376.4,
+     376.2,
+     376.2,
+     376.2
+    ],
+    "drift": 0.0013
+   },
+   "ft_gated 4096": {
+    "median_ms": 380.2,
+    "n": 30,
+    "round_medians_ms": [
+     380.7,
+     380.1,
+     380.2,
+     380.0,
+     379.6,
+     380.2
+    ],
+    "drift": 0.0029
+   },
+   "ft_gated 32768": {
+    "median_ms": 6276.6,
+    "n": 18,
+    "round_medians_ms": [
+     6276.6,
+     6276.3,
+     6277.6,
+     6275.8,
+     6276.6,
+     6276.6
+    ],
+    "drift": 0.0003
+   },
+   "holon_f 1024": {
+    "median_ms": 205.05,
+    "n": 30,
+    "round_medians_ms": [
+     205.1,
+     205.1,
+     205.0,
+     205.1,
+     205.0,
+     205.0
+    ],
+    "drift": 0.0005
+   },
+   "holon_f 4096": {
+    "median_ms": 333.2,
+    "n": 30,
+    "round_medians_ms": [
+     333.2,
+     333.2,
+     333.3,
+     333.1,
+     333.3,
+     333.2
+    ],
+    "drift": 0.0006
+   },
+   "holon_f 32768": {
+    "median_ms": 6240.5,
+    "n": 18,
+    "round_medians_ms": [
+     6241.1,
+     6240.0,
+     6239.8,
+     6240.6,
+     6241.2,
+     6240.1
+    ],
+    "drift": 0.0002
+   },
+   "holon_main 1024": {
+    "median_ms": 210.4,
+    "n": 30,
+    "round_medians_ms": [
+     210.4,
+     210.4,
+     210.4,
+     210.4,
+     210.4,
+     210.4
+    ],
+    "drift": 0.0
+   },
+   "holon_main 4096": {
+    "median_ms": 408.65,
+    "n": 30,
+    "round_medians_ms": [
+     408.7,
+     408.8,
+     408.9,
+     408.6,
+     408.9,
+     408.5
+    ],
+    "drift": 0.001
+   },
+   "holon_main 32768": {
+    "median_ms": 6847.65,
+    "n": 18,
+    "round_medians_ms": [
+     6847.6,
+     6847.8,
+     6847.4,
+     6847.3,
+     6848.6,
+     6847.3
+    ],
+    "drift": 0.0002
+   }
+  },
+  "pairs": {
+   "holon_f vs ft_default 1024": {
+    "round_geomeans": [
+     1.8837,
+     1.862,
+     1.8611,
+     1.8619,
+     1.8482,
+     1.8494
+    ],
+    "median": 1.8615,
+    "sd": 0.0128,
+    "median_paired": 1.8349
+   },
+   "holon_f vs ft_default 4096": {
+    "round_geomeans": [
+     1.1509,
+     1.1414,
+     1.1419,
+     1.1414,
+     1.1422,
+     1.1403
+    ],
+    "median": 1.1417,
+    "sd": 0.0039,
+    "median_paired": 1.1427
+   },
+   "holon_f vs ft_default 32768": {
+    "round_geomeans": [
+     0.9595,
+     0.9597,
+     0.9597,
+     0.9595,
+     0.9595,
+     0.9596
+    ],
+    "median": 0.9596,
+    "sd": 0.0001,
+    "median_paired": 0.9596
+   },
+   "holon_f vs ft_gated 1024": {
+    "round_geomeans": [
+     1.878,
+     1.862,
+     1.8632,
+     1.8613,
+     1.8752,
+     1.8514
+    ],
+    "median": 1.8626,
+    "sd": 0.0098,
+    "median_paired": 1.8356
+   },
+   "holon_f vs ft_gated 4096": {
+    "round_geomeans": [
+     1.1425,
+     1.1411,
+     1.141,
+     1.1411,
+     1.14,
+     1.1408
+    ],
+    "median": 1.141,
+    "sd": 0.0008,
+    "median_paired": 1.1409
+   },
+   "holon_f vs ft_gated 32768": {
+    "round_geomeans": [
+     1.0057,
+     1.0058,
+     1.006,
+     1.0057,
+     1.0056,
+     1.0059
+    ],
+    "median": 1.0058,
+    "sd": 0.0001,
+    "median_paired": 1.0057
+   },
+   "holon_f vs holon_main 1024": {
+    "round_geomeans": [
+     1.0248,
+     1.0247,
+     1.0248,
+     1.0247,
+     1.0179,
+     1.0185
+    ],
+    "median": 1.0247,
+    "sd": 0.0034,
+    "median_paired": 1.0258
+   },
+   "holon_f vs holon_main 4096": {
+    "round_geomeans": [
+     1.2258,
+     1.2267,
+     1.226,
+     1.2259,
+     1.2262,
+     1.2254
+    ],
+    "median": 1.2259,
+    "sd": 0.0004,
+    "median_paired": 1.2261
+   },
+   "holon_f vs holon_main 32768": {
+    "round_geomeans": [
+     1.0973,
+     1.0974,
+     1.0974,
+     1.0973,
+     1.0973,
+     1.0974
+    ],
+    "median": 1.0973,
+    "sd": 0.0001,
+    "median_paired": 1.0973
+   }
+  },
+  "flagged": [],
+  "clocks": [
+   {
+    "round": 0,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 239
+    }
+   },
+   {
+    "round": 0,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 0,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 227
+    }
+   },
+   {
+    "round": 1,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 228
+    }
+   },
+   {
+    "round": 1,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 1,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 215
+    }
+   },
+   {
+    "round": 1,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 241
+    }
+   },
+   {
+    "round": 2,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 239
+    }
+   },
+   {
+    "round": 2,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 215
+    }
+   },
+   {
+    "round": 2,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 2,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 227
+    }
+   },
+   {
+    "round": 3,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 228
+    }
+   },
+   {
+    "round": 3,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 217
+    }
+   },
+   {
+    "round": 3,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 3,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 238
+    }
+   },
+   {
+    "round": 4,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 243
+    }
+   },
+   {
+    "round": 4,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 215
+    }
+   },
+   {
+    "round": 4,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 4,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 227
+    }
+   },
+   {
+    "round": 5,
+    "arm": "ft_gated",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 227
+    }
+   },
+   {
+    "round": 5,
+    "arm": "ft_default",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 5,
+    "arm": "holon_f",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 220
+    }
+   },
+   {
+    "round": 5,
+    "arm": "holon_main",
+    "clock": {
+     "p10": 2767,
+     "p50": 2767,
+     "n": 238
+    }
+   }
+  ],
+  "memory": {
+   "ft_default": {},
+   "ft_gated": {},
+   "holon_f": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "holon_main": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3777,
+     0.4207,
+     0.3777,
+     0.379,
+     0.3777
+    ],
+    "tok_s": [
+     2711.5,
+     2434.3,
+     2711.3,
+     2701.6,
+     2710.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3837,
+     0.3833,
+     0.3844,
+     0.3831,
+     0.3842
+    ],
+    "tok_s": [
+     10674.2,
+     10687.0,
+     10656.5,
+     10692.5,
+     10660.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9875,
+     5.9879,
+     5.9886
+    ],
+    "tok_s": [
+     5472.7,
+     5472.3,
+     5471.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 1,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3763,
+     0.4059,
+     0.3763,
+     0.3749,
+     0.3762
+    ],
+    "tok_s": [
+     2721.6,
+     2522.9,
+     2721.1,
+     2731.5,
+     2721.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3802,
+     0.3812,
+     0.3797,
+     0.3813,
+     0.38
+    ],
+    "tok_s": [
+     10774.3,
+     10745.3,
+     10787.7,
+     10743.3,
+     10778.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9884,
+     5.9889,
+     5.9892
+    ],
+    "tok_s": [
+     5471.9,
+     5471.4,
+     5471.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 2,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3747,
+     0.408,
+     0.375,
+     0.3762,
+     0.3748
+    ],
+    "tok_s": [
+     2732.6,
+     2509.9,
+     2730.9,
+     2722.0,
+     2731.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3814,
+     0.38,
+     0.3814,
+     0.3801,
+     0.3815
+    ],
+    "tok_s": [
+     10739.8,
+     10778.9,
+     10739.5,
+     10777.5,
+     10737.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9887,
+     5.9888,
+     5.9888
+    ],
+    "tok_s": [
+     5471.6,
+     5471.5,
+     5471.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 3,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3761,
+     0.4062,
+     0.3762,
+     0.375,
+     0.3764
+    ],
+    "tok_s": [
+     2723.0,
+     2521.0,
+     2721.7,
+     2730.5,
+     2720.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3798,
+     0.3814,
+     0.3802,
+     0.3812,
+     0.3801
+    ],
+    "tok_s": [
+     10784.0,
+     10739.7,
+     10772.0,
+     10744.1,
+     10775.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9878,
+     5.9876,
+     5.9879
+    ],
+    "tok_s": [
+     5472.4,
+     5472.7,
+     5472.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 4,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3756,
+     0.4065,
+     0.3753,
+     0.3762,
+     0.3749
+    ],
+    "tok_s": [
+     2726.2,
+     2519.3,
+     2728.2,
+     2721.9,
+     2731.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3816,
+     0.3803,
+     0.3813,
+     0.3801,
+     0.3813
+    ],
+    "tok_s": [
+     10734.0,
+     10770.0,
+     10741.2,
+     10775.1,
+     10742.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9883,
+     5.9888,
+     5.9889
+    ],
+    "tok_s": [
+     5472.0,
+     5471.5,
+     5471.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 5,
+   "arm": "ft_default",
+   "1024": {
+    "s": [
+     0.3762,
+     0.4041,
+     0.376,
+     0.3749,
+     0.376
+    ],
+    "tok_s": [
+     2721.9,
+     2534.2,
+     2723.4,
+     2731.5,
+     2723.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3797,
+     0.3813,
+     0.3797,
+     0.3812,
+     0.3793
+    ],
+    "tok_s": [
+     10786.1,
+     10740.8,
+     10786.1,
+     10744.8,
+     10797.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     5.9879,
+     5.9875,
+     5.9884
+    ],
+    "tok_s": [
+     5472.4,
+     5472.7,
+     5471.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.33,
+   "memory": {},
+   "arm_dir": "ft_default"
+  },
+  {
+   "round": 0,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.3768,
+     0.4217,
+     0.3764,
+     0.3756,
+     0.3767
+    ],
+    "tok_s": [
+     2717.9,
+     2428.4,
+     2720.3,
+     2726.4,
+     2718.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3807,
+     0.3817,
+     0.3804,
+     0.3817,
+     0.3802
+    ],
+    "tok_s": [
+     10759.0,
+     10730.1,
+     10766.4,
+     10730.9,
+     10772.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2777,
+     6.2766,
+     6.2753
+    ],
+    "tok_s": [
+     5219.8,
+     5220.7,
+     5221.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 1,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.3765,
+     0.4059,
+     0.3762,
+     0.3749,
+     0.3762
+    ],
+    "tok_s": [
+     2720.0,
+     2522.9,
+     2722.2,
+     2731.5,
+     2722.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3796,
+     0.381,
+     0.3801,
+     0.3811,
+     0.3801
+    ],
+    "tok_s": [
+     10789.4,
+     10750.2,
+     10777.3,
+     10747.8,
+     10776.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2774,
+     6.2763,
+     6.2749
+    ],
+    "tok_s": [
+     5220.0,
+     5220.9,
+     5222.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 2,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.3768,
+     0.4063,
+     0.3764,
+     0.375,
+     0.3762
+    ],
+    "tok_s": [
+     2718.0,
+     2520.5,
+     2720.2,
+     2730.9,
+     2722.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.38,
+     0.3814,
+     0.3802,
+     0.3812,
+     0.3801
+    ],
+    "tok_s": [
+     10778.8,
+     10739.8,
+     10773.2,
+     10745.5,
+     10777.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2772,
+     6.2776,
+     6.2776
+    ],
+    "tok_s": [
+     5220.1,
+     5219.9,
+     5219.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 3,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.377,
+     0.4048,
+     0.3762,
+     0.375,
+     0.3762
+    ],
+    "tok_s": [
+     2716.5,
+     2529.6,
+     2722.2,
+     2730.8,
+     2721.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3798,
+     0.381,
+     0.38,
+     0.3814,
+     0.38
+    ],
+    "tok_s": [
+     10785.7,
+     10750.1,
+     10779.6,
+     10739.3,
+     10778.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2774,
+     6.2758,
+     6.2753
+    ],
+    "tok_s": [
+     5220.0,
+     5221.3,
+     5221.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 4,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.3763,
+     0.4357,
+     0.3762,
+     0.3745,
+     0.3762
+    ],
+    "tok_s": [
+     2721.2,
+     2350.3,
+     2722.0,
+     2734.1,
+     2722.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3795,
+     0.3813,
+     0.3795,
+     0.3811,
+     0.3796
+    ],
+    "tok_s": [
+     10794.0,
+     10742.6,
+     10794.2,
+     10748.9,
+     10790.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2769,
+     6.2766,
+     6.2752
+    ],
+    "tok_s": [
+     5220.4,
+     5220.6,
+     5221.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 5,
+   "arm": "ft_gated",
+   "1024": {
+    "s": [
+     0.3762,
+     0.4062,
+     0.3763,
+     0.3749,
+     0.3758
+    ],
+    "tok_s": [
+     2721.7,
+     2521.2,
+     2721.3,
+     2731.6,
+     2724.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3802,
+     0.381,
+     0.3796,
+     0.3813,
+     0.3799
+    ],
+    "tok_s": [
+     10773.3,
+     10750.8,
+     10789.1,
+     10742.8,
+     10781.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2787,
+     6.2766,
+     6.2753
+    ],
+    "tok_s": [
+     5218.9,
+     5220.6,
+     5221.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 14.07,
+   "memory": {},
+   "arm_dir": "ft_gated"
+  },
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.2051,
+     0.2051,
+     0.2048,
+     0.2049,
+     0.2052
+    ],
+    "tok_s": [
+     4992.5,
+     4992.7,
+     4999.9,
+     4996.6,
+     4989.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3332,
+     0.3349,
+     0.3325,
+     0.3334,
+     0.3332
+    ],
+    "tok_s": [
+     12292.7,
+     12229.8,
+     12319.7,
+     12285.5,
+     12294.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2395,
+     6.2414,
+     6.2411
+    ],
+    "tok_s": [
+     5251.7,
+     5250.1,
+     5250.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 1,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.2051,
+     0.2051,
+     0.2048,
+     0.2049,
+     0.2052
+    ],
+    "tok_s": [
+     4992.7,
+     4992.1,
+     4999.8,
+     4997.0,
+     4991.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3328,
+     0.3349,
+     0.3325,
+     0.3334,
+     0.3332
+    ],
+    "tok_s": [
+     12306.0,
+     12230.3,
+     12319.4,
+     12284.1,
+     12292.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.24,
+     6.2409,
+     6.2398
+    ],
+    "tok_s": [
+     5251.2,
+     5250.5,
+     5251.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 2,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.2051,
+     0.2052,
+     0.2048,
+     0.2049,
+     0.205
+    ],
+    "tok_s": [
+     4993.7,
+     4990.0,
+     5001.1,
+     4996.6,
+     4995.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3332,
+     0.3351,
+     0.3326,
+     0.3335,
+     0.3333
+    ],
+    "tok_s": [
+     12293.1,
+     12221.4,
+     12316.8,
+     12281.1,
+     12290.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2396,
+     6.241,
+     6.2398
+    ],
+    "tok_s": [
+     5251.6,
+     5250.4,
+     5251.4
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 3,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.2052,
+     0.2051,
+     0.2048,
+     0.205,
+     0.2052
+    ],
+    "tok_s": [
+     4989.8,
+     4991.6,
+     4999.9,
+     4994.5,
+     4989.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3331,
+     0.3349,
+     0.3324,
+     0.3335,
+     0.3331
+    ],
+    "tok_s": [
+     12297.7,
+     12228.9,
+     12322.4,
+     12280.4,
+     12296.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2403,
+     6.2406,
+     6.2407
+    ],
+    "tok_s": [
+     5251.1,
+     5250.7,
+     5250.7
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 4,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.205,
+     0.2052,
+     0.2121,
+     0.2049,
+     0.205
+    ],
+    "tok_s": [
+     4996.1,
+     4991.2,
+     4829.0,
+     4997.0,
+     4994.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3331,
+     0.335,
+     0.3326,
+     0.3335,
+     0.3333
+    ],
+    "tok_s": [
+     12295.0,
+     12226.1,
+     12316.3,
+     12280.1,
+     12288.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2407,
+     6.2412,
+     6.2418
+    ],
+    "tok_s": [
+     5250.7,
+     5250.3,
+     5249.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 5,
+   "arm": "holon_f",
+   "1024": {
+    "s": [
+     0.205,
+     0.2052,
+     0.2109,
+     0.2048,
+     0.205
+    ],
+    "tok_s": [
+     4996.2,
+     4991.1,
+     4854.9,
+     5000.5,
+     4995.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.3332,
+     0.335,
+     0.3325,
+     0.3335,
+     0.3331
+    ],
+    "tok_s": [
+     12291.8,
+     12227.7,
+     12320.6,
+     12281.3,
+     12296.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.2401,
+     6.2404,
+     6.24
+    ],
+    "tok_s": [
+     5251.2,
+     5250.9,
+     5251.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.41,
+   "memory": {
+    "kv_tokens": 33808,
+    "profiled_peak_gib": 0.417,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 13.021,
+    "run_peak_over_start_gib": 0.391,
+    "reserved_over_start_gib": 0.744
+   },
+   "arm_dir": "holon_f"
+  },
+  {
+   "round": 0,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2104,
+     0.2105,
+     0.2086,
+     0.2106,
+     0.2104
+    ],
+    "tok_s": [
+     4866.4,
+     4863.8,
+     4909.9,
+     4862.0,
+     4868.0
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.4081,
+     0.4105,
+     0.4075,
+     0.4088,
+     0.4087
+    ],
+    "tok_s": [
+     10036.0,
+     9977.8,
+     10052.2,
+     10020.8,
+     10021.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8476,
+     6.8487,
+     6.8468
+    ],
+    "tok_s": [
+     4785.3,
+     4784.6,
+     4785.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 1,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2104,
+     0.2105,
+     0.2086,
+     0.2105,
+     0.2104
+    ],
+    "tok_s": [
+     4867.8,
+     4863.9,
+     4909.7,
+     4865.2,
+     4867.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.4084,
+     0.4108,
+     0.4077,
+     0.409,
+     0.4088
+    ],
+    "tok_s": [
+     10029.6,
+     9970.9,
+     10046.7,
+     10014.4,
+     10020.1
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8477,
+     6.8483,
+     6.8478
+    ],
+    "tok_s": [
+     4785.3,
+     4784.8,
+     4785.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 2,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2103,
+     0.2107,
+     0.2085,
+     0.2105,
+     0.2104
+    ],
+    "tok_s": [
+     4868.1,
+     4860.7,
+     4910.9,
+     4863.6,
+     4867.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.4084,
+     0.4106,
+     0.4078,
+     0.4089,
+     0.4089
+    ],
+    "tok_s": [
+     10030.2,
+     9974.6,
+     10044.3,
+     10017.7,
+     10016.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8473,
+     6.8483,
+     6.8474
+    ],
+    "tok_s": [
+     4785.6,
+     4784.8,
+     4785.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 3,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2104,
+     0.2107,
+     0.2085,
+     0.2106,
+     0.2104
+    ],
+    "tok_s": [
+     4867.1,
+     4859.6,
+     4911.4,
+     4862.0,
+     4867.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.408,
+     0.4105,
+     0.4076,
+     0.4086,
+     0.4088
+    ],
+    "tok_s": [
+     10039.4,
+     9978.7,
+     10050.0,
+     10025.3,
+     10019.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8473,
+     6.8484,
+     6.8469
+    ],
+    "tok_s": [
+     4785.5,
+     4784.8,
+     4785.8
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 4,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2103,
+     0.2107,
+     0.2086,
+     0.2106,
+     0.2104
+    ],
+    "tok_s": [
+     4868.3,
+     4860.1,
+     4908.8,
+     4863.1,
+     4867.5
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.4083,
+     0.4107,
+     0.4078,
+     0.409,
+     0.4089
+    ],
+    "tok_s": [
+     10032.3,
+     9973.2,
+     10044.1,
+     10013.6,
+     10018.2
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8486,
+     6.8488,
+     6.8476
+    ],
+    "tok_s": [
+     4784.7,
+     4784.5,
+     4785.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  },
+  {
+   "round": 5,
+   "arm": "holon_main",
+   "1024": {
+    "s": [
+     0.2102,
+     0.2104,
+     0.2084,
+     0.2105,
+     0.2104
+    ],
+    "tok_s": [
+     4871.3,
+     4866.6,
+     4913.3,
+     4864.3,
+     4867.3
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "4096": {
+    "s": [
+     0.4079,
+     0.4107,
+     0.4075,
+     0.4085,
+     0.4085
+    ],
+    "tok_s": [
+     10041.9,
+     9974.3,
+     10051.5,
+     10026.5,
+     10026.9
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "32768": {
+    "s": [
+     6.8473,
+     6.8488,
+     6.8471
+    ],
+    "tok_s": [
+     4785.5,
+     4784.5,
+     4785.6
+    ],
+    "alloc": {
+     "num_alloc_retries": [
+      0,
+      0,
+      0
+     ],
+     "num_device_alloc": [
+      0,
+      0,
+      0
+     ],
+     "num_device_free": [
+      0,
+      0,
+      0
+     ]
+    }
+   },
+   "peak_alloc_gib": 13.38,
+   "memory": {
+    "kv_tokens": 33792,
+    "profiled_peak_gib": 0.425,
+    "max_model_len": 33792,
+    "allocated_after_start_gib": 12.991,
+    "run_peak_over_start_gib": 0.392,
+    "reserved_over_start_gib": 0.755
+   },
+   "arm_dir": "holon_main"
+  }
+ ],
+ "decode_and_llama_rows_ctx": [
+  {
+   "round": 0,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4666.9858,
+     "decode_tps": 240.043,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10020.1738,
+     "decode_tps": 195.702,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4791.5733,
+     "decode_tps": 119.4592,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 44.7
+  },
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4798.9596,
+     "decode_tps": 241.5494,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12292.8346,
+     "decode_tps": 194.5048,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5250.3126,
+     "decode_tps": 119.8074,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 35.9
+  },
+  {
+   "round": 0,
+   "arm": "llama_fit",
+   "results": {
+    "1024": {
+     "prefill_tps": 1317.962,
+     "decode_tps": 79.67
+    },
+    "4096": {
+     "prefill_tps": 1193.742,
+     "decode_tps": 75.732
+    },
+    "32768": {
+     "prefill_tps": 1161.773,
+     "decode_tps": 61.958
+    }
+   },
+   "peak_vram_mib": 14856,
+   "wall_s": 49.5
+  },
+  {
+   "round": 0,
+   "arm": "llama_ncmoe16",
+   "results": {
+    "1024": {
+     "prefill_tps": 1333.913,
+     "decode_tps": 78.035
+    },
+    "4096": {
+     "prefill_tps": 1242.024,
+     "decode_tps": 76.084
+    },
+    "32768": {
+     "prefill_tps": 1182.755,
+     "decode_tps": 62.144
+    }
+   },
+   "peak_vram_mib": 15690,
+   "wall_s": 47.7
+  },
+  {
+   "round": 0,
+   "arm": "cache_nat",
+   "results": {
+    "1024": {
+     "prefill_tps": 1166.924,
+     "decode_tps": 175.567
+    },
+    "4096": {
+     "prefill_tps": 1020.989,
+     "decode_tps": 121.299
+    },
+    "32768": {
+     "prefill_tps": 1036.567,
+     "decode_tps": 88.95
+    }
+   },
+   "peak_vram_mib": 13366,
+   "wall_s": 47.7
+  },
+  {
+   "round": 0,
+   "arm": "cache_nat_pinned",
+   "results": {
+    "1024": {
+     "prefill_tps": 1913.343,
+     "decode_tps": 198.021
+    },
+    "4096": {
+     "prefill_tps": 1737.67,
+     "decode_tps": 156.02
+    },
+    "32768": {
+     "prefill_tps": 1606.762,
+     "decode_tps": 106.352
+    }
+   },
+   "peak_vram_mib": 13398,
+   "wall_s": 42.2
+  },
+  {
+   "round": 1,
+   "arm": "cache_nat_pinned",
+   "results": {
+    "1024": {
+     "prefill_tps": 1911.871,
+     "decode_tps": 197.555
+    },
+    "4096": {
+     "prefill_tps": 1734.231,
+     "decode_tps": 155.736
+    },
+    "32768": {
+     "prefill_tps": 1604.609,
+     "decode_tps": 106.285
+    }
+   },
+   "peak_vram_mib": 13398,
+   "wall_s": 42.4
+  },
+  {
+   "round": 1,
+   "arm": "cache_nat",
+   "results": {
+    "1024": {
+     "prefill_tps": 1163.976,
+     "decode_tps": 175.789
+    },
+    "4096": {
+     "prefill_tps": 1021.03,
+     "decode_tps": 121.556
+    },
+    "32768": {
+     "prefill_tps": 1036.175,
+     "decode_tps": 88.922
+    }
+   },
+   "peak_vram_mib": 13366,
+   "wall_s": 47.7
+  },
+  {
+   "round": 1,
+   "arm": "llama_ncmoe16",
+   "results": {
+    "1024": {
+     "prefill_tps": 1335.862,
+     "decode_tps": 84.581
+    },
+    "4096": {
+     "prefill_tps": 1242.297,
+     "decode_tps": 81.267
+    },
+    "32768": {
+     "prefill_tps": 1184.113,
+     "decode_tps": 65.865
+    }
+   },
+   "peak_vram_mib": 15690,
+   "wall_s": 47.1
+  },
+  {
+   "round": 1,
+   "arm": "llama_fit",
+   "results": {
+    "1024": {
+     "prefill_tps": 1315.139,
+     "decode_tps": 79.842
+    },
+    "4096": {
+     "prefill_tps": 1194.06,
+     "decode_tps": 75.955
+    },
+    "32768": {
+     "prefill_tps": 1161.084,
+     "decode_tps": 61.703
+    }
+   },
+   "peak_vram_mib": 14856,
+   "wall_s": 48.8
+  },
+  {
+   "round": 1,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4799.2159,
+     "decode_tps": 241.467,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12299.7181,
+     "decode_tps": 194.5717,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5255.0556,
+     "decode_tps": 119.8038,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 43.4
+  },
+  {
+   "round": 1,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4666.8939,
+     "decode_tps": 239.9814,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10025.1324,
+     "decode_tps": 195.7271,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4799.659,
+     "decode_tps": 119.4727,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 36.5
+  },
+  {
+   "round": 2,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4675.3564,
+     "decode_tps": 239.9705,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10028.8477,
+     "decode_tps": 195.6132,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4800.4465,
+     "decode_tps": 119.4738,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 44.1
+  },
+  {
+   "round": 2,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4821.9961,
+     "decode_tps": 241.5849,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12287.8323,
+     "decode_tps": 194.7191,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5252.7092,
+     "decode_tps": 119.807,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 36.6
+  },
+  {
+   "round": 2,
+   "arm": "llama_fit",
+   "results": {
+    "1024": {
+     "prefill_tps": 1318.388,
+     "decode_tps": 79.136
+    },
+    "4096": {
+     "prefill_tps": 1193.294,
+     "decode_tps": 74.452
+    },
+    "32768": {
+     "prefill_tps": 1162.239,
+     "decode_tps": 61.708
+    }
+   },
+   "peak_vram_mib": 14856,
+   "wall_s": 49.0
+  },
+  {
+   "round": 2,
+   "arm": "llama_ncmoe16",
+   "results": {
+    "1024": {
+     "prefill_tps": 1337.192,
+     "decode_tps": 82.99
+    },
+    "4096": {
+     "prefill_tps": 1243.777,
+     "decode_tps": 80.929
+    },
+    "32768": {
+     "prefill_tps": 1186.343,
+     "decode_tps": 65.655
+    }
+   },
+   "peak_vram_mib": 15690,
+   "wall_s": 47.0
+  },
+  {
+   "round": 2,
+   "arm": "cache_nat",
+   "results": {
+    "1024": {
+     "prefill_tps": 1166.696,
+     "decode_tps": 175.706
+    },
+    "4096": {
+     "prefill_tps": 1020.559,
+     "decode_tps": 121.437
+    },
+    "32768": {
+     "prefill_tps": 1036.515,
+     "decode_tps": 88.906
+    }
+   },
+   "peak_vram_mib": 13366,
+   "wall_s": 47.8
+  },
+  {
+   "round": 2,
+   "arm": "cache_nat_pinned",
+   "results": {
+    "1024": {
+     "prefill_tps": 1913.843,
+     "decode_tps": 197.756
+    },
+    "4096": {
+     "prefill_tps": 1736.113,
+     "decode_tps": 155.858
+    },
+    "32768": {
+     "prefill_tps": 1606.096,
+     "decode_tps": 106.267
+    }
+   },
+   "peak_vram_mib": 13398,
+   "wall_s": 42.2
+  }
+ ],
+ "decode_split_check_ctx": [
+  {
+   "round": 0,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4678.0417,
+     "decode_tps": 240.007,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10005.3325,
+     "decode_tps": 195.6713,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4791.9677,
+     "decode_tps": 119.4627,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 49.0
+  },
+  {
+   "round": 0,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4795.3398,
+     "decode_tps": 241.5186,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12291.4783,
+     "decode_tps": 194.5273,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5255.0814,
+     "decode_tps": 119.7547,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 42.8
+  },
+  {
+   "round": 0,
+   "arm": "holon_f_split",
+   "results": {
+    "1024": {
+     "prefill_tps": 4762.5405,
+     "decode_tps": 240.1746,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3059,
+     "hit_rate": 0.9836,
+     "miss_mb_per_token": 18.3114
+    },
+    "4096": {
+     "prefill_tps": 12257.2527,
+     "decode_tps": 193.5893,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.3844
+    },
+    "32768": {
+     "prefill_tps": 5248.6546,
+     "decode_tps": 119.1341,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.4258
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1627,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 37.6
+  },
+  {
+   "round": 1,
+   "arm": "holon_f_split",
+   "results": {
+    "1024": {
+     "prefill_tps": 4765.2054,
+     "decode_tps": 240.0597,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3059,
+     "hit_rate": 0.9836,
+     "miss_mb_per_token": 18.3114
+    },
+    "4096": {
+     "prefill_tps": 12282.2796,
+     "decode_tps": 193.5121,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.3844
+    },
+    "32768": {
+     "prefill_tps": 5248.6138,
+     "decode_tps": 119.1961,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.4258
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1627,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 38.2
+  },
+  {
+   "round": 1,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4816.1798,
+     "decode_tps": 241.4071,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12280.406,
+     "decode_tps": 194.6066,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5257.3122,
+     "decode_tps": 119.8194,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 41.3
+  },
+  {
+   "round": 1,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4664.7574,
+     "decode_tps": 240.0412,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10030.5052,
+     "decode_tps": 195.6006,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4799.675,
+     "decode_tps": 119.4691,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 38.4
+  },
+  {
+   "round": 2,
+   "arm": "holon_main",
+   "results": {
+    "1024": {
+     "prefill_tps": 4687.3842,
+     "decode_tps": 240.0144,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10018.5578,
+     "decode_tps": 195.6533,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4799.7621,
+     "decode_tps": 119.4943,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 42.4
+  },
+  {
+   "round": 2,
+   "arm": "holon_f",
+   "results": {
+    "1024": {
+     "prefill_tps": 4818.429,
+     "decode_tps": 241.5091,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12284.4165,
+     "decode_tps": 194.5805,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5252.574,
+     "decode_tps": 119.8103,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 39.2
+  },
+  {
+   "round": 2,
+   "arm": "holon_f_split",
+   "results": {
+    "1024": {
+     "prefill_tps": 4772.7698,
+     "decode_tps": 240.0871,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3059,
+     "hit_rate": 0.9836,
+     "miss_mb_per_token": 18.3114
+    },
+    "4096": {
+     "prefill_tps": 12274.0066,
+     "decode_tps": 193.5027,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.3844
+    },
+    "32768": {
+     "prefill_tps": 5254.5223,
+     "decode_tps": 119.151,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 15.0275,
+     "hit_rate": 0.9609,
+     "miss_mb_per_token": 43.4258
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1627,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 44.2
+  }
+ ],
+ "ctx_method": "x4_gap ctx.py: fresh process per arm, 512 + 64 warm-up, one request per context generating 256 tokens, 3 interleaved rounds; holon_main at main's lock pin (3,236 / 1,618 / 1,618), holon_f at the re-fill (3,229 / 1,700 / 1,529), holon_f_split at 3,229 / 1,618 / 1,618",
+ "soak_16gb_lock": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "kv_tokens": 18416,
+  "ctx": 16384,
+  "max_seqs": 32,
+  "long": 16000,
+  "seats": 32,
+  "short": 512,
+  "decode": 128,
+  "rounds": [
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 4,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   },
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 0,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   },
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 0,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   },
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 0,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   },
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 0,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   },
+   {
+    "num_alloc_retries": 0,
+    "num_device_alloc": 0,
+    "num_device_free": 0,
+    "least_free_mib": 192,
+    "peak_alloc_gib": 14.133
+   }
+  ]
+ }
+}

@@ -4,8 +4,10 @@ of 1, in tokens per second over the batch; random prompts, the prefix cache off.
 warm-up.
 
     python bench/holon_tg.py --model <checkpoint | file.gguf> [-n 128] [--depths 0 8192] [--batch 1 8]
-                             [--engine-args "<holon serve flags>"] [-r 5] [--llama-crossover] [--json out]
+                             [--engine-args "<holon serve flags>"] [-r 5] [--seed 0] [--llama-crossover] [--json out]
 
+`--seed`: the random prompts' seed (each repetition draws new prompts from it), so several seeds measure a code change
+apart from the routing one prompt set happens to take.
 `--llama-crossover`: kernels.ggml_cuda without its per-shape entries (llama.cpp's rule; D2's baseline).
 """
 from __future__ import annotations
@@ -32,6 +34,7 @@ def main() -> None:
     ap.add_argument("--batch", type=int, nargs="+", default=[1])
     ap.add_argument("--engine-args", default="")
     ap.add_argument("-r", type=int, default=5)
+    ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--llama-crossover", action="store_true")
     ap.add_argument("--json")
     a = ap.parse_args()
@@ -43,7 +46,7 @@ def main() -> None:
     cfg = engine_config(a.model, flags.parse_args(shlex.split(a.engine_args)))
     engine = Engine(dataclasses.replace(cfg, max_seqs=max(a.batch), max_model_len=max(a.depths) + a.n + 16,
                                         prefix_cache=False))
-    rng = random.Random(0)
+    rng = random.Random(a.seed)
 
     def generate(batch: int, depth: int, tokens: int) -> float:
         prompts = [[rng.randrange(1000, engine.spec.vocab // 2) for _ in range(max(depth, 1))] for _ in range(batch)]
@@ -64,7 +67,8 @@ def main() -> None:
     if a.json:
         with open(a.json, "w") as f:
             json.dump({"engine": "holon", "model": a.model.rstrip("/").rsplit("/", 1)[-1],
-                       "gpu": torch.cuda.get_device_name(), "llama_crossover": a.llama_crossover, "results": results},
+                       "gpu": torch.cuda.get_device_name(), "llama_crossover": a.llama_crossover, "seed": a.seed,
+                       "results": results},
                       f, indent=1)
 
 

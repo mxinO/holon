@@ -1,0 +1,3721 @@
+{
+ "gpu": "NVIDIA GeForce RTX 5080",
+ "date": "2026-10-19",
+ "what": "The 5080 offload lock's 4K decode row (0.9942) split into cache and code. ctx.py (x4 gate method), one session, step 0's desktop.",
+ "trees": {
+  "main": "b5b1e7f",
+  "s4": "52853e1 (the step-4 code)",
+  "s4mb": "52853e1 run with main's prefill numerics (dense qlinear at CHUNK rows: no D5; the router's composition: no D3\u2032) \u2014 prompt_logprobs bitwise main's on the A5000"
+ },
+ "pins": {
+  "main": "3,236 / 1,618 / 1,618",
+  "refill": "3,229 / 1,700 / 1,529",
+  "x4_gate": "3,220 / 1,610 / 1,610 (both fit)"
+ },
+ "two_by_two_5_rounds": [
+  {
+   "round": 0,
+   "arm": "main_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4664.2288,
+     "decode_tps": 239.9466,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10023.1488,
+     "decode_tps": 195.6169,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4808.5814,
+     "decode_tps": 119.5389,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 60.9
+  },
+  {
+   "round": 0,
+   "arm": "main_refill",
+   "error": "RuntimeError: moe: the pinned cache (gate_up.q4_k.1536x2048=3229, down.q6_k.2048x768=1700, down.q4_k.2048x768=1529) does not fit above the paged floor: the arena got 8.669 of 8.683 GiB"
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4765.405,
+     "decode_tps": 240.3557,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.2627,
+     "hit_rate": 0.9837,
+     "miss_mb_per_token": 18.1969
+    },
+    "4096": {
+     "prefill_tps": 12287.449,
+     "decode_tps": 193.6458,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9529,
+     "hit_rate": 0.9611,
+     "miss_mb_per_token": 43.1867
+    },
+    "32768": {
+     "prefill_tps": 5262.6276,
+     "decode_tps": 119.2206,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9686,
+     "hit_rate": 0.961,
+     "miss_mb_per_token": 43.2697
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 42.5
+  },
+  {
+   "round": 0,
+   "arm": "s4_refill",
+   "results": {
+    "1024": {
+     "prefill_tps": 4801.5221,
+     "decode_tps": 241.5461,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12296.8467,
+     "decode_tps": 194.5714,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5265.5676,
+     "decode_tps": 119.8583,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 42.1
+  },
+  {
+   "round": 1,
+   "arm": "s4_refill",
+   "results": {
+    "1024": {
+     "prefill_tps": 4824.2935,
+     "decode_tps": 241.454,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12291.1582,
+     "decode_tps": 194.6803,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5259.5669,
+     "decode_tps": 119.8148,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 36.1
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4779.3336,
+     "decode_tps": 240.257,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.2627,
+     "hit_rate": 0.9837,
+     "miss_mb_per_token": 18.1969
+    },
+    "4096": {
+     "prefill_tps": 12281.523,
+     "decode_tps": 193.7238,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9529,
+     "hit_rate": 0.9611,
+     "miss_mb_per_token": 43.1867
+    },
+    "32768": {
+     "prefill_tps": 5251.7396,
+     "decode_tps": 119.2083,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9686,
+     "hit_rate": 0.961,
+     "miss_mb_per_token": 43.2697
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 43.1
+  },
+  {
+   "round": 1,
+   "arm": "main_refill",
+   "error": "RuntimeError: moe: the pinned cache (gate_up.q4_k.1536x2048=3229, down.q6_k.2048x768=1700, down.q4_k.2048x768=1529) does not fit above the paged floor: the arena got 8.669 of 8.683 GiB"
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4675.1462,
+     "decode_tps": 239.9733,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10014.9785,
+     "decode_tps": 195.5826,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4807.1517,
+     "decode_tps": 119.5418,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 43.1
+  },
+  {
+   "round": 2,
+   "arm": "main_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4672.5634,
+     "decode_tps": 240.0848,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10022.2716,
+     "decode_tps": 195.4687,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4802.0867,
+     "decode_tps": 119.4925,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 44.1
+  },
+  {
+   "round": 2,
+   "arm": "main_refill",
+   "error": "RuntimeError: moe: the pinned cache (gate_up.q4_k.1536x2048=3229, down.q6_k.2048x768=1700, down.q4_k.2048x768=1529) does not fit above the paged floor: the arena got 8.669 of 8.683 GiB"
+  },
+  {
+   "round": 2,
+   "arm": "s4_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4762.6706,
+     "decode_tps": 240.2245,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.2627,
+     "hit_rate": 0.9837,
+     "miss_mb_per_token": 18.1969
+    },
+    "4096": {
+     "prefill_tps": 12291.9331,
+     "decode_tps": 193.5987,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9529,
+     "hit_rate": 0.9611,
+     "miss_mb_per_token": 43.1867
+    },
+    "32768": {
+     "prefill_tps": 5259.7761,
+     "decode_tps": 119.195,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9686,
+     "hit_rate": 0.961,
+     "miss_mb_per_token": 43.2697
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 36.9
+  },
+  {
+   "round": 2,
+   "arm": "s4_refill",
+   "results": {
+    "1024": {
+     "prefill_tps": 4809.8594,
+     "decode_tps": 241.3801,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12280.0544,
+     "decode_tps": 194.4837,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5264.0808,
+     "decode_tps": 119.8112,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 43.0
+  },
+  {
+   "round": 3,
+   "arm": "s4_refill",
+   "results": {
+    "1024": {
+     "prefill_tps": 4820.4199,
+     "decode_tps": 241.5265,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12283.6316,
+     "decode_tps": 194.514,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5256.098,
+     "decode_tps": 119.8338,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 37.5
+  },
+  {
+   "round": 3,
+   "arm": "s4_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4762.2227,
+     "decode_tps": 240.3336,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.2627,
+     "hit_rate": 0.9837,
+     "miss_mb_per_token": 18.1969
+    },
+    "4096": {
+     "prefill_tps": 12282.218,
+     "decode_tps": 193.6949,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9529,
+     "hit_rate": 0.9611,
+     "miss_mb_per_token": 43.1867
+    },
+    "32768": {
+     "prefill_tps": 5253.3543,
+     "decode_tps": 119.1474,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9686,
+     "hit_rate": 0.961,
+     "miss_mb_per_token": 43.2697
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 41.5
+  },
+  {
+   "round": 3,
+   "arm": "main_refill",
+   "error": "RuntimeError: moe: the pinned cache (gate_up.q4_k.1536x2048=3229, down.q6_k.2048x768=1700, down.q4_k.2048x768=1529) does not fit above the paged floor: the arena got 8.669 of 8.683 GiB"
+  },
+  {
+   "round": 3,
+   "arm": "main_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4686.7401,
+     "decode_tps": 240.0877,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10018.9055,
+     "decode_tps": 195.7162,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4804.4906,
+     "decode_tps": 119.5085,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 41.9
+  },
+  {
+   "round": 4,
+   "arm": "main_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4676.6966,
+     "decode_tps": 240.0024,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.3451,
+     "hit_rate": 0.9835,
+     "miss_mb_per_token": 18.398
+    },
+    "4096": {
+     "prefill_tps": 10017.6324,
+     "decode_tps": 195.7066,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3843,
+     "hit_rate": 0.9625,
+     "miss_mb_per_token": 41.6218
+    },
+    "32768": {
+     "prefill_tps": 4800.3743,
+     "decode_tps": 119.4889,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7176,
+     "hit_rate": 0.9617,
+     "miss_mb_per_token": 42.5288
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 37.7
+  },
+  {
+   "round": 4,
+   "arm": "main_refill",
+   "error": "RuntimeError: moe: the pinned cache (gate_up.q4_k.1536x2048=3229, down.q6_k.2048x768=1700, down.q4_k.2048x768=1529) does not fit above the paged floor: the arena got 8.669 of 8.683 GiB"
+  },
+  {
+   "round": 4,
+   "arm": "s4_mainpin",
+   "results": {
+    "1024": {
+     "prefill_tps": 4779.6263,
+     "decode_tps": 240.2864,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.2627,
+     "hit_rate": 0.9837,
+     "miss_mb_per_token": 18.1969
+    },
+    "4096": {
+     "prefill_tps": 12279.5071,
+     "decode_tps": 193.7461,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9529,
+     "hit_rate": 0.9611,
+     "miss_mb_per_token": 43.1867
+    },
+    "32768": {
+     "prefill_tps": 5261.7488,
+     "decode_tps": 119.2549,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.9686,
+     "hit_rate": 0.961,
+     "miss_mb_per_token": 43.2697
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 37.4
+  },
+  {
+   "round": 4,
+   "arm": "s4_refill",
+   "results": {
+    "1024": {
+     "prefill_tps": 4820.6606,
+     "decode_tps": 241.4804,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 6.0745,
+     "hit_rate": 0.9842,
+     "miss_mb_per_token": 17.3984
+    },
+    "4096": {
+     "prefill_tps": 12285.7448,
+     "decode_tps": 194.5488,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.7804,
+     "hit_rate": 0.9615,
+     "miss_mb_per_token": 42.2691
+    },
+    "32768": {
+     "prefill_tps": 5262.9105,
+     "decode_tps": 119.866,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.5294,
+     "hit_rate": 0.9622,
+     "miss_mb_per_token": 41.5966
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14536,
+   "wall_s": 41.6
+  }
+ ],
+ "six_prompts_s4_vs_main_at_main_pin": [
+  {
+   "round": 0,
+   "arm": "main_mainpin_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 10003.7416,
+     "decode_tps": 204.992,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.2,
+     "hit_rate": 0.9708,
+     "miss_mb_per_token": 32.4289
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 44.6
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 12244.4305,
+     "decode_tps": 202.1613,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 12.0275,
+     "hit_rate": 0.9687,
+     "miss_mb_per_token": 34.8573
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 30.8
+  },
+  {
+   "round": 0,
+   "arm": "main_mainpin_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10073.593,
+     "decode_tps": 154.0129,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.502,
+     "hit_rate": 0.9154,
+     "miss_mb_per_token": 93.698
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 31.4
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 12328.7089,
+     "decode_tps": 154.1894,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.4314,
+     "hit_rate": 0.9155,
+     "miss_mb_per_token": 93.5027
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 31.7
+  },
+  {
+   "round": 0,
+   "arm": "main_mainpin_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10044.9171,
+     "decode_tps": 166.3291,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 25.8863,
+     "hit_rate": 0.9326,
+     "miss_mb_per_token": 75.0366
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 27.1
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 12317.0426,
+     "decode_tps": 163.6072,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 27.1961,
+     "hit_rate": 0.9292,
+     "miss_mb_per_token": 78.8566
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 29.1
+  },
+  {
+   "round": 0,
+   "arm": "main_mainpin_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10047.6184,
+     "decode_tps": 180.9888,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.5961,
+     "hit_rate": 0.949,
+     "miss_mb_per_token": 56.9195
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.5
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 12307.9376,
+     "decode_tps": 173.6385,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 22.6549,
+     "hit_rate": 0.941,
+     "miss_mb_per_token": 65.7045
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 25.4
+  },
+  {
+   "round": 0,
+   "arm": "main_mainpin_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10031.2767,
+     "decode_tps": 188.3487,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 16.7843,
+     "hit_rate": 0.9563,
+     "miss_mb_per_token": 48.7393
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.4
+  },
+  {
+   "round": 0,
+   "arm": "s4_mainpin_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 12275.8708,
+     "decode_tps": 210.4429,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 9.6314,
+     "hit_rate": 0.9749,
+     "miss_mb_per_token": 27.8615
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.6
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 12284.0394,
+     "decode_tps": 210.3673,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 9.6314,
+     "hit_rate": 0.9749,
+     "miss_mb_per_token": 27.8615
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 28.3
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10033.3633,
+     "decode_tps": 188.2777,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 16.7843,
+     "hit_rate": 0.9563,
+     "miss_mb_per_token": 48.7393
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 25.6
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 12304.6742,
+     "decode_tps": 173.6217,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 22.6549,
+     "hit_rate": 0.941,
+     "miss_mb_per_token": 65.7045
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 27.2
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10057.8844,
+     "decode_tps": 180.9545,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.5961,
+     "hit_rate": 0.949,
+     "miss_mb_per_token": 56.9195
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 27.4
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 12316.2541,
+     "decode_tps": 163.5134,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 27.1961,
+     "hit_rate": 0.9292,
+     "miss_mb_per_token": 78.8566
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 25.9
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10060.3995,
+     "decode_tps": 166.3208,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 25.8863,
+     "hit_rate": 0.9326,
+     "miss_mb_per_token": 75.0366
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 30.5
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 12344.0347,
+     "decode_tps": 154.1487,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.4314,
+     "hit_rate": 0.9155,
+     "miss_mb_per_token": 93.5027
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 25.4
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10066.2104,
+     "decode_tps": 153.8963,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.502,
+     "hit_rate": 0.9154,
+     "miss_mb_per_token": 93.698
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 25.2
+  },
+  {
+   "round": 1,
+   "arm": "s4_mainpin_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 12253.364,
+     "decode_tps": 202.0617,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 12.0275,
+     "hit_rate": 0.9687,
+     "miss_mb_per_token": 34.8573
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.8
+  },
+  {
+   "round": 1,
+   "arm": "main_mainpin_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 10007.4103,
+     "decode_tps": 204.813,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.2,
+     "hit_rate": 0.9708,
+     "miss_mb_per_token": 32.4289
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 25.7
+  }
+ ],
+ "six_prompts_s4mb_vs_main_at_x4_gate_pin": [
+  {
+   "round": 0,
+   "arm": "main_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 10059.3128,
+     "decode_tps": 195.7672,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3137,
+     "hit_rate": 0.9627,
+     "miss_mb_per_token": 41.4201
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 43.2
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 11814.6858,
+     "decode_tps": 195.8784,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3137,
+     "hit_rate": 0.9627,
+     "miss_mb_per_token": 41.4201
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 33.0
+  },
+  {
+   "round": 0,
+   "arm": "main_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 9996.017,
+     "decode_tps": 204.3285,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.3843,
+     "hit_rate": 0.9704,
+     "miss_mb_per_token": 32.9626
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 30.5
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 11741.9672,
+     "decode_tps": 204.3091,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.3843,
+     "hit_rate": 0.9704,
+     "miss_mb_per_token": 32.9626
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 33.3
+  },
+  {
+   "round": 0,
+   "arm": "main_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10068.3615,
+     "decode_tps": 153.486,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.8431,
+     "hit_rate": 0.9145,
+     "miss_mb_per_token": 94.6799
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 28.4
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 11839.8464,
+     "decode_tps": 153.5183,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.8431,
+     "hit_rate": 0.9145,
+     "miss_mb_per_token": 94.6799
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 29.4
+  },
+  {
+   "round": 0,
+   "arm": "main_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10053.5918,
+     "decode_tps": 165.7119,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.2118,
+     "hit_rate": 0.9317,
+     "miss_mb_per_token": 75.98
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 27.2
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 11813.7499,
+     "decode_tps": 165.2823,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.2118,
+     "hit_rate": 0.9317,
+     "miss_mb_per_token": 75.98
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 25.2
+  },
+  {
+   "round": 0,
+   "arm": "main_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10051.992,
+     "decode_tps": 180.2602,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.8667,
+     "hit_rate": 0.9483,
+     "miss_mb_per_token": 57.7013
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.5
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 11807.3866,
+     "decode_tps": 180.3775,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.8667,
+     "hit_rate": 0.9483,
+     "miss_mb_per_token": 57.7013
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 26.7
+  },
+  {
+   "round": 0,
+   "arm": "main_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10026.5426,
+     "decode_tps": 187.4505,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 17.0275,
+     "hit_rate": 0.9557,
+     "miss_mb_per_token": 49.4355
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 29.9
+  },
+  {
+   "round": 0,
+   "arm": "s4mb_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 11766.4833,
+     "decode_tps": 187.5973,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 17.0275,
+     "hit_rate": 0.9557,
+     "miss_mb_per_token": 49.4355
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 26.8
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 11768.1744,
+     "decode_tps": 187.5299,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 17.0275,
+     "hit_rate": 0.9557,
+     "miss_mb_per_token": 49.4355
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 25.7
+  },
+  {
+   "round": 1,
+   "arm": "main_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10025.6693,
+     "decode_tps": 187.4758,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 17.0275,
+     "hit_rate": 0.9557,
+     "miss_mb_per_token": 49.4355
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.3
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 11809.4692,
+     "decode_tps": 180.2863,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.8667,
+     "hit_rate": 0.9483,
+     "miss_mb_per_token": 57.7013
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 25.7
+  },
+  {
+   "round": 1,
+   "arm": "main_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10052.7658,
+     "decode_tps": 180.3136,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.8667,
+     "hit_rate": 0.9483,
+     "miss_mb_per_token": 57.7013
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 30.2
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 11809.8627,
+     "decode_tps": 165.6006,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.2118,
+     "hit_rate": 0.9317,
+     "miss_mb_per_token": 75.98
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 26.4
+  },
+  {
+   "round": 1,
+   "arm": "main_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10048.9514,
+     "decode_tps": 165.4827,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.2118,
+     "hit_rate": 0.9317,
+     "miss_mb_per_token": 75.98
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 24.8
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 11839.3879,
+     "decode_tps": 153.5209,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.8431,
+     "hit_rate": 0.9145,
+     "miss_mb_per_token": 94.6799
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 26.5
+  },
+  {
+   "round": 1,
+   "arm": "main_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10080.5001,
+     "decode_tps": 153.4019,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.8431,
+     "hit_rate": 0.9145,
+     "miss_mb_per_token": 94.6799
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.4
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 11751.1492,
+     "decode_tps": 204.4446,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.3843,
+     "hit_rate": 0.9704,
+     "miss_mb_per_token": 32.9626
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 29.1
+  },
+  {
+   "round": 1,
+   "arm": "main_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 10000.9369,
+     "decode_tps": 204.3411,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.3843,
+     "hit_rate": 0.9704,
+     "miss_mb_per_token": 32.9626
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 25.5
+  },
+  {
+   "round": 1,
+   "arm": "s4mb_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 11816.754,
+     "decode_tps": 195.8421,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3137,
+     "hit_rate": 0.9627,
+     "miss_mb_per_token": 41.4201
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14544,
+   "wall_s": 25.1
+  },
+  {
+   "round": 1,
+   "arm": "main_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 10059.072,
+     "decode_tps": 195.7316,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.3137,
+     "hit_rate": 0.9627,
+     "miss_mb_per_token": 41.4201
+    }
+   },
+   "store": {
+    "cached_experts": 3220,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3236,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1626,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 29.5
+  }
+ ],
+ "six_prompts_s4_refill_vs_main_at_main_pin": [
+  {
+   "round": 0,
+   "arm": "main_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 10052.0266,
+     "decode_tps": 196.2069,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.1294,
+     "hit_rate": 0.9632,
+     "miss_mb_per_token": 40.888
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 49.5
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 12322.9695,
+     "decode_tps": 194.7948,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.6706,
+     "hit_rate": 0.9618,
+     "miss_mb_per_token": 41.9586
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 32.5
+  },
+  {
+   "round": 0,
+   "arm": "main_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 9998.5307,
+     "decode_tps": 204.8525,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.2,
+     "hit_rate": 0.9708,
+     "miss_mb_per_token": 32.4289
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 33.4
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 12266.5345,
+     "decode_tps": 204.0144,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.5412,
+     "hit_rate": 0.9699,
+     "miss_mb_per_token": 33.0403
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 32.4
+  },
+  {
+   "round": 0,
+   "arm": "main_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10071.3572,
+     "decode_tps": 153.959,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.502,
+     "hit_rate": 0.9154,
+     "miss_mb_per_token": 93.698
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 28.1
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 12352.8579,
+     "decode_tps": 154.6813,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.2667,
+     "hit_rate": 0.916,
+     "miss_mb_per_token": 92.3786
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 31.3
+  },
+  {
+   "round": 0,
+   "arm": "main_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10053.8202,
+     "decode_tps": 166.19,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 25.8863,
+     "hit_rate": 0.9326,
+     "miss_mb_per_token": 75.0366
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 28.2
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 12327.5954,
+     "decode_tps": 164.9979,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.6235,
+     "hit_rate": 0.9307,
+     "miss_mb_per_token": 76.3367
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.1
+  },
+  {
+   "round": 0,
+   "arm": "main_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10066.6371,
+     "decode_tps": 180.9639,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.5961,
+     "hit_rate": 0.949,
+     "miss_mb_per_token": 56.9195
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.4
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 12344.1691,
+     "decode_tps": 174.7502,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 22.3255,
+     "hit_rate": 0.9419,
+     "miss_mb_per_token": 64.1528
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 27.8
+  },
+  {
+   "round": 0,
+   "arm": "main_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10038.6705,
+     "decode_tps": 188.1417,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 16.7843,
+     "hit_rate": 0.9563,
+     "miss_mb_per_token": 48.7393
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 30.9
+  },
+  {
+   "round": 0,
+   "arm": "s4refill_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 12303.775,
+     "decode_tps": 210.9492,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 9.549,
+     "hit_rate": 0.9751,
+     "miss_mb_per_token": 27.2979
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.2
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 12310.5261,
+     "decode_tps": 210.9545,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 9.549,
+     "hit_rate": 0.9751,
+     "miss_mb_per_token": 27.2979
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.7
+  },
+  {
+   "round": 1,
+   "arm": "main_p5",
+   "results": {
+    "4096": {
+     "prefill_tps": 10034.9577,
+     "decode_tps": 188.1149,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 16.7843,
+     "hit_rate": 0.9563,
+     "miss_mb_per_token": 48.7393
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.2
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 12333.6799,
+     "decode_tps": 174.6599,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 22.3255,
+     "hit_rate": 0.9419,
+     "miss_mb_per_token": 64.1528
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.9
+  },
+  {
+   "round": 1,
+   "arm": "main_p4",
+   "results": {
+    "4096": {
+     "prefill_tps": 10051.079,
+     "decode_tps": 180.8871,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 19.5961,
+     "hit_rate": 0.949,
+     "miss_mb_per_token": 56.9195
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 31.6
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 12326.8687,
+     "decode_tps": 165.0665,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 26.6235,
+     "hit_rate": 0.9307,
+     "miss_mb_per_token": 76.3367
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.3
+  },
+  {
+   "round": 1,
+   "arm": "main_p3",
+   "results": {
+    "4096": {
+     "prefill_tps": 10055.4574,
+     "decode_tps": 166.1554,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 25.8863,
+     "hit_rate": 0.9326,
+     "miss_mb_per_token": 75.0366
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.8
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 12358.4125,
+     "decode_tps": 154.696,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.2667,
+     "hit_rate": 0.916,
+     "miss_mb_per_token": 92.3786
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.5
+  },
+  {
+   "round": 1,
+   "arm": "main_p2",
+   "results": {
+    "4096": {
+     "prefill_tps": 10087.3737,
+     "decode_tps": 154.0862,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 32.502,
+     "hit_rate": 0.9154,
+     "miss_mb_per_token": 93.698
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.3
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 12268.8162,
+     "decode_tps": 203.9321,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.5412,
+     "hit_rate": 0.9699,
+     "miss_mb_per_token": 33.0403
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 31.0
+  },
+  {
+   "round": 1,
+   "arm": "main_p1",
+   "results": {
+    "4096": {
+     "prefill_tps": 10014.2507,
+     "decode_tps": 204.8669,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 11.2,
+     "hit_rate": 0.9708,
+     "miss_mb_per_token": 32.4289
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 27.8
+  },
+  {
+   "round": 1,
+   "arm": "s4refill_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 12329.3927,
+     "decode_tps": 194.7981,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.6706,
+     "hit_rate": 0.9618,
+     "miss_mb_per_token": 41.9586
+    }
+   },
+   "store": {
+    "cached_experts": 3229,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3245,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1716,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1545,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14534,
+   "wall_s": 26.1
+  },
+  {
+   "round": 1,
+   "arm": "main_p0",
+   "results": {
+    "4096": {
+     "prefill_tps": 10061.9305,
+     "decode_tps": 196.2399,
+     "decode_steps": 255,
+     "routed_per_token": 384.0,
+     "misses_per_token": 14.1294,
+     "hit_rate": 0.9632,
+     "miss_mb_per_token": 40.888
+    }
+   },
+   "store": {
+    "cached_experts": 3236,
+    "experts": 6144,
+    "classes": {
+     "gate_up.q4_k.1536x2048": {
+      "unit_bytes": 1769472,
+      "slots": 3252,
+      "staging": 8,
+      "pieces": 6144
+     },
+     "down.q6_k.2048x768": {
+      "unit_bytes": 1290240,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     },
+     "down.q4_k.2048x768": {
+      "unit_bytes": 884736,
+      "slots": 1634,
+      "staging": 8,
+      "pieces": 3072
+     }
+    }
+   },
+   "peak_vram_mib": 14522,
+   "wall_s": 26.1
+  }
+ ]
+}
