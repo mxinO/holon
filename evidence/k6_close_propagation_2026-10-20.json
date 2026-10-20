@@ -375,5 +375,42 @@
  "notes": [
   "The RTX 3090's 27B trace returns to the one its locks 3-6 recorded (one step's deltas differ from lock 7's); this history alternates between two recorded traces by desktop, each run-identical x3 on its own",
   "First pass: the first RTX 3090 desktop lost its GPU mid-run (a launch failure, then no device); its three remaining histories were rerun on another RTX 3090 desktop"
- ]
+ ],
+ "close_review": {
+  "decision": "The panel's close review (C, the lead's decision): rtx-5080/12.lock's staging margin (about 90 MB at max_model_len 49,152) is too thin to ship; the RTX 5080 27B tier lock re-propagated at max_model_len 40,960, approval delegated",
+  "commit": "03ddf79 (the lock's [deploy] commit)",
+  "flags": "holon_tools propagate --approve from rtx-5080/12.lock with --max-model-len 40960 --host-memory 21474836480 (no --state-memory: its L2 engine, the process's second, was not refused); holon_judge snapshot --runs 3 at the new lock with --host-memory 21474836480",
+  "row": {
+   "class": "rtx-5080",
+   "lock": "Qwen3.8-27B UD-IQ3_S, with the tier",
+   "from": 12,
+   "to": 13,
+   "changed": "max_model_len 49152 -> 40960 and the attention / rope sites' max_positions (their kernels' config hashes follow)",
+   "trace": "identical (sha256:178205fe..., lock 12's)",
+   "l2_top1": 97.519,
+   "floor_top1": 97.54,
+   "budget_top1": 97.29,
+   "kl_p99": 0.591,
+   "kl_p99_budget": 1.42,
+   "dppl_vs_floor": "+0.111% \u00b1 0.331%",
+   "dppl_budget_pct": 1.078,
+   "approved": true,
+   "snapshots_run_identical_x3": true
+  },
+  "pools_as_served": {
+   "note": "a fresh process at the new lock on the propagation's RTX 5080 (pools.py, --host-memory only)",
+   "state_bytes": 3236790272,
+   "state.kv_units": 3047,
+   "state.kv_unit_bytes": 557056,
+   "state.kv_floor_units": 2561,
+   "margin_bytes": 270729216,
+   "at_49152": "the same budget holds 3047 < 3073 units, 26 short"
+  },
+  "clamp_check": {
+   "setup": "one RTX A5000, rtx-5080/12.lock (max_model_len 49,152) with --host-memory 21474836480 --state-memory 3000000000 (2.794 GiB, short of the 3,073-unit KV floor beside staging 5), a fresh engine each",
+   "clamp_context (holon serve)": "max_model_len 49152 clamped to 41920; state.kv 2621 units (min 129, the profiled step's rows); every checkpoint and slot pool at 5",
+   "no clamp (propagate's L2, the judge's snapshot)": "OutOfUnits: memory budget 2.794 GiB too small: state.kv (2621 < 3073 units)",
+   "reading": "a served start keeps the staging units and clamps the context; only the engines that verify a lock at its own length refuse"
+  }
+ }
 }

@@ -1,8 +1,9 @@
 """No private infrastructure details in commit messages: every subject and body in `base..HEAD` (default
 `origin/main..HEAD`) against `check_private.py`'s patterns, theirs and the untracked `.private-patterns`, which also
 lists the user branch prefix (`<user>/`), so branch names stay out of history: merges take a neutral message. The
-prefix lives there, not here, for the same reason. Usage: `check_commit_messages.py [base-ref]`; skipped when the
-base is unknown (a shallow clone)."""
+prefix lives there, not here, for the same reason. GitHub CI has no `.private-patterns`, so it checks the tracked
+patterns only; the full set runs where the file is, after a merge and before the push. Usage:
+`check_commit_messages.py [base-ref]`; skipped when the base is unknown (a shallow clone)."""
 from __future__ import annotations
 
 import subprocess

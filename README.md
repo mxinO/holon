@@ -47,7 +47,8 @@ also serves Qwen3.8), from HF safetensors directories or GGUF files. The recomme
 
 **This card's lock**: written and verified on this card (L2 against the judge's floor, the snapshot trace identical
 over three runs), in the release environment (`docs/release.md` §16, §19). Every lock selects the grammar processor.
-The Qwen3.8-27B locks serve a context of 49,152 tokens without speculation (Known limitations).
+The Qwen3.8-27B locks serve a context of 49,152 tokens (40,960 on the RTX 5080) without speculation (Known
+limitations).
 
 **Borrowed, unverified.** Locks are found by the checkpoint's build hash, so a file downloaded anywhere, under any
 name, finds its lock. Without a lock for this card, `holon serve` borrows the nearest class's: the same GPU on another
@@ -191,12 +192,11 @@ holon: Claude Code:
 
 The server drops Claude Code's per-request billing-header system block, which would otherwise defeat prefix caching
 (`holon serve <model> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
-Serve the Qwen3.8-27B for Claude Code: its locks serve 49,152 tokens of context. Claude Code 2.1.300 sends, besides
-its main loop, side requests of ≈ 31K input tokens (`docs/release.md` §18.2), which a 32K context would fit with about
-1K tokens to spare. Its auto-compaction assumes a far larger window than 49,152 tokens, so a long session reaches the
-served limit first. On an RTX 5080 that also drives a display, the 49,152-token context leaves ≈ 200 MiB of headroom,
-so it may be clamped to what fits; the log shows it (`differs from the lock: engine:max_model_len: …`). The side
-requests need it to stay above ≈ 32K.
+Serve the Qwen3.8-27B for Claude Code: its locks serve 49,152 tokens of context (40,960 on the RTX 5080). Claude Code
+2.1.300 sends, besides its main loop, side requests of ≈ 31K input tokens (`docs/release.md` §18.2), which a 32K
+context would fit with about 1K tokens to spare. Its auto-compaction assumes a far larger window than the served
+context, so a long session reaches the served limit first. On an RTX 5080 that also drives a display, see Known
+limitations. The side requests need the context to stay above ≈ 32K.
 
 The release's agent demo (`bench/demo/`) is a small fix in a three-module Python project — a seeded bug and a missing
 function — chosen to fit a 32K context. It shows the served model completing such a task through Claude Code; it
@@ -270,9 +270,10 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 ## Known limitations
 
 - One GPU per server; no offload: the model and its KV cache must fit the card.
-- **Context.** The Qwen3.8-27B locks serve 49,152 tokens; the 8B and 30B locks 8,192 or 16,384 (`holon models` and
-  the lock files show each); without a lock, min(the model's trained context, 32768). `holon serve <model>
-  --max-model-len N` changes it, and a context that does not fit the card's memory is clamped to what does (logged).
+- **Context.** The Qwen3.8-27B locks serve 49,152 tokens (40,960 on the RTX 5080); the 8B and 30B locks 8,192 or
+  16,384 (`holon models` and the lock files show each); without a lock, min(the model's trained context, 32768).
+  `holon serve <model> --max-model-len N` changes it, and a context that does not fit the card's memory is clamped to
+  what does (logged).
 - **Speculation is off in every lock.** On the Qwen3.8-27B, MTP gave 11–45% lower TPOT on a sampled
   Claude-Code-shaped trace, but a speculating stream's longest pauses (p95 per-request maximum gap) grew 1.1–3.1×, past
   the ≤ 1.10× rule fixed before measuring (`docs/release.md` §16.6). Turn it on with the flags under Options.
@@ -281,8 +282,9 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   --chunk-with-decode 512` mixes decoding into those prefill steps and cut it 23–37×, for 11–22% more time to that
   prompt's first token (48–54% on two RTX 4090 cells) and 2–15% of its throughput (`docs/release.md` §16.5). The
   Qwen3.8-27B locks set 512.
-- **On an RTX 5080 that also drives a display**, the Qwen3.8-27B's 49,152-token context leaves ≈ 200 MiB of headroom
-  and may be clamped to what fits (logged); Claude Code's ≈ 31K side requests need it above ≈ 32K.
+- **On an RTX 5080 that also drives a display**, the Qwen3.8-27B's 40,960-token context leaves ≈ 260 MiB of headroom
+  (its state tier's staging units are kept first) and may be clamped to what fits (logged); Claude Code's ≈ 31K side
+  requests need it above ≈ 32K.
 - **Traces are run-identical on one machine, not across machines:** two RTX 3090 desktops recorded different
   Qwen3.8-27B snapshot traces at the same lock, both within the judge's L2 budget (`docs/release.md` §19.1).
 - **No authentication:** the server checks no API key; do not expose it beyond a trusted network.

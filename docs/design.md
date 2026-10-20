@@ -329,7 +329,8 @@ approvals, and the `isolation-check` CI job.
   scheduler's row kinds (`BatchPlan.row_kind`, `RowKind`, graph padding included) and 1.4 with milestone K's seams
   KS1–KS5 (`docs/v1-kv-tiers.md` §4: the slots `tier` and `eviction_policy`; `BlockRecord`, `Fence`, `Stream`,
   `Load`, `TierCtx`, `StateTier`, `EntryView`, `EvictionPolicy`; `Payload.tentative`, `SeqView.branch_at`,
-  `Seq.branch_at`, `Pool.segments`, `Option.planned` and the optional `KeepsTentatives`). `holon.api.ABI` is the version;
+  `Seq.branch_at`, `SeqView.matched`, `Seq.matched`, `Pool.segments`, `Option.planned` and the optional
+  `KeepsTentatives`). `holon.api.ABI` is the version;
   every manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
   manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields in
   order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
@@ -910,7 +911,8 @@ while True:
   refuse), payloads at registration (mandatory; the staging unit is freed then, so a kind's pool only stages, and a
   request keeps its last `keep_tentative` tentative payloads). Every decision is logical; a unit freed while a copy
   still reads or writes it is reused only after the next launch waits for that copy. `SeqView.branch_at` tells a
-  checkpoint policy where a request leaves a cached chain.
+  checkpoint policy where a request leaves a cached chain, and `SeqView.matched` where its matched prefix ends before a
+  kind trims the hit to a payload (both the first admission's, kept when a preempted request is admitted again).
 - **v0 (implemented in E4)**: paged state only (the index is off when any spec is not paged; checkpoints arrive in
   M0.3). Blocks are `lcm(tokens_per_unit, alignment)` tokens; keys chain from a namespace derived from the model's
   canonical hash; entries verify their tokens, so a hash collision is a miss. Pages are shared by refcount — the
