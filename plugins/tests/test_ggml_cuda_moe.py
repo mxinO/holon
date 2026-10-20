@@ -321,6 +321,20 @@ def qwen_stacks():
             for name in ("q4_k", "iq3_xxs")}
 
 
+@pytest.mark.parametrize("name", ["q2_0", "iq4_nl"])
+def test_linear_experts_at_in_640(ctx, lib, name):
+    """T6 (docs/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
+    but not of 256) on mmvq and mmq with ids, at a chunk and at a pass of two; mmq's last K step stays inside each
+    row (the bytes after the stack are poison)."""
+    down = experts(ctx, name, 640, H, K)
+    sd, t = stack(name, E, H, 640, seed=13), down.mmvq_tokens
+    for tokens in (1, t, t + 1, 64, 2 * CHUNK + 1):
+        ids = uniform(tokens, E, seed=tokens)
+        h = torch.randn(tokens, K, 640, generator=torch.Generator().manual_seed(tokens)).cuda()
+        y = down(h, sd.parts, ids)
+        check(y, emulated(down, sd, h, ids), 640, f"down {name} at 640, T={tokens}")
+
+
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs"])
 def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     sg, sd = qwen_stacks[name]

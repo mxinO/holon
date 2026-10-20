@@ -314,6 +314,20 @@ def test_qlinear_random_blocks(ctx, name, k):
     assert halves_of_150(x, w) is None and (name in GLU_TYPES or glu(x, w) is None)       # the others compose
 
 
+@pytest.mark.parametrize("name", ["q2_0", "iq4_nl", "q4_0", "q8_0"])
+def test_qlinear_at_in_640(ctx, name):
+    """T6 (docs/v1-moe-prefill.md §10): `in` a whole number of the type's blocks but not of 256 (FN's down
+    projections, 640 wide) on both paths; mmq's last K step stays inside each row (the bytes after the weights are
+    poison: a read past them gives NaN). A 256-value type cannot hold such a row and is not served."""
+    kernel = qlinear(ctx, name, 640)
+    t = kernel.mmvq_rows
+    check_qlinear(kernel, name, random_blocks(name, OUT, 640, seed=11), (1, t, t + 1, 64, CHUNK + 1))
+    for other in ("q6_k", "iq4_xs"):
+        facts = {"layout": f"ggml.{other}/gguf.native", "in": 640, "out": OUT, "act_dtype": "bfloat16",
+                 "out_dtype": "bfloat16", "act_quant": "a8"}
+        assert not [s for s in ctx.candidates("qlinear@2", facts) if s.provider == "kernels.ggml_cuda"], other
+
+
 def test_qlinear_real_tensors(ctx, real):
     tested = {(name, k) for name, k in real if name in TYPES}
     if not tested:

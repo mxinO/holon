@@ -72,14 +72,25 @@ def main() -> None:
                     # D10's passed buffers, each its own allocation of exactly its size
                     kern(xs, w, route, out=torch.empty_like(y),
                          scratch=torch.empty(kern.scratch_bytes(tokens), dtype=torch.uint8, device="cuda"))
+    # T6: `in` 640 (FN's down projections), weights in buffers of exactly their size: mmq's last K step stays inside
+    for name in ("q2_0", "iq4_nl", "q4_0", "q8_0"):
+        layout = f"ggml.{name}/gguf.native"
+        down = experts(layout, 640, 1024, K)
+        w = {"blocks": torch.from_numpy(random_blocks(name, E * 1024, 640, seed=7)).unflatten(0, (E, -1)).cuda()}
+        dense = select("qlinear@2", layout=layout, out=1024, act_dtype="bfloat16", out_dtype="bfloat16",
+                       act_quant="a8", **{"in": 640})
+        wd = {"blocks": torch.from_numpy(random_blocks(name, 1024, 640, seed=8)).cuda()}
+        for tokens in (1, down.mmvq_tokens + 1, 513):
+            down(torch.randn(tokens, K, 640, generator=gen).cuda(), w, ids(tokens))
+            dense((1e-3 * torch.randn(tokens, 640, generator=gen)).bfloat16().cuda(), wd)
     for n in (16, 128, 512):
         select("moe_topk@1", experts=n, top_k=K, renormalize=True)(torch.randn(13, n, generator=gen).cuda())
     out = torch.empty(13, 2048, dtype=torch.bfloat16, device="cuda")
     select("moe_combine@1", hidden=2048, top_k=K, dtype="bfloat16", y_dtype="float32")(
         torch.randn(13, K, 2048, generator=gen).cuda(), torch.rand(13, K, generator=gen).cuda(), out)
     torch.cuda.synchronize()
-    print(f"memcheck run: {len(cases)} layouts and modes x in 768, 2304, E {E}, k {K}, topk, combine on sm "
-          f"{ctx.fingerprint.sm}")
+    print(f"memcheck run: {len(cases)} layouts and modes x in 768, 2304, E {E}, k {K}; in 640 (T6), topk, combine on "
+          f"sm {ctx.fingerprint.sm}")
 
 
 if __name__ == "__main__":

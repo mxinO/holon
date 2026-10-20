@@ -43,13 +43,13 @@ llama.cpp's default, native W4A4 on Blackwell), and each instance asks llama.cpp
 which precision it will use (`mmq_prec`): a mismatch is an error.
 
 FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`, llama.cpp's converter layouts);
-NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before
-SwiGLU on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above
-one row in the unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one
-rounding to `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a
-multiple of 256 (all supported shapes) no q8_1 kernel reads past the weight blocks, so they need no padding (L0
-poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4` spec's
-`prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
+NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before SwiGLU
+on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above one row in the
+unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one rounding to
+`out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a multiple of 256, or of
+a `ROW_BLOCKS` type's block (its loaders keep the last K step inside the row: T6), no q8_1 kernel reads past the weight
+blocks, so they need no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4`
+spec's `prepare` appends llama.cpp's allocation padding, the blocks of one row's values up to a multiple of 512 zeroed
 (`tail_bytes`), after each FP4 tensor or stack, and its calls check it is there.
 
 Calls are counted per path and mode (`calls["mmq/fp4"]`, …; counted when called, not on graph replay).
@@ -107,6 +107,11 @@ BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
 # whole 32-value blocks; IQ4_NL's reads 256-value groups, so a row of whole blocks narrower than that (FN: PLE's
 # 160-wide rows) is gathered as bytes and converted (`QEmbedding`), bitwise the same values.
 QK = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32}
+# The `in` widths qlinear and linear_experts serve, as multiples (256 unless listed; T6, docs/v1-moe-prefill.md §10):
+# these types' mmq tile loaders keep a row's last K step (MMQ_ITER_K = 256 values) inside the row, so any whole number
+# of their blocks serves (FN: the down projections at 640, Q2_0 and IQ4_NL); mmvq reads whole blocks only. The
+# 256-value types and FP4 keep 256 (their blocks, or native W4A4's K step).
+ROW_BLOCKS = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32, "q2_0": 64}
 DTYPES = ("bfloat16", "float32")
 ACT_QUANT = ("a4", "a8")                    # q8_1 activations (8 bits) serve either
 # Each spec's activation format per path, and the ggml_prec each format asks mmq for (GGML_PREC_Q8, GGML_PREC_Q4).
@@ -702,7 +707,8 @@ class MoeCombine:
 
 
 def _supports_matmul(f: dict, act_quant: tuple[str, ...], types) -> bool:
-    return (weight_type(f["layout"]) in types and f["in"] % 256 == 0 and f["act_dtype"] in DTYPES
+    name = weight_type(f["layout"])
+    return (name in types and f["in"] % ROW_BLOCKS.get(name, 256) == 0 and f["act_dtype"] in DTYPES
             and f["act_quant"] in act_quant)
 
 

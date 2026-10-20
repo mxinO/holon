@@ -9,6 +9,18 @@
 // 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/v1-moe-prefill.md D8): `split` in every
 // loader's signature and row offset, marked at each signature only
 
+// Holon: T6 (docs/v1-moe-prefill.md §10). A row of `stride` blocks whose width is not a multiple of MMQ_ITER_K: the
+// last K step's blocks past the row re-read the row's last block, not the next row's (or past the buffer). The
+// activations there are q8_1's zero padding, so those products are 0 either way: the same bits as upstream's padded
+// allocation. kbx0 is the tile's row start (a multiple of `stride`) plus its K step's first block.
+template <int qk> static __device__ __forceinline__ int ggml_cuda_mmq_kblock(const int kbx0, const int stride, const int kbx) {
+    if (stride % (MMQ_ITER_K / qk) == 0) {          // rows of whole K steps (every width a multiple of 256): upstream's
+        return kbx0 + kbx;
+    }
+    const int kb0 = kbx0 % stride;
+    return kbx0 - kb0 + min(kb0 + kbx, stride - 1);
+}
+
 template <ggml_type type, int J, bool fallback> static __device__ __forceinline__ void ggml_cuda_mmq_load_tiles_q1_0(
         const char * __restrict__ x, int * __restrict__ x_tile, const int kbx0, const int i_max, const int stride, const int split) { // Holon: split
     constexpr int warp_size   = ggml_cuda_get_physical_warp_size();
@@ -134,7 +146,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q2_0 * bxi = (const block_q2_0 *) x + ggml_cuda_mmq_kblock<QK2_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
         const int16_t    * qxi = (const int16_t *) bxi->qs + kqsx * 4;
 
         const int dst_offset = kbx*(scale_entries_per_block*QI8_0) + kqsx*QI8_0;
@@ -179,7 +191,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q2_0 * bxi = (const block_q2_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + scale_block;
+        const block_q2_0 * bxi = (const block_q2_0 *) x + ggml_cuda_mmq_kblock<QK2_0>(kbx0, stride, scale_block) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                           + ksx] = bxi->d;
@@ -219,7 +231,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q4_0 * bxi = (const block_q4_0 *) x + ggml_cuda_mmq_kblock<QK4_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
         const int qs0 = get_int_b2(bxi->qs, kqsx);
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
@@ -242,7 +254,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q4_0 * bxi = (const block_q4_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_q4_0 * bxi = (const block_q4_0 *) x + ggml_cuda_mmq_kblock<QK4_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                     + kbxd] = bxi->d;
@@ -282,7 +294,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q4_1 * bxi = (const block_q4_1 *) x + ggml_cuda_mmq_kblock<QK4_1>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
         const int qs0 = get_int_b4(bxi->qs, kqsx);
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
@@ -305,7 +317,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q4_1 * bxi = (const block_q4_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_q4_1 * bxi = (const block_q4_1 *) x + ggml_cuda_mmq_kblock<QK4_1>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_dm[i*sram_stride                     + kbxd] = bxi->dm;
@@ -345,7 +357,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q5_0 * bxi = (const block_q5_0 *) x + ggml_cuda_mmq_kblock<QK5_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
 
         const int ql = get_int_b2(bxi->qs, kqsx);
         const int qh = get_int_b2(bxi->qh, 0) >> (4 * kqsx);
@@ -385,7 +397,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q5_0 * bxi = (const block_q5_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_q5_0 * bxi = (const block_q5_0 *) x + ggml_cuda_mmq_kblock<QK5_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                     + kbxd] = bxi->d;
@@ -425,7 +437,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q5_1 * bxi = (const block_q5_1 *) x + ggml_cuda_mmq_kblock<QK5_1>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
 
         const int ql = get_int_b4(bxi->qs, kqsx);
         const int qh = get_int_b4(bxi->qh, 0) >> (4 * kqsx);
@@ -463,7 +475,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q5_1 * bxi = (const block_q5_1 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_q5_1 * bxi = (const block_q5_1 *) x + ggml_cuda_mmq_kblock<QK5_1>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_dm[i*sram_stride                     + kbxd] = bxi->dm;
@@ -504,14 +516,15 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_q8_0 * bxi = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
+        const block_q8_0 * bxj = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbx + MMQ_TILE_NE_K/QI8_0) + (i*stride + (i >= I/2)*split); // Holon: T6, the second half
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
-        x_qs[i*sram_stride + 0             + txi] = get_int_b2(bxi[0].qs,                   kqsx);
-        x_qs[i*sram_stride + MMQ_TILE_NE_K + txi] = get_int_b2(bxi[MMQ_TILE_NE_K/QI8_0].qs, kqsx);
+        x_qs[i*sram_stride + 0             + txi] = get_int_b2(bxi->qs, kqsx);
+        x_qs[i*sram_stride + MMQ_TILE_NE_K + txi] = get_int_b2(bxj->qs, kqsx);
 #else
-        x_qs[i*(2*MMQ_TILE_NE_K + 1) + 0             + txi] = get_int_b2(bxi[0].qs,                   kqsx);
-        x_qs[i*(2*MMQ_TILE_NE_K + 1) + MMQ_TILE_NE_K + txi] = get_int_b2(bxi[MMQ_TILE_NE_K/QI8_0].qs, kqsx);
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + 0             + txi] = get_int_b2(bxi->qs, kqsx);
+        x_qs[i*(2*MMQ_TILE_NE_K + 1) + MMQ_TILE_NE_K + txi] = get_int_b2(bxj->qs, kqsx);
 #endif // defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
     }
 
@@ -527,7 +540,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_q8_0 * bxi = (const block_q8_0 *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_q8_0 * bxi = (const block_q8_0 *) x + ggml_cuda_mmq_kblock<QK8_0>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                           + kbxd] = bxi->d;
@@ -1597,7 +1610,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbx;
+        const block_iq4_nl * bxi = (const block_iq4_nl *) x + ggml_cuda_mmq_kblock<QK4_NL>(kbx0, stride, kbx) + (i*stride + (i >= I/2)*split); // Holon: T6
 
         const int aux_q4 = get_int_b2(bxi->qs, kqsx);
         const int2 v = get_int_from_table_16(aux_q4, kvalues_iq4nl);
@@ -1624,7 +1637,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
             i = min(i, i_max);
         }
 
-        const block_iq4_nl * bxi = (const block_iq4_nl *) x + kbx0 + (i*stride + (i >= I/2)*split) + kbxd;
+        const block_iq4_nl * bxi = (const block_iq4_nl *) x + ggml_cuda_mmq_kblock<QK4_NL>(kbx0, stride, kbxd) + (i*stride + (i >= I/2)*split); // Holon: T6
 
 #if defined(AMD_MFMA_AVAILABLE) || defined(TURING_MMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE)
         x_df[i*sram_stride                       + kbxd] = __half2float(bxi->d);
