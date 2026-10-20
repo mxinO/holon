@@ -650,7 +650,9 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   the start of the GLM milestone, which needs F10 with RAM short.
 - **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
   an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
-  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them.
+  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them. FN's step 6 also
+  gives the arena store `fused` (the MTP pack's fused gate / up stacks, `std.moe@1(fused_gate_up=True)`: one piece
+  per expert, gate's rows then up's); the resident store has it since FN step 3.
 - **KV streaming for sparse-attention mixers (K4; owner: FN, its first follow-up after its close)**: Strata streams a
   QSA layer's KV through pinned RAM from 64K contexts (`--kv-resident`, R §3.1 C4); FN's bars stop at 32K, where
   Strata keeps KV in VRAM. Built on `std.mixers.qsa` and X's `DeviceResolver`, reading K's host copies if K's D15

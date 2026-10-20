@@ -297,7 +297,7 @@ def qk_rope_kv_decode_position() -> Iterator[None]:
     rows are right. Reports how many decode calls it changed (graph captures included: the + 1 is captured)."""
     from holon_std.mixers.gqa import units
 
-    project, fired = units.GQA._project_and_write, collections.Counter()
+    project, fired = units.GQA.project_and_write, collections.Counter()
 
     def planted(self, x, ctx, kv):
         fused = self._fused
@@ -309,7 +309,7 @@ def qk_rope_kv_decode_position() -> Iterator[None]:
             return project(self, x, ctx, kv)
         finally:
             self._fused = fused
-    with mock.patch.object(units.GQA, "_project_and_write", planted):
+    with mock.patch.object(units.GQA, "project_and_write", planted):
         yield
     print(f"plant qk-rope-kv-decode-position fired: {dict(fired)}", file=sys.stderr)
 

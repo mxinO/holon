@@ -387,7 +387,8 @@ at a time through the judge's existing `_streamed`.**
 MoE first.**
 - The router-prepared q8_1 is consumed inside `std.moe@1`'s own call (`moe/units.py:247-254, 273-289`). An L0 test
   asserts that FN's layer never re-quantizes (the generation check, `kernels/ggml_cuda/plugin.py:434-450`).
-- `std.moe@1` is not edited.
+- `std.moe@1` gains one additive option, `fused_gate_up` (default off; step 3 review): the MTP pack stores each
+  expert's gate and up rows as one tensor, which the core's weight rules cannot split. Nothing else in it changes.
 
 **D8 — GDN gains `out_gate` (`silu` | `sigmoid`).**
 - It is passed to the unit and the kernel facts only when not the default, so the Qwen3.8 locks' recorded facts do
@@ -754,7 +755,13 @@ Notes on the 5080:
 **RTX 5090, IQ3_S:** 0.9 × (33.88 − 0.9 − 5.40) = 24.82 GB, less 1.39, 0.34 (6 classes) and 1.64 (8K steps), gives
 ≈ 21.45 GB: 43% of 50.29 GB. Its prefill cap is similar, ≈ 13.5K tok/s at 8K steps.
 
-**RTX PRO 6000, all-resident:** 40.1 / 55.7 GB of weights (IQ2_XS / IQ3_S, with MTP). KV up to 128K is 4.1 GB.
+**RTX PRO 6000, all-resident:** 40.1 / 55.7 GB of weights (IQ2_XS / IQ3_S, with MTP), plus the PLE table resident
+on the card (28.8 GB; step 5 reads it through `std.ops.embedding@1`, the RAM tier being step 6's): 68.9 / 84.5 GB.
+KV up to 128K is 4.1 GB.
+- **The fit at 32K (step 3 review, C):** IQ3_S needs 84.5 + 1.39 (KV and state) + 1.64 + 0.43 (the 8K step's peaks)
+  + 0.9 (context) ≈ 88.9 GB; IQ2_XS ≈ 73.3 GB. Visible is ≈ 102.6 GB (96 GiB less ≈ 460 MiB, est.), so the rule
+  gives 0.9 × (102.6 − 0.9 − 84.5) = 15.5 GB for the 3.5 GB of KV, state and peaks: both fit, IQ3_S with ≈ 12 GB to
+  spare. At 128K, IQ3_S's KV rises by ≈ 3.1 GB and still fits.
 
 **Host pinned memory:**
 - IQ2_XS: experts 35.5 + PLE 28.8 ≈ 64.3 GB.
@@ -1563,3 +1570,25 @@ with a tiny Qwen3 written in 5-tensor shards: it serves what the whole file serv
 **Qwen3.8's snapshot is unchanged:** Qwen3.8-27B UD-IQ3_S, bf16, the `v1-qwen3_5` trace (354 steps), `--max-seqs 8`
 and a 2 GiB state budget on an RTX A5000: this step's tree and the base (0aad1ab) write byte-identical snapshot files
 (sha256 `dd32244b…`), and the steps' outputs equal main's recorded snapshot of step 4's GDN check.
+
+**The panel's review of step 3, dispositions:**
+
+| # | Finding | Disposition |
+|---|---|---|
+| C (blocker for step 5) | The PLE table has no GPU kernel: `kernels.ggml_cuda`'s `qembedding` refuses rows that are not a multiple of 256 wide (PLE's are 160, IQ4_NL) | **Fixed** in its own commit (`6b05ed0`, "Holon:" comments): the check is per type's block (QK_K = 256 unless listed). The legacy types' `get_rows` reads 32-value blocks as is; IQ4_NL's reads 256-value groups, so a narrower IQ4_NL row is gathered as bytes and converted (2 launches), bitwise gguf-py's. L0 at width 160 for IQ4_NL, Q4_0, Q5_0, Q8_0, both output dtypes. **To carry onto the MoE prefill track's branch when the tracks meet** (it edits that track's plugin). §7's RTX PRO 6000 row gains the 28.8 GB table: IQ3_S ≈ 88.9 GB at 32K, fits. |
+| C (major) | Launches ≈ 25–31 per layer | **Measured, and the cheap ones done.** On a 4-layer slice of the IQ2_XS file (`local` tooling: layers 0–3, every expert, the PLE hash tables cut to 1,000 rows, Q2_0 requantized to Q4_0 since the CUDA Q2_0 path is the track's), eager, sparse QSA, one decode token: **GDN 32–34, QSA 35–37, PLE's layer +11, embed / output mixer / head 7 per token**, so ≈ 34 per layer layer-weighted (1,640 per token on IQ2_XS, 1,654 on IQ3_S; the ± 2 is whether a layer's shared gate and up share a type and merge). A 4-row verify step adds the replay saves: GDN 39–41, PLE's layer 59, QSA 37. Done now: the indexer's rope rotates q only (`rope@1` with no key heads; the k clone is gone), the shared expert's output is added inside the routed combine (`std.ffn.sum@1` hands it to `std.moe@1.add_residual`: one launch less, bitwise the same sum), and `expand` casts and repeats in one copy. **Step-7 fusions instead** (each needs a kernel or contract change): the shared gate as an extra output row of the shared gate / up call (the gate is BF16 while gate / up are quantized, often of two types: ≈ 4 launches with its sigmoid and product), a cat-free SwiGLU for unmerged gate / up, the PLE key / value projections in one GEMM, the indexer q / k in one call with `q_norm` + rope fused; owner FN, with those already listed (§14). N3 now carries the band 16–37 with the measured 34 as its projection point (`launches_34`, `launches_37`; regenerated records): **at 34 launches per layer every decode cell is below its bar** (0.73–0.98 on the RTX 5080, 0.76–0.86 on the 5090), so step 7's ≤ 768 per token (16 per layer) is what the decode rows rest on. The MTP head has its own launch budget in N3: 46 per draft sub-step (the head 39, its output mixer 2, the lm_head 2, the inner embedding 2, the argmax 1), at the band's overhead per launch; it moves the RTX 5090's 32K defaults MTP row to 0.999 central. |
+| C-minor 3 | `fused_index_qk`'s strided views | **Already off by default** (only the MTP pack sets it). The kernels now read the strided k in place (`qsa_index@1` takes strided rows, stated in its contract); q still becomes dense rows at `q_norm` (one copy, in the MTP head's one layer). |
+| A (major) | QSA depends on gqa's private methods | **Done:** `std.mixers.gqa@1` 1.1.0 (additive) documents its composing surface — `heads`, `kv_heads`, `head_dim`, `o_proj`, `kv_layer()`, `project()`, `project_and_write()`, `write_kv()` — and QSA calls only those (the judge's plant and a KV test follow the renames). |
+| A-minor | D7 says `std.moe@1` is not edited | **Updated:** it gains the additive `fused_gate_up` option. |
+| A-minor | HF `arch.Qwen4ExpForConditionalGeneration@1` | **Deferred, recorded:** D1 serves the GGUF files only; the HF checkpoint is the oracle's (D2), so the rules wait for a deployment that serves it. |
+| A-minor | QSA's `ratio` and `budget` defaults | **Done:** both required; the recipe passes them. |
+| A-minor | The MTP head's embedding assumption | **Done:** `drafters.mtp` passes a residual-carrying head the target embed's `inner` (expand's embedding before the repeat), and the head refuses an embedding that is not hidden-size wide. |
+| A-nit | A file without a tokenizer | **Done:** `GGUFSource.tokenizer()` says the file has none and is no model to serve. |
+| B-minor | The speculation test | **Done:** the first j drafts made right and the next wrong, j = 0, 1, 2, 3 in turn, so rows accept 0, 1, 2 and 3 drafts; logprobs within 1e-5 of a run without a drafter (and the tokens HF's). |
+| B-minor | Split shards out of order | **Done:** each shard's `split.no` and `split.count` must match its place in the set (and the first's `split.no` 0); tested by swapping two shards' files. |
+| B-minor | Step 6 and the arena store | **Plan note:** step 6 gives the arena store `fused` for the MTP experts. |
+
+**Found on the real file** (the 4-layer slice, while measuring):
+- **The deployed files store the shared expert's gate as [H]** (the tiny file's converter wrote [1, H]): a `qwen4_exp.row` value transform makes it a row either way. The slice's every tensor maps and loads.
+- **Blocker for step 5, the MoE prefill track's:** `kernels.ggml_cuda` serves matmuls only at `in` a multiple of 256 (`_supports_matmul`, still so on the track's branch), and FN's routed down and the shared expert's down have `in` = 640. The counts above ran with that check relaxed to 128 in a scratch copy; the track's T5 (Q2_0) needs the `in` = 640 case for both `linear_experts@2` and `qlinear@2`, with L0.
+- **Propagation (D16) grows:** step 3 also changes `src` in `std.mixers.gqa`, `std.ffn`, `std.ops` (the `rope@1` text), `std.moe`, `std.spec.mtp_head` and `std.weights.gguf`, which the close's single propagation covers.

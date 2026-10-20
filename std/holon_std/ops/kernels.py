@@ -4,11 +4,12 @@
   trunk's output itself, which a drafter and prompt logprobs read again after it). Facts: dim, eps, offset, dtype.
 - `add_rmsnorm@1`: instance `(x, residual, weight) -> (normed, residual + x)`; may update `x` and `residual` in
   place (callers pass tensors they no longer need). Facts as rmsnorm.
-- `rope@1`: instance `(q [T, Hq, D], k [T, Hk, D], positions [T]) -> (q, k)`, neox (half-split) rotation of the
-  first `rotary_dim` dims; may rotate in place. Facts: head_dim, rotary_dim, theta, max_positions, dtype. An instance
-  may name the table it rotates with, `cos_sin`: a static buffer (`BuildCtx.static`) [max_positions, rotary_dim]
-  float32 holding, per position p, cos(p · θ_i) for i < rotary_dim / 2, then sin(p · θ_i), θ_i = theta^(−2i /
-  rotary_dim) (the reference's angles); fused kernels read it (the unit's `fusion_facts`, docs/m07-perf.md D3).
+- `rope@1`: instance `(q [T, Hq, D], k [T, Hk, D], positions [T]) -> (q, k)`, neox (half-split) rotation of the first
+  `rotary_dim` dims; may rotate in place; Hk may be 0 (only q rotated). Facts: head_dim, rotary_dim, theta,
+  max_positions, dtype. An instance may name the table it rotates with, `cos_sin`: a static buffer (`BuildCtx.static`)
+  [max_positions, rotary_dim] float32 holding, per position p, cos(p · θ_i) for i < rotary_dim / 2, then sin(p · θ_i),
+  θ_i = theta^(−2i / rotary_dim) (the reference's angles); fused kernels read it (the unit's `fusion_facts`,
+  docs/m07-perf.md D3).
 - `qlinear@2`: instance `(x [T, in], parts) -> y [T, out]` with `y = x @ W.T`, `W` the dequantized weight of the
   layout and `parts` its tensors by role, as `QTensor.parts` (`{"blocks": [out, row_bytes] uint8}` for ggml layouts);
   any `T` ≥ 0; `x` of `act_dtype`, `y` of `out_dtype`. Facts: layout (`"<scheme elem>/<layout name>"` as adopted,

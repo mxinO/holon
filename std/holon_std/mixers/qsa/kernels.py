@@ -15,7 +15,8 @@ complete block. Block b of a sequence lives in its page (ratio·b) // page, at (
 padding token, which reads nothing and writes nothing), and `positions` [T] int64, its position in that sequence.
 **Precondition:** each sequence's tokens are consecutive rows of the call, in position order (the batch layout).
 
-- `qsa_index@1`: instance `(k [T, Dk], raw, pooled, table, seq, positions, weight [Dk], cos_sin) -> None`: stores each
+- `qsa_index@1`: instance `(k [T, Dk] (its rows may be strided), raw, pooled, table, seq, positions, weight [Dk],
+  cos_sin) -> None`: stores each
   token's k into `raw` at its position, then, for every token that completes a block (p % ratio = ratio − 1), pools that
   block **from the raw keys as stored after the call** (a position the call stores reads the value it stores; never
   values kept from an earlier step, so a block completed by rejected drafts is rewritten when its positions are

@@ -46,15 +46,21 @@ class GatedSwiGLU(SwiGLU):
 
 
 class Sum(nn.Module):
-    """FFN parts summed (D7): each `parts` Ref built at this layer, their outputs added in order (e.g. routed experts,
-    then a gated shared expert)."""
+    """FFN parts summed (D7): each `parts` Ref built at this layer (e.g. routed experts, then a gated shared expert).
+    The later parts are summed in order, then added to the first part's output — in the first part's own kernel when
+    it has the ffn interface's `add_residual` (std.moe@1: its combine's `add`, one launch less), bitwise the plain add
+    (for two parts, the same sum as before: IEEE addition commutes)."""
 
     def __init__(self, ctx, *, hidden: int, parts: tuple[Ref, ...], layer: int = 0) -> None:
         super().__init__()
         self.parts = nn.ModuleList(ctx.unit(p, hidden=hidden, layer=layer) for p in parts)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.parts[0](x)
-        for part in self.parts[1:]:
-            out = out + part(x)
-        return out
+        first, rest = self.parts[0], self.parts[1:]
+        if not len(rest):
+            return first(x)
+        acc = rest[0](x)
+        for part in rest[1:]:
+            acc = acc + part(x)
+        add = getattr(first, "add_residual", None)
+        return add(x, acc) if add is not None else first(x) + acc

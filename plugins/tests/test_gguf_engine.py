@@ -80,7 +80,8 @@ def test_quantized_parts_say_where_their_bytes_lie_in_the_file(tiny_checkpoint, 
 
 def test_a_split_file_is_one_checkpoint(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
     """A split GGUF (FN D14), opened by its first file: the whole file's name, configuration and tensors, each extent
-    in its own shard; it serves what the whole file serves. A missing shard, or a later shard named, is refused."""
+    in its own shard; it serves what the whole file serves. Refused: a later shard named, shards out of their order
+    (`split.no`), a missing shard."""
     from holon_judge.gguf import shards
     from holon_std.weights.gguf.source import GGUFSource
 
@@ -107,6 +108,11 @@ def test_a_split_file_is_one_checkpoint(tiny_checkpoint, tiny_case, tmp_path):  
     assert _engine(files[0]).generate(prompts, GREEDY) == _engine(whole).generate(prompts, GREEDY)
     with pytest.raises(ValueError, match="by its first"):
         GGUFSource(files[1])
+    files[1].rename(tmp_path / "x")
+    files[2].rename(files[1])
+    (tmp_path / "x").rename(files[2])
+    with pytest.raises(ValueError, match="split.no 2 of .*, not shard 1"):
+        GGUFSource(files[0])
     files[-1].unlink()
     with pytest.raises(ValueError, match="are missing"):
         GGUFSource(files[0])
@@ -150,6 +156,15 @@ def test_nvfp4_tensors_and_nan_mxfp4_scales_are_refused(tiny_checkpoint, tmp_pat
     w.close()
     with pytest.raises(ValueError, match=r"NVFP4 tensors \(blk\.0\.ffn_down\.weight, …\) are not served from GGUF"):
         GGUFSource(file)
+    file = tmp_path / "no-tokenizer.gguf"                              # (and a file without a tokenizer is no model)
+    w = gguf.GGUFWriter(file, "qwen3")
+    w.add_tensor("blk.0.ffn_norm.weight", np.ones(4, np.float32))
+    w.write_header_to_file()
+    w.write_kv_data_to_file()
+    w.write_tensors_to_file()
+    w.close()
+    with pytest.raises(ValueError, match="no tokenizer in this file"):
+        GGUFSource(file).tokenizer()
     file = tmp_path / "mxfp4.gguf"
     write(tiny_checkpoint, file, Q.Q8_0, types={"ffn_down": Q.MXFP4})
     down = next(t for t in reader.read(file)[1] if t.name == "blk.1.ffn_down.weight")

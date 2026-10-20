@@ -52,7 +52,10 @@ class Expand(nn.Module):
         self.inner, self.n = ctx.unit(inner, vocab=vocab, hidden=hidden), n
 
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
-        return self.inner(ids).float().repeat(1, self.n)
+        e = self.inner(ids)
+        r = torch.empty(e.shape[0], self.n * e.shape[1], dtype=torch.float32, device=e.device)
+        r.view(e.shape[0], self.n, e.shape[1]).copy_(e[:, None])          # cast and repeat in one copy
+        return r
 
 
 class GRMix(nn.Module):

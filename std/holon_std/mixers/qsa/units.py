@@ -69,7 +69,7 @@ class QSA(nn.Module):
     @classmethod
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
         attn = _gqa(params)
-        page, ratio, dk = ctx.options.get("page_size", 16), params.get("ratio", 4), params["index_head_dim"]
+        page, ratio, dk = ctx.options.get("page_size", 16), params["ratio"], params["index_head_dim"]
         if page % ratio:
             raise ValueError(f"std.mixers.qsa: page_size {page} must be a multiple of the ratio {ratio}")
         per_layer = page * dk * ctx.dtype.itemsize + page // ratio * dk * 4             # raw keys, pooled f32
@@ -80,13 +80,13 @@ class QSA(nn.Module):
     @classmethod
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Any:
         if specs[0].layout == "qsa.idx":                 # (an aux model's spec names are namespaced)
-            return IndexPlanner(kernels.dense_limit(params.get("budget", 2048), params.get("ratio", 4)))
+            return IndexPlanner(kernels.dense_limit(params["budget"], params["ratio"]))
         attn = _gqa(params)
         return ctx.unit_class(attn).planner(dict(attn.params), specs, ctx)
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads: int, kv_heads: int, head_dim: int, rope: Ref,
-                 index_heads: int, index_head_dim: int, qk_norm: Ref | None = None, output_gate: str = "none",
-                 ratio: int = 4, budget: int = 2048, eps: float = 1e-6, causal: bool = True, window: int = 0,
+                 index_heads: int, index_head_dim: int, ratio: int, budget: int, qk_norm: Ref | None = None,
+                 output_gate: str = "none", eps: float = 1e-6, causal: bool = True, window: int = 0,
                  fused_index_qk: bool = False) -> None:
         super().__init__()
         params = {k: v for k, v in locals().items() if k not in ("self", "ctx", "layer", "hidden", "__class__")}
@@ -133,7 +133,8 @@ class QSA(nn.Module):
                 units[:, raw_bytes:].view(torch.float32).view(-1, page // self.ratio, self.dk))
 
     def _indexer(self, x: torch.Tensor, positions: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """The indexer's queries [T, Hi, Dk] (normed and rotated at their positions) and raw keys [T, Dk]."""
+        """The indexer's queries [T, Hi, Dk] (normed and rotated at their positions) and raw keys [T, Dk] (fused: a
+        strided view of the projection, which `qsa_index@1` reads in place)."""
         t = x.shape[0]
         if hasattr(self, "index_qk_proj"):
             q, k = self.index_qk_proj(x).split([self.hi * self.dk, self.dk], dim=1)
@@ -141,9 +142,9 @@ class QSA(nn.Module):
             q, k = self.index_q_proj(x), self.index_k_proj(x)
         q = q.reshape(t, self.hi, self.dk)
         if self.index_q_norm is not None:
-            q = self.index_q_norm(q.contiguous())
-        q, _ = self.index_rope(q, k.reshape(t, 1, self.dk).clone(), positions)
-        return q, k.contiguous()
+            q = self.index_q_norm(q)
+        q, _ = self.index_rope(q, q.new_empty(t, 0, self.dk), positions)       # q only (rope@1 with no key heads)
+        return q, k
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         if self._idx is None:
@@ -155,8 +156,8 @@ class QSA(nn.Module):
         self._index(ik, raw, pooled, table, meta.seq, dev.positions, self.index_k_norm, self.cos_sin)
         if meta.dense:
             return self.attn(x, ctx)
-        kv = self.attn._kv_layer()
-        q, gate = self.attn._project_and_write(x, ctx, kv)
+        kv = self.attn.kv_layer()
+        q, gate = self.attn.project_and_write(x, ctx, kv)
         blocks = self._select(iq, pooled, table, meta.seq, dev.positions)
         o = self._attend(q, kv, blocks, ctx.meta("kv").pages.table, meta.seq, dev.positions, gate)
         return self.attn.o_proj(o.reshape(x.shape[0], -1))
@@ -173,7 +174,7 @@ class QSA(nn.Module):
         table = torch.arange(rows * pages, dtype=torch.int32, device=x.device).view(rows, pages)
         seq = torch.repeat_interleave(torch.arange(rows, device=x.device), dev.query_start.diff()).to(torch.int32)
         unit, off = table[seq.long(), dev.positions // page].long(), dev.positions % page
-        q, gate, k, v = self.attn._project(x, ctx)
+        q, gate, k, v = self.attn.project(x, ctx)
         kv = x.new_zeros(rows * pages, 2, self.attn.kv_heads, page, self.attn.head_dim)
         kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v
         raw = x.new_zeros(rows * pages, page, self.dk)

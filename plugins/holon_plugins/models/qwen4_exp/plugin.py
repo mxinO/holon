@@ -26,3 +26,4 @@ class Plugin:
         # Value transforms of the weight map (in f32: exact for these values, as models.qwen3_5's)
         regs.transforms.add("qwen4_exp.minus_one", lambda t: t.float() - 1)          # GGUF norms store w + 1
         regs.transforms.add("qwen4_exp.a_log", lambda t: torch.log(-t.float()))      # GGUF stores -exp(A_log)
+        regs.transforms.add("qwen4_exp.row", lambda t: t.reshape(1, -1))              # [H] or [1, H]: a row

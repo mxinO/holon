@@ -4,9 +4,10 @@ model plugin declares as `draft_head("mtp")`, built as the auxiliary model "mtp"
 Pairing (llama.cpp's): the head's row at position p takes the token at p and the target's final-norm hidden of p − 1,
 so every head KV entry depends only on tokens ≤ p and prefix-cached pages share safely. A head whose `carries` is
 "residual" (e.g. `std.spec.mtp_hc_head@1`, FN D9) takes the trunk's residual itself (`ModelSpec.residual`'s width and
-dtype) instead of its final norm, returns its own, and maps it for the `lm_head` by its `out`. The head's weights are
-the target checkpoint's, or with the plugin option `mtp.path` a file of their own (e.g. Strata's MTP pack). After each
-step `run`:
+dtype) instead of its final norm, returns its own, and maps it for the `lm_head` by its `out`; its token embedding is
+the target embed's `inner` when it wraps one (`std.hyper.expand@1`'s, before the repeat into streams). The head's
+weights are the target checkpoint's, or with the plugin option `mtp.path` a file of their own (e.g. Strata's MTP
+pack). After each step `run`:
 
 1. runs the head over every token of the step (its KV), each token paired with its predecessor's hidden — inside the
    step, the previous row; for a row's first token, the hidden carried from the slot's last step if it was the
@@ -41,6 +42,8 @@ class MTPDrafter:
         self.embed, self.norm, self.lm_head = (target.shared(n) for n in ("embed", "norm", "lm_head"))
         self.residual = getattr(head, "carries", "norm") == "residual"
         self.out = head.out if self.residual else (lambda x: x)
+        if self.residual:
+            self.embed = getattr(self.embed, "inner", self.embed)
         r = target.spec.residual
         width, dtype = ((r.width, getattr(torch, r.dtype)) if self.residual and r is not None
                         else (target.spec.hidden, ctx.dtype))

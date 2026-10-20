@@ -46,7 +46,10 @@ class GGUFSource:
             raise ValueError(f"{self.path}: a GGUF weight source reads a .gguf file")
         self._fields, first = reader.read(self.path)
         self.files = shards(self.path, self._fields.get("split.count", 1))
-        self._shards = [(self.path, first)] + [(p, reader.read(p)[1]) for p in self.files[1:]]
+        if len(self.files) > 1 and self._fields.get("split.no") != 0:
+            raise ValueError(f"{self.path}: split.no {self._fields.get('split.no')}, not the first shard its name says")
+        self._shards = [(self.path, first)] + [(p, _shard(p, i, len(self.files))) for i, p in enumerate(self.files)
+                                                if i]
         self._tensors = [t for _, infos in self._shards for t in infos]
         if len(self.files) > 1 and len(self._tensors) != self._fields.get("split.tensors.count"):
             raise ValueError(f"{self.path}: its {len(self.files)} files hold {len(self._tensors)} tensors, not the "
@@ -95,6 +98,9 @@ class GGUFSource:
         from .tokenizer import build
 
         tokens, eos = self._value("tokenizer.ggml.tokens"), self._value("tokenizer.ggml.eos_token_id")
+        if not tokens:
+            raise ValueError(f"{self.path}: no tokenizer in this file (e.g. a draft head's weights): it is not a model "
+                             "to serve")
         return build(tokens, self._value("tokenizer.ggml.merges"), self._value("tokenizer.ggml.token_type"),
                      self._value("tokenizer.ggml.pre"), self._value("tokenizer.chat_template"),
                      None if eos is None else tokens[eos])
@@ -122,6 +128,15 @@ def shards(path: pathlib.Path, count: int) -> list[pathlib.Path]:
     if missing := [f.name for f in files if not f.is_file()]:
         raise ValueError(f"{path}: its split files {missing} are missing")
     return files
+
+
+def _shard(path: pathlib.Path, index: int, count: int) -> list[reader.TensorInfo]:
+    """Shard `index`'s tensors, its own `split.no` and `split.count` checked against its place in the set."""
+    fields, infos = reader.read(path)
+    if (fields.get("split.no"), fields.get("split.count")) != (index, count):
+        raise ValueError(f"{path}: split.no {fields.get('split.no')} of {fields.get('split.count')}, not shard "
+                         f"{index} of {count} as its name says")
+    return infos
 
 
 def _digest(path: pathlib.Path) -> str:

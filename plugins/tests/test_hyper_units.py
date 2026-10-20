@@ -63,7 +63,7 @@ def test_qsa_sparse_path_selecting_every_block_is_the_dense_attention():
     norm = Ref("std.ops.rmsnorm@1", eps=EPS, offset=1.0)
     qsa = ctx.unit(Ref("std.mixers.qsa@1", heads=4, kv_heads=2, head_dim=64, qk_norm=norm, output_gate="sigmoid",
                        rope=Ref("std.ops.rope@1", theta=1e7, rotary_dim=16), index_heads=2, index_head_dim=32,
-                       budget=2048), layer=0, hidden=H)
+                       ratio=4, budget=2048), layer=0, hidden=H)
     _fill(qsa, 5)
     ids = [list(range(1, 41)), list(range(50, 73))]
     step = StepContext.whole_sequences(ids, "cpu")

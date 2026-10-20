@@ -15,15 +15,17 @@ pack, the MTP rows with it; and, for the RTX 5080, step 7's target (≥ 8.2 GB w
 - QSA (the 12 layers' selection and sparse attention): measured per layer in FN's step 4 on the RTX A5000 (real
   indexer inputs, cold caches; `QSA_US`), scaled to the card by ×0.67 [0.55, 0.85]; 0.03 ms dense below 2,052 tokens;
 - launches: the overhead is scaled to 16 launches per layer (step 7's gate, a per-token average: <= 768 per decode
-  token); `launches_22` gives each decode cell at today's layer-weighted projection, `launches_24` at the band's upper
-  end (every layer at the QSA layers' count) (panel C);
+  token); `launches_34` gives each decode cell at the composed count measured in step 3 (a 4-layer slice of the
+  IQ2_XS file, eager, sparse QSA: ≈ 34 per layer, layer-weighted over both files), `launches_37` at the band's upper end
+  (every layer at the QSA layers' count) (panel C, step 3 review);
 - BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B
   lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,
   scaled from X's ~11 to FN's 16 launches per layer).
 
 **Decode, MTP** (per verify pass of 4 rows, 3 drafts): the pass reads the dense bytes once and each distinct expert of
 its 4 tokens once — lfu replayed on 4-token window unions (one decay per pass) — plus 3 draft steps of the MTP head
-(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, one layer's overhead each) and the MTP
+(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, and its own launch budget: 46 launches
+at the band's overhead per launch, measured in step 3) and the MTP
 head over the pass's verify rows (0.275 ms, panel C's 0.25-0.3); a pass
 yields Strata's own recorded accepted tokens per pass in the matched row (the same pack, full head, min-p 0).
 A1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults drafting-off rows; the defaults
@@ -71,9 +73,13 @@ LAYERS, TOPK, GDN_STATE_GB = 48, 10, 36 * 48 * 128 * 128 * 4 * 2 / 1e9
 X_ROWS = {"lfu": {"ms": 1e3 / 119.1672, "miss_mb": 169.7687, "hit": 0.8478},
           "static": {"ms": 1e3 / 83.6541, "miss_mb": 321.0333, "hit": 0.7072}}
 X_DENSE_GB, X_ROUTED, X_EXPERT_MB, X_BW = 1.0, 384, 2.857, 960 * 0.85
-# FN's launches per layer: step 7's gate (a per-token average: <= 768 per decode token), today's layer-weighted
-# projection, and the band's upper end (every layer at the QSA layers' count) (panel C)
-X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_PROJECTED, FN_LAUNCHES_HIGH = 11, 16, 22, 24
+# FN's launches per layer: step 7's gate (a per-token average: <= 768 per decode token), the composed count measured
+# in step 3 (layer-weighted; GDN 32-34, QSA 35-37, PLE's layer +11, embed / output mixer / head 7 per token: 1,640 on
+# IQ2_XS, 1,654 on IQ3_S), and the band's upper end (every layer at the QSA layers' count) (panel C, step 3 review)
+X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_PROJECTED, FN_LAUNCHES_HIGH = 11, 16, 34, 37
+# The MTP head's launches per draft sub-step, measured in step 3: the head 39, its output mixer 2, the shared lm_head
+# 2, the inner embedding 2, the argmax 1
+MTP_LAUNCHES = 46
 # QSA per layer, `qsa_select` + `qsa_attend` (bf16 KV, gated), measured (FN step 4) on real indexer inputs with cold
 # caches on the RTX A5000 (evidence/fn4_qsa_rtx-a5000_2026-10-19.json, fn4_qsa_4k_rtx-a5000_2026-10-19.json) and
 # scaled to the 50-series by QSA_SCALE (central, low, high: their clocks and bandwidth; panel C ×≈0.67); by (context,
@@ -81,10 +87,11 @@ X_LAUNCHES, FN_LAUNCHES, FN_LAUNCHES_PROJECTED, FN_LAUNCHES_HIGH = 11, 16, 22, 2
 QSA_LAYERS, QSA_US = 12, {(4096, 1): 23.43 + 18.22, (4096, 4): 22.15 + 34.50,
                           (32768, 1): 25.34 + 18.68, (32768, 4): 28.81 + 37.12}
 QSA_SCALE = {"central": 0.67, "low": 0.85, "high": 0.55}
-# per band: the overhead factor, the QSA band and FN's launches per layer ("launches_22": today's projection,
-# "launches_24": the band's upper end)
+# per band: the overhead factor, the QSA band and FN's launches per layer ("launches_34": the measured count,
+# "launches_37": the band's upper end)
 BANDS = (("central", 1.0, "central", FN_LAUNCHES), ("low", 1.3, "low", FN_LAUNCHES), ("high", 0.7, "high", FN_LAUNCHES),
-         ("launches_22", 1.0, "central", FN_LAUNCHES_PROJECTED), ("launches_24", 1.0, "central", FN_LAUNCHES_HIGH))
+         (f"launches_{FN_LAUNCHES_PROJECTED}", 1.0, "central", FN_LAUNCHES_PROJECTED),
+         (f"launches_{FN_LAUNCHES_HIGH}", 1.0, "central", FN_LAUNCHES_HIGH))
 # Holon's cost per Strata prefill phase (central, low, high)
 F = {"hc read": (1.5, 1.0, 2.0), "gdn": (1.1, 0.9, 1.5), "gdn conv+gates": (1.1, 0.9, 1.5),
      "gdn recurrence": (1.1, 0.9, 1.5), "gdn out proj": (1.0, 1.0, 1.0), "qsa attn": (1.2, 1.0, 1.6),
@@ -144,13 +151,16 @@ def routed_share(trace: str, profile: str, slots: int, window: int) -> float:
     return statistics.mean(shares)
 
 
-def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, context: int, scale: float) -> float:
-    """A verify pass of WINDOW rows (`union` distinct experts per layer, `hit` of them resident), and its drafts."""
+def mtp_pass_ms(card: dict, hit: float, union: float, pcie: float, over: float, context: int, scale: float,
+                launches: int) -> float:
+    """A verify pass of WINDOW rows (`union` distinct experts per layer, `hit` of them resident), and its drafts (each
+    the head's MTP_LAUNCHES at the pass's overhead per launch, `over` being `launches` per layer's)."""
     experts = LAYERS * union * card["expert_mb"] / 1e3
     qsa = qsa_ms(context, WINDOW, scale)
     verify = ((card["dense_gb"] + GDN_STATE_GB + hit * experts) / card["bw"] * 1e3 + (1 - hit) * experts * 1e3 / pcie
               + over + qsa)
-    draft = (MTP_DENSE_GB + card["head_gb"] + TOPK * MTP_EXPERT_MB / 1e3) / card["bw"] * 1e3 + over / LAYERS
+    draft = ((MTP_DENSE_GB + card["head_gb"] + TOPK * MTP_EXPERT_MB / 1e3) / card["bw"] * 1e3
+             + over * MTP_LAUNCHES / (LAYERS * launches))
     return verify + DRAFTS * draft + MTP_HEAD_MS
 
 
@@ -190,7 +200,7 @@ def main() -> None:
 
         def mtp_tps(hit: str, k: float, q: str, n: int, c: int = c, accepted: float = accepted) -> float:
             return accepted * 1e3 / mtp_pass_ms(card, hits[hit], union, pcie, over * k * n / FN_LAUNCHES, c,
-                                                QSA_SCALE[q])
+                                                QSA_SCALE[q], n)
         dec = {w: dec_tps("off", k, q, n) for w, k, q, n in BANDS}
         mtp = {w: mtp_tps("mtp", k, q, n) for w, k, q, n in BANDS}
         pf = {w: statistics.median(factor(p, i) for p in ph[c]) for w, i in (("central", 0), ("low", 2), ("high", 1))}

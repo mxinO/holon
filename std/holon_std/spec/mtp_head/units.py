@@ -53,7 +53,8 @@ class MTPHCHead(nn.Module):
         logits = the target's lm_head(out(R))                   `out`: the head's output mixer; R is also what the
                                                                 next chained step takes (`carries`)
 
-    `e` is the target's embedding: the first H columns of what its embed returns (`std.hyper.expand@1` repeats e)."""
+    `e` [T, H] is the target's token embedding (`drafters.mtp` passes the inner embedding of the target's
+    `std.hyper.expand@1`); another width fails."""
 
     carries = "residual"
 
@@ -69,10 +70,13 @@ class MTPHCHead(nn.Module):
         self.out = ctx.unit(out, dim=hidden)
 
     def forward(self, embedded: torch.Tensor, r: torch.Tensor, ctx) -> torch.Tensor:
-        """`embedded` [T, ≥ H] (the target's embed of each token), `r` [T, n·H] (R of each token's predecessor) →
-        the head's R [T, n·H] float32, before its output mixer."""
+        """`embedded` [T, H] (the target's token embedding), `r` [T, n·H] (R of each token's predecessor) → the head's
+        R [T, n·H] float32, before its output mixer."""
         t, h = r.shape[0], self.hidden
-        e = self.fc_embedding(self.enorm(embedded[:, :h].to(self.dtype)))
+        if embedded.shape[1] != h:
+            raise ValueError(f"std.spec.mtp_hc_head: the token embedding is {embedded.shape[1]} wide, not the hidden "
+                             f"size {h} (a target embed that expands into streams: pass its inner embedding)")
+        e = self.fc_embedding(self.enorm(embedded.to(self.dtype)))
         g = self.fc_hidden(self.hnorm(r.to(self.dtype)).view(t * self.n, h)).view(t, self.n, h)
         x = (g.float() + e.float()[:, None]).view(t, self.n * h)
         for layer in self.layers:

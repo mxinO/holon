@@ -123,6 +123,12 @@ class GQA(nn.Module):
     With engine state, the q/k norms, the rotation and the KV write run as one `attention.qk_rope_kv@1` kernel on every
     step (docs/m07-perf.md D3) when the norm and rope units answer `fusion_facts()` and the KV writer's spec offers it
     (`config["fused"]`); otherwise, and in a model-only build, as the units' composition.
+
+    **The surface a composing unit may use** (e.g. `std.mixers.qsa@1`, which holds a GQA built by Ref and attends with
+    kernels of its own; stable within a major): `heads`, `kv_heads`, `head_dim`; `o_proj` (the output projection
+    unit); `kv_layer()` (this layer's pages, engine builds); `project(x, ctx)` → (q [T, heads, D] normed and rotated,
+    the output gate [T, heads, D] or None, k, v [T, kv_heads, D]); `project_and_write(x, ctx, kv)` → (q, gate), the
+    keys and values written at the step's positions; `write_kv(x, ctx)`. Everything else is private.
     """
 
     @staticmethod
@@ -206,7 +212,7 @@ class GQA(nn.Module):
         facts = facts | {"heads": self.heads, "gated": self.gated} | norm | rope
         return ctx.select_kernel(kernels.QK_ROPE_KV, site=f"std.mixers.gqa[layer={layer}]", **facts).impl(ctx, **facts)
 
-    def _kv_layer(self):
+    def kv_layer(self):
         """This layer's pages as its layout's kernels read them (kernels.py): a tensor, or q8_0's (values, scales)."""
         pool, index, n_layers, page, dtype, layout = self._kv
         shape = (pool.capacity, 2, self.kv_heads, page, self.head_dim)
@@ -244,7 +250,7 @@ class GQA(nn.Module):
     def _gate(self, q: torch.Tensor) -> torch.Tensor | None:
         return q[..., self.head_dim:] if self.gated else None
 
-    def _project(self, x: torch.Tensor, ctx) -> tuple[torch.Tensor, ...]:
+    def project(self, x: torch.Tensor, ctx) -> tuple[torch.Tensor, ...]:
         """q, the output gate (or None), k and v of `x`, normed and rotated at the step's positions."""
         q, k, v = self._projections(x)
         q, gate = q[..., :self.head_dim], self._gate(q)
@@ -255,12 +261,12 @@ class GQA(nn.Module):
         q, k = self.rope(q, k, ctx.batch.dev.positions)
         return q, gate, k, v
 
-    def _project_and_write(self, x: torch.Tensor, ctx, kv) -> tuple[torch.Tensor, torch.Tensor | None]:
+    def project_and_write(self, x: torch.Tensor, ctx, kv) -> tuple[torch.Tensor, torch.Tensor | None]:
         """q normed and rotated and the output gate (or None) of `x`; its keys and values written at the step's
         positions — by the fused kernel (D3), else by the composition and `kv_write@1`."""
         meta = ctx.meta("kv")
         if self._fused is None:
-            q, gate, k, v = self._project(x, ctx)
+            q, gate, k, v = self.project(x, ctx)
             self._write(k, v, kv, meta.write_unit, meta.write_off)
             return q, gate
         q, k, v = self._projections(x)
@@ -270,16 +276,16 @@ class GQA(nn.Module):
     def write_kv(self, x: torch.Tensor, ctx) -> None:
         """Write the keys and values of `x` at the step's positions without attending: a drafter's context from
         another model's features (engine builds)."""
-        self._project_and_write(x, ctx, self._kv_layer())
+        self.project_and_write(x, ctx, self.kv_layer())
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         t = x.shape[0]
         if self._kv is None:
-            q, gate, k, v = self._project(x, ctx)
+            q, gate, k, v = self.project(x, ctx)
             o = self._causal(q, k, v, ctx.batch.dev.query_start)
         else:
-            meta, kv = ctx.meta("kv"), self._kv_layer()
-            q, gate = self._project_and_write(x, ctx, kv)
+            meta, kv = ctx.meta("kv"), self.kv_layer()
+            q, gate = self.project_and_write(x, ctx, kv)
             o = meta.kernel.run(q, kv, meta.handle)
         o = o.reshape(t, self.heads, self.head_dim)
         if gate is not None:

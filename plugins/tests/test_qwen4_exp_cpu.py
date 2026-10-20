@@ -13,8 +13,9 @@ prefilled one-shot and in chunks of 7, 10 and 13 tokens, and as its 100-token pr
   of a run without the prefix cache.
 - MTP (D9): the head loaded from the tiny Strata-format pack (`drafters.mtp` with `mtp.path`): its output-mixer x
   within 1e-4 of the judge's pooled reference over the pack's own tensors (the fixture's `mtp_x`), one-shot and in
-  chunks of 13 (the carried R); greedy speculation emits HF's tokens, its drafts replaced by the right ones on
-  alternate steps (a random head is rarely right), so verify rows accept 0 … 3 drafts and GDN, PLE and QSA rewind.
+  chunks of 13 (the carried R); greedy speculation emits HF's tokens and, within 1e-5, the logprobs of a run without a
+  drafter, its drafts replaced so that the first j are right and the next wrong, j = 0 … 3 in turn (a random head is
+  rarely right): verify rows accept 0, 1, 2 and 3 drafts, and GDN, PLE and QSA rewind.
   `drafters.dflash` refuses the target (its residual is not hidden-size).
 - Plants that must fail: `qsa_dense_limit_off_by_one` (a 20-token step runs dense), `ple_conv_dilation_1`,
   `ple_eos_cut_off`.
@@ -168,19 +169,28 @@ def test_the_mtp_head_matches_the_pooled_reference(tiny, chunk):
     drafter, steps = engine.executor.drafter, [0]
     run = drafter.run
 
-    def right_on_alternate_steps(ctx, h):
+    def right_for_j(ctx, h):                  # the first j drafts right and the next one wrong, j = 0, 1, 2, 3 in turn
         run(ctx, h)
         table, dev, k = ctx.seq_table, ctx.batch.dev, ctx.batch.plan.draft_k
-        steps[0] += 1
-        if k and len(dev.logits_rows) and steps[0] % 2:
+        if k and len(dev.logits_rows):
+            j, steps[0] = steps[0] % (k + 1), steps[0] + 1
             slot, p = int(dev.slots[0]), int(table.num_computed[dev.slots[0]])
             right = ids[p + 1: p + 1 + k]
-            table.draft_tokens[slot, : len(right)] = torch.tensor(right)
-    drafter.run = right_on_alternate_steps
-    assert _ask(engine, ids[: q.PROMPT], DECODE)[0] == ids[q.PROMPT:]                   # lossless
+            drafts = right[:j] + [(t + 1) % engine.spec.vocab for t in right[j:]]
+            table.draft_tokens[slot, : len(drafts)] = torch.tensor(drafts)
+    drafter.run = right_for_j
+    params = SamplingParams(temperature=0.0, max_tokens=q.DECODE, ignore_eos=True, logprobs=1)
+    plain = _engine(path, chunk)
+    (tokens, lps), (want, want_lps) = (_flat(_decode(e, ids[: q.PROMPT], params)) for e in (engine, plain))
+    assert tokens == want == ids[q.PROMPT:]                                              # lossless
+    assert (torch.tensor(lps) - torch.tensor(want_lps)).abs().max() <= 1e-5             # vs no drafter
     stats = engine.stats()
-    assert stats["spec_rows_k3_accepting_0"] > 0 and stats["spec_rows_k3_accepting_3"] > 0
+    assert all(stats[f"spec_rows_k3_accepting_{n}"] > 0 for n in range(4)), stats
     engine.close()
+
+
+def _flat(deltas: list) -> tuple[list, list]:
+    return [t for ts, _ in deltas for t in ts], [x for _, xs in deltas for x in xs]
 
 
 def test_dflash_refuses_a_wide_residual(tiny, tmp_path):

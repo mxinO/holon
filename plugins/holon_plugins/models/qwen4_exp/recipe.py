@@ -8,7 +8,9 @@ D4) is the block's `pre` at its layer, its state on GDN's 64-token grid.
 
 GGUF only (D1: the deployed files). llama.cpp's converter writes every zero-centred norm as w + 1 in f32 (the HC,
 PLE, indexer and q / k norms; not GDN's gated norm) and `ssm_a = −exp(A_log)`, both undone by value transforms
-(`plugin.py`), and orders GDN's value heads tiled. The MTP block (`blk.<n>` after the trunk's n) is skipped here.
+(`plugin.py`), and orders GDN's value heads tiled. The shared expert's gate is [H] in the deployed files and [1, H]
+in the tiny one (converter versions differ): a row either way (`qwen4_exp.row`). The MTP block (`blk.<n>` after the
+trunk's n) is skipped here.
 
 `draft_head("mtp")` (D9) is `std.spec.mtp_hc_head@1` over one QSA + MoE + shared-expert layer, its weights mapped
 from Strata's MTP pack (`mtp-q2_0.gguf`, the drafter's `mtp.path`): HF names under `mtp.`, norms stored as w, the
@@ -48,7 +50,7 @@ RULES = (
       for g in ("gate", "up", "down")),
     *(WeightRule(f"blk.{{i}}.ffn_{g}_shexp.weight", f"layers.{{i}}.ffn.parts.1.{g}_proj.weight")
       for g in ("gate", "up", "down")),
-    WeightRule("blk.{i}.ffn_gate_inp_shexp.weight", "layers.{i}.ffn.parts.1.gate.weight"),
+    WeightRule("blk.{i}.ffn_gate_inp_shexp.weight", "layers.{i}.ffn.parts.1.gate.weight", "qwen4_exp.row"),
     WeightRule("blk.{i}.ple_key.weight", "layers.{i}.pre.key_proj.weight"),
     WeightRule("blk.{i}.ple_value.weight", "layers.{i}.pre.value_proj.weight"),
     *(WeightRule(f"blk.{{i}}.ple_norm_{g}.weight", f"layers.{{i}}.pre.norm_{g}", MINUS)
