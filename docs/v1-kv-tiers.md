@@ -1457,6 +1457,86 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### Close (2026-10-20)
+
+**History.** `main`'s history was rewritten on 2026-10-20 (merge messages neutralised, trees identical); the old → new
+SHA map is kept with the maintainers. This document still cites the old SHAs. K was replanted onto the rewritten
+`main` (`a379614`, its tree identical to the old `21ec123`), and `v1-kv-tiers-api` re-signed on `ec8c487` (the old
+`b596ba7`).
+
+**Merge.** `main` with MoE prefill (`f974b21`) merged into K (`c6c87ac`, signed, a neutral message). Two add/add
+conflicts: MoE prefill's propagation wrote the 27B histories' `rtx-5080/11.lock` and `rtx-5090/6.lock`, the numbers
+K's step-4 tier locks had taken. `main`'s were kept; K's tier locks are written again by the propagation below as
+`rtx-5080/12.lock` and `rtx-5090/7.lock` (their step-4 texts and checks stay in `evidence/k4_locks_2026-10-19.json`).
+No core file differs between the two sides' bases and `main`: core stays +337 over `b5b1e7f`. The full suite after
+the merge: 1713 passed, 66 skipped.
+
+**CI addition.** `scripts/ci/check_commit_messages.py`, run by `run_all.sh`: every commit subject and body in
+`base..HEAD` against `check_private.py`'s patterns and the untracked `.private-patterns`, which also holds the user
+branch prefix (the prefix itself stays out of tracked files, so the script reads it from there). It passes on K's
+branch; on a commit whose message carried the prefix it fails.
+
+**The single propagation (D14)** (`evidence/k6_close_propagation_2026-10-20.json`). `python -m holon_tools impact
+main..HEAD` lists all 23 lock histories (every lock pins the core). Class by class on its desktop, `holon_tools
+propagate --approve` at each lock's own `[engine]` (L2 against its floor, the trace, the lock written only on a
+passing verdict), then snapshots ×3 at the new lock; approval delegated as at X's and MoE prefill's closes. The 27B
+agent histories take the tier (acceptance 6), at K's step-4 settings and tuned clocks; the offload lock and the tier
+locks run with `--host-memory 21474836480` (a deployment's, not in the lock).
+
+| Class | Lock | Trace | L2 top-1 / floor / budget | KL p99 / budget | ΔPPL vs floor / budget | Approved | ×3 |
+|---|---|---|---|---|---|---|---|
+| rtx-5080 | Qwen3.8-27B UD-IQ3_S, with the tier (11 → 12) | identical | 97.519 / 97.540 / ≥ 97.290 | 0.591 / 1.42 | +0.111% ± 0.331% / 1.078% | yes | yes |
+| rtx-5080 | Qwen3-30B-A3B Q4_K_M (natural-fit offload) (3 → 4) | identical | 98.368 / 98.219 / ≥ 97.969 | 0.0552 / 0.118 | -0.084% ± 0.105% / 0.512% | yes | yes |
+| rtx-5080 | Qwen3-30B-A3B UD-IQ3_XXS (11 → 12) | identical | 98.463 / 98.331 / ≥ 98.081 | 0.056 / 0.119 | -0.141% ± 0.126% / 0.566% | yes | yes |
+| rtx-5080 | Qwen3-8B FP8 (5 → 6) | identical | 98.142 / 98.173 / ≥ 97.923 | 0.0426 / 0.0837 | -0.066% ± 0.127% / 0.516% | yes | yes |
+| rtx-5080 | Qwen3-8B NVFP4 (8 → 9) | identical | 98.746 / 98.691 / ≥ 98.441 | 0.0128 / 0.0249 | -0.121% ± 0.048% / 0.359% | yes | yes |
+| rtx-5080 | Qwen3-8B Q4_K_M (13 → 14) | identical | 98.496 / 98.356 / ≥ 98.106 | 0.0362 / 0.0717 | -0.115% ± 0.134% / 0.586% | yes | yes |
+| rtx-5080 | Qwen3-8B UD-IQ3_XXS (13 → 14) | identical | 98.929 / 98.871 / ≥ 98.621 | 0.013 / 0.0306 | +0.037% ± 0.088% / 0.471% | yes | yes |
+| rtx-4090 | Qwen3.8-27B UD-Q4_K_M (11 → 12) | identical | 97.306 / 96.947 / ≥ 96.697 | 0.759 / 1.3 | -0.661% ± 0.960% / 2.650% | yes | yes |
+| rtx-4090 | Qwen3-30B-A3B MXFP4_MOE (7 → 8) | identical | 98.447 / 98.469 / ≥ 98.219 | 0.0261 / 0.0563 | -0.059% ± 0.078% / 0.446% | yes | yes |
+| rtx-4090 | Qwen3-30B-A3B NVFP4 (8 → 9) | identical | 98.310 / 98.359 / ≥ 98.109 | 0.05 / 0.0984 | +0.166% ± 0.107% / 0.503% | yes | yes |
+| rtx-4090 | Qwen3-30B-A3B Q4_K_M (12 → 13) | identical | 98.246 / 98.219 / ≥ 97.969 | 0.0619 / 0.118 | +0.091% ± 0.105% / 0.513% | yes | yes |
+| rtx-4090 | Qwen3-8B bf16 (16 → 17) | identical | 98.990 / 98.929 / ≥ 98.679 | 0.0047 / 0.0115 | -0.076% ± 0.037% / 0.343% | yes | yes |
+| rtx-4090 | Qwen3-8B FP8 (5 → 6) | identical | 98.194 / 98.173 / ≥ 97.923 | 0.0417 / 0.0837 | -0.127% ± 0.092% / 0.481% | yes | yes |
+| rtx-4090 | Qwen3-8B NVFP4 (8 → 9) | identical | 98.768 / 98.691 / ≥ 98.441 | 0.0124 / 0.0249 | -0.059% ± 0.056% / 0.359% | yes | yes |
+| rtx-4090 | Qwen3-8B Q4_K_M (5 → 6) | identical | 98.511 / 98.356 / ≥ 98.106 | 0.0338 / 0.0717 | -0.089% ± 0.121% / 0.553% | yes | yes |
+| rtx-5090 | Qwen3.8-27B UD-Q4_K_M, with the tier (6 → 7) | identical | 96.914 / 96.947 / ≥ 96.697 | 0.789 / 1.3 | -0.038% ± 0.493% / 1.483% | yes | yes |
+| rtx-5090 | Qwen3-30B-A3B Q4_K_M (5 → 6) | identical | 98.331 / 98.219 / ≥ 97.969 | 0.0548 / 0.118 | +0.022% ± 0.100% / 0.500% | yes | yes |
+| rtx-5090 | Qwen3-8B bf16 (10 → 11) | identical | 98.929 / 98.929 / ≥ 98.679 | 0.00479 / 0.0115 | -0.047% ± 0.041% / 0.353% | yes | yes |
+| rtx-5090 | Qwen3-8B Q4_K_M (5 → 6) | identical | 98.414 / 98.356 / ≥ 98.106 | 0.0376 / 0.0717 | -0.092% ± 0.110% / 0.526% | yes | yes |
+| rtx-3090 | Qwen3.8-27B UD-Q4_K_M (7 → 8) | moved | 97.249 / 96.947 / ≥ 96.697 | 0.72 / 1.3 | -1.314% ± 0.901% / 2.503% | yes | yes |
+| rtx-3090 | Qwen3-30B-A3B Q4_K_M (5 → 6) | identical | 98.200 / 98.219 / ≥ 97.969 | 0.062 / 0.118 | +0.015% ± 0.103% / 0.506% | yes | yes |
+| rtx-3090 | Qwen3-8B bf16 (4 → 5) | identical | 98.954 / 98.929 / ≥ 98.679 | 0.00465 / 0.0115 | -0.027% ± 0.031% / 0.328% | yes | yes |
+| rtx-3090 | Qwen3-8B Q4_K_M (5 → 6) | identical | 98.490 / 98.356 / ≥ 98.106 | 0.037 / 0.0717 | -0.092% ± 0.115% / 0.537% | yes | yes |
+
+**23 of 23 approved (delegated), none escalated**; `scripts/ci/check_locks.py --release`: green (newest locks pin
+this tree). 22 traces byte-identical to their predecessors'; the RTX 3090's 27B returns to the trace its locks 3–6
+recorded (one step's deltas differ from lock 7's): this history alternates between those two recorded traces by
+desktop (lock 6, X's close, and lock 8 were taken on the same desktop), each run-identical ×3. With tiers off no
+trace moved by K.
+- **The first RTX 3090 desktop lost its GPU mid-run** (a launch failure, then no device), as one RTX 5090 desktop did in
+  step 4; its three remaining histories were rerun on another RTX 3090 desktop and passed.
+- **The RTX 5080 tier lock's L2 engine** (the process's second engine) measured 3.009 GiB for its state, below staging 5
+  beside the 49,152-token paged floor, and the start was refused (K's required `recurrent.checkpoints`, where the old
+  pool fell to 0 units silently). It was rerun with `--state-memory 3341516800` (the first engine's budget, K step 4's
+  measurement; unplanned, not in the lock). Served, the lock's engine is the process's first (3.34 GB): its staging
+  margin is ≈ 90 MB, and a card with less free memory is now refused at start instead of serving without checkpoints.
+
+**Suite and CI on the final tree:** `pytest core std plugins judge testing tools`: 1713 passed, 66 skipped (one RTX
+A5000); `run_all.sh main`: every check ok (ABI 1.4 listing, the commit messages, the locks), ruff clean, import
+contracts 8 kept.
+
+**Acceptance (docs/v1-kv-tiers.md §1):**
+
+| # | Item | Status | Where |
+|---|---|---|---|
+| 1 | Strategies are plugins | **met** | `std.state_tier` (host level, SSD level, the clock), the `branch` / `answer` policies, `evict.root_pin`; held out after the tag, plugin-only: `state_tiers.zlib` and `policies.last_turn`; the proof's finding (`SeqView.matched`) added inside ABI 1.4 (the owner) |
+| 2 | Exactness | **met** | tier invariance and run-identity (Qwen3-8B on the A5000, host and SSD; the 27B pair on the RTX 5090); the null test; the policies' bounded checks (A5000, RTX 5090, RTX 5080 at 16 sessions); the plants (steps 2–4); the restart check |
+| 3 | Development gate | **met, 3a's SSD cells beside decoders by the owner's option 2** | the bar table ("Step 4"): 3a idle, 3b, 3c, 3d (the sized reference), 3e, 3f, 3h pass; 3a's SSD beside decoders missed at 16K / 32K on the default rates and passes post-hoc on the host's tuned rates ("Owner decisions"); 3b-SSD and 3i reported; 3g reported (26.1% against ≤ 10% predicted, "3g") |
+| 4 | Memory | **met** | exact host pools after the final materialize; `host.bytes` pinned by the tier locks; attach refuses a host level below its floors, a staging pool below `max_seqs` + 1 (a floor, not a guarantee against drops), and names `--host-memory` when refused host memory; a set `recurrent.checkpoints` required at start; the SSD level refuses a directory without its bytes; `dropped_publishes` 0 on `agent_park` |
+| 5 | Core | **met at the owner's cap** | KS1–KS5 and `SeqView.matched` in ABI 1.4; **+337** code lines over `b5b1e7f` (the owner, 2026-10-20); the `could_fit` / eviction property test; tiers-off snapshots byte-identical (above) |
+| 6 | Locks | **met** | the 27B agent locks with the tier: `rtx-5080/12.lock` and `rtx-5090/7.lock` (bounded checks at step 4 and its follow-ups); every other history propagated once (above) |
+
 ### 3g (2026-10-20, report): the pi agent test with the tier
 
 The pi agent test re-run on an RTX 5090 desktop as K-M1 ran it: demo ×3 and workloads ×2, pi 0.73.1 with the
@@ -1481,7 +1561,7 @@ long ones), most of the 12,738; the 48 verbatim ones leave only their tails past
 re-rendered those four differently (K-M1 saw none) is not established from positions alone (the record keeps no text);
 it is pi's rendering of its history, not the tier's. Report only: 3g is not gated.
 
-### Close (prepared 2026-10-20; held for MoE prefill's merge)
+### Close (prepared 2026-10-20; held for MoE prefill's merge, then done: "Close (2026-10-20)")
 
 What the close still does, in order, when the lead relays that `main` has MoE prefill:
 1. Rebase K onto the new `main` as the lead specifies (`--rebase-merges --onto <new main> b5b1e7f`, signed, a recorded
