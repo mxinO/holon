@@ -49,9 +49,10 @@ def main() -> None:
         for k in range(3):
             start = (k * (n // 6) + c * (n // 18)) % n
             engine.generate([offload_ctx.span(corpus, start, context)], params)
+    layers = len(engine.executor.model.layers)
     engine.close()
     np.concatenate(records).tofile(a.out)
-    print(f"{len(records) // len(engine.executor.model.layers)} decode tokens -> {a.out}")
+    print(f"{len(records) // layers} decode tokens -> {a.out}")
 
 
 if __name__ == "__main__":

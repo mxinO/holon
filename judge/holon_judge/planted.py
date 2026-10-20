@@ -182,7 +182,8 @@ def hc_inject_unscaled() -> Iterator[None]:
 @contextlib.contextmanager
 def ple_gate_no_sqrt() -> Iterator[None]:
     """PLE (§6.3): its gate σ(u) without the signed √: the unit's `qwen4_exp.ple_block@1` instance replaced by the
-    oracle (torch, on the unit's device) with that gate. Reports how often it fired."""
+    oracle (torch, on the unit's device) with that gate, in eager steps (L2's); graph captures keep the kernel.
+    Reports how often it fired."""
     from holon_plugins.models.qwen4_exp import reference, units
 
     init, fired = units.PLE.__init__, collections.Counter()
@@ -190,9 +191,12 @@ def ple_gate_no_sqrt() -> Iterator[None]:
     def planted(self, ctx, **params):
         init(self, ctx, **params)
         streams, eps, dilation = self.n, self.eps, self.window // (params.get("kernel", 4) - 1)
+        kernel = self._block
 
         def block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init):
-            fired[_when()] += 1
+            if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+                return kernel(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init)
+            fired["eager"] += 1                        # (the oracle syncs: graph captures keep the kernel)
             return reference.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start,
                                        has_init, streams, dilation, eps)
         self._block = block
