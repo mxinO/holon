@@ -166,7 +166,8 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    - `check_abi --base` and the line check are relative to **K's step-1 base**: the main-branch commit K's seams
      rebase onto, after FN's seams if FN lands first.
    - **At most +320 code lines over that base** (§4 itemizes ≈ 292; rev 2 had ≤ +300 for ≈ 285). Rev 8.2: the lead
-     raised it to +326 for the two frozen slot factories (the owner told); step 1 is at +326.
+     raised it to +326 for the two frozen slot factories (the owner told); step 1 is at +326. The owner (2026-10-20)
+     raised it to +337 for the step-5 panel's two post-tag core follow-ups (`branch_at` kept, `SeqView.matched`).
    - A property test shows that `could_fit` and eviction agree under random traffic with demotions, promotions, loads
      and tier drops.
    - With tiers off, every existing lock's snapshot stays byte-identical.
@@ -1456,6 +1457,63 @@ the restart check pass as before (7,402 level reads; 338 blocks restored, none a
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
+### Close (prepared 2026-10-20; held for MoE prefill's merge)
+
+What the close still does, in order, when the lead relays that `main` has MoE prefill:
+1. Rebase K onto the new `main` as the lead specifies (`--rebase-merges --onto <new main> b5b1e7f`, signed, a recorded
+   SHA map; `main` was rewritten to `d659b2b` with identical trees), resolve, and recreate `v1-kv-tiers-api` on the
+   rebased tag commit. K neither merges nor rebases `main` before then.
+2. Re-run `python -m holon_tools impact <new main>..HEAD`: the 23 histories listed in "Step 5" plus MoE prefill's
+   locks, which pin the new `main`'s core and so are outdated by K's core change too.
+3. The single propagation (D14) of every history it lists, each with L2 against its golden and floor and the snapshot
+   ×3, `--approve` under the delegation; the two 27B tier locks (rtx-5080 11, rtx-5090 6) are among them, carried to
+   the post-tag follow-ups.
+4. The full CI suite and `run_all.sh` on the rebased tree; the panel's code review.
+
+Acceptance at this point (before the rebase):
+
+| # | Status | Where |
+|---|---|---|
+| 1 Strategies are plugins | met | `std.state_tier` with the SSD level, the `branch` / `answer` policies, `evict.root_pin`; held out after the tag: `state_tiers.zlib` and `policies.last_turn`, plugin-only; the proof's finding (`SeqView.matched`) added inside ABI 1.4 (the owner) |
+| 2 Exactness | met | tier invariance and run-identity on the A5000 (Qwen3-8B, host and SSD) and the RTX 5090 (the 27B pair); the null test; the policies' bounded checks; the plants (steps 2–4) |
+| 3 Development gate | met with option 2 for 3a's SSD cells beside decoders | the bar table ("Step 4"), 3d on the sized reference, 3a post-hoc ("Owner decisions"); 3g (the pi agent re-run, report only) was not in step 4's list and is not run |
+| 4 Memory | met | host pools exact (S2, `mmap` + `cudaHostRegister`); `host.bytes` pinned by the tier locks; attach refuses a host level below its floors, a staging pool below `max_seqs` + 1, and names `--host-memory` when refused host memory; the SSD level refuses a directory without its bytes; `dropped_publishes` 0 on `agent_park` at staging 5 |
+| 5 Core | met at the owner's cap | KS1–KS5 in ABI 1.4; **+337** code lines over `b5b1e7f` (the owner, 2026-10-20); the `could_fit` / eviction property test (`core/tests/test_state_liveness.py`); tiers-off snapshots byte-identical where re-checked (the two tier locks' tunes), all histories at the propagation |
+| 6 Locks | the 27B tier locks met; the rest at the close | rtx-5080 11 and rtx-5090 6 after their bounded checks ("Step 4" and its follow-ups); every other history in step 3 above |
+
+### Owner decisions (2026-10-20)
+
+On the lead's recommendations:
+1. **Core cap raised to +337** code lines over `b5b1e7f`: `39abbcb` (`branch_at` kept, +5) and `e1ae0f7`
+   (`SeqView.matched`, +6) both stay in K, at ABI 1.4. FN keeps 1.5 (D14's order is unchanged).
+2. **3a's SSD cells beside decoders (16K by 1.0%, 32K by 1.7% over their bars): option 2.** Rerun 3a, all three
+   lengths beside decoders and the idle cells, on lock 11 (its tuned clock) with this host's tuned SSD rates from
+   `tune --ssd-rates`, labelled post-hoc, the original miss kept beside it; if it still misses, stop and report.
+   Result: below ("3a post-hoc, the host's tuned rates").
+
+Then the close is prepared and the propagation round held: MoE prefill merges to `main` first; K then merges or
+rebases `main`, resolves, and runs the single propagation of every lock history K outdates against the new `main`.
+
+**3a post-hoc, the host's tuned rates** (the owner's option 2; **post-hoc**: run after the miss and its cause were
+known). Lock 11 (its tuned clock) with the RTX 5080 desktop's rates from `tune --ssd-rates`' sustained run: read 2.197
+GB/s, write 2.262 GB/s, mixed 0.857, `read_beside` 0.872 (as `state_tier.ssd.*` options); the bench as changed after
+the miss (the loop steps the decoders while parking); clock screen before it 2,715 / 2,722 MHz, steady
+(`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `owner_option_2_post_hoc`):
+
+| 3a, SSD arm | post-hoc (bar) | gated steps | the miss it follows (default rates) |
+|---|---|---|---|
+| beside, 4K | **345.8** (359.3) | 8–9 | 345.4 (359.1), 9 |
+| beside, 16K | **632.1** (645.9): pass by 2.1% | 18–21 | 653.3 (646.7): missed by 1.0%, 22 |
+| beside, 32K | **983.7** (1,030.7): pass by 4.6% | 32–36 | 1,048.0 (1,030.7): missed by 1.7%, 39 |
+| idle, 4K / 16K / 32K | 239.2 / 451.8 / 738.7 (322.2 / 607.8 / 993.7) | 1 | 239.4 / 449.8 / 797.8 |
+
+The VRAM and RAM arms are unchanged (beside 161.6 / 179.2, 195.3 / 209.1, 242.9 / 275.8 ms; idle 124.5 / 124.8,
+157.2 / 167.2, 205.8 / 228.5 ms; every RAM cell passes). With the drive's measured write rate the background lane
+drains in about the time the writes take, so fewer resumes are charged beside writes (32–36 gated steps against 39),
+and every cell passes. Without the host's rates (the std defaults, 2.24 / 1.77) the beside cells at 16K and 32K miss,
+as recorded above; that is the clock's designed conservatism on an untuned host, and the deployment path (`tune
+--ssd-rates` into a lock that binds the level) is what this run measures.
+
 ### Step 5: the panel's review (2026-10-19)
 
 | Finding | Disposition | Where |
@@ -1678,6 +1736,7 @@ staging 5, `prompt_end,branch,answer:1`, the tuned clock; UD-Q4_K_M on the RTX 5
 | 3a beside, 32K | VRAM 242.7, RAM 275.8, SSD 987.6 ms | RAM ≤ 301.1, SSD ≤ 1,030.6 | pass (SSD by 4%) |
 | 3a beside, rerun on lock 11 (panel C-1) | 4K SSD 325.6, 16K 641.2, 32K **1,050.2** ms | SSD ≤ 359.2 / 646.3 / 1,030.2 | **32K misses** ("the panel's review") |
 | 3a beside, lock 11, the loop stepping while parking (the lead's bench change, made after the miss) | 4K SSD 345.4, 16K **653.3**, 32K **1,048.0** ms | SSD ≤ 359.1 / 646.7 / 1,030.7 | **16K and 32K miss** ("the panel's review") |
+| 3a beside, lock 11 with the host's tuned SSD rates (the owner's option 2, **post-hoc**) | 4K SSD 345.8, 16K 632.1, 32K 983.7 ms; idle 239.2 / 451.8 / 738.7 | SSD ≤ 359.3 / 645.9 / 1,030.7; idle ≤ 322.2 / 607.8 / 993.7 | pass ("Owner decisions") |
 | 3b (32K from RAM, 30 resumes, 285 gated gaps) | gated median 20.27 vs 20.27 ms (1.000×), p90 23.58 vs 23.07 (1.022×); append step 1.001× | ≤ 1.1×, p90 ≤ 1.2× | pass |
 | 3b-SSD (report) | 1,020 gated gaps (34 per resume): 1.000× median, 1.000× p90; append 1.001× | reported | — |
 | 3c (2 rounds) | tier 265 ms p50 against VRAM-only 5,597 ms: **0.047×** (geomean of pairs 0.059×; turns 1–5 0.078×, 6+ 0.045×); throughput **2.26×** (124.0 vs 54.9 tok/s, both rounds) | TTFT p50 ≤ 0.25×, throughput ≥ 1.2× | pass |
