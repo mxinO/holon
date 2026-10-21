@@ -120,9 +120,10 @@ def _down_sum(part_ptr, sq_ptr, a_ptr, inj_out_ptr, rstd_ptr, T, H, RANK, NOUT, 
 
 
 @triton.jit
-def _up_mix_gemv(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H, RANK,
-                 S: tl.constexpr, PENDING: tl.constexpr, BJ: tl.constexpr, RK: tl.constexpr):
-    """`_up_mix` for BJ columns of every stream, every token, each up tile held once (RK ≥ RANK, masked)."""
+def _up_mix_gemv(a_ptr, up_ptr, r_ptr, rstd_ptr, norm_ptr, x_ptr, T, H, RANK, S: tl.constexpr, BJ: tl.constexpr,
+                 RK: tl.constexpr):
+    """`_up_mix` for BJ columns of every stream, every token, each up tile held once (RK ≥ RANK, masked); R as the
+    caller left it (a pending combine already applied: storing it here raced with Triton's re-run loads on sm_86)."""
     j = tl.program_id(0) * BJ + tl.arange(0, BJ)
     kk = tl.arange(0, RK)
     jm = j < H
@@ -134,12 +135,9 @@ def _up_mix_gemv(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr,
                         mask=jm[:, None] & (kk < RANK)[None, :], other=0.0).to(tl.float32)
             acc = tl.sum(w * a[None, :], 1)
             col = s * H + j
-            rn = tl.load(r_ptr + t * S * H + col, mask=jm, other=0.0)
-            if PENDING:
-                rn = rn + tl.load(wp_ptr + t * S + s) * tl.load(y_ptr + t * H + j, mask=jm, other=0.0).to(tl.float32)
-                tl.store(r_ptr + t * S * H + col, rn, mask=jm)
-            rn = rn * tl.load(rstd_ptr + t * S + s) * (1.0 + tl.load(norm_ptr + col, mask=jm, other=0.0).to(tl.float32))
-            out += tl.sigmoid(acc) * rn
+            r_s = tl.load(r_ptr + t * S * H + col, mask=jm, other=0.0)
+            scale = tl.load(rstd_ptr + t * S + s) * (1.0 + tl.load(norm_ptr + col, mask=jm, other=0.0).to(tl.float32))
+            out += tl.sigmoid(acc) * (r_s * scale)
         tl.store(x_ptr + t * H + j, (out / S).to(x_ptr.dtype.element_ty), mask=jm)
 
 
@@ -185,9 +183,9 @@ def _combine(r_ptr, y_ptr, w_ptr, H, S: tl.constexpr, BLOCK: tl.constexpr):
 
 
 def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype):
-    """Two launches: `_down` (its rstd folded in) and `_up_mix` (three at most GEMV_ROWS tokens: `_down_gemv`,
-    `_down_sum`, `_up_mix_gemv`); a pending combine (y_prev, w_prev: the same block's previous half) rides along. The
-    returned w is a new tensor, never w_prev."""
+    """Two launches: `_down` (its rstd folded in) and `_up_mix`, a pending combine (y_prev, w_prev: the same block's
+    previous half) riding along; at most GEMV_ROWS tokens, three (`_down_gemv`, `_down_sum`, `_up_mix_gemv`), after
+    `_combine` for a pending combine. The returned w is a new tensor, never w_prev."""
     t, width = r.shape
     hidden, rank = width // streams, down.shape[0]
     if hidden % BK or r.stride(1) != 1 or r.stride(0) != width:
@@ -208,14 +206,16 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
         ks = hidden // KCHUNK
         part = torch.empty(streams * ks, t, nout, dtype=torch.float32, device=r.device)
         sq = torch.empty(streams * ks, t, dtype=torch.float32, device=r.device)
+        if pending:                                             # R + w · y first: `_combine`'s same expression
+            _combine[(t, streams, triton.cdiv(hidden, 1024))](r, y, w_prev, hidden, streams, 1024)
         _down_gemv[(triton.cdiv(nout, BNV), streams * ks)](
-            r, y, w_prev, norm, down, inj, part, sq, t, hidden, rank, nout, streams, pending, inject is not None,
+            r, y, w_prev, norm, down, inj, part, sq, t, hidden, rank, nout, streams, False, inject is not None,
             BNV, KCHUNK, num_warps=4)
         _down_sum[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
             part, sq, a, sink, rstd, t, hidden, rank, nout, eps, streams, ks, BM, BN, num_warps=4)
         _up_mix_gemv[(triton.cdiv(hidden, BJ),)](
-            a, up.contiguous(), r, y, w_prev, rstd, norm, x, t, hidden, rank, streams, pending, BJ,
-            triton.next_power_of_2(rank), num_warps=4)
+            a, up.contiguous(), r, rstd, norm, x, t, hidden, rank, streams, BJ, triton.next_power_of_2(rank),
+            num_warps=4)
         return x, w
     _down[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
         r, y, w_prev, norm, down, inj, a, sink, rstd, t, hidden, rank, eps, streams, pending, inject is not None,
