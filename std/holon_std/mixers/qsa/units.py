@@ -10,7 +10,8 @@ bounds: a verify row by its width) attends densely through gqa, any other step s
 bits depend on whether a long one shares its step (D6; the snapshot fixes the schedule). A model-only build attends
 over each whole sequence the same way, its pages made for the call. The indexer's q and k projections are two
 linears as llama.cpp's converter splits them, or with `fused_index_qk` one (`index_qk_proj`, q's rows then k's), as
-transformers stores them."""
+transformers stores them; split linears that can share one matmul are merged into `index_qk_proj` once loaded (one
+launch less per call)."""
 from __future__ import annotations
 
 import dataclasses
@@ -123,6 +124,12 @@ class QSA(nn.Module):
                  "kv_dtype": kv_dtype}
         self._attend = ctx.select_kernel(kernels.ATTEND, site=site, **facts).impl(ctx, **facts)
         self.page = page
+
+    def finalize_weights(self, ctx) -> None:
+        if not hasattr(self, "index_qk_proj") and (merge := getattr(type(self.index_q_proj), "merge", None)):
+            merged = merge(self.index_q_proj, self.index_k_proj)        # q's rows then k's: the fused layout
+            if merged is not None:
+                self.index_qk_proj = merged
 
     def _idx_layer(self) -> tuple[torch.Tensor, torch.Tensor]:
         """This layer's raw [units, page, Dk] (model dtype) and pooled [units, page / ratio, Dk] (f32) keys."""

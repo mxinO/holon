@@ -205,7 +205,7 @@ def summarize(a) -> dict:
     total = sum(ms.values()) / n
     table = {k: {"ms": round(ms[k] / n, 4), "share": round(ms[k] / n / total, 4), "kernels": kernels[k] / n,
                  "memops": memops[k] / n, "top": {name: [round(t / n, 4), count[k][name] / n]
-                                                  for name, t in by_kernel[k].most_common(8)}}
+                                                  for name, t in by_kernel[k].most_common(16)}}
              for k in (*COMPONENTS, "mtp", *sorted(x for x in ms if x.startswith("mtp.")), "other") if k in ms}
     info = json.loads(pathlib.Path(a.run).read_text())
     walls = sorted(info["wall_ms"])
