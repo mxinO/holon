@@ -12,10 +12,12 @@ import triton.language as tl
 
 BM, BN, BK = 16, 64, 64          # token, output and reduction tiles
 # Decode and verify steps (at most GEMV_ROWS tokens) run GEMV-shaped kernels: each program holds a weight tile once and
-# loops over the tokens, `_down_gemv` over one (stream, K chunk), its partials summed in a fixed order by every program
-# of `_mix_gemv`. FN step 5 measured the tiled `_down` at 442 µs per decode call on the RTX PRO 6000 (six programs for a
-# 10,240-long reduction): 78% of the decode step.
-GEMV_ROWS, KCHUNK, BNV, BJ = 16, 512, 16, 16
+# loops over the tokens, `_down_gemv` over one (stream, K chunk). A one-token step takes two launches: every program of
+# `_mix_gemv` sums the partials in a fixed order and a pending combine rides along; past SUM_ROWS tokens the repeated
+# sums cost more than the launches saved (RTX A5000, FN's shapes: 26 µs against 30 µs per mix at 1 token, 82 against
+# 46 at 2), so `_combine` applies a pending combine first and `_down_sum` sums once. FN step 5 measured the tiled
+# `_down` at 442 µs per decode call on the RTX PRO 6000 (six programs for a 10,240-long reduction): 78% of the step.
+GEMV_ROWS, SUM_ROWS, KCHUNK, BNV, BJ = 16, 1, 512, 16, 16
 
 
 @triton.jit
@@ -95,42 +97,61 @@ def _down_gemv(r_ptr, y_ptr, wp_ptr, norm_ptr, down_ptr, inj_ptr, part_ptr, sq_p
 
 
 @triton.jit
-def _mix_gemv(part_ptr, sq_ptr, up_ptr, r_ptr, rn_ptr, norm_ptr, x_ptr, inj_out_ptr, T, H, RANK, NOUT, eps,
-              S: tl.constexpr, KS: tl.constexpr, PENDING: tl.constexpr, BJ: tl.constexpr, RK: tl.constexpr,
-              SP: tl.constexpr):
-    """`_down`'s epilogue and `_up_mix` for BJ columns of every stream, every token, each up tile held once (RK ≥
-    RANK, masked). Every program sums the partials itself, chunks in order (per stream its rstd and partial, then the
-    mean over streams and the activations: the same expressions in the same order in every program, so the same
-    bits); the first also stores the combine weights (inject). With a pending combine the mixed R is `rn` (R + w · y,
-    `_down_gemv`'s), which this program also writes to R for exactly its columns (no other program touches them)."""
+def _down_sum(part_ptr, sq_ptr, a_ptr, inj_out_ptr, rstd_ptr, T, H, RANK, NOUT, eps, S: tl.constexpr,
+              KS: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr):
+    """`_down`'s epilogue over the partials, chunks summed in order: per stream its rstd and partial, then the mean
+    over streams and the activations."""
+    m = tl.program_id(0) * BM + tl.arange(0, BM)
+    n = tl.program_id(1) * BN + tl.arange(0, BN)
+    rows = m < T
+    row = m[:, None].to(tl.int64)
+    ok = rows[:, None] & (n < NOUT)[None, :]
+    acc = tl.zeros((BM, BN), tl.float32)
+    for s in tl.static_range(S):
+        sq = tl.zeros((BM,), tl.float32)
+        part = tl.zeros((BM, BN), tl.float32)
+        for c in tl.static_range(KS):
+            z = s * KS + c
+            sq += tl.load(sq_ptr + z * T + m, mask=rows, other=0.0)
+            part += tl.load(part_ptr + (z * T + row) * NOUT + n[None, :], mask=ok, other=0.0)
+        rstd = tl.rsqrt(sq / H + eps)
+        acc += part * rstd[:, None]
+        if tl.program_id(1) == 0:
+            tl.store(rstd_ptr + m.to(tl.int64) * S + s, rstd, mask=rows)
+    acc = acc / S
+    tl.store(a_ptr + row * RANK + n[None, :], acc * tl.sigmoid(acc), mask=rows[:, None] & (n < RANK)[None, :])
+    tl.store(inj_out_ptr + row * S + (n - RANK)[None, :], 2.0 * tl.sigmoid(acc),
+             mask=rows[:, None] & ((n >= RANK) & (n < NOUT))[None, :])
+
+
+@triton.jit
+def _mix_gemv(part_ptr, sq_ptr, a_ptr, rstd_ptr, up_ptr, r_ptr, rn_ptr, norm_ptr, x_ptr, inj_out_ptr, T, H, RANK,
+              NOUT, eps, S: tl.constexpr, KS: tl.constexpr, SUMMED: tl.constexpr, PENDING: tl.constexpr,
+              BJ: tl.constexpr, RK: tl.constexpr, SP: tl.constexpr):
+    """`_up_mix` for BJ columns of every stream, every token, each up tile held once (RK ≥ RANK, masked), and unless
+    `_down_sum` ran (SUMMED: its activations `a` and `rstd`) `_down`'s epilogue too: every program then sums the
+    partials itself, chunks in order (per stream its rstd and partial, then the mean over streams and the activations:
+    `_down_sum`'s expressions in its order in every program, so the same bits), and the first stores the combine
+    weights (inject). With a pending combine the mixed R is `rn` (R + w · y, `_down_gemv`'s), which this program also
+    writes to R for exactly its columns (no other program touches them)."""
     j = tl.program_id(0) * BJ + tl.arange(0, BJ)
     kk = tl.arange(0, RK)
     ii = RANK + tl.arange(0, SP)
     jm, km, im = j < H, kk < RANK, ii < NOUT
     for t in range(T):
-        acc = tl.zeros((RK,), tl.float32)
-        inj = tl.zeros((SP,), tl.float32)
-        for s in tl.static_range(S):
-            sq = 0.0
-            part = tl.zeros((RK,), tl.float32)
-            part_i = tl.zeros((SP,), tl.float32)
-            for c in tl.static_range(KS):
-                z = s * KS + c
-                sq += tl.load(sq_ptr + z * T + t)
-                part += tl.load(part_ptr + (z * T + t) * NOUT + kk, mask=km, other=0.0)
-                part_i += tl.load(part_ptr + (z * T + t) * NOUT + ii, mask=im, other=0.0)
-            rstd = tl.rsqrt(sq / H + eps)
-            acc += part * rstd
-            inj += part_i * rstd
-        acc = acc / S
-        a = tl.where(km, acc * tl.sigmoid(acc), 0.0)
-        if tl.program_id(0) == 0:
-            tl.store(inj_out_ptr + t * S + (ii - RANK), 2.0 * tl.sigmoid(inj / S), mask=im)
+        if SUMMED:
+            a = tl.load(a_ptr + t * RANK + kk, mask=km, other=0.0)
+        else:
+            a = _activations(part_ptr, sq_ptr, inj_out_ptr, t, T, H, RANK, NOUT, eps, kk, ii, km, im, S, KS, RK, SP)
         out = tl.zeros((BJ,), tl.float32)
         for s in tl.static_range(S):
-            sq = 0.0
-            for c in tl.static_range(KS):
-                sq += tl.load(sq_ptr + (s * KS + c) * T + t)
+            if SUMMED:
+                rstd = tl.load(rstd_ptr + t * S + s)
+            else:
+                sq = 0.0
+                for c in tl.static_range(KS):
+                    sq += tl.load(sq_ptr + (s * KS + c) * T + t)
+                rstd = tl.rsqrt(sq / H + eps)
             w = tl.load(up_ptr + (s * H + j)[:, None].to(tl.int64) * RANK + kk[None, :],
                         mask=jm[:, None] & km[None, :], other=0.0).to(tl.float32)
             up = tl.sum(w * a[None, :], 1)
@@ -140,9 +161,34 @@ def _mix_gemv(part_ptr, sq_ptr, up_ptr, r_ptr, rn_ptr, norm_ptr, x_ptr, inj_out_
                 tl.store(r_ptr + t * S * H + col, r_s, mask=jm)
             else:
                 r_s = tl.load(r_ptr + t * S * H + col, mask=jm, other=0.0)
-            scale = tl.rsqrt(sq / H + eps) * (1.0 + tl.load(norm_ptr + col, mask=jm, other=0.0).to(tl.float32))
+            scale = rstd * (1.0 + tl.load(norm_ptr + col, mask=jm, other=0.0).to(tl.float32))
             out += tl.sigmoid(up) * (r_s * scale)
         tl.store(x_ptr + t * H + j, (out / S).to(x_ptr.dtype.element_ty), mask=jm)
+
+
+@triton.jit
+def _activations(part_ptr, sq_ptr, inj_out_ptr, t, T, H, RANK, NOUT, eps, kk, ii, km, im, S: tl.constexpr,
+                 KS: tl.constexpr, RK: tl.constexpr, SP: tl.constexpr):
+    """`_down_sum` for token t, in registers: the activations over kk (RANK, masked); program 0 stores the combine
+    weights."""
+    acc = tl.zeros((RK,), tl.float32)
+    inj = tl.zeros((SP,), tl.float32)
+    for s in tl.static_range(S):
+        sq = 0.0
+        part = tl.zeros((RK,), tl.float32)
+        part_i = tl.zeros((SP,), tl.float32)
+        for c in tl.static_range(KS):
+            z = s * KS + c
+            sq += tl.load(sq_ptr + z * T + t)
+            part += tl.load(part_ptr + (z * T + t) * NOUT + kk, mask=km, other=0.0)
+            part_i += tl.load(part_ptr + (z * T + t) * NOUT + ii, mask=im, other=0.0)
+        rstd = tl.rsqrt(sq / H + eps)
+        acc += part * rstd
+        inj += part_i * rstd
+    acc = acc / S
+    if tl.program_id(0) == 0:
+        tl.store(inj_out_ptr + t * S + (ii - RANK), 2.0 * tl.sigmoid(inj / S), mask=im)
+    return tl.where(km, acc * tl.sigmoid(acc), 0.0)
 
 
 @triton.jit
@@ -188,8 +234,9 @@ def _combine(r_ptr, y_ptr, w_ptr, H, S: tl.constexpr, BLOCK: tl.constexpr):
 
 def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype):
     """Two launches: `_down` (its rstd folded in) and `_up_mix`, a pending combine (y_prev, w_prev: the same block's
-    previous half) riding along; at most GEMV_ROWS tokens, `_down_gemv` and `_mix_gemv`. The returned w is a new
-    tensor, never w_prev."""
+    previous half) riding along; at most GEMV_ROWS tokens, `_down_gemv` and `_mix_gemv`, with `_combine` (pending)
+    and `_down_sum` before and after `_down_gemv` past SUM_ROWS tokens. The returned w is a new tensor, never
+    w_prev."""
     t, width = r.shape
     hidden, rank = width // streams, down.shape[0]
     if hidden % BK or r.stride(1) != 1 or r.stride(0) != width:
@@ -206,17 +253,25 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
     down = down.contiguous()
     inj = inject.contiguous() if inject is not None else down
     nout = rank + (streams if inject is not None else 0)
-    if t <= GEMV_ROWS and hidden % KCHUNK == 0:                 # decode and verify steps: two launches
+    if t <= GEMV_ROWS and hidden % KCHUNK == 0:                 # decode and verify steps
         ks = hidden // KCHUNK
         part = torch.empty(streams * ks, t, nout, dtype=torch.float32, device=r.device)
         sq = torch.empty(streams * ks, t, dtype=torch.float32, device=r.device)
-        rn = torch.empty_like(r) if pending else r              # R + w · y, written by `_down_gemv`
+        fused = t <= SUM_ROWS             # two launches: `_mix_gemv` sums the partials, a pending combine rides along
+        if pending and not fused:                               # R + w · y first: the same expression
+            _combine[(t, streams, triton.cdiv(hidden, 1024))](r, y, w_prev, hidden, streams, 1024)
+        rides = pending and fused
+        rn = torch.empty_like(r) if rides else r                # R + w · y, written by `_down_gemv`
         _down_gemv[(triton.cdiv(nout, BNV), streams * ks)](
-            r, y, w_prev, norm, down, inj, part, sq, rn, t, hidden, rank, nout, streams, pending, inject is not None,
+            r, y, w_prev, norm, down, inj, part, sq, rn, t, hidden, rank, nout, streams, rides, inject is not None,
             BNV, KCHUNK, num_warps=4)
+        if not fused:
+            _down_sum[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
+                part, sq, a, sink, rstd, t, hidden, rank, nout, eps, streams, ks, BM, BN, num_warps=4)
         _mix_gemv[(triton.cdiv(hidden, BJ),)](
-            part, sq, up.contiguous(), r, rn, norm, x, sink, t, hidden, rank, nout, eps, streams, ks, pending, BJ,
-            triton.next_power_of_2(rank), triton.next_power_of_2(max(nout - rank, 1)), num_warps=4)
+            part, sq, a, rstd, up.contiguous(), r, rn, norm, x, sink, t, hidden, rank, nout, eps, streams, ks,
+            not fused, rides, BJ, triton.next_power_of_2(rank), triton.next_power_of_2(max(nout - rank, 1)),
+            num_warps=4)
         return x, w
     _down[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
         r, y, w_prev, norm, down, inj, a, sink, rstd, t, hidden, rank, eps, streams, pending, inject is not None,
