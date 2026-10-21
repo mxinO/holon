@@ -38,7 +38,7 @@ from .test_attention_kernels import (
     _run,
 )
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 PREFILL, DECODE, VERIFY = "attention.paged_prefill", "attention.paged_decode", "attention.paged_verify"
 TRITON, FLASHINFER = "kernels.triton_attn", "kernels.flashinfer"

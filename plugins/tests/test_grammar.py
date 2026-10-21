@@ -616,6 +616,7 @@ def test_masks_follow_the_tokenizer(e2e):
     proc.close("tok")
 
 
+@pytest.mark.slow
 def test_a_failing_constraint_ends_only_its_request(e2e, qwen_checkpoint):
     # D5's outcomes on the plain engine beside requests that finish unchanged: a compile error (client), a compile
     # past a lowered timeout (busy, then refused at once from the negative cache), a compile the memory watchdog

@@ -1099,6 +1099,8 @@ def test_round_trip_on_a_tiny_model(tiny, dialect):
     assert cached > 0                                    # the second turn reused the first's prompt, and says so
 
 
+@pytest.mark.slow
+@pytest.mark.model
 def test_round_trip_on_qwen3_0_6b():
     """A real model through the app (GPU, graphs captured, grammar.xgrammar selected): a required call to a tool,
     the answer from its result (streamed), reasoning the model opens itself (Anthropic, streamed), and a strict

@@ -65,6 +65,7 @@ def test_snapshot_trace_on_cpu(tiny_checkpoint, tiny_prompts):
 QWEN = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
+@pytest.mark.model
 @pytest.mark.skipif(QWEN is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_snapshot_trace_is_run_identical_on_qwen3():
     """The acceptance check of design §7.10 on the production engine (graphs, overlap, prefix cache)."""

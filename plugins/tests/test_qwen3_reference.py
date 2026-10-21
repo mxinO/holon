@@ -10,7 +10,7 @@ from holon.core.build import BuildContext, StepContext, build_model, load_weight
 from holon.core.plugins import PluginSet, discover
 
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
-pytestmark = pytest.mark.skipif(SNAP is None, reason="needs Qwen3-0.6B")
+pytestmark = [pytest.mark.model, pytest.mark.skipif(SNAP is None, reason="needs Qwen3-0.6B")]
 
 
 def test_qwen3_matches_hf():

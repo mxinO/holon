@@ -9,7 +9,7 @@ import pytest
 import torch
 from holon.core import platform
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 LINE = 64
 

@@ -8,7 +8,7 @@ from holon_judge import l0
 from holon_plugins.kernels.triton_experts.kernel import BM, grouped
 from holon_std.moe import reference as moe
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 E, K = 8, 2
 
 

@@ -173,6 +173,7 @@ def test_the_proxy_reads_openai_chat_answers_without_text():
     assert shape["reasoning_effort"] == "medium" and "sys" not in json.dumps(shape)
 
 
+@pytest.mark.slow
 def test_the_pi_workloads_task_is_scored_by_the_harness_tests_and_the_agents_own(tmp_path):
     files = pi.workloads_project()
     assert pi.pytest_counts(files)["passed"] == pi.SEEDED_TESTS
@@ -245,6 +246,7 @@ def test_a_series_runs_only_on_a_clean_harness_and_its_reference_environment(tmp
     assert demo.shop_diff(project, work) == "<diff failed: OSError>"
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv")
 def test_every_runs_venv_has_the_first_runs_pytest(tmp_path):
     """Each venv is checked as made, before its session: what an agent installs into its own venv afterwards is

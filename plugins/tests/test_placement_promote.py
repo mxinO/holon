@@ -213,6 +213,7 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
     assert _parity(store, trace) is None
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_promote_on_the_gpu_is_bitwise_the_resident_store(gpu_moe):  # noqa: F811
     """F10 on the native path (kernels.promote around kernels.expert_io's resolve, the zero-copy gather into spares,

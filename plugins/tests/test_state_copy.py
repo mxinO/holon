@@ -9,6 +9,8 @@ from holon.core.plugins import PluginSet, discover
 from holon_std.state_tier import reference
 from holon_std.state_tier.kernels import STATE_COPY
 
+pytestmark = pytest.mark.l0
+
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
 @pytest.mark.parametrize("chunk", [34_816, 65_536, 61_440, 3_145_728])   # 27B q8_0 KV, 8B bf16 KV, GDN conv, GDN SSM

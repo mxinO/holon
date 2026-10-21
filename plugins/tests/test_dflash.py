@@ -146,6 +146,8 @@ def _gpu_config(draft, **kw) -> EngineConfig:
                                "verifier": "std.spec.rejection"}, **kw)
 
 
+@pytest.mark.slow
+@pytest.mark.model
 @needs_gpu
 def test_the_startup_profile_runs_the_draft_block(quantized_draft, monkeypatch):
     # The pools are sized after the worst step's peak: eager verify steps (logprobs) run the drafter's block over every
@@ -157,6 +159,8 @@ def test_the_startup_profile_runs_the_draft_block(quantized_draft, monkeypatch):
     assert blocks and blocks[0][0] == 8                       # every slot's block
 
 
+@pytest.mark.slow
+@pytest.mark.model
 @needs_gpu
 def test_a_quantized_draft_runs_in_verify_graphs(quantized_draft):
     # Qwen3-0.6B with a random DFlash2 of its geometry (head_dim 128, 16 candidates), converted to q8_0 by llama.cpp:

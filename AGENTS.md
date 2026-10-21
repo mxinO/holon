@@ -47,7 +47,9 @@ for the item at hand, never as required reading.
 - Every bug fix comes with a test that fails before and passes after.
 - **Lean tests.** A new test catches something no existing test catches; otherwise extend or parametrize an existing
   one. Share expensive setup (module-scoped engines, one run checked by several assertions), prefer tiny models on
-  the CPU, and use the GPU only where it is the point. Watch `pytest --durations`.
+  the CPU, and use the GPU only where it is the point. Watch `pytest --durations`. Mark a test `slow` (over ≈ 8 s) or
+  `model` (a real checkpoint): `pytest` leaves them out, the pre-merge full run takes them with `-m ""`, sharded over
+  idle GPUs (`docs/release.md` §22).
 - Never edit `judge/` goldens/snapshots or `plans/` locks by hand; they are written by the tools.
 
 ## Commits

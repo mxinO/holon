@@ -18,6 +18,7 @@ def converted(tiny_qwen3_5_gguf):
     return tiny_qwen3_5_gguf
 
 
+@pytest.mark.slow
 def test_the_judge_undoes_the_conversion_exactly(converted):
     checkpoint, file = converted
     ref = transformers.AutoModelForCausalLM.from_pretrained(checkpoint, dtype=torch.float32).state_dict()
@@ -29,6 +30,7 @@ def test_the_judge_undoes_the_conversion_exactly(converted):
     assert max(judge_gguf.gate(file, checkpoint).values()) < 1e-12
 
 
+@pytest.mark.slow
 def test_the_gguf_golden_is_the_checkpoints(converted, tiny_prompts):
     checkpoint, file = converted
     a = golden.record(str(file), tiny_prompts, config=str(checkpoint))

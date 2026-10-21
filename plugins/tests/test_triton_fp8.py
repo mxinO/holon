@@ -22,7 +22,7 @@ from holon_plugins.kernels.triton_fp8 import kernel
 from holon_plugins.kernels.triton_fp8.plugin import QLinear
 from holon_std.weights.hf import reference as hf
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 ROWS = (0, 1, 7, 8, 9, 16, 17, 64, 512, 513, 2049)
 SHAPES = ((384, 256),) + ((6144, 4096), (4096, 4096), (24576, 4096), (4096, 12288))   # Qwen3-8B's, merged

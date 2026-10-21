@@ -172,6 +172,7 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     assert built[-1] == 990
 
 
+@pytest.mark.slow
 def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags, tmp_path, capsys, monkeypatch):
     gold, floor = tmp_path / "gold.safetensors", tmp_path / "floor.safetensors"
     pools, checks = [], propagate.EngineChecks          # the stored pools each run's checks start from
