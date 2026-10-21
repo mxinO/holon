@@ -13,12 +13,11 @@ TIERS, CPU_TASK = "moe_tiers@1", "cpu_task@1"
 
 
 class DeviceResolver:
-    def __init__(self, ctx, store, group: int, classes: list, state: dict[str, torch.Tensor]) -> None:
-        self.store, self.group, self.classes, self.state = store, group, classes, state
+    def __init__(self, ctx, store, group_id: int, classes: list) -> None:
+        self.store, self.group_id, self.classes = store, group_id, classes
+        self.group = None                     # its row in the store's tables, once attached (`attach`)
         self._prepared = False                # the pass is prepared, not yet resolved
         self.io_slot = None                   # exclusive tiers: its SSD reads' slot on the I/O worker
-        self.residency, self.host = store.residency.device[group], store.host_units[group]
-        self.limits, self.counts = store.limits[group], store.counts[group]
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
         site = f"std.tiered[{store.name}]"
         op = store.policy.resolve_variant or RESOLVE
@@ -27,6 +26,13 @@ class DeviceResolver:
         for c in classes:
             facts = {"unit_bytes": c.unit_bytes, "staging": c.staging}
             self._fetch.append(ctx.select_kernel(FETCH, site=f"{site}.{c.name}", **facts).impl(ctx, **facts))
+
+    def attach(self, group: int, state: dict[str, torch.Tensor]) -> None:
+        """Its row `group` of the store's device tables (made when every group has its pieces)."""
+        store = self.store
+        self.group, self.state = group, state
+        self.residency, self.host = store.residency.device[group], store.host_units[group]
+        self.limits, self.counts = store.limits[group], store.counts[group]
 
     def prepare(self, first: int) -> None:
         """Before the first use of the pass starting at the step's token `first`: on the step's first, its counts and
@@ -50,12 +56,14 @@ class DeviceResolver:
         return torch.where(self.ring >= 0, self.ring, self.residency)
 
     def __call__(self, ids: torch.Tensor, first: int, plan: torch.Tensor | None = None,
-                 jobs: torch.Tensor | None = None, before_fetch=None) -> tuple[torch.Tensor, torch.Tensor]:
-        """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds), the misses fetched; and
+                 jobs: torch.Tensor | None = None, before_fetch=None,
+                 kinds: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds, or `kinds`), the misses
+        fetched; and
         `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without), handed
         to `before_fetch(cpu)` before the fetch (the CPU's jobs start, then the GPU's misses come over PCIe: D5)."""
         store = self.store
-        kinds = store.kinds[first:first + len(ids)]
+        kinds = store.kinds[first:first + len(ids)] if kinds is None else kinds     # given: a drafter sub-step's
         if len(kinds) != len(ids):
             raise ValueError(f"tokens {first}…{first + len(ids)} past the step's {len(store.kinds)} row kinds")
         self.prepare(first)

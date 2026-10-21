@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import torch
 
+from .residency import RETURN
+
 BUFFERS = 2                                   # the ring's halves: layer l streams while layer l − 1 computes
 ROUNDS = 4                                    # `lend` calls of a ring step, 1…ROUNDS (one suffices for staging)
 SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
@@ -190,3 +192,8 @@ class Lent:
         stacks = torch.cat([s.empty, s.empty[..., :1]], 2)
         s.empty.copy_(stacks.scatter_(2, at, s.lent_slots.permute(0, 2, 1).contiguous())[..., :experts])
         s.n_empty.copy_(s.n_before + lent.sum(1))
+        # A marker record per group (g, RETURN, 0) where the slots came back: an auxiliary layer's sub-steps (FN D12a)
+        # resolve after it, and their admissions pop the returned slots (the host mirror returns them there).
+        g = torch.arange(groups, device=lent.device)
+        s.delta[g, s.n_delta.long()] = torch.stack([g, torch.full_like(g, RETURN), torch.zeros_like(g)], 1).int()
+        s.n_delta.add_(1)

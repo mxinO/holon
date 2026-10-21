@@ -16,6 +16,7 @@ import torch
 
 LAG = 2                       # launches between the commit deciding an edit and the launch applying it
 OWNER = 1                     # the edit error word's bit: a precondition failed
+RETURN = -3                   # a delta record's `a` marking where a step's lent slots came back
 
 
 class ResidencyMap:
@@ -69,14 +70,19 @@ class ResidencyMap:
     def commit(self, step: int, records: np.ndarray, returned: bool = False) -> None:
         """The host mirror after step `step`: the host edits launched by it, then the step's delta log `records`
         ((group, a, b): a took b's slots, b unmapped; (group, a, −2 − j): a took the group's empty slots j, popped;
-        (group, −1, b): b unmapped, lent), then — a step that `returned` its lent slots — every lent item's slots on
-        top of its group's empty stack, in the order of their records."""
+        (group, −1, b): b unmapped, lent; (group, RETURN, 0): the lent slots returned there), then — a step that
+        `returned` its lent slots without a marker — every lent item's slots on top of its group's empty stack, in the
+        order of their records."""
         flat = self.host.reshape(-1)
         for launch in sorted(x for x in self._launched if x <= step):
             index, _, value = self._launched.pop(launch)
             flat[index] = value
         back: list[list[np.ndarray]] = [[] for _ in self.empty]
         for g, a, b in records.tolist():
+            if a == RETURN:                      # the lent slots came back here (`Lent`'s marker), before what follows
+                self.empty[g] += back[g]
+                back[g] = []
+                continue
             if b <= -2:
                 self.host[g, a] = self.empty[g][-2 - b]
                 del self.empty[g][-2 - b:]

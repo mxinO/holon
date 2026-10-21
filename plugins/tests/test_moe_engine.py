@@ -608,10 +608,10 @@ def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
-    """The delta log has a region of 2 × items records per layer (docs/v1-offload.md D4): a decode step of k · rows ≥ E
-    routes whose first layer admits and then lends every resident expert of every layer (in the forward, after the
-    step's first resolve, as the ring will) logs it all without overflow, the host mirror follows the device, and the
-    outputs stay the resident store's."""
+    """The delta log has a region of 2 × items records per layer (docs/v1-offload.md D4), and one for the returned lent
+    slots' marker (FN D12a): a decode step of k · rows ≥ E routes whose first layer admits and then lends every
+    resident expert of every layer (in the forward, after the step's first resolve, as the ring will) logs it all
+    without overflow, the host mirror follows the device, and the outputs stay the resident store's."""
     from holon_judge.placement import route_dump
     from holon_std.tiered.resolver import DeviceResolver
 
@@ -631,7 +631,7 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
         assert _served(engine, prompts) == want
     step = next(s for s in trace.steps if (s["records"][:, 1] < 0).any())
     assert lent == [8] and (step["records"][:, 1] < 0).sum() == 8 and (step["records"][:, 1] >= 0).any()
-    assert store.delta.shape[1] == 2 * store.items and trace.mirrored and not store.residency.host.max() >= 0
+    assert store.delta.shape[1] == 2 * store.items + 1 and trace.mirrored and not store.residency.host.max() >= 0
 
 
 def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):

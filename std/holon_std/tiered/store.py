@@ -142,12 +142,16 @@ class TieredStore:
         self._cache, self._profile = _parse_cache(cache), profile
         self.classes: dict[str, SlotClass] = {}
         self.groups: dict[int, dict[int, SlotClass]] = {}       # group -> role -> its class
-        self.residency: ResidencyMap | None = None              # the device tables, once a resolver is asked for
+        self.residency: ResidencyMap | None = None              # the device tables, made at `before_materialize`
         self.resolvers: list[DeviceResolver] = []
+        self._watched: list[torch.Tensor] = []                  # kernels' error words watched before the tables
         tokens = max(ctx.options.get("max_step_tokens", 1),
                      ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0)))
         self._kinds, self._written = np.zeros(tokens, dtype=np.uint8), 0     # host side; the prefix not PADDING
         self.kinds = ctx.static(f"{name}.kinds", (tokens,), torch.uint8)
+        self._decode = ctx.static(f"{name}.decode_kinds", (tokens,), torch.uint8)    # DECODE throughout (sub-steps)
+        self._decode_set = False
+        self.step, self.step_tokens = -1, 0     # the step being launched and its tokens (`before_launch`)
         self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # the step's most (`moe_resolve@1`)
         self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
         self.edit_errors = ctx.static(f"{name}.edit_errors", (1,), torch.int32)   # host edits' preconditions
@@ -170,7 +174,7 @@ class TieredStore:
         """One piece: role `role` of item `item` of group `group`, in class `cls` (`unit_bytes` each), its bytes the
         concatenation of `extents`."""
         if self.residency is not None:
-            raise RuntimeError(f"{self.name}: pieces added after kernels were bound (an auxiliary model's?)")
+            raise RuntimeError(f"{self.name}: pieces added after the device tables were made (at materialize)")
         c = self.classes.setdefault(cls, SlotClass(cls, unit_bytes, self.top_k, self.staging,
                                                    cache=self._cache.get(cls, self._cache.get("*"))))
         if c.unit_bytes != unit_bytes or sum(e.nbytes for e in extents) != unit_bytes:
@@ -182,6 +186,20 @@ class TieredStore:
         return c
 
     def resolver(self, group: int) -> DeviceResolver:
+        """Group `group`'s resolver. Its device tables come at `before_materialize` (`_tables`), when every group has
+        added its pieces: an auxiliary model's (an MTP layer's experts, FN D12a) are added after the target's kernels
+        are bound."""
+        self.resolvers.append(DeviceResolver(self.ctx, self, group, [self.groups[group][r] for r in range(self.roles)]))
+        if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
+            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
+                             f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
+        if self.residency is not None or any(self.tiers[0].holds(c.name, len(c.pieces)) < len(c.pieces)
+                                             for c in self.classes.values()):
+            self._tables()                       # exclusive tiers bind their I/O worker in the build: no later group
+        return self.resolvers[-1]
+
+    def _tables(self) -> None:
+        """The device tables of every group added, then each resolver attached to its group's."""
         if self.residency is None:
             pinned = [c.cap for c in self.classes.values() if c.cache is not None]
             for c in self.classes.values():
@@ -215,8 +233,8 @@ class TieredStore:
             self.no_jobs = self.ctx.static(f"{self.name}.no_jobs", (1, 4), torch.int32)
             # The delta log, a region per group: a step's records of a group are its admissions (at most its misses,
             # E − R for R resident), its lent items (at most R) and the lent slots' returns (at most as many): 2E bound
-            # them (+ a sink row for `lend`'s scatter).
-            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 1, 3), torch.int32)
+            # them, and one more for the returned slots' marker (`Lent`; + a sink row for `lend`'s scatter).
+            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 2, 3), torch.int32)
             self.delta, self.n_delta = log[:, :-1], self.ctx.static(f"{self.name}.n_delta", shape[:1], torch.int32)
             self._log = log
             self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
@@ -259,16 +277,16 @@ class TieredStore:
                 self.prefetch[c.name] = self.ctx.select_kernel(
                     EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
                 ).impl(self.ctx, **facts, copy=self.ring_copy)
-        g = self._order[group]
-        self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
-                                             {n: t[g] for n, t in self.state.items()}))
-        if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
-            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
-                             f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
-        if self.exclusive:                       # its SSD reads: a copy task on the I/O worker, bound after materialize
-            self.reads.append(_Reads(self, g))
-            self.resolvers[-1].io_slot = self.io.bind(self.reads[-1])
-        return self.resolvers[-1]
+            for errors in self._watched:
+                self.watch(errors)
+        for r in self.resolvers:
+            if r.group is not None:
+                continue
+            g = self._order[r.group_id]
+            r.attach(g, {n: t[g] for n, t in self.state.items()})
+            if self.exclusive:                   # its SSD reads: a copy task on the I/O worker, bound after materialize
+                self.reads.append(_Reads(self, g))
+                r.io_slot = self.io.bind(self.reads[-1])
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
         """The exclusive tiers' device tables (`moe_tiers@1`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
@@ -296,7 +314,9 @@ class TieredStore:
     def watch(self, errors: torch.Tensor) -> None:
         """A kernel's error word (`linear_experts_arena@1`'s `errors`): zeroed each step, a commit that finds it set
         stops the engine."""
-        if not any(errors is t for t in self.zeroed):
+        if self.residency is None:              # before the tables: kept until `_tables`
+            self._watched.append(errors)
+        elif not any(errors is t for t in self.zeroed):
             self.telemetry[f"kernel_errors.{len(self.zeroed) - 6}"] = errors
             self.zeroed.append(errors)
 
@@ -304,6 +324,7 @@ class TieredStore:
     def before_materialize(self, ctx) -> None:
         """The tiers take their storage (the RAM tier its pool, filled when it holds every piece), the arena pool is
         requested, and under exclusive tiers the I/O tables."""
+        self._tables()
         classes = list(self.classes.values())
         self.granule = functools.reduce(math.gcd, (c.unit_bytes for c in classes))     # both pools' unit
         self._align = math.lcm(self.granule, ALIGN)
@@ -362,9 +383,14 @@ class TieredStore:
                                                         dtype=torch.int64)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
+    def decode_kinds(self, tokens: int) -> torch.Tensor:
+        """Row kinds of `tokens` decode rows (an auxiliary model's sub-step, FN D12a)."""
+        return self._decode[:tokens]
+
     def after_materialize(self, ctx) -> None:
         """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
         at the tier but for the seed, copied in; the policy's state, counts and words zeroed."""
+        self._decode_set = False                # the decode kinds are written again at the next launch
         classes = list(self.classes.values())
         size = self.arena.capacity * self.granule
         groups = list(self._order)
@@ -498,7 +524,11 @@ class TieredStore:
         else:
             self._mode = None
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
+        self.step, self.step_tokens = step.step, at
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
+        if not self._decode_set:                # once after each materialize (statics come back zeroed)
+            writes.append((self._decode, np.full(len(self._decode), DECODE, dtype=np.uint8)))
+            self._decode_set = True
         return writes, self._copies.pop(step.step, [])
 
     def after_commit(self, step, telemetry) -> None:

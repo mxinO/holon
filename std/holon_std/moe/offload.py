@@ -63,9 +63,11 @@ class Offload(nn.Module):
     def __init__(self, ctx, *, layer: int, experts: int, top_k: int) -> None:
         super().__init__()
         self.store = ctx.shared(KEY, lambda root: _store(root, experts, top_k))
-        if ctx is not self.store.ctx:
-            raise NotImplementedError("std.moe.offload@1: an auxiliary model's experts (an MTP layer's) need its "
-                                      "sub-steps' row kinds; not yet")
+        # An auxiliary model's layer (an MTP head's, FN D12a) is the store's next group, numbered when its stacks are
+        # added (after the target's); its passes read the step's row kinds over the step's tokens, then, in the
+        # drafter's sub-steps (one decode row per drafting sequence), decode kinds.
+        self._aux = ctx is not self.store.ctx
+        self._seen, self._main = None, 0
         policy = self.store.policy
         if (policy.resolve_variant or policy.device_state()) and _rows(ctx) > CHUNK:
             raise NotImplementedError(f"std.moe.offload@1: {self.store.policy_ref}'s state changes once per call "
@@ -74,7 +76,7 @@ class Offload(nn.Module):
         if (self.store.items, self.store.top_k) != (experts, top_k):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")
-        self.layer, self._resolver, self._transform = layer, None, None
+        self.layer, self._resolver, self._transform = (None if self._aux else layer), None, None
         self._max_pass = ctx.options.get("max_step_tokens")       # a pass's most tokens (none: the kernels' pass_rows)
         opts = ctx.options.get("plugins", {})
         self._transform_name = opts.get("moe.route_transform")
@@ -85,11 +87,24 @@ class Offload(nn.Module):
             if plan and isa in ("", ctx.fingerprint.cpu_isa) else None
         self._stacks, self._slot, self._pending = [], None, None
 
+    def _group(self) -> None:
+        if self.layer is None:                  # an auxiliary model's layer: after every group added so far
+            self.layer = max(self.store.groups, default=-1) + 1
+
+    def fused(self, gate_up: ExpertLinear) -> ArenaExperts:
+        """A fused gate/up stack (per expert gate's rows then up's: the arena's layout) as pieces of the store."""
+        self._group()
+        stack = ArenaExperts(self, gate_up, "swiglu", gate_up.out_features, GATE_UP, [_extents(gate_up)])
+        gate_up.weight = gate_up.parts = None
+        self._stacks.append(stack)
+        return stack
+
     def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ArenaExperts | None:
         """The gate/up stack as pieces of the store: per expert, gate's extent then up's (nothing is read or moved)."""
         if (gate.layout, gate.in_features, gate.out_features, gate.experts) != \
                 (up.layout, up.in_features, up.out_features, up.experts):
             return None
+        self._group()
         stack = ArenaExperts(self, gate, "swiglu", 2 * gate.out_features, GATE_UP,
                              [_extents(gate), _extents(up)])
         gate.weight = up.weight = gate.parts = up.parts = None
@@ -97,6 +112,7 @@ class Offload(nn.Module):
         return stack
 
     def stack(self, down: ExpertLinear) -> ArenaExperts:
+        self._group()
         stack = ArenaExperts(self, down, "none", down.out_features, DOWN, [_extents(down)])
         down.weight = down.parts = None
         self._stacks.append(stack)
@@ -160,12 +176,26 @@ class Offload(nn.Module):
     def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
         small pass's CPU share is published to the CPU (its entries read null slots: zeros until `patch`)."""
+        kinds = self._kinds(len(ids))
         if self._cpu is None or len(ids) > self._cpu.tokens:
             self._pending = None
-            return self._resolver(ids, first)[0]
+            return self._resolver(ids, first, kinds=kinds)[0]
         slots, self._pending = self._resolver(ids, first, *self._cpu.args(),
-                                              before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu))
+                                              before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu),
+                                              kinds=kinds)
         return slots
+
+    def _kinds(self, tokens: int) -> torch.Tensor | None:
+        """The row kinds of an auxiliary layer's pass: the step's (None) while its passes cover the step's tokens, then
+        decode kinds (the drafter's sub-steps). A target layer's are the step's."""
+        if not self._aux:
+            return None
+        if self._seen != self.store.step:
+            self._seen, self._main = self.store.step, 0
+        if self._main < self.store.step_tokens:
+            self._main += tokens
+            return None
+        return self.store.decode_kinds(tokens)
 
     def patch(self, y: torch.Tensor) -> torch.Tensor:
         """The experts' outputs `y` [T, k, H] of the pass `route` resolved, its CPU share's rows in place."""
