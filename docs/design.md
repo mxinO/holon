@@ -395,15 +395,16 @@ plan_id = "sha256:…"   recipe = "sha256:…"      # canonical hash of the emit
 
 `(commit, lock)` fully defines a deployment; promoted variant code is part of the commit.
 
-**Propagation.** `holon impact <unit>` lists the locks whose closures contain it. `holon propagate` runs
-inside the PR that changes shared code; CI's `isolation-check` re-runs it on a trusted GPU runner and rejects any
-lock or snapshot it cannot reproduce byte for byte. Each affected (model, fingerprint class) gets one of three
-outcomes:
+**Propagation.** `holon impact <unit>` lists the locks whose closures contain it; a PR that changes shared code lists
+them. `holon propagate` runs at a release or a milestone's close, one round over everything merged since (owner,
+2026-10-21; `docs/release.md` §22); CI's `isolation-check` (not built) would re-run it on a trusted GPU runner and
+reject any lock or snapshot it cannot reproduce byte for byte. Each affected (model, fingerprint class) gets one of
+three outcomes:
 
 | Outcome | Condition | Effect | Human |
 |---|---|---|---|
-| **Auto-advance** | model's closure unaffected, or snapshot trace byte-identical **and** no `uncovered` site touched **and** every changed line inside the model's closure executed during its snapshot trace | lock rewritten in the PR | 0 |
-| **Approve** | otherwise, L2 vs the HF reference passes and no L2 metric regresses beyond δ vs the current snapshot | lock rewritten, snapshot re-recorded | 1 approval for the whole change (all affected models listed) |
+| **Auto-advance** | model's closure unaffected, or only code pins changed (`commit`, `uv_lock`, units) **and** the snapshot trace is byte-identical **and** no `uncovered` site touched (changed-line coverage, once planned here, is not recorded: the owner accepted the identical trace alone, 2026-10-21) | lock appended at the propagation round | 0 |
+| **Approve** | otherwise, L2 vs the HF reference passes (skipped when the trace is byte-identical and only settings, bindings, sources or the recipe changed); "no L2 metric regresses beyond δ vs the current snapshot" is not checked yet | lock appended, snapshot re-recorded | 1 approval per lock |
 | **Fail** | L2 fails | the PR fixes it, or the model keeps the previous unit version through an explicit copy in its own package (visible in the diff, `derived_from` set) | — |
 
 Toolchain bumps (torch, Triton, FlashInfer, CUDA majors) produce a new fingerprint class and run the same sweep.
