@@ -1941,3 +1941,43 @@ a952ba9, the HC and indexer changes in): **passes**.
 | MTP vs plain, 256 tokens (231 positions up to each first difference) | 0.0018 | – | 0.015 | – | first differences at 9, 35, 39, 144 |
 
 The pre-registered plant (`qsa_decode_select_shift`, which must fail) runs once at the step's close.
+
+### 19.4 Accuracy gate (d) and the sample dump (e)
+
+The 72-item set on IQ2_XS, RTX PRO 6000, greedy with thinking on, 8,192 new tokens at most
+(`evidence/fn7_tasks_IQ2_XS_2026-10-21/`: both engines' answers, the scores, `samples.md`). **Passes** the bar
+stated before the run (within 5 items, no Holon-only degenerate answer):
+
+| | Correct | Math 24 | Code 14 | Reasoning 16 | Recall 12 | Multi-turn 6 | Degenerate |
+|---|---|---|---|---|---|---|---|
+| Holon | **70** | 23 | 13 | 16 | 12 | 6 | 2 (`code-08`, `code-12`) |
+| Strata (no-approx) | **69** | 24 | 12 | 15 | 12 | 6 | 3 (`code-08`, `code-12`, `reasoning-04`) |
+
+- The engines agree on 69 items' correctness and give the same final value on 70. Holon misses `math-06` (1,532
+  against 1,531); Strata misses `reasoning-04` (its reasoning loops to the limit) and the two code items both miss.
+- **The degenerate answers are the model's, in both engines:** on `code-08` and `code-12` each engine's greedy
+  reasoning falls into a repeated line until the token limit (Holon: "Potential hidden issue: …", Strata: "Need maybe
+  support …"). No Holon-only degenerate answer, and no gibberish: the answers read as the model's (medians 443 and
+  453 tokens).
+- **The sample dump** (`samples.md`): eight items — two math, two code (one of them `code-08`'s loop, shown as it
+  is), two reasoning, the 32K recall and one multi-turn — with the question, the end of the reasoning and the
+  answer.
+
+### 19.5 Levers C and B (the perf reviewer's re-plan: GPU time against each component's floor)
+
+- **C — the prefill HC projections as cuBLAS SGEMMs** (bbdfc01; TF32 refused, so float32 products with IEEE sums as
+  D10 requires). Triton's IEEE float32 tiles reached 9% of float32 peak (bigger tiles: 13%); cuBLAS's SGEMM 50% at
+  these shapes. The mix is now `_prep` → batched SGEMM → `_act` → SGEMM → `_mix_out`, in passes of 4,096 rows.
+  - RTX PRO 6000, full model (nsys): the HC mixes per 8,192-token step **1,127 → 332 ms** at 32K, 657 → 173 ms in a
+    4K step; a 32K prefill step 2,057 → 1,244 ms. The target was ≤ 270 ms: missed by 23% (the float32 scratch's
+    reads and writes, ≈ 2.3 GB per mix, are about a third of it).
+  - A/B, 3 rounds against 3f5e7d6: **prefill 3,902 → 6,420 tok/s at 4K, 3,958 → 6,388 at 32K** (Strata 4,407 and
+    5,401 in §17.2); decode unchanged (137.9 / 136.6, 132.1 / 132.1).
+  - L0 (with the stress case) passes on sm_86; decode and verify are bitwise unchanged.
+- **B — the GEMV mix at 2-16 rows** (e6dcdcb): each up tile held while the rows loop, a pending combine through the
+  `rn` scratch (no `_combine`), `_down_gemv` retuned for rows. Per mix on an RTX A5000: 69 → 49 µs at 4 rows, 117 →
+  79 at 8 — 1.7× the one-row time, not the 1.5× target: the per-row reductions stay serial (holding the rows in one
+  tile through Triton's IEEE dot or a deferred 3-D sum was slower). One row bitwise unchanged; L0 passes.
+- Pending on the cluster: B's 3-round decode / verify A/B, the self-consistency gate on both trees, the HC L0 on
+  sm_120.
+
