@@ -1,16 +1,16 @@
 """FN step 5 (docs/v1-flash-next.md acceptance 2, §6.2): the full model's decode checks on the RTX PRO 6000,
 all-resident (experts, PLE table and MTP head in VRAM), one engine at a time.
 
-- `divergence`: the absolute decode check. Each `v1-long` prompt (4K-32K tokens, its chat prompt up to `gen_start`)
-  is one session; an arm decodes `--tokens` greedily with top-k logprobs, and a reference engine of the same QSA mode
-  (prefix cache off, eager, whole prompts) re-scores prompt + generated tokens teacher-forced; KL(reference || arm)
-  at the generated positions (`holon_judge.bounded.divergence`'s, session-bootstrap SEs). Arms: `sparse` (as built),
-  `mtp` (sparse, speculating with the MTP head, 3 drafts), `dense` (the control: `holon_judge.qwen4exp.forced_dense`
-  in the arm and its reference), and, with `--plant`, `sparse+plant` and `mtp+plant` (`qsa_decode_select_shift`,
-  decode and verify only, so the sparse reference serves them too). Gate per arm: KL p99 <= max(2 x dense,
-  dense + 2.5 SE of dense's p99); pre-registered: the unplanted arms pass and both planted arms fail, and if a planted
-  arm passes, the statistic is tightened to p95 (the per-position KLs are kept for the next step, a paired
-  difference).
+- `divergence`: the absolute decode check. Each `v1-long` prompt (4K-32K tokens, its chat prompt up to `gen_start`) is
+  one session; an arm decodes `--tokens` greedily with top-k logprobs, and a reference engine of the same QSA mode
+  (prefix cache off, eager, whole prompts) re-scores prompt + generated tokens teacher-forced; KL(reference || arm) at
+  the generated positions (`holon_judge.bounded.divergence`'s, session-bootstrap SEs; `--cuts n`: n sessions per
+  prompt, cut at n lengths). Arms: `sparse` (as built), `mtp` (sparse, speculating with the MTP head, 3 drafts),
+  `dense` (the control: `holon_judge.qwen4exp.forced_dense` in the arm and its reference), and, with `--plant`,
+  `sparse+plant` and `mtp+plant` (`qsa_decode_select_shift`, decode and verify only, so the sparse reference serves
+  them too). Gate per arm: KL p99 <= max(2 x dense, dense + 2.5 SE of dense's p99); pre-registered: the unplanted arms
+  pass and both planted arms fail, and if a planted arm passes, the statistic is tightened to p95 (the per-position
+  KLs are kept for the next step, a paired difference).
 - `mtp`: accepted tokens per verify pass (accepted drafts + 1, Strata's count) at 3 drafts on `v1-qwen3_5`'s chat and
   agent prompts (their chat prompts, `--tokens` greedy each); acceptance 2's gate is >= 2.2.
 - `launches`: CUDA kernels per decode token and per 4-row verify pass, counted with the profiler on eager steps (a
@@ -75,8 +75,17 @@ def generate(engine: Engine, ids: list[list[int]], tokens: int, k: int | None) -
     return [(p, out, lps) for p, (out, lps) in zip(ids, bounded._generate(engine, ids, params), strict=True)]
 
 
+def sessions(ids: list[list[int]], cuts: int, low: int = 2560) -> list[list[int]]:
+    """`cuts` sessions per prompt: its chat prompt cut at `cuts` lengths evenly spaced from `low` (past the dense
+    limit, so they decode sparse) to its whole length; a prompt of at most `low` tokens is one session."""
+    if cuts == 1:
+        return ids
+    return [p[:low + (len(p) - low) * i // (cuts - 1)] for p in ids if len(p) > low for i in range(cuts)] + \
+        [p for p in ids if len(p) <= low]
+
+
 def divergence(a) -> dict:
-    ids = prompts("judge/prompts/v1-long.jsonl")
+    ids = sessions(prompts("judge/prompts/v1-long.jsonl"), a.cuts)
     arms = {"sparse": ({}, None), "mtp": ({"mtp": True}, None), "dense": ({}, qwen4exp.forced_dense)}
     if a.plant:
         arms |= {"sparse+plant": ({}, a.plant), "mtp+plant": ({"mtp": True}, a.plant)}
@@ -189,6 +198,8 @@ def main() -> None:
     ap.add_argument("--tokens", type=int, default=128)
     ap.add_argument("--k", type=int, default=20)
     ap.add_argument("--plant", help="the planted arms' plant (divergence)")
+    ap.add_argument("--cuts", type=int, default=1, help="sessions per v1-long prompt (divergence): its prompt cut at "
+                    "this many lengths from 2,560 tokens to the whole")
     ap.add_argument("--max-model-len", type=int, default=33792)
     ap.add_argument("--max-step-tokens", type=int, default=8192)
     ap.add_argument("--max-seqs", type=int, default=8)
