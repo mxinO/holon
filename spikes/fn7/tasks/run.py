@@ -52,8 +52,10 @@ def bundle(model: str):
 
 def holon(a, prompts: list[list[int]]) -> list[dict]:
     from holon.api import SamplingParams
+    from holon.core.cli import layered
     from holon.core.engine import Engine, EngineConfig
-    e = Engine(EngineConfig(a.model, max_model_len=MAX_LEN, max_step_tokens=8192, max_seqs=8))
+    e = Engine(EngineConfig(a.model, **layered({"max_model_len": MAX_LEN, "max_step_tokens": 8192, "max_seqs": 8},
+                                               flags(a.holon_flags))))
     params = SamplingParams(temperature=0.0, max_tokens=MAX_TOKENS, stop_token_ids=EOS)
     index = {e.add(p, params): i for i, p in enumerate(prompts)}
     out = [{"tokens": [], "finish": None} for _ in prompts]
@@ -67,6 +69,17 @@ def holon(a, prompts: list[list[int]]) -> list[dict]:
         o["wall_s"] = round(time.perf_counter() - t0, 1)
     e.close()
     return out
+
+
+def flags(text: str) -> dict:
+    """`holon serve`-style engine flags (e.g. an offload deployment's) as EngineConfig settings: only those given."""
+    import argparse
+    import shlex
+
+    from holon.core.cli import engine_flags, engine_settings
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    return engine_settings(parser.parse_args(shlex.split(text)))
 
 
 def strata(a, prompts: list[list[int]]) -> list[dict]:
@@ -211,6 +224,7 @@ def main() -> None:
     g.add_argument("--model", required=True)
     g.add_argument("--strata")
     g.add_argument("--strata-flags", default="")
+    g.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
     g.add_argument("--out", required=True)
     s = sub.add_parser("score")
     s.add_argument("--answers", nargs="+", required=True, help="name=answers.jsonl")

@@ -14,6 +14,7 @@ noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `
 KL mean ≤ 0.13 over the agreeing positions. `--plant qsa_decode_select_shift` (decode and verify only) must fail.
 
     python spikes/fn7/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
+        [--holon-flags '<engine flags>'] [--prefill-step N]
 """
 from __future__ import annotations
 
@@ -33,11 +34,24 @@ BARS = {"kl_mean": 0.13, "kl_p50": 0.007, "band_dnll": 0.75}
 
 
 def engine(a, **kw):
+    from holon.core.cli import layered
     from holon.core.engine import Engine, EngineConfig
     if kw.pop("mtp", False):
         kw |= {"max_draft_tokens": DRAFTS, "plugin_options": {"spec.k": str(DRAFTS), "mtp.path": a.pack},
                "slots": {"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k", "verifier": "std.spec.greedy"}}
-    return Engine(EngineConfig(a.model, **({"max_model_len": a.max_len, "max_seqs": 8} | kw)))
+    base = layered({"max_model_len": a.max_len, "max_seqs": 8}, flags(a.holon_flags))
+    return Engine(EngineConfig(a.model, **layered(base, kw)))
+
+def flags(text: str) -> dict:
+    """`holon serve`-style engine flags (e.g. an offload deployment's) as EngineConfig settings: only those given."""
+    import argparse
+    import shlex
+
+    from holon.core.cli import engine_flags, engine_settings
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    return engine_settings(parser.parse_args(shlex.split(text)))
+
 
 
 def scored(a, prompts, step: int):
@@ -106,6 +120,8 @@ def main() -> None:
     ap.add_argument("--tokens", type=int, default=256)
     ap.add_argument("--max-len", type=int, default=20480)
     ap.add_argument("--plant", help="a judge plant, e.g. qsa_decode_select_shift (must fail)")
+    ap.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
+    ap.add_argument("--prefill-step", type=int, default=0, help="the reference's step (default: whole prompts)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     from holon_judge import planted
@@ -120,7 +136,7 @@ def main() -> None:
     out = {"name": "fn7_consistency", "date": datetime.date.today().isoformat(), "gpu": torch.cuda.get_device_name(),
            "model": pathlib.Path(a.model).name, "plant": a.plant, "prompts": PROMPTS, "bars": BARS, "commit": commit}
     with planted.PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        prefill = scored(a, prompts, a.max_len)
+        prefill = scored(a, prompts, a.prefill_step or a.max_len)
         out["decode"] = compare(prefill, scored(a, prompts, 1))
         out["chunked"] = compare(prefill, scored(a, prompts, 250))
         out["mtp"] = mtp_vs_plain(a, chats)

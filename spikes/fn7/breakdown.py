@@ -40,6 +40,17 @@ def prompt(ctx: int) -> list[int]:
     return ids[:ctx]
 
 
+def flags(text: str) -> dict:
+    """`holon serve`-style engine flags (e.g. an offload deployment's) as EngineConfig settings: only those given."""
+    import argparse
+    import shlex
+
+    from holon.core.cli import engine_flags, engine_settings
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    return engine_settings(parser.parse_args(shlex.split(text)))
+
+
 def instrument(engine) -> None:
     """NVTX ranges around each component (hooks and wrappers only: the kernels are unchanged)."""
     import torch
@@ -121,8 +132,11 @@ def run(a) -> dict:
     opts = dict(o.split("=", 1) for o in a.options)
     if opts:
         kw["plugin_options"] = kw.get("plugin_options", {}) | opts
-    engine = Engine(EngineConfig(a.model, max_model_len=a.ctx + 256, max_step_tokens=a.max_step_tokens, max_seqs=1,
-                                 cuda_graphs=False, overlap=False, host_memory=a.host_memory, **kw))
+    from holon.core.cli import layered
+    base = layered({"max_model_len": a.ctx + 256, "max_step_tokens": a.max_step_tokens, "host_memory": a.host_memory},
+                   flags(a.holon_flags))
+    eager = {"max_seqs": 1, "cuda_graphs": False, "overlap": False}
+    engine = Engine(EngineConfig(a.model, **layered(base, eager | kw)))
     instrument(engine)
     prefill = a.phase == "prefill"
     if prefill:          # a warm-up prompt first (kernel autotuning, allocations), then the measured one
@@ -229,6 +243,7 @@ def main() -> None:
     r.add_argument("--max-step-tokens", type=int, default=8192)
     r.add_argument("--options", nargs="*", default=[], help="plugin options, key=value (e.g. rows.place=ple:host)")
     r.add_argument("--host-memory", type=int, default=0, help="EngineConfig.host_memory, bytes")
+    r.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
     r.add_argument("--out", required=True)
     s = sub.add_parser("summarize")
     s.add_argument("--rep", required=True)
