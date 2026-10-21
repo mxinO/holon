@@ -305,9 +305,11 @@ from the weight source (`<hub id or directory name>@<16 hex of config + weight f
 `holon`) and every plugin whose code runs (the units built, the kernels bound, model, weight source, sampler, state
 kinds …; not kernel providers loaded only as candidates), one `[sites]` binding per kernel site (`<site>/<op>` →
 provider, facts, props, launch config) and `[engine]`, the EngineConfig settings that shape outputs (memory budgets
-are per host and not recorded). `src` is sha256 over a unit directory's sorted relative paths and contents (no hidden
-files, caches or build products), so a checkout and an installed copy agree; `sem` is sha256 of the manifest's
-reference module. Lock files are canonical TOML (`[deploy]`, `[engine]`, `[snapshot]`, then `[units]`/`[sites]` one
+are per host and not recorded). `src` is sha256 over a unit directory's sorted relative paths and the contents of its
+runtime files (no hidden files, caches, build products, tests, docs or examples; Python by its syntax tree without
+docstrings, so comments never outdate a lock; scheme `src2`, written as its prefix), so a checkout and an installed
+copy agree; `sem` is sha256 of the manifest's reference module. Lock files are canonical TOML (`[deploy]`, `[engine]`,
+`[snapshot]`, then `[units]`/`[sites]` one
 sorted line per entry, so a changed binding is one changed line) carrying a `digest` of the whole content and the
 `plan_id`, both re-checked on read, so a hand edit fails to load; `sm` is recorded for the same-SM preference. A
 lock whose plan has uncovered sites and no run-identical trace records no snapshot. Snapshots are stored by content
@@ -369,8 +371,8 @@ separate `reference.py` holding its oracle.
 
 | Field | Meaning |
 |---|---|
-| `src` | git tree hash of the unit's directory |
-| `sem` | hash of `reference.py` + parameter schema — the unit's *semantic identity* |
+| `src` | hash of the unit's runtime files, Python by its syntax tree without docstrings (scheme `src2`, §4.4) |
+| `sem` | hash of `reference.py` (by its syntax tree) + parameter schema — the unit's *semantic identity* |
 | `iface@major` | interface version; minors are additive only |
 
 - Unit code imports only `holon.api`, its own package and declared third-party libraries; other units are

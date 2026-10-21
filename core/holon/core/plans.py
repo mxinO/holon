@@ -8,12 +8,13 @@ plan; both are checked on read, so a hand edit fails to load.
 """
 from __future__ import annotations
 
+import ast
 import dataclasses
 import hashlib
 import pathlib
 import tomllib
 import typing
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 import torch
@@ -34,22 +35,62 @@ RUNTIME = ("holonlm", "holonlm-std", "holonlm-plugins")     # what a user instal
 # preferences show as sites; the clamp as `max_model_len`).
 NOT_PLANNED = {"model", "device", "kernels", "kernel_preferences", "memory_fraction", "state_memory", "clamp_context",
                "host_memory", "paged_min_tokens", "loop_core"}
-_NOT_SOURCE_DIRS = {"__pycache__", "build", "dist"}
-_NOT_SOURCE_SUFFIXES = {".pyc", ".pyo", ".so"}
+# The `src` scheme, written into every pin. Scheme 1 ("sha256:…", locks before it) hashed every file's bytes; a lock
+# pinning another scheme is outdated like one pinning other code, and the next propagation re-pins it.
+SRC_SCHEME = "src2"
+_NOT_SOURCE_DIRS = {"__pycache__", "build", "dist"}              # anywhere, as in scheme 1
+_NOT_SOURCE_SUFFIXES = {".pyc", ".pyo", ".so", ".md"}
+_NOT_RUNTIME = {"tests", "docs", "examples", "conftest.py"}        # at the unit's top level only, with test_*
+_DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 
 
 def src_hash(path: pathlib.Path) -> str:
-    """A unit's `src`: sha256 over the sorted relative paths and contents of its source files — everything under
-    `path` but hidden files, caches and build products. Content only, so a checkout and an installed copy agree."""
+    """A unit's `src`: `src_digest` of the files under `path`. Content only, so a checkout and an installed copy
+    agree."""
+    return src_digest((f.relative_to(path).as_posix(), f.read_bytes()) for f in path.rglob("*") if f.is_file())
+
+
+def src_digest(files: Iterable[tuple[str, bytes]]) -> str:
+    """sha256 over the sorted relative paths and contents of a unit's runtime files: everything but hidden files,
+    caches, build products, `*.md`, and the unit's own tests, docs and examples (top-level `tests/`, `docs/`,
+    `examples/`, `test_*`, `conftest.py`; a vendored tree's are code). Python files count by their syntax tree without
+    docstrings, so comments, docstrings and formatting never outdate a lock."""
     h = hashlib.sha256()
-    for f in sorted(p for p in path.rglob("*") if p.is_file() and _is_source(p.relative_to(path))):
-        h.update(f.relative_to(path).as_posix().encode() + b"\0" + f.read_bytes() + b"\0")
-    return "sha256:" + h.hexdigest()
+    for rel, data in sorted(files):
+        if _is_source(pathlib.PurePosixPath(rel)):
+            h.update(rel.encode() + b"\0" + (_python(data) if rel.endswith(".py") else data) + b"\0")
+    return f"{SRC_SCHEME}:sha256:{h.hexdigest()}"
 
 
 def _is_source(rel: pathlib.PurePath) -> bool:
-    return rel.suffix not in _NOT_SOURCE_SUFFIXES and not any(
-        part.startswith(".") or part in _NOT_SOURCE_DIRS or part.endswith(".egg-info") for part in rel.parts)
+    top = rel.parts[0]
+    return not (rel.suffix in _NOT_SOURCE_SUFFIXES or top in _NOT_RUNTIME or top.startswith("test_") or any(
+        part.startswith(".") or part in _NOT_SOURCE_DIRS or part.endswith(".egg-info") for part in rel.parts))
+
+
+def _python(data: bytes) -> bytes:
+    """A Python file's syntax tree without docstrings, rendered by `_node`; its bytes if it does not parse."""
+    try:
+        return repr(_node(ast.parse(data))).encode()
+    except (SyntaxError, ValueError, RecursionError):
+        return data
+
+
+def _node(node: Any) -> Any:
+    """Node type and fields, leaving out locations and empty fields, so the rendering does not depend on the Python
+    version adding optional fields (`type_params`, …)."""
+    if isinstance(node, list):
+        return [_node(x) for x in node]
+    if not isinstance(node, ast.AST):
+        return repr(node)
+    out = [type(node).__name__]
+    for key in node._fields:
+        if (value := getattr(node, key, None)) is None or value == []:
+            continue
+        if key == "body" and isinstance(node, _DOCUMENTED) and ast.get_docstring(node, clean=False) is not None:
+            value = value[1:]
+        out += [key, _node(value)]
+    return out
 
 
 def unit_dirs(installed: Mapping[str, Installed]) -> dict[str, pathlib.Path]:
@@ -121,7 +162,7 @@ def state_identity(engine: Any) -> str | None:
 
 def unit_pin(inst: Installed) -> UnitPin:
     ref = inst.manifest.reference
-    sem = _sha256((inst.path / f"{ref.replace('.', '/')}.py").read_bytes()) if ref else None
+    sem = _sha256(_python((inst.path / f"{ref.replace('.', '/')}.py").read_bytes())) if ref else None
     return UnitPin(inst.manifest.version, src_hash(inst.path), sem)
 
 

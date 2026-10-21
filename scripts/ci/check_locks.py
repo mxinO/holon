@@ -65,8 +65,9 @@ if "--release" in sys.argv:
     for directory in sorted({p.parent for p in PLANS.rglob("*.lock")}):
         if found := plans.numbered(directory):
             lock = plans.read(found[-1])
-            msgs += [f"{found[-1].relative_to(PLANS.parent)}: {name} differs from this tree" for name, pin in
-                     lock.plan.units.items() if current.get(name) != pin.src]
+            msgs += [f"{found[-1].relative_to(PLANS.parent)}: {name} differs from this tree"
+                     + ("" if pin.src.startswith(f"{plans.SRC_SCHEME}:") else " (an older src scheme)")
+                     for name, pin in lock.plan.units.items() if current.get(name) != pin.src]
 fail(msgs, "locks read back, one servable model id per build, no test-only plugins, declared options, no CPU tier, "
      "defaults.toml valid"
      + (", newest locks pin this tree" if "--release" in sys.argv else ""))

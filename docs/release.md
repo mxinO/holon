@@ -3600,6 +3600,11 @@ process, which replaces §6's per-change propagation and the release's re-checks
   against the goldens and floors already recorded — never a new fp32 or CPU golden — and takes one approval.
   `--snapshot-runs 3` asks for a third identical run, for race-prone features (it replaces the separate `holon_judge
   snapshot --runs 3`, which stays available).
+- **Locks pin only output-affecting code** (`src` scheme 2, `tools/README.md`): comments, docstrings, formatting,
+  tests, docs and examples never outdate a lock, in `src` or `sem`. The same change scores the snapshot trace's long
+  prefix-hit request (two tokens, top-5 logprobs: its prefill and one decode step at ≈ 2,065 tokens of context), so
+  long-context and chunked-prefill numerics reach the trace bits; every snapshot re-records once, in the round that
+  re-pins scheme 2.
 
 **Checks.**
 

@@ -753,7 +753,12 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   locks and needed a propagation round on four card classes for byte-identical traces. `src_hash` and the `holon`
   unit pin are frozen in ABI 1.0 and in every committed lock, so narrowing them (e.g. hashing the modules a model's
   step imports, without docstrings and comments, and leaving the frontend-facing records out) is a deliberate v1
-  change with its own lock migration.
+  change with its own lock migration. **First step built (owner, 2026-10-21; `docs/release.md` §22):** `src` scheme 2
+  leaves out tests, docs, examples and `*.md`, and hashes Python by its syntax tree without docstrings (identical
+  under Python 3.12, 3.13 and 3.14); the scheme is written as the pin's prefix, so a scheme-1 lock reads as outdated.
+  It outdates every lock once (with the snapshot trace now scoring its long prefix-hit request, re-recording every
+  snapshot) and merges just before FN's close, whose single propagation covers it. Still open: the
+  version string and response-reporting fields inside the pinned modules.
 - **The test and propagation process** (owner, 2026-10-21; `docs/release.md` §22): locks are propagated at a release
   or a milestone's close only; a code change whose 2-run trace is byte-identical advances without L2 or an approval
   (another change with an identical trace skips L2 only), a moved trace runs L2 against the recorded goldens
