@@ -39,6 +39,7 @@ explicit = true           # only torch comes from it
 dev = ["pytest>=8", "pytest-xdist", "ruff>=0.6", "import-linter>=2.1", "httpx",  # httpx: FastAPI's TestClient
        "scipy", "jsonschema",                                     # statistical tests; bench/conformance.py
        "sentencepiece",                                           # llama.cpp's converter (test_dflash's q8_0 draft)
+       "openai", "anthropic",                                     # bench/client_smoke.py: the real client SDKs
        "holonlm-testing", "holonlm-judge", "holonlm-tools"]       # test-only plugins, the judge, the lock tools
 
 [tool.ruff]
