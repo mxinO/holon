@@ -1993,3 +1993,52 @@ stated before the run (within 5 items, no Holon-only degenerate answer):
   nor prefill), so the same one-prompt miss; MTP vs plain passes (KL mean 0.0017; first differences at 9, 35, 139
   and 132 tokens).
 
+### 19.6 The owner's new opening: llama.cpp's FN kernels and Strata, per component (2026-10-21)
+
+**Item 1 — the vendored ggml already carries Flash-Next's kernels.** `kernels.ggml_cuda` is pinned at llama.cpp
+cbe28bb3 (2026-10-13), and 3cf03257 (2026-09-20, "CUDA: enable sparse fa for qwen4", the commit Strata's `native_*`
+kernels cite) is its ancestor: the pin's tree has `gated_delta_net.cu`, `ssm-conv.cu`, `dsv4-hc.cu` (HC pre / post),
+`lightning-indexer.cu` and the sparse flash attention. No pin move and no `vendor.patch` rebase is needed; only the
+matmul and MoE files are vendored, and item 2 decides whether any of these joins them. **No lock class moves** from
+item 1. From step 7 so far only FN-only units changed (`kernels.hc_triton`, the indexer merge in `std.mixers.qsa`), so
+at FN's close only FN's own locks are new; no other model's lock moves.
+
+**Items 2 and 3 — where the GPU time goes, per component, in all three engines** (RTX PRO 6000, IQ2_XS; ms of GPU
+time; `evidence/fn7_component_comparison_2026-10-21.json`). Holon: nsys breakdowns (§19.1, with levers C and B).
+llama.cpp: its own `qwen4exp` graph and CUDA kernels at 27c7a76 (newer than the pin), `llama-bench` under nsys, each
+graphed decode kernel attributed by its place in the half-layer (`dsv4_hc_post` delimits). Strata: its own stage
+timers (`STRATA_VERIFY_PROFILE`, `STRATA_PREFILL_TIMING`), whose GPU stamps add about a fifth to its decode (9.0 ms
+per token stamped against ≈ 7.4 ms in its decode tok/s).
+
+| Decode, 4K context, per token | Holon | llama.cpp | Strata (stamped) |
+|---|---|---|---|
+| HC mixes and combines | **1.73** | 4.04 | 2.64 |
+| GDN mixer (36 layers) | 1.87 | 2.65 | **1.70** |
+| QSA mixer (12 layers) | **1.02** | 2.01 | 1.70 |
+| Router (+ top-k) | **0.47** | 0.52 | 0.53 |
+| Routed experts | 1.43 | 1.61 | **1.30** |
+| Shared expert | 0.92 | 1.27 | **0.87** |
+| PLE, lm_head, other | 0.39 | – | 0.29 |
+| **Step** | **7.82** | 12.12 | 9.01 (≈ 7.4 unstamped) |
+
+- **Item 2's verdict: no llama.cpp component beats ours**, so none is wired in. Their HC is generic ops around
+  `dsv4_hc_pre` / `dsv4_hc_post` (≈ 11 launches a mix, bf16 `mul_mat_vec_f` GEMVs: 4.0 ms against 1.7); their GDN runs
+  a fast recurrence (`gated_delta_net_cuda`, 3.0 µs a layer against our fused 6.5 µs) but pays 8 µs of separate
+  norms and gates around it (2.65 ms against 1.87); their QSA (lightning indexer, sparse flash attention) is 2.0 ms
+  against 1.0. At 32K: HC 3.98, GDN 2.65, QSA 2.35; Holon's QSA 1.10. Throughput, `llama-bench` under nsys: decode 54
+  (4K) and 72 (32K) tok/s, prefill 3,766 (4K) and 3,455 (an 8K chunk at 24K) tok/s.
+- **Where Holon still trails Strata at decode:** the routed experts (1.43 against 1.30; `kernels.ggml_cuda`'s mmvq,
+  held as D), the shared expert (0.92 against 0.87; held as D) and GDN (1.87 against 1.70: our conv and its state
+  write take 0.20 ms against Strata's 0.08, our a / b projections 0.25 against 0.18; the recurrence and the
+  quantized projections are level). Strata's stage times include its stamps, so these gaps are upper bounds.
+- **Verify (1 + 3 rows; Strata's window of ≈ 4 rows):** Strata 12.85 ms GPU a window plus 1.8–2.3 ms of drafting;
+  Holon 17.6 ms before B (HC 4.46, GDN 3.76, routed experts 2.79, the MTP head 2.22, other 1.07), B taking ≈ 1.4 ms
+  off the HC. Strata's HC at 4 rows is 4.09 and its GDN 2.30: our GDN at 4 rows (3.76) and the verify "other"
+  (sampling, rewind; 1.07) are the gaps.
+- **Prefill, a 32K prompt:** Strata 6.18 s of GPU (HC read 0.46, GDN 1.35, QSA 1.72, routed MoE ≈ 2.49, router and
+  shared 0.10); Holon ≈ 4.98 s (4 steps: HC 1.41, GDN 0.77, QSA 0.85, routed MoE 1.73, router 0.12, shared 0.10).
+  **Holon trails only in the HC** (1.41 s against 0.46): float32 SGEMMs (D10) against Strata's projections.
+- **Item 4's candidates** (own kernels where both trail Strata), for the perf plan's budgets: the HC prefill (D10
+  decides how far float32 can go), GDN's conv and gates at decode and GDN at 4 rows, the verify "other"; the routed
+  and shared experts wait for D.
+
