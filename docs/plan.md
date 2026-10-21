@@ -629,6 +629,31 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   loaded after prebuild (fixed at the close); Holon's offload decode sat 1.3–3% below step 4's at the closing code —
   bisected on an A5000 to step 6's CPU share phase in `moe_resolve@1`, run under F5a too, and fixed (`b45e86f`; on
   the 5080 decode is back at step 4's numbers, and the offload lock is propagated, `8615e26`). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
+
+  **K status (2026-10-20): closed, acceptance met** (3a's SSD cells beside decoders by the owner's option 2).
+  Design and record: `docs/v1-kv-tiers.md` (rev 8.5, panel-clean; §13 the build record per step, the panels'
+  reviews, "Owner decisions", "Close (2026-10-20)"); records `evidence/k0_*` … `k6_close_propagation_2026-10-20.json`.
+
+  | # | Result |
+  |---|---|
+  | 1 | Plugins: `std.state_tier` (pinned host level, the SSD level, a virtual clock for loads), `branch` / `answer` checkpoint policies, `evict.root_pin`; held out after the tag, plugin-only: `state_tiers.zlib` (a `Level`), `policies.last_turn` (its finding: `SeqView.matched`, added in ABI 1.4) |
+  | 2 | Exact: tier invariance and run-identity through host and SSD (A5000; the 27B pair on the RTX 5090), the restart check, the null test, the policies bounded (KL p99 split by wave), timing plants on GPU |
+  | 3 | Gate, Qwen3.8-27B on the RTX 5080 / 5090: 3a resume from RAM / SSD within the link-rate bars (SSD beside decoders on the host's tuned rates, post-hoc: the default rates' clock is conservative), 3b gaps 1.000× / 1.022×, `agent_park` TTFT 0.047× VRAM-only and throughput 2.26×, 0.122× `llama-server --cache-ram` (sized to serve the trace), 3e first-turn TTFT 0.017× with `branch`, 3f restart 450 ms (5-resume median), 3h tier overhead 0.96× roomy; 3g reported (26.1% against ≤ 10%) |
+  | 4 | Memory: exact host pools; attach refuses floors, a staging pool below `max_seqs` + 1, and names `--host-memory`; a set `recurrent.checkpoints` is required |
+  | 5 | Core: KS1–KS5 and `SeqView.matched` in ABI 1.4; +337 code lines over `d659b2b` (was `b5b1e7f`; the owner's cap); the post-tag follow-ups `a77a1a2` (`branch_at` kept; was `39abbcb`) and `5739f8c` (`SeqView.matched`; was `e1ae0f7`) |
+  | 6 | Locks: 23 of 23 propagated once and approved, 22 traces byte-identical; the 27B agent locks take the tier (`rtx-5080/13` at `max_model_len` 40,960, `rtx-5090/7` at 49,152), launched with `--host-memory`. The RTX 5080's was re-propagated at the close review: at 49,152 (`12`) its staging margin was ≈ 90 MB, too thin to ship |
+
+  Decisions: `answer:1` on by default (K-M1); the owner's cap +337 and 3a's option 2; `llama-server` sized to serve
+  `agent_park` for 3d (the matched-KV reference fails). Found on the way: a staging pool could fall to 0 units
+  silently (now refused with a tier, required when set, warned when the default); `branch_at` changed across
+  preemption (kept); the clock's write lane outlasts the drive's real writes at the default write rate (3a's miss);
+  two desktops lost their GPU mid-run. Old → new SHA maps of `main`'s rewrite: `docs/history/`. Next: FN, GLM.
+- **Required staging units and a short card** (panel, K's close): when the staging units are in a pool's minimum
+  (a state tier's, `max_seqs` + 1), a shortfall should come out of the context instead of refusing the start. Checked
+  at the close review: a served start already does (`clamp_context`: `rtx-5080/12.lock` at a 2.79 GiB state budget
+  serves 41,920 tokens, staging 5 kept); the engines that do not clamp refuse (`OutOfUnits`, the KV pool below the
+  lock's length): propagate's L2 and the judge's snapshot, which verify a lock at its own length, as at the close's
+  propagation. Generic, a later core round. Until then the RTX 5080's 27B tier lock is at 40,960 tokens for margin.
 - **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
   path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
   tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
@@ -686,25 +711,31 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
-- **MoE prefill speed** (owner, 2026-10-18; `docs/v1-offload.md` §13): offload's development gate passed every decode row
-  but trails FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause is the expert GEMMs, not offload — FreeToken's
-  all-resident prefill is 1.6–2.0× Holon's on the RTX 5090. Work: a faster large-batch MoE GEMM path (e.g. dequant to
-  a tensor-core GEMM for big chunks instead of mmq's int8 path), measured against FreeToken and llama.cpp, all-resident
-  and offloaded. **Step 0 (2026-10-18)** is `spikes/moe_prefill/README.md`, run on an A5000 with all experts resident;
-  the design is `docs/v1-moe-prefill.md` (rev 6: the three-lens panel's five rounds and the lead's decisions applied).
-  - The cause is mmq's launch shape, not int8 against tensor cores. FreeToken runs the same ggml mmq.
-  - Holon's resident stacks call it at 512 rows. Its grouped grid launches every slot's column tiles, 76–92% of them
-    empty.
-  - Planned fixes (D0–D5): larger exact calls per class through the bound kernel's `pass_rows`, a map-free compact
-    grouped launch, SwiGLU fused into the gate/up GEMM, and a router for prompt chunks plus larger dense calls
-    (bounded).
-  - Predicted on the A5000's numbers: resident 0.96–0.99× / 1.00–1.03× / 1.03–1.04× FreeToken (gated arm, modelled)
-    at 1K / 4K / 32K, and the 5080 offload rows 1.12–1.15× / 1.00–1.06× at 4K / 32K. Step 0 on the bar cards measures
-    FreeToken's gated arm. The 32K row against FreeToken's ungated 8K chunks (≈ 0.98–0.99×) and D6's decode trade
-    are owner items.
-  - Dequant + bf16 GEMMs are rejected on achieved rates, pending the bar cards' step 0 (D7). Before its single
-    propagation round the track also lands FN's needs: IQ1_M's mmq tile loader and Q2_0, passed buffers on
-    `linear_experts`, and contiguous-tail lending through the placement policy's contract (`lend_tail`).
+- **MoE prefill speed — closed (2026-10-20)** (owner, 2026-10-18; `docs/v1-offload.md` §13; the design and its record
+  are `docs/v1-moe-prefill.md`). Offload's gate had trailed FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause
+  was mmq's launch shape, not int8 against tensor cores. Built (steps 0–5): exact larger calls per class (`pass_rows`),
+  a compact grouped launch, SwiGLU fused into the gate/up store, the router per pass and larger dense calls
+  (bounded), FN's needs (IQ1_M's mmq loader, Q2_0, passed buffers, tail lending, T6's 640-wide rows); D3 failed its
+  keep rule and was reverted. No core diff, ABI 1.3.
+  - **Final rows:** the 5080 natural-fit offload lock (re-pinned at the close) 1.850 / 1.136 / 1.005× FreeToken gated
+    at 1K / 4K / 32K; the 5090 resident 1.029 / 1.008 / 1.016×; llama.cpp ≥ 1.45× resident, ≥ 2.51× offload. 18 of 18
+    locks propagated, L2 passing.
+  - **Owner decisions (2026-10-20):** O1 no D6 on offload locks; O3 the 4090 Q4_K_M lock at `ggml_cuda.pass_rows` 2,048;
+    O5 the 5080 offload decode deviations are D3′'s and D5's routing (the code at main's numerics 1.000×), measured as
+    the six-prompt geomean with the single prompt beside; acceptance 7's suite time +6% accepted.
+  - **Follow-ups:**
+    - the 4090 Q4_K_M lock's KV pages: at 2,048 its pool is 32 tokens (2 pages, ≈ 3 MB) short of a 23rd sequence per
+      B32 / B64 wave at depth 1,024 (−3.6% / −4.4% batched decode); give ≥ 3 MB back in kernels.ggml_cuda at the next
+      round that moves its source (no lock-level setting can);
+    - with it, A's close review's host assert on `tail` launches (T6's clamp precondition);
+    - FN-7a (FN's step 7): IQ2_S's mmq with ids on sm_89 at T = 16–32, 1.25–1.37× main's time per call;
+    - sm_89's batched-decode J rule per type (one threshold, 64, today: forcing 16 helps MXFP4 / IQ3 / IQ2_XXS from 32
+      tokens and costs Q4_K 5–9% at 17–48);
+    - a prompt-variance term for routing-sensitive decode rows (acceptance tolerances today have only a rounds term;
+      one prompt swings ±5% by routing);
+    - deferred levers: D4's fused q8_1 store, attention at 4K steps, D6 on resident locks;
+    - bench method: per-call A/Bs of sub-50 µs kernels swing ±1–8% between processes; read them over many
+      interleaved rounds, or by SASS when the question is "unchanged".
 - **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree
   (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
   at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its

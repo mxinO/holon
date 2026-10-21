@@ -1,13 +1,13 @@
 # Written by the holon tools; never edit by hand (AGENTS.md).
-digest = "sha256:4cc9a06829558c65d4767fb40bcaf50afb7f7d94244f36ea56eb33406eddd615"
-plan_id = "sha256:0e1e8b57c8187ea29b8a8987132cbfb38a3e6afb0e23e40e68dc95f4f62e8595"
+digest = "sha256:25321893295d0af0014d9316a7983aff3e8022417e34e1c440dd611c2e3e2960"
+plan_id = "sha256:a809564fc44b45d2647cfedf1b6fdda0247a0b77b3be4f8f06c14124224aa00a"
 model_id = "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7"
 fingerprint_class = "rtx-5090/cu130-torch2.11"
 sm = 120
 recipe = "sha256:952ef96ce35f99072edc6b36c96399874aca9d1be2e3dc12752e307334c852a6"
 
 [deploy]
-commit = "32d5945f0273098f8cb4957e805f9a35d19bdd69"
+commit = "c281d8cc5bd1026e57c5c12d5334179f20d36a78"
 uv_lock = "sha256:09b707086b4104f6072e8b128fba0858f08012bb24ecbe4cbf5039010644eaa5"
 
 [engine]
@@ -20,9 +20,9 @@ max_seqs = 4
 max_step_tokens = 2048
 overlap = true
 page_size = 16
-plugin_options = { "recurrent.checkpoints" = "5", "recurrent.policy" = "prompt_end,branch,answer:1", "state_tier.host.bytes" = "16GiB", "state_tier.step_cost" = "0.0110891,0.000197983,0.000381702" }
+plugin_options = { "recurrent.checkpoints" = "4" }
 prefix_cache = true
-slots = { logits_processor = "grammar.xgrammar", tier = "std.state_tier" }
+slots = { logits_processor = "grammar.xgrammar" }
 source = "gguf"
 
 [snapshot]
@@ -31,12 +31,11 @@ uncovered = []
 
 [units]
 "grammar.xgrammar" = { src = "sha256:685a1ba40b70d71d6ea8c2ef33645268234e92cb8e64dff55032f1b76e90d8cf", version = "1.0.0" }
-holon = { src = "sha256:5aaa322dfa4199c15cd0b456ea2cd904c9e43012f8505c137ac856a5953b0e62", version = "0.1.1" }
+holon = { src = "sha256:94f5de31d785a1ce21b360b1be17ef526d4243c5c06cbfd20f2cfd5a5b4bfeb6", version = "0.1.1" }
 "kernels.fla" = { src = "sha256:8d21a04b2f3de35c1d46548ec4584528063d05f687775d9f697d4125a15fccdd", version = "1.0.0" }
 "kernels.flashinfer" = { src = "sha256:438dfe292ad17a0b37f62858242300ffb7188f055647b645e37160c4d497438a", version = "1.0.0" }
 "kernels.gdn_triton" = { src = "sha256:8a589d748561402bd03a60cc4e4b0f68408571db7a68585113345181d5911a2e", version = "1.0.0" }
-"kernels.ggml_cuda" = { src = "sha256:78b35d24d91e570ed1bd21ee499ed4e74aeec96ca596fe3d55a0f4fad5fa8a90", version = "1.0.0" }
-"kernels.state_copy" = { src = "sha256:b531d190169557536f3ca870b982df08ac3472e655760a89403f234c99eab021", version = "1.0.0" }
+"kernels.ggml_cuda" = { src = "sha256:414902200298c2fc5013a776e36cb9fd77fecf2de5d3ac2bba116b9acbb9784a", version = "1.0.0" }
 "kernels.triton_attn" = { src = "sha256:aee5583511e125f3ebb65f07df097dbe47bd558a237b46f0f9e504389ff47945", version = "1.0.0" }
 "models.qwen3_5" = { src = "sha256:dab0466d530bb68dd1c7205f32ecbb448eadc97e3eee4ed2e46bcc7358a9b25f", version = "1.0.0" }
 "std.blocks" = { src = "sha256:0752e7076ddc43a609d18337e244c03f9aaf705617b770b0d19934825c46c701", version = "1.0.0" }
@@ -46,8 +45,7 @@ holon = { src = "sha256:5aaa322dfa4199c15cd0b456ea2cd904c9e43012f8505c137ac856a5
 "std.ops" = { sem = "sha256:c2bc5197346b521199c88ec892402ed02b8dfbb082cefa5b9e041fc1c09f54a3", src = "sha256:3c5efbf1e6a8fb699ccc94126dd71708b63bb77f2e62454c16f91edd10755fea", version = "1.0.0" }
 "std.sampling" = { sem = "sha256:3f9a80781e878ec96e0bc4ed2ec5fd13a51f1332899a19467dad5fd8328e597b", src = "sha256:b5629e228a727d9cdd52fecb5d33748b93a8075b3dfaceeb3649955de9ee0b83", version = "1.0.0" }
 "std.state.paged" = { src = "sha256:887effb79cbf8ccbc8dfacf0ffa3462fed9b230162358a5de27166007d1bc144", version = "1.0.0" }
-"std.state.recurrent" = { src = "sha256:7dcb11de4ca5a4c154c2f4d309cef83609c30b148285a3aaf0aca5617dafe17f", version = "1.0.0" }
-"std.state_tier" = { src = "sha256:6b381aa183c61963afc61cbff7306fb28b9b1b9ba70b503cad32674bf44666c9", version = "1.0.0" }
+"std.state.recurrent" = { src = "sha256:5723e13fcb0270a5029239ec3ebf3f0eddd69f0abc1651678b5bd83a6466702b", version = "1.0.0" }
 "std.weights.gguf" = { src = "sha256:ea3140520886f4412455879e945597ac79ddc98caf1d4852b3439d8e29fff109", version = "1.0.0" }
 
 [sites]
@@ -234,9 +232,3 @@ holon = { src = "sha256:5aaa322dfa4199c15cd0b456ea2cd904c9e43012f8505c137ac856a5
 "std.ops.rmsnorm[dim=5120]/add_rmsnorm@1" = { config = { facts = { dim = 5120, dtype = "bfloat16", eps = 1e-06, offset = 1.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
 "std.ops.rmsnorm[dim=5120]/rmsnorm@1" = { config = { facts = { dim = 5120, dtype = "bfloat16", eps = 1e-06, offset = 1.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
 "std.ops.rope[head_dim=256]/rope@1" = { config = { facts = { dtype = "bfloat16", head_dim = 256, max_positions = 49152, rotary_dim = 64, theta = 10000000.0 }, props = ["deterministic", "graph_safe"] }, impl = "kernels.flashinfer" }
-"std.state_tier.kv.d2h/state_copy@1" = { config = { facts = { chunk = 65536, direction = "d2h" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
-"std.state_tier.kv.h2d/state_copy@1" = { config = { facts = { chunk = 65536, direction = "h2d" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
-"std.state_tier.plugin.conv_state.checkpoints.d2h/state_copy@1" = { config = { facts = { chunk = 61440, direction = "d2h" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
-"std.state_tier.plugin.conv_state.checkpoints.h2d/state_copy@1" = { config = { facts = { chunk = 61440, direction = "h2d" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
-"std.state_tier.plugin.ssm_state.checkpoints.d2h/state_copy@1" = { config = { facts = { chunk = 3145728, direction = "d2h" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
-"std.state_tier.plugin.ssm_state.checkpoints.h2d/state_copy@1" = { config = { facts = { chunk = 3145728, direction = "h2d" }, props = ["deterministic"] }, impl = "kernels.state_copy" }
