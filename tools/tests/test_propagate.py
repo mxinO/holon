@@ -58,20 +58,21 @@ def test_unchanged_closure_writes_nothing(current):
     assert out.verdict == "unchanged" and out.lock is None and checks.calls == ["plan"]
 
 
-def test_identical_snapshot_is_evidence_for_an_approval(current):
-    # Without changed-line coverage a byte-identical trace does not prove the change unexercised.
+def test_identical_snapshot_advances_without_l2(current):
     checks = Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()])
     out = propagate.decide(current, checks, 86)
-    assert out.verdict == "approve" and checks.calls == ["plan", "snapshot", "snapshot", "l2"]
-    assert out.evidence[0].startswith("snapshot trace byte-identical") and out.lock.snapshot == current.snapshot
-
-
-def test_identical_snapshot_advances_when_allowed(current):
-    checks = Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()])
-    out = propagate.decide(current, checks, 86, allow_advance=True)
     assert out.verdict == "advance" and checks.calls == ["plan", "snapshot", "snapshot"]
     assert out.lock.snapshot == current.snapshot and out.lock.plan.units["kern"].src == "bbbb"
     assert list(out.changes) == ["commit", "unit:kern"]
+
+
+def test_identical_snapshot_with_a_settings_change_needs_approval_without_l2(current):
+    # e.g. a longer max_model_len: the trace cannot show the pools' margin at it
+    plan = dataclasses.replace(_plan(src="bbbb"), engine={"max_model_len": 49152})
+    checks = Scripted(plan, [_snap(), _snap()])
+    out = propagate.decide(current, checks, 86)
+    assert out.verdict == "approve" and "l2" not in checks.calls and out.lock.snapshot == current.snapshot
+    assert out.evidence[0].endswith("not only code changed: ['engine:max_model_len'] (an approval; no L2)")
 
 
 def test_bounded_change_needs_approval(current):
@@ -86,22 +87,23 @@ def test_l2_failure_fails(current):
     assert out.verdict == "fail" and out.lock is None and out.evidence[-1] == "L2 FAIL"
 
 
-def test_a_snapshot_that_is_not_run_identical_fails(current):
-    checks = Scripted(_plan(src="bbbb"), [_snap(9), _snap(10)])
-    out = propagate.decide(current, checks, 86)
+@pytest.mark.parametrize("runs", [2, 3])
+def test_a_snapshot_that_is_not_run_identical_fails(current, runs):
+    checks = Scripted(_plan(src="bbbb"), [_snap(9)] * (runs - 1) + [_snap(10)])     # the opt-in third run decides
+    out = propagate.decide(current, checks, 86, runs=runs)
     assert out.verdict == "fail" and "not run-identical" in out.evidence[0] and "l2" not in checks.calls
+    assert checks.calls.count("snapshot") == runs
 
 
 def test_changed_uncovered_site_never_advances():
     racy = _plan(props=())
     current = Lock(racy, propagate.trace_hash(_snap()), locks.uncovered(racy), sm=86)
-    out = propagate.decide(current, Scripted(_plan(src="bbbb", props=()), [_snap(), _snap()]), 86,
-                           allow_advance=True)
+    out = propagate.decide(current, Scripted(_plan(src="bbbb", props=()), [_snap(), _snap()]), 86)
     assert out.verdict == "approve" and "uncovered sites changed" in out.evidence[0]
 
 
 def test_newly_nondeterministic_site_never_advances(current):
-    out = propagate.decide(current, Scripted(_plan(props=()), [_snap(), _snap()]), 86, allow_advance=True)
+    out = propagate.decide(current, Scripted(_plan(props=()), [_snap(), _snap()]), 86)
     assert out.verdict == "approve" and out.evidence[0].endswith(f"uncovered sites changed: ['{SITE}']")
 
 
@@ -199,7 +201,7 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert pools[-1] == 4 << 20                                 # on the lock's own class: its stored pools
     assert len(list(home.rglob("*.lock"))) == 1
 
-    # Another class's lock, verified here: the trace is byte-identical, which needs an approval, or the opt-in.
+    # Another class's lock, verified here: the trace is byte-identical, so no L2, but a new class needs an approval.
     lock = plans.read(first)
     other = dataclasses.replace(lock.plan, fingerprint_class="cpu/other-toolchain")
     away = tmp_path / "away"
@@ -209,9 +211,8 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     stored.write_bytes(propagate.snapshot_path(home, lock.plan, lock.snapshot).read_bytes())
     assert run(away) == 2
     out = capsys.readouterr().out
-    assert "starting from cpu/other-toolchain's" in out and "snapshot trace byte-identical" in out
-    assert "prefix tokens saved 0" not in out
+    assert "starting from cpu/other-toolchain's" in out and "verdict: approve" in out
+    assert "snapshot trace byte-identical" in out and "L2 " not in out and "prefix tokens saved 0" not in out
     assert pools[-1] is None                                    # another class's pools may not fit here: measured
-    assert run(away, "--allow-uncovered-advance") == 0
-    assert "verdict: advance" in capsys.readouterr().out
+    assert run(away, "--approve") == 0
     assert plans.newest(away, lock.plan.model_id, lock.plan.fingerprint_class).snapshot == lock.snapshot

@@ -314,9 +314,10 @@ lock whose plan has uncovered sites and no run-identical trace records no snapsh
 next to the history (`<class>/snapshots/<hash>.json`). The snapshot trace is the judge's
 (`holon_judge.snapshot.trace`: long context, a prefix hit, the decode batch shrinking through every graph bucket up
 to 64, seeded n > 1, logprobs, prompt logprobs; each run records the step widths and prefix tokens saved). The
-commands are `python -m holon_tools impact | propagate | tune` (`tools/README.md`). Until changed-line coverage is
-recorded, every changed plan needs one approval with the byte-identical trace as evidence; auto-advance is an explicit
-opt-in (`--allow-uncovered-advance`). Since the release (design D2 in `docs/release.md`), `holon serve` starts from
+commands are `python -m holon_tools impact | propagate | tune` (`tools/README.md`). A changed plan whose trace is
+byte-identical advances without a human and without L2 (owner, 2026-10-21: changed-line coverage is not recorded and
+the identical trace is accepted alone); a moved trace goes through L2 against the recorded goldens and one
+approval. Since the release (design D2 in `docs/release.md`), `holon serve` starts from
 the lock it finds by the weight file's build hash, with flags over it, its kernel pins as soft preferences, and
 reports the served plan's difference from the lock. Not yet: changed-line coverage, L2-regression-vs-current-lock for
 approvals, and the `isolation-check` CI job.
