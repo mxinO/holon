@@ -4,6 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "model"
 license = "Apache-2.0"
+derived_from = "models.qwen3_5@a561b15"
 core_abi = ">=1.5,<2.0"
 
 [resources]

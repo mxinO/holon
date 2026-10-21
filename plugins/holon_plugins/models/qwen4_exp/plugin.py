@@ -1,6 +1,7 @@
 """models.qwen4_exp: Qwen3.8-Flash-Next (docs/v1-flash-next.md): its recipe over llama.cpp's `qwen4exp` GGUF and its
-MTP draft head (`recipe.py`, D9), its PLE unit (`units.py`, D4), and PLE's op contracts (`kernels.py`) with their
-oracles (`reference.py`); the kernels are `kernels.ple_triton`'s."""
+MTP draft head (`recipe.py`, D9), its PLE unit (`units.py`, D4), PLE's op contracts (`kernels.py`) with their
+oracles (`reference.py`; the kernels are `kernels.ple_triton`'s), and the frontend bundle (`bundle.py`: the GGUF's
+tokenizer and chat template, as `models.qwen3_5`'s)."""
 from __future__ import annotations
 
 import torch
@@ -27,3 +28,8 @@ class Plugin:
         regs.transforms.add("qwen4_exp.minus_one", lambda t: t.float() - 1)          # GGUF norms store w + 1
         regs.transforms.add("qwen4_exp.a_log", lambda t: torch.log(-t.float()))      # GGUF stores -exp(A_log)
         regs.transforms.add("qwen4_exp.row", lambda t: t.reshape(1, -1))              # [H] or [1, H]: a row
+
+    def bundle(self, source):
+        from .bundle import Bundle
+
+        return Bundle(source)
