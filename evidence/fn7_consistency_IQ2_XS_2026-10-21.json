@@ -1,0 +1,95 @@
+{
+ "name": "fn7_consistency",
+ "date": "2026-10-21",
+ "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+ "plant": null,
+ "prompts": [
+  "summary-6k",
+  "recall-8k",
+  "recall-16k",
+  "chat-multiturn-20k"
+ ],
+ "bars": {
+  "kl_mean": 0.13,
+  "kl_p50": 0.007,
+  "band_dnll": 0.75
+ },
+ "commit": "a952ba97a4a59eccec4c9ccb334c482708de10ac",
+ "decode": {
+  "n": 49596,
+  "kl_mean": 0.023775111410518173,
+  "kl_p50": 0.001843616296077589,
+  "kl_p99": 0.3307731938579222,
+  "dnll": -0.04100310703469684,
+  "worst_band_dnll": -0.27060622159444847,
+  "prompts": {
+   "summary-6k": {
+    "dnll": -0.20212427197267677,
+    "kl_mean": 0.030999154052643658,
+    "worst_band": -0.27060622159444847
+   },
+   "recall-8k": {
+    "dnll": -0.025651751640914343,
+    "kl_mean": 0.030062486913758145,
+    "worst_band": -0.08892366890734321
+   },
+   "recall-16k": {
+    "dnll": -0.026627003410658684,
+    "kl_mean": 0.04062300384391784,
+    "worst_band": -0.053762779861131094
+   },
+   "chat-multiturn-20k": {
+    "dnll": -0.014234148371766557,
+    "kl_mean": 0.005427854221749485,
+    "worst_band": -0.16398312704177442
+   }
+  },
+  "pass": true
+ },
+ "chunked": {
+  "n": 49596,
+  "kl_mean": 0.02290461461549044,
+  "kl_p50": 0.001639279654529622,
+  "kl_p99": 0.354380351433036,
+  "dnll": 0.018998713755117486,
+  "worst_band_dnll": 0.15045419035414298,
+  "prompts": {
+   "summary-6k": {
+    "dnll": 0.10011843588873848,
+    "kl_mean": 0.021043843207107765,
+    "worst_band": 0.13232261228944253
+   },
+   "recall-8k": {
+    "dnll": 0.06498377864742576,
+    "kl_mean": 0.03399980344688666,
+    "worst_band": 0.15045419035414298
+   },
+   "recall-16k": {
+    "dnll": 0.024393985912856027,
+    "kl_mean": 0.0377229696869439,
+    "worst_band": 0.09578676509540784
+   },
+   "chat-multiturn-20k": {
+    "dnll": -0.026467322301256944,
+    "kl_mean": 0.006806828381630318,
+    "worst_band": -0.13426796258147533
+   }
+  },
+  "pass": true
+ },
+ "mtp": {
+  "tokens": 256,
+  "first_difference": [
+   9,
+   35,
+   39,
+   144
+  ],
+  "positions": 231,
+  "kl_mean": 0.0018070156551870712,
+  "kl_p99": 0.014867032439313784,
+  "pass": true
+ },
+ "pass": true
+}

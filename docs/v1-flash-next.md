@@ -1928,3 +1928,16 @@ The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's chang
   product, sigmoid and product, SwiGLU, a cat) and router + top-k + reduction (5 per layer), and in GDN's 11 per layer
   (three quantized matmuls with their two activation quantizations, conv, its state, the recurrent kernel, the norm).
   ≤ 768 needs those; the owner's answer decides it.
+
+### 19.3 Accuracy gate (c), first run
+
+`spikes/fn7/consistency.py` on IQ2_XS, RTX PRO 6000, bf16 (`evidence/fn7_consistency_IQ2_XS_2026-10-21.json`;
+a952ba9, the HC and indexer changes in): **passes**.
+
+| Pair (4 prompts, 49,596 positions) | KL mean (≤ 0.13) | KL p50 (≤ 0.007) | KL p99 | mean ΔNLL | worst 1K band (≤ 0.75) |
+|---|---|---|---|---|---|
+| decode (1-token steps) vs prefill | 0.024 | 0.0018 | 0.33 | −0.041 | −0.27 (`summary-6k`) |
+| chunked (250) vs one-shot | 0.023 | 0.0016 | 0.35 | +0.019 | +0.15 (`recall-8k`) |
+| MTP vs plain, 256 tokens (231 positions up to each first difference) | 0.0018 | – | 0.015 | – | first differences at 9, 35, 39, 144 |
+
+The pre-registered plant (`qsa_decode_select_shift`, which must fail) runs once at the step's close.
