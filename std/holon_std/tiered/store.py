@@ -710,7 +710,9 @@ class TieredStore:
     def _profile_counts(self) -> np.ndarray:
         """`profile`'s routing counts by group: a JSON file `{"checkpoint": …, "layers": {"<group>": [count per
         item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
-        refused unless it was counted on this checkpoint's files; groups it does not name count zero."""
+        refused unless it was counted on this checkpoint's files (or some of them: a profile of the target serves a
+        deployment whose auxiliary model, an MTP head, adds its own file and group); groups it does not name count
+        zero."""
         counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
             return counts
@@ -718,7 +720,8 @@ class TieredStore:
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
         data = json.loads((self.profile_dir / name).read_text())
-        if data.get("checkpoint") != self.checkpoint:
+        files = data.get("checkpoint") or []
+        if not files or any(f not in self.checkpoint for f in files):
             raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "
                              f"this checkpoint {self.checkpoint} (`holon_tools profile` writes one per file)")
         for group, row in data["layers"].items():
