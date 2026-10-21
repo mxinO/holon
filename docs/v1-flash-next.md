@@ -1836,6 +1836,10 @@ history. Acceptance 1(b) is restated (§1). FN's accuracy gates are now all fast
   target log-prob| 0.2–0.3 nats on high-entropy filler, and by up to 1.3% in perplexity on `v1-qwen3_5`). Kept as
   the check that showed the HC race's shift on `recall-4k`; the re-runs show that shift sits inside the paths' noise
   (§17.1's correction, below).
+  **Judged by KL (owner, 2026-10-21):** the KL statistics against the bars as set decide (c) — the tool's set bars
+  are the KL mean (≤ 0.13) and p50 (≤ 0.007); the p99 is reported beside them, as no bar was set for it —; the
+  per-band NLL is reported, not gated (the float64 evidence of §19.5: an SGEMM path as accurate as the tiles it replaced moved
+  `summary-6k`'s bands past 0.75). Under this rule C's and B's trees pass (19.5).
 - **(d) Task accuracy on hard questions.** A fixed set of about 60–100 public or synthetic items with checkable
   answers: multi-step math (exact numbers), code run against tests, reasoning and multiple choice, needle / recall at
   8K and 32K, a couple of multi-turn. Holon and Strata greedy on the same file, both scored. Bar: Holon within a
@@ -1987,11 +1991,17 @@ stated before the run (within 5 items, no Holon-only degenerate answer):
   Triton tiles it replaced have the same error at 250, 1,412, 4,096 and 5,508 rows (x relative 1.13e-7, R 7.6e-6
   max, both). The SGEMMs only round differently, by row count (cuBLAS picks its kernel per shape), and `summary-6k`
   moves as a whole with any such change (as `recall-4k` did in §17.1). The bar, set at 1.5× the worst band seen
-  before, does not hold this prompt's spread: for the owner (keep the bar and drop the prompt, widen the band bar,
-  or judge by KL alone).
+  before, does not hold this prompt's spread. **Owner, 2026-10-21: (c) is judged by KL** (the bars as set: mean
+  and p50); the bands are reported. So C's tree passes (KL mean 0.025 / 0.033, p50 0.0018 / 0.0020; p99 0.36 /
+  0.52).
 - **On B's tree** decode vs prefill and chunked vs one-shot give C's numbers exactly (B changes neither one-row decode
   nor prefill), so the same one-prompt miss; MTP vs plain passes (KL mean 0.0017; first differences at 9, 35, 139
   and 132 tokens).
+
+**Owner decision (2026-10-21) on the RTX 5080's MTP rows:** decided once measured on the card in step 6 — the F5b
+CPU split in the lock, or accepting about 0.95–1.0. Both arms are measured on the 5080: F5b off, and F5b on at tune's
+thread count; the F5b-on arm runs under the path-aware floor check, now GPU self-consistency plus the task gate, no
+fp32 (§20).
 
 ### 19.6 The owner's new opening: llama.cpp's FN kernels and Strata, per component (2026-10-21)
 

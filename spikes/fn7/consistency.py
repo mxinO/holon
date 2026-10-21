@@ -10,8 +10,9 @@ golden. On four `v1-long` prompts (natural text and recall, 6K-20K tokens):
 Per pair: KL(reference || path) mean, p50 and p99 over positions, the signed mean ΔNLL of the scored tokens (path
 minus reference, nats) per prompt and per 1,024-position band. Bars, set before the gate's first run from the bf16
 noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `v1-long`: KL mean 0.043 / 0.063, p50
-0.0023 / 0.0032, worst band |ΔNLL| 0.50): KL mean ≤ 0.13, KL p50 ≤ 0.007, every band's |ΔNLL| ≤ 0.75, and for `mtp`
-KL mean ≤ 0.13 over the agreeing positions. `--plant qsa_decode_select_shift` (decode and verify only) must fail.
+0.0023 / 0.0032, worst band |ΔNLL| 0.50): KL mean ≤ 0.13, KL p50 ≤ 0.007, and for `mtp` KL mean ≤ 0.13 over the
+agreeing positions; every band's |ΔNLL| ≤ 0.75 is reported (`band_within`), not gated (owner, 2026-10-21). `--plant
+qsa_decode_select_shift` (decode and verify only) must fail.
 
     python spikes/fn7/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
         [--holon-flags '<engine flags>'] [--prefill-step N]
@@ -76,8 +77,8 @@ def compare(ref, rec) -> dict:
         per[p] = {"dnll": d[s:e].mean().item(), "kl_mean": kl[s:e].mean().item(), "worst_band": max(b, key=abs)}
     out = {"n": len(kl), "kl_mean": kl.mean().item(), "kl_p50": kl.median().item(), "kl_p99": kl.quantile(0.99).item(),
            "dnll": d.mean().item(), "worst_band_dnll": max(bands, key=abs), "prompts": per}
-    out["pass"] = (out["kl_mean"] <= BARS["kl_mean"] and out["kl_p50"] <= BARS["kl_p50"]
-                   and abs(out["worst_band_dnll"]) <= BARS["band_dnll"])
+    out["pass"] = out["kl_mean"] <= BARS["kl_mean"] and out["kl_p50"] <= BARS["kl_p50"]   # judged by KL (owner,
+    out["band_within"] = abs(out["worst_band_dnll"]) <= BARS["band_dnll"]                 # 2026-10-21); reported
     return out
 
 
