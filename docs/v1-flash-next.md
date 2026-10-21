@@ -1594,3 +1594,115 @@ and a 2 GiB state budget on an RTX A5000: this step's tree and the base (0aad1ab
 - **The deployed files store the shared expert's gate as [H]** (the tiny file's converter wrote [1, H]): a `qwen4_exp.row` value transform makes it a row either way. The slice's every tensor maps and loads.
 - **Blocker for step 5, the MoE prefill track's:** `kernels.ggml_cuda` serves matmuls only at `in` a multiple of 256 (`_supports_matmul`, still so on the track's branch), and FN's routed down and the shared expert's down have `in` = 640. The counts above ran with that check relaxed to 128 in a scratch copy; the track's T5 (Q2_0) needs the `in` = 640 case for both `linear_experts@2` and `qlinear@2`, with L0.
 - **Propagation (D16) grows:** step 3 also changes `src` in `std.mixers.gqa`, `std.ffn`, `std.ops` (the `rope@1` text), `std.moe`, `std.spec.mtp_head` and `std.weights.gguf`, which the close's single propagation covers.
+
+## 17. Step 5 record: the full model on the RTX PRO 6000 (2026-10-20)
+
+**Status: stopped at a failed gate (L2, IQ3_S `v1-long` decode path, below), for the panel's review.** FN merged
+the MoE prefill track (a8c8a97: T6's width-640 kernels, the
+qembedding fix, IQ1_M, Q2_0, lending, `pass_rows`) at b6a79f2, then ran step 5 on one RTX PRO 6000 (96 GB, sm_120),
+all-resident: experts, the 28.8 GB PLE table and the MTP pack in VRAM. The fp32 goldens streamed one layer at a time
+on the CPU (32 threads; 1.5–3.6 h and 40–72 GB peak RSS per file and set). Every result below is on the final code
+(30c7fd7 and the judge's 9bf717c), re-run after the two fixes. The numbers are in
+`evidence/fn5_step5_rtx-pro-6000_2026-10-20.json`; the drivers are `spikes/fn5/` and the judge's commands.
+
+**Two bugs found and fixed during the step:**
+- **QSA's index kernels addressed units as if dense** (ba55212). The unit views each idx unit's layer segment as raw keys
+  then pooled keys, so units are strided; `qsa_index@1` and `qsa_select@1`'s Triton kernels ignored `stride(0)`, wrote
+  pooled keys over other units' bytes and selected from wrong ones. The CPU oracle (strided views) and step 4's L0
+  (dense test pools) could not see it. **Found by the decode-divergence gate:** its first run failed every unplanted arm
+  (sparse KL p99 9.3 nats against dense 0.19); a scoring engine then gave different logprobs for the same prompt after
+  another one, from position 2,051 (the dense limit) on. The kernels now take the unit strides, the contract states
+  the layout, and L0 runs on the unit's own strided views (failing before the fix).
+- **Decode spent 78% of its step in one HC kernel** (30c7fd7). The tiled `_down` gave a token's 10,240-long reduction to
+  six programs: 442 µs per call, 97 calls per token. Decode and verify steps (≤ 16 tokens) now take GEMV-shaped kernels
+  (`_down_gemv` over (stream, 512-wide K chunk), `_down_sum` in a fixed order, `_up_mix_gemv`): the IQ2_XS decode step
+  goes from 54.7 to 8.2 ms. L0 unchanged.
+- Also: the judge's GGUF floor skipped PLE's table (45cf5fb), and the decode-path L2 runs in 1-token steps (at 8-token
+  steps some matmuls took mmq, which the mmvq floor does not emulate).
+
+**The decode-divergence gate (acceptance 2; IQ2_XS; `spikes/fn5/gates.py divergence`).** Each `v1-long` prompt (4K–32K)
+is a session decoding 128 tokens; a reference of the same QSA mode re-scores them teacher-forced (KL at 1,024
+positions, session-bootstrap SEs). Bound: max(2 × dense, dense + 2.5 SE).
+
+| Arm | KL p95 | KL p99 | gate (p99) |
+|---|---|---|---|
+| dense control | 0.0163 | 0.128 | bound 0.334 |
+| sparse | 0.0300 | 0.235 | pass |
+| MTP (sparse, 3 drafts) | 0.0080 | 0.090 | pass |
+| sparse + `qsa_decode_select_shift` | 0.0993 | 0.435 | **fails** |
+| MTP + `qsa_decode_select_shift` | 0.0785 | 0.542 | **fails** |
+
+- As pre-registered: the unplanted arms pass, both planted arms fail. **Noise:** 8 sessions make the p99 noisy. The run
+  just before the HC fix had the dense p99 at 0.19 (bound 0.61), where both plants passed p99; the pre-registered
+  tightening to p95 then separated them (bound 0.020: sparse 0.019 passed, the plants 0.094 / 0.078 failed). Both
+  records are kept; the step-7 re-run should use more sessions.
+
+**MTP acceptance** (3 drafts, `v1-qwen3_5`'s chat and agent prompts, 256 tokens each): **2.71 tokens per pass (IQ2_XS),
+2.74 (IQ3_S)** against the ≥ 2.2 gate.
+
+**Bounded and run-identical** (IQ2_XS; `v1-long`, a 4,096-token system prompt so decode runs sparse after a restore;
+16 sessions × 4 turns × 128 tokens): prefix on / off × overlap 1 / 0 and chunked prefill at 250 tokens pass (231,744
+prompt tokens restored from the prefix cache); graphs vs eager pass; MTP speculation vs plain decoding pass (prefix on,
+depth 1, and depth 0). Snapshot ×3 with an 8,192-token request (a prefix hit of 8,192), MTP on: **run-identical**.
+
+**Plants (§6.3; L2 on IQ2_XS):** `qsa_select_shift` fails on `v1-qwen3_5` too (§6.3 predicted a pass there: its three
+prompts past 2,051 tokens suffice), `hc_inject_unscaled` and `ple_gate_no_sqrt` fail; the `v1-long` ones are below.
+
+**Launches per token** (eager steps counted with the profiler, IQ2_XS): **1,678 per decode token (≈ 35 per layer)**, the
+GEMV mix adding one launch per mix; a verify pass of 1 + 3 rows with its three draft sub-steps: 2,615. Step 7's gate is
+768.
+
+**Kernel-only comparison with Strata, all-resident** (`bench/offload_ctx.py --corpus fn`, 3 rounds, medians over the
+three spans; Strata no-approx with `--expert-cache 24576`, its PLE in RAM as it requires, Holon's in VRAM; Holon at
+8,192-token steps). Decode tok/s, Holon / Strata:
+
+| File, arm | 1K | 4K | 32K |
+|---|---|---|---|
+| IQ2_XS, drafting off | 123.5 / 133.4 (0.93) | 125.5 / 134.5 (0.93) | 121.1 / 137.2 (0.88) |
+| IQ2_XS, MTP | 171.2 / 221.4 (0.77) | 143.4 / 189.9 (0.76) | 186.0 / 230.8 (0.81) |
+| IQ3_S, drafting off | 116.5 / 123.8 (0.94) | 120.6 / 126.6 (0.95) | 114.1 / 126.0 (0.91) |
+| IQ3_S, MTP | 176.1 / 176.7 (1.00) | 138.3 / 167.8 (0.82) | 165.8 / 228.1 (0.73) |
+
+Prefill tok/s, Holon / Strata (drafting off): IQ2_XS 3,085 / 2,719 (1.13), 3,867 / 4,392 (0.88), 3,960 / 5,379 (0.74);
+IQ3_S 3,108 / 2,745 (1.13), 3,794 / 4,476 (0.85), 3,845 / 5,480 (0.70). Strata's accepted tokens per pass in its MTP
+arms: 2.2–3.4. The gaps sit where §14's launch table and step 7 put them: ≈ 35 launches per decode layer, the MTP head's
+own budget, and the prefill's fp32 HC projections and GDN at long contexts.
+
+**N5:** Holon's own decode routing (IQ2_XS, all-resident, 1,530 decode tokens over D11's 1K and 4K spans) replayed in
+N3's roofline in place of Strata's trace: the lfu hit rates rise 0.4–1.4 points and the decode ratios 1–3% (e.g. the
+RTX 5080's no-approx decode 1.04 / 1.01 / 1.08 at 1K / 4K / 32K central); of N3's rows below their bar only the RTX
+5090's 32K defaults MTP row (report-only) leaves the list.
+
+**L2 Tier B** (bf16 engine vs fp32 golden, against the bf16 floor emulating q8_1 on the path; prefill path at 8,192-token
+steps, decode path at 1-token steps):
+
+| File, set, path | top-1 | KL p50 | KL p99 (floor; budget) | ΔPPL vs floor (budget) | Verdict |
+|---|---|---|---|---|---|
+| IQ2_XS, `v1-qwen3_5`, prefill | 97.26% | 4.4e-4 | 0.301 (0.316; 0.631) | −0.24% (3.13%) | pass |
+| IQ2_XS, `v1-qwen3_5`, decode | 97.16% | 5.2e-4 | 0.301 (0.301; 0.601) | +1.27% (1.57%) | pass |
+| IQ2_XS, `v1-long`, prefill | 94.67% | 1.8e-3 | 0.634 (0.752; 1.50) | +2.29% (3.82%) | pass |
+| IQ2_XS, `v1-long`, decode | 94.62% | 1.9e-3 | 0.661 (0.729; 1.46) | −0.84% (4.92%) | pass |
+| IQ3_S, `v1-qwen3_5`, prefill | 96.51% | 6.7e-4 | 0.467 (0.486; 0.97) | −1.28% (3.43%) | pass |
+| IQ3_S, `v1-qwen3_5`, decode | 97.13% | 6.0e-4 | 0.355 (0.382; 0.76) | −0.12% (3.08%) | pass |
+| IQ3_S, `v1-long`, prefill | 93.55% | 2.7e-3 | 1.00 (1.08; 2.15) | −2.78% (7.13%) | pass |
+| **IQ3_S, `v1-long`, decode** | 93.51% | 2.6e-3 | 0.915 (1.08; 2.16) | **−6.56% (6.36%)** | **FAIL** |
+
+**The gate that failed, and where step 5 stops.** L2 on IQ3_S's `v1-long` decode path fails on one statistic: the
+engine's perplexity sits 4.53% below the golden's and the floor's 2.18% above, a difference of 6.56% ± 2.45% against a
+6.36% budget. Its top-1, KL p50 and KL p99 are inside budget (the KL p99 below the floor's). Per prompt, the shift comes
+from `recall-4k` (the engine's NLL 0.37 nats per token below the golden's, the floor's 0.12 above), a prompt of
+high-entropy filler (the golden's NLL 4.9 nats per token), and it spans the dense positions (0–2,050) as much as the
+sparse ones, so it is not QSA's selection. The same prompt's decode and prefill paths differ by 0.1–0.26 nats per token
+in both files (IQ2_XS: decode −0.11 against prefill on positions 0–2,050), which the KL statistics barely see (those
+are tail tokens, outside the top-20). Not yet diagnosed: which path-dependent op (the mmvq trunk, the head's output
+dtype on the decode path, GDN's recurrent update, the GEMV HC mix) moves tail log-probabilities this much. Step 5
+stops here, as instructed.
+
+**`qsa_pool_rope_last` passes L2 on `v1-long`** (KL p99 0.652 against 0.634 unplanted; it fired on every step). §6.3's
+pre-registered rule applies: the long set gains recall prompts before any lock.
+
+**Deviations and notes:**
+- The `v1-qwen3_5` floors ran on an RTX A5000 (one layer resident fits 24 GB); the `v1-long` floors need the RTX PRO
+  6000 (an A5000 runs out of memory in HF's GDN at 32K).
+- The first node's card reported uncorrectable ECC errors (an engine failed at its first allocation); a second node
+  served the step.

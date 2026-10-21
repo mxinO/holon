@@ -1,0 +1,1239 @@
+{
+ "name": "fn5_step5",
+ "date": "2026-10-20",
+ "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+ "commit": "9bf717caa21e2fbb6671db186989636b6b8ac7a5",
+ "files": [
+  "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF IQ2_XS",
+  "... IQ3_S"
+ ],
+ "mtp_pack": "Strata mtp-q2_0.gguf",
+ "mtp_acceptance": {
+  "IQ2_XS": {
+   "tokens_per_pass": 2.7102473498233213,
+   "rows_by_accepted": {
+    "0": 264,
+    "3": 446,
+    "1": 246,
+    "2": 176
+   },
+   "gate": true
+  },
+  "IQ3_S": {
+   "tokens_per_pass": 2.7366548042704624,
+   "rows_by_accepted": {
+    "2": 174,
+    "3": 459,
+    "1": 227,
+    "0": 264
+   },
+   "gate": true
+  }
+ },
+ "launches_per_step": {
+  "decode": {
+   "per_step": [
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1681,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678,
+    1678
+   ],
+   "median": 1678
+  },
+  "mtp": {
+   "per_step": [
+    2615,
+    2615,
+    2615,
+    2615,
+    2622,
+    2615
+   ],
+   "median": 2615
+  }
+ },
+ "decode_divergence": {
+  "final": {
+   "arms": {
+    "sparse": {
+     "kl_mean": 0.008118672369810183,
+     "p50": 4.531931263911775e-05,
+     "p95": 0.030026504520835984,
+     "p95_se": 0.029105372814799163,
+     "p99": 0.2347952512620214,
+     "p99_se": 0.11139530750163142,
+     "n": 1024
+    },
+    "mtp": {
+     "kl_mean": 0.006553351892281982,
+     "p50": 3.090216949841493e-05,
+     "p95": 0.007958884214693778,
+     "p95_se": 0.0019181467357584857,
+     "p99": 0.0901200531592976,
+     "p99_se": 0.060608328752263095,
+     "n": 1024
+    },
+    "dense": {
+     "kl_mean": 0.005611232471485709,
+     "p50": 3.461538136227037e-05,
+     "p95": 0.016335112556527427,
+     "p95_se": 0.011060319409890055,
+     "p99": 0.1284343551662898,
+     "p99_se": 0.08230585639068566,
+     "n": 1024
+    },
+    "sparse+plant": {
+     "kl_mean": 0.02523025180434159,
+     "p50": 0.00023367624003415877,
+     "p95": 0.09929989389265743,
+     "p95_se": 0.03860881683257982,
+     "p99": 0.4350364919842453,
+     "p99_se": 0.24203395486414575,
+     "n": 1024
+    },
+    "mtp+plant": {
+     "kl_mean": 0.022390825599085434,
+     "p50": 0.0003061635210640411,
+     "p95": 0.07854030791746314,
+     "p95_se": 0.02453928040689467,
+     "p99": 0.5420113444658954,
+     "p99_se": 0.22881985966471083,
+     "n": 1024
+    }
+   },
+   "gate_p99": {
+    "bound": 0.33419899614300397,
+    "sparse": true,
+    "mtp": true,
+    "sparse+plant": false,
+    "mtp+plant": false
+   },
+   "gate_p95": {
+    "bound": 0.04398591108125256,
+    "sparse": true,
+    "mtp": true,
+    "sparse+plant": false,
+    "mtp+plant": false
+   },
+   "statistic": "p99",
+   "pre_registered": {
+    "expected": {
+     "sparse": true,
+     "mtp": true,
+     "sparse+plant": false,
+     "mtp+plant": false
+    },
+    "as_expected": true
+   }
+  },
+  "before_the_qsa_fix": {
+   "arms": {
+    "sparse": {
+     "kl_mean": 0.5465984033835699,
+     "p50": 0.001488423453334825,
+     "p99": 9.295095931464578,
+     "p99_se": 1.6738818555456771,
+     "n": 1024
+    },
+    "mtp": {
+     "kl_mean": 0.26180852617975203,
+     "p50": 0.00026921967283715113,
+     "p99": 5.8155647834459865,
+     "p99_se": 2.227677765626256,
+     "n": 1024
+    },
+    "dense": {
+     "kl_mean": 0.00945457518476104,
+     "p50": 3.3355306952747286e-05,
+     "p99": 0.19021015556892235,
+     "p99_se": 0.16910470452033882,
+     "n": 1024
+    },
+    "sparse+plant": {
+     "kl_mean": 0.18247401747578515,
+     "p50": 0.0008701064940346531,
+     "p99": 5.062472175666471,
+     "p99_se": 2.1501304953771614,
+     "n": 1024
+    },
+    "mtp+plant": {
+     "kl_mean": 0.1953394010563184,
+     "p50": 0.0009453375404891545,
+     "p99": 5.431399331642329,
+     "p99_se": 2.5723189467715915,
+     "n": 1024
+    }
+   },
+   "gate": {
+    "bound_p99": 0.6129719168697694,
+    "sparse": false,
+    "mtp": false,
+    "sparse+plant": false,
+    "mtp+plant": false
+   },
+   "pre_registered": {
+    "expected": {
+     "sparse": true,
+     "mtp": true,
+     "sparse+plant": false,
+     "mtp+plant": false
+    },
+    "as_expected": false
+   }
+  },
+  "before_the_hc_fix": {
+   "arms": {
+    "sparse": {
+     "kl_mean": 0.006154599131409425,
+     "p50": 2.619816266515843e-05,
+     "p95": 0.018941228591451136,
+     "p95_se": 0.010966411774541072,
+     "p99": 0.11300213099839225,
+     "p99_se": 0.05560671038294507,
+     "n": 1024
+    },
+    "mtp": {
+     "kl_mean": 0.006582388592139892,
+     "p50": 3.071587592777549e-05,
+     "p95": 0.008209186878048504,
+     "p95_se": 0.002148338937455178,
+     "p99": 0.0901200531592976,
+     "p99_se": 0.060541256259711705,
+     "n": 1024
+    },
+    "dense": {
+     "kl_mean": 0.009454575184761043,
+     "p50": 3.3355306952747286e-05,
+     "p95": 0.009214336214784688,
+     "p95_se": 0.0042461703925871985,
+     "p99": 0.19021015556892235,
+     "p99_se": 0.16910470452033882,
+     "n": 1024
+    },
+    "sparse+plant": {
+     "kl_mean": 0.022938830905584122,
+     "p50": 0.00030383793628986676,
+     "p95": 0.0937562859486493,
+     "p95_se": 0.034329413258719826,
+     "p99": 0.5403186121559036,
+     "p99_se": 0.1836774921495182,
+     "n": 1024
+    },
+    "mtp+plant": {
+     "kl_mean": 0.022146927610906586,
+     "p50": 0.00030730497059567653,
+     "p95": 0.07808750399037329,
+     "p95_se": 0.02454414446386227,
+     "p99": 0.5420113444658954,
+     "p99_se": 0.2189447992434378,
+     "n": 1024
+    }
+   },
+   "gate_p99": {
+    "bound": 0.6129719168697694,
+    "sparse": true,
+    "mtp": true,
+    "sparse+plant": true,
+    "mtp+plant": true
+   },
+   "gate_p95": {
+    "bound": 0.019829762196252685,
+    "sparse": true,
+    "mtp": true,
+    "sparse+plant": false,
+    "mtp+plant": false
+   },
+   "statistic": "p95",
+   "pre_registered": {
+    "expected": {
+     "sparse": true,
+     "mtp": true,
+     "sparse+plant": false,
+     "mtp+plant": false
+    },
+    "as_expected": true
+   }
+  }
+ },
+ "bounded": {
+  "bounded_IQ2_XS": {
+   "sessions": 16,
+   "turns": 4,
+   "system_len": 4096,
+   "passed": true,
+   "results": {
+    "baseline": {
+     "top1": 0.9859619140625,
+     "kl_p50": 0.00019829199494029084,
+     "kl_p99": 0.08384151720123095,
+     "tokens_saved": 0,
+     "passed": true
+    },
+    "prefix on, depth 1": {
+     "top1": 0.986572265625,
+     "kl_p50": 0.0002560345869561246,
+     "kl_p99": 0.06453777430454839,
+     "tokens_saved": 231744,
+     "passed": true
+    },
+    "prefix on, depth 0": {
+     "top1": 0.9852294921875,
+     "kl_p50": 0.0002046967352284119,
+     "kl_p99": 0.08575061091738571,
+     "tokens_saved": 240064,
+     "passed": true
+    },
+    "prefix off, depth 1": {
+     "top1": 0.9859619140625,
+     "kl_p50": 0.00019829199494029084,
+     "kl_p99": 0.08384151720123095,
+     "tokens_saved": 0,
+     "passed": true
+    },
+    "chunked 250": {
+     "top1": 0.9866943359375,
+     "kl_p50": 0.000197181608496432,
+     "kl_p99": 0.05892435089038043,
+     "tokens_saved": 0,
+     "passed": true
+    }
+   }
+  },
+  "bounded_graphs_IQ2_XS": {
+   "sessions": 16,
+   "turns": 4,
+   "system_len": 4096,
+   "passed": true,
+   "results": {
+    "baseline": {
+     "top1": 0.9859619140625,
+     "kl_p50": 0.00019829199494029084,
+     "kl_p99": 0.08384151720123095,
+     "tokens_saved": 0,
+     "passed": true
+    },
+    "graphs on": {
+     "top1": 0.9859619140625,
+     "kl_p50": 0.00019829199494029084,
+     "kl_p99": 0.08384151720123095,
+     "tokens_saved": 0,
+     "passed": true
+    }
+   }
+  },
+  "bounded_spec_IQ2_XS": {
+   "sessions": 16,
+   "turns": 4,
+   "system_len": 4096,
+   "passed": true,
+   "results": {
+    "baseline": {
+     "top1": 0.9859619140625,
+     "kl_p50": 0.00019829199494029084,
+     "kl_p99": 0.08384151720123095,
+     "tokens_saved": 0,
+     "passed": true
+    },
+    "spec, prefix on, depth 1": {
+     "top1": 0.986572265625,
+     "kl_p50": 0.00020034368387111153,
+     "kl_p99": 0.07589179066335754,
+     "tokens_saved": 231744,
+     "passed": true
+    },
+    "spec, depth 0": {
+     "top1": 0.986572265625,
+     "kl_p50": 0.00018548444896591222,
+     "kl_p99": 0.06622469798672212,
+     "tokens_saved": 0,
+     "passed": true
+    }
+   }
+  }
+ },
+ "snapshot": {
+  "runs": 3,
+  "steps": 42,
+  "run_identical": true,
+  "tokens_saved": 8192,
+  "trace": "sha256:cd98ff6f75362b89a163be30a673a7b76a5157ea4a6852917b20168ebc81fedc"
+ },
+ "kernel_only_comparison": {
+  "IQ2_XS": {
+   "holon_off": {
+    "1024": {
+     "decode_tps": 123.52,
+     "prefill_tps": 3084.71
+    },
+    "4096": {
+     "decode_tps": 125.55,
+     "prefill_tps": 3867.44
+    },
+    "32768": {
+     "decode_tps": 121.06,
+     "prefill_tps": 3960.26
+    }
+   },
+   "strata_na_off": {
+    "1024": {
+     "decode_tps": 133.39,
+     "prefill_tps": 2718.6,
+     "tokens_per_pass": 1.0
+    },
+    "4096": {
+     "decode_tps": 134.49,
+     "prefill_tps": 4391.78,
+     "tokens_per_pass": 1.0
+    },
+    "32768": {
+     "decode_tps": 137.24,
+     "prefill_tps": 5379.45,
+     "tokens_per_pass": 1.0
+    }
+   },
+   "holon_mtp": {
+    "1024": {
+     "decode_tps": 171.23,
+     "prefill_tps": 2916.62
+    },
+    "4096": {
+     "decode_tps": 143.44,
+     "prefill_tps": 3810.59
+    },
+    "32768": {
+     "decode_tps": 186.0,
+     "prefill_tps": 3853.04
+    }
+   },
+   "strata_na_mtp": {
+    "1024": {
+     "decode_tps": 221.43,
+     "prefill_tps": 2667.29,
+     "tokens_per_pass": 2.81
+    },
+    "4096": {
+     "decode_tps": 189.93,
+     "prefill_tps": 4370.47,
+     "tokens_per_pass": 2.37
+    },
+    "32768": {
+     "decode_tps": 230.82,
+     "prefill_tps": 5341.84,
+     "tokens_per_pass": 3.01
+    }
+   }
+  },
+  "IQ3_S": {
+   "holon_off": {
+    "1024": {
+     "decode_tps": 116.51,
+     "prefill_tps": 3107.94
+    },
+    "4096": {
+     "decode_tps": 120.59,
+     "prefill_tps": 3794.19
+    },
+    "32768": {
+     "decode_tps": 114.12,
+     "prefill_tps": 3844.59
+    }
+   },
+   "strata_na_off": {
+    "1024": {
+     "decode_tps": 123.78,
+     "prefill_tps": 2745.14,
+     "tokens_per_pass": 1.0
+    },
+    "4096": {
+     "decode_tps": 126.57,
+     "prefill_tps": 4475.74,
+     "tokens_per_pass": 1.0
+    },
+    "32768": {
+     "decode_tps": 125.98,
+     "prefill_tps": 5479.53,
+     "tokens_per_pass": 1.0
+    }
+   },
+   "holon_mtp": {
+    "1024": {
+     "decode_tps": 176.11,
+     "prefill_tps": 3087.24
+    },
+    "4096": {
+     "decode_tps": 138.34,
+     "prefill_tps": 3748.43
+    },
+    "32768": {
+     "decode_tps": 165.75,
+     "prefill_tps": 3793.39
+    }
+   },
+   "strata_na_mtp": {
+    "1024": {
+     "decode_tps": 176.71,
+     "prefill_tps": 2744.46,
+     "tokens_per_pass": 2.39
+    },
+    "4096": {
+     "decode_tps": 167.84,
+     "prefill_tps": 4449.04,
+     "tokens_per_pass": 2.27
+    },
+    "32768": {
+     "decode_tps": 228.14,
+     "prefill_tps": 5431.7,
+     "tokens_per_pass": 3.2
+    }
+   }
+  }
+ },
+ "n5": {
+  "rtx-5080": {
+   "lfu_hit_rate": {
+    "off": 0.8333,
+    "mtp": 0.7302,
+    "target_off": 0.8506,
+    "target_mtp": 0.7578
+   },
+   "rows_below_bar_central": [
+    "1024 defaults_mtp_decode",
+    "1024 noapprox_mtp_decode",
+    "1024 target_noapprox_mtp_decode",
+    "32768 defaults_mtp_decode",
+    "4096 defaults_mtp_decode",
+    "4096 noapprox_mtp_decode",
+    "4096 target_noapprox_mtp_decode"
+   ],
+   "ratios": {
+    "1024": {
+     "strata": {
+      "na_off_decode": 89.71,
+      "na_mtp_decode": 131.84,
+      "accepted_per_pass": 2.84,
+      "def_off_decode": 99.29,
+      "def_mtp_decode": 153.99,
+      "na_prefill": 1622.1,
+      "def_prefill": 1548.0
+     },
+     "holon": {
+      "decode_off": {
+       "central": 93.3,
+       "low": 86.9,
+       "high": 100.8,
+       "launches_34": 73.1,
+       "launches_37": 70.5
+      },
+      "decode_mtp": {
+       "central": 118.8,
+       "low": 114.3,
+       "high": 123.6,
+       "launches_34": 105.6,
+       "launches_37": 103.7
+      },
+      "prefill": {
+       "central": 1927.4,
+       "low": 1517.6,
+       "high": 2205.2
+      },
+      "prefill_stream_cap": 2319.0,
+      "routed_nonresident_share": 0.748,
+      "q8_0_kv_gain": 1.0
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.04,
+       "low": 0.969,
+       "high": 1.124,
+       "launches_34": 0.815,
+       "launches_37": 0.786
+      },
+      "noapprox_mtp_decode": {
+       "central": 0.901,
+       "low": 0.867,
+       "high": 0.937,
+       "launches_34": 0.801,
+       "launches_37": 0.787
+      },
+      "noapprox_prefill": {
+       "central": 1.188,
+       "low": 0.936,
+       "high": 1.359
+      },
+      "defaults_off_decode": {
+       "central": 1.04,
+       "low": 0.969,
+       "high": 1.124,
+       "launches_34": 0.815,
+       "launches_37": 0.786
+      },
+      "defaults_mtp_decode": {
+       "central": 0.854,
+       "low": 0.821,
+       "high": 0.888,
+       "launches_34": 0.759,
+       "launches_37": 0.745
+      },
+      "defaults_prefill": {
+       "central": 1.245,
+       "low": 0.98,
+       "high": 1.425
+      },
+      "target_noapprox_off_decode": {
+       "central": 1.069,
+       "low": 0.993,
+       "high": 1.157,
+       "launches_34": 0.832,
+       "launches_37": 0.802
+      },
+      "target_noapprox_mtp_decode": {
+       "central": 0.949,
+       "low": 0.911,
+       "high": 0.989,
+       "launches_34": 0.839,
+       "launches_37": 0.823
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.0308,
+      "dequant": 0.2849,
+      "embed+steps": 0.0029,
+      "gather": 0.0044,
+      "gdn": 0.091,
+      "gdn conv+gates": 0.0059,
+      "gdn out proj": 0.0382,
+      "gdn recurrence": 0.0279,
+      "gemm down": 0.0954,
+      "gemm gate/up": 0.2012,
+      "hc read": 0.0396,
+      "host grouping": 0.0117,
+      "ple": 0.0015,
+      "qsa attn": 0.0323,
+      "qsa indexer": 0.0,
+      "qsa proj": 0.0426,
+      "qsa select": 0.0015,
+      "router+shared": 0.0191,
+      "wait copy": 0.072
+     }
+    },
+    "4096": {
+     "strata": {
+      "na_off_decode": 89.55,
+      "na_mtp_decode": 108.8,
+      "accepted_per_pass": 2.42,
+      "def_off_decode": 96.32,
+      "def_mtp_decode": 127.2,
+      "na_prefill": 2727.3,
+      "def_prefill": 2674.4
+     },
+     "holon": {
+      "decode_off": {
+       "central": 90.8,
+       "low": 84.0,
+       "high": 98.4,
+       "launches_34": 71.5,
+       "launches_37": 69.0
+      },
+      "decode_mtp": {
+       "central": 99.4,
+       "low": 95.3,
+       "high": 103.8,
+       "launches_34": 88.6,
+       "launches_37": 87.0
+      },
+      "prefill": {
+       "central": 2704.6,
+       "low": 2132.2,
+       "high": 3091.1
+      },
+      "prefill_stream_cap": 6937.4,
+      "routed_nonresident_share": 1.0,
+      "q8_0_kv_gain": 1.0
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.013,
+       "low": 0.938,
+       "high": 1.098,
+       "launches_34": 0.798,
+       "launches_37": 0.771
+      },
+      "noapprox_mtp_decode": {
+       "central": 0.914,
+       "low": 0.876,
+       "high": 0.954,
+       "launches_34": 0.814,
+       "launches_37": 0.8
+      },
+      "noapprox_prefill": {
+       "central": 0.992,
+       "low": 0.782,
+       "high": 1.133
+      },
+      "defaults_off_decode": {
+       "central": 1.013,
+       "low": 0.938,
+       "high": 1.098,
+       "launches_34": 0.798,
+       "launches_37": 0.771
+      },
+      "defaults_mtp_decode": {
+       "central": 0.841,
+       "low": 0.806,
+       "high": 0.877,
+       "launches_34": 0.749,
+       "launches_37": 0.736
+      },
+      "defaults_prefill": {
+       "central": 1.011,
+       "low": 0.797,
+       "high": 1.156
+      },
+      "target_noapprox_off_decode": {
+       "central": 1.04,
+       "low": 0.961,
+       "high": 1.13,
+       "launches_34": 0.815,
+       "launches_37": 0.786
+      },
+      "target_noapprox_mtp_decode": {
+       "central": 0.961,
+       "low": 0.919,
+       "high": 1.006,
+       "launches_34": 0.852,
+       "launches_37": 0.836
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.0703,
+      "dequant": 0.1125,
+      "embed+steps": 0.0019,
+      "gather": 0.0064,
+      "gdn": 0.0972,
+      "gdn conv+gates": 0.0134,
+      "gdn out proj": 0.0473,
+      "gdn recurrence": 0.0505,
+      "gemm down": 0.0895,
+      "gemm gate/up": 0.1714,
+      "hc read": 0.0723,
+      "host grouping": 0.0096,
+      "ple": 0.0032,
+      "qsa attn": 0.1682,
+      "qsa indexer": 0.0,
+      "qsa proj": 0.0505,
+      "qsa select": 0.007,
+      "router+shared": 0.0211,
+      "wait copy": 0.0096
+     }
+    },
+    "32768": {
+     "strata": {
+      "na_off_decode": 83.88,
+      "na_mtp_decode": 112.77,
+      "accepted_per_pass": 2.98,
+      "def_off_decode": 91.65,
+      "def_mtp_decode": 142.64,
+      "na_prefill": 3091.0,
+      "def_prefill": 3701.3
+     },
+     "holon": {
+      "decode_off": {
+       "central": 90.6,
+       "low": 83.9,
+       "high": 98.2,
+       "launches_34": 71.4,
+       "launches_37": 68.9
+      },
+      "decode_mtp": {
+       "central": 122.1,
+       "low": 116.9,
+       "high": 127.4,
+       "launches_34": 108.8,
+       "launches_37": 106.9
+      },
+      "prefill": {
+       "central": 2884.7,
+       "low": 2263.6,
+       "high": 3319.7
+      },
+      "prefill_stream_cap": 6937.4,
+      "routed_nonresident_share": 1.0,
+      "q8_0_kv_gain": 1.197
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.08,
+       "low": 1.0,
+       "high": 1.171,
+       "launches_34": 0.851,
+       "launches_37": 0.822
+      },
+      "noapprox_mtp_decode": {
+       "central": 1.082,
+       "low": 1.037,
+       "high": 1.13,
+       "launches_34": 0.965,
+       "launches_37": 0.948
+      },
+      "noapprox_prefill": {
+       "central": 0.933,
+       "low": 0.732,
+       "high": 1.074
+      },
+      "defaults_off_decode": {
+       "central": 1.08,
+       "low": 1.0,
+       "high": 1.171,
+       "launches_34": 0.851,
+       "launches_37": 0.822
+      },
+      "defaults_mtp_decode": {
+       "central": 0.935,
+       "low": 0.895,
+       "high": 0.976,
+       "launches_34": 0.834,
+       "launches_37": 0.819
+      },
+      "defaults_prefill": {
+       "central": 0.933,
+       "low": 0.732,
+       "high": 1.074
+      },
+      "target_noapprox_off_decode": {
+       "central": 1.109,
+       "low": 1.024,
+       "high": 1.204,
+       "launches_34": 0.869,
+       "launches_37": 0.838
+      },
+      "target_noapprox_mtp_decode": {
+       "central": 1.139,
+       "low": 1.088,
+       "high": 1.191,
+       "launches_34": 1.009,
+       "launches_37": 0.991
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.0479,
+      "dequant": 0.0576,
+      "embed+steps": 0.0048,
+      "gather": 0.0084,
+      "gdn": 0.0965,
+      "gdn conv+gates": 0.0153,
+      "gdn out proj": 0.05,
+      "gdn recurrence": 0.0586,
+      "gemm down": 0.0765,
+      "gemm gate/up": 0.1419,
+      "hc read": 0.0814,
+      "host grouping": 0.0083,
+      "ple": 0.004,
+      "qsa attn": 0.2486,
+      "qsa indexer": 0.0001,
+      "qsa proj": 0.0528,
+      "qsa select": 0.0219,
+      "router+shared": 0.0227,
+      "wait copy": 0.0035
+     }
+    }
+   }
+  },
+  "rtx-5090": {
+   "lfu_hit_rate": {
+    "off": 0.9351,
+    "mtp": 0.8976
+   },
+   "rows_below_bar_central": [
+    "1024 defaults_mtp_decode",
+    "1024 noapprox_mtp_decode",
+    "4096 defaults_mtp_decode"
+   ],
+   "ratios": {
+    "1024": {
+     "strata": {
+      "na_off_decode": 113.33,
+      "na_mtp_decode": 189.9,
+      "accepted_per_pass": 2.94,
+      "def_off_decode": 121.19,
+      "def_mtp_decode": 206.71,
+      "na_prefill": 2123.5,
+      "def_prefill": 1955.1
+     },
+     "holon": {
+      "decode_off": {
+       "central": 129.1,
+       "low": 117.1,
+       "high": 143.8,
+       "launches_34": 93.3,
+       "launches_37": 89.2
+      },
+      "decode_mtp": {
+       "central": 184.4,
+       "low": 174.2,
+       "high": 195.8,
+       "launches_34": 155.4,
+       "launches_37": 151.4
+      },
+      "prefill": {
+       "central": 2368.0,
+       "low": 2142.2,
+       "high": 2368.0
+      },
+      "prefill_stream_cap": 2368.0,
+      "routed_nonresident_share": 0.708,
+      "q8_0_kv_gain": 1.0
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.139,
+       "low": 1.033,
+       "high": 1.269,
+       "launches_34": 0.823,
+       "launches_37": 0.787
+      },
+      "noapprox_mtp_decode": {
+       "central": 0.971,
+       "low": 0.917,
+       "high": 1.031,
+       "launches_34": 0.818,
+       "launches_37": 0.797
+      },
+      "noapprox_prefill": {
+       "central": 1.115,
+       "low": 1.009,
+       "high": 1.115
+      },
+      "defaults_off_decode": {
+       "central": 1.139,
+       "low": 1.033,
+       "high": 1.269,
+       "launches_34": 0.823,
+       "launches_37": 0.787
+      },
+      "defaults_mtp_decode": {
+       "central": 0.954,
+       "low": 0.901,
+       "high": 1.013,
+       "launches_34": 0.804,
+       "launches_37": 0.783
+      },
+      "defaults_prefill": {
+       "central": 1.211,
+       "low": 1.096,
+       "high": 1.211
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.0437,
+      "dequant": 0.3534,
+      "embed+steps": 0.0042,
+      "gather": 0.0042,
+      "gdn": 0.0769,
+      "gdn conv+gates": 0.0062,
+      "gdn out proj": 0.0312,
+      "gdn recurrence": 0.0353,
+      "gemm down": 0.0769,
+      "gemm gate/up": 0.1435,
+      "hc read": 0.027,
+      "host grouping": 0.0146,
+      "ple": 0.0021,
+      "qsa attn": 0.0229,
+      "qsa indexer": 0.0,
+      "qsa proj": 0.0353,
+      "qsa select": 0.0021,
+      "router+shared": 0.0187,
+      "wait copy": 0.0977
+     }
+    },
+    "4096": {
+     "strata": {
+      "na_off_decode": 110.22,
+      "na_mtp_decode": 147.81,
+      "accepted_per_pass": 2.49,
+      "def_off_decode": 117.56,
+      "def_mtp_decode": 177.01,
+      "na_prefill": 4608.6,
+      "def_prefill": 4001.0
+     },
+     "holon": {
+      "decode_off": {
+       "central": 124.2,
+       "low": 111.9,
+       "high": 138.9,
+       "launches_34": 90.7,
+       "launches_37": 86.8
+      },
+      "decode_mtp": {
+       "central": 152.1,
+       "low": 142.9,
+       "high": 162.2,
+       "launches_34": 128.7,
+       "launches_37": 125.5
+      },
+      "prefill": {
+       "central": 4738.3,
+       "low": 3767.0,
+       "high": 5413.6
+      },
+      "prefill_stream_cap": 6703.8,
+      "routed_nonresident_share": 1.0,
+      "q8_0_kv_gain": 1.0
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.127,
+       "low": 1.016,
+       "high": 1.26,
+       "launches_34": 0.823,
+       "launches_37": 0.788
+      },
+      "noapprox_mtp_decode": {
+       "central": 1.029,
+       "low": 0.967,
+       "high": 1.097,
+       "launches_34": 0.871,
+       "launches_37": 0.849
+      },
+      "noapprox_prefill": {
+       "central": 1.028,
+       "low": 0.817,
+       "high": 1.175
+      },
+      "defaults_off_decode": {
+       "central": 1.127,
+       "low": 1.016,
+       "high": 1.26,
+       "launches_34": 0.823,
+       "launches_37": 0.788
+      },
+      "defaults_mtp_decode": {
+       "central": 0.916,
+       "low": 0.861,
+       "high": 0.977,
+       "launches_34": 0.776,
+       "launches_37": 0.756
+      },
+      "defaults_prefill": {
+       "central": 1.184,
+       "low": 0.942,
+       "high": 1.353
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.1082,
+      "dequant": 0.1467,
+      "embed+steps": 0.0021,
+      "gather": 0.0062,
+      "gdn": 0.0822,
+      "gdn conv+gates": 0.0125,
+      "gdn out proj": 0.0416,
+      "gdn recurrence": 0.0718,
+      "gemm down": 0.076,
+      "gemm gate/up": 0.153,
+      "hc read": 0.0624,
+      "host grouping": 0.0208,
+      "ple": 0.0031,
+      "qsa attn": 0.1301,
+      "qsa indexer": 0.0,
+      "qsa proj": 0.0437,
+      "qsa select": 0.0073,
+      "router+shared": 0.0198,
+      "wait copy": 0.0125
+     }
+    },
+    "32768": {
+     "strata": {
+      "na_off_decode": 105.15,
+      "na_mtp_decode": 179.07,
+      "accepted_per_pass": 3.05,
+      "def_off_decode": 114.25,
+      "def_mtp_decode": 197.27,
+      "na_prefill": 5650.4,
+      "def_prefill": 6499.7
+     },
+     "holon": {
+      "decode_off": {
+       "central": 123.9,
+       "low": 111.6,
+       "high": 138.6,
+       "launches_34": 90.6,
+       "launches_37": 86.7
+      },
+      "decode_mtp": {
+       "central": 185.4,
+       "low": 174.0,
+       "high": 197.8,
+       "launches_34": 157.1,
+       "launches_37": 153.2
+      },
+      "prefill": {
+       "central": 5463.2,
+       "low": 4291.5,
+       "high": 6314.6
+      },
+      "prefill_stream_cap": 13407.5,
+      "routed_nonresident_share": 1.0,
+      "q8_0_kv_gain": 1.15
+     },
+     "ratios": {
+      "noapprox_off_decode": {
+       "central": 1.178,
+       "low": 1.062,
+       "high": 1.318,
+       "launches_34": 0.861,
+       "launches_37": 0.824
+      },
+      "noapprox_mtp_decode": {
+       "central": 1.036,
+       "low": 0.972,
+       "high": 1.105,
+       "launches_34": 0.877,
+       "launches_37": 0.855
+      },
+      "noapprox_prefill": {
+       "central": 0.967,
+       "low": 0.76,
+       "high": 1.118
+      },
+      "defaults_off_decode": {
+       "central": 1.178,
+       "low": 1.062,
+       "high": 1.318,
+       "launches_34": 0.861,
+       "launches_37": 0.824
+      },
+      "defaults_mtp_decode": {
+       "central": 1.021,
+       "low": 0.959,
+       "high": 1.09,
+       "launches_34": 0.865,
+       "launches_37": 0.844
+      },
+      "defaults_prefill": {
+       "central": 0.967,
+       "low": 0.76,
+       "high": 1.118
+      }
+     },
+     "strata_phase_shares": {
+      "combine": 0.0581,
+      "dequant": 0.0965,
+      "embed+steps": 0.0075,
+      "gather": 0.0074,
+      "gdn": 0.0864,
+      "gdn conv+gates": 0.0149,
+      "gdn out proj": 0.0458,
+      "gdn recurrence": 0.0893,
+      "gemm down": 0.0694,
+      "gemm gate/up": 0.125,
+      "hc read": 0.074,
+      "host grouping": 0.0183,
+      "ple": 0.0035,
+      "qsa attn": 0.2072,
+      "qsa indexer": 0.0,
+      "qsa proj": 0.0479,
+      "qsa select": 0.0215,
+      "router+shared": 0.0209,
+      "wait copy": 0.0071
+     }
+    }
+   }
+  }
+ },
+ "l2": {
+  "cand_IQ2_XS_v1-long_mmq": {
+   "verdict": "PASS",
+   "overall": "overall    122907  94.666%    95.991%  1.80e-03  6.34e-01  1.68e+01  -0.241% \u00b1 1.234%   6.22%",
+   "floor": "floor      122907  94.231%    95.565%  2.09e-03  7.52e-01  1.56e+01  -2.474% \u00b1 1.069%   6.59%",
+   "budget": "budget            \u226593.981%            \u22644.18e-03 \u22641.50e+00                     \u22643.824%"
+  },
+  "cand_IQ2_XS_v1-long_mmvq": {
+   "verdict": "PASS",
+   "overall": "overall    122907  94.615%    95.911%  1.85e-03  6.61e-01  1.58e+01  -2.231% \u00b1 1.804%   6.26%",
+   "floor": "floor      122907  94.166%    95.549%  2.24e-03  7.29e-01  1.56e+01  -1.402% \u00b1 1.493%   6.58%",
+   "budget": "budget            \u226593.916%            \u22644.47e-03 \u22641.46e+00                     \u22644.922%"
+  },
+  "cand_IQ2_XS_v1-qwen3_5_mmq": {
+   "verdict": "PASS",
+   "overall": "overall     33372  97.255%    98.171%  4.37e-04  3.01e-01  7.25e+00  +0.803% \u00b1 0.665%   4.76%",
+   "floor": "floor       33372  97.177%    98.144%  5.35e-04  3.16e-01  1.03e+01  +1.046% \u00b1 0.843%   5.06%",
+   "budget": "budget            \u226596.927%            \u22641.07e-03 \u22646.31e-01                     \u22643.133%"
+  },
+  "cand_IQ2_XS_v1-qwen3_5_mmvq": {
+   "verdict": "PASS",
+   "overall": "overall     33372  97.162%    98.119%  5.19e-04  3.01e-01  8.97e+00  +1.301% \u00b1 0.815%   4.84%",
+   "floor": "floor       33372  97.267%    98.233%  5.04e-04  3.01e-01  1.10e+01  +0.033% \u00b1 0.373%   5.03%",
+   "budget": "budget            \u226597.017%            \u22641.01e-03 \u22646.01e-01                     \u22641.569%"
+  },
+  "cand_IQ3_S_v1-long_mmq": {
+   "verdict": "PASS",
+   "overall": "overall    122907  93.545%    94.859%  2.65e-03  1.00e+00  1.56e+01  -2.273% \u00b1 1.166%   7.58%",
+   "floor": "floor      122907  93.044%    94.321%  2.97e-03  1.08e+00  1.71e+01  +0.522% \u00b1 2.825%   7.88%",
+   "budget": "budget            \u226592.794%            \u22645.94e-03 \u22642.15e+00                     \u22647.134%"
+  },
+  "cand_IQ3_S_v1-long_mmvq": {
+   "verdict": "FAIL: |\u0394PPL vs floor| 6.563% > 6.362%",
+   "overall": "overall    122907  93.510%    94.811%  2.61e-03  9.15e-01  1.39e+01  -4.526% \u00b1 1.560%   7.30%",
+   "floor": "floor      122907  93.424%    94.771%  2.52e-03  1.08e+00  1.40e+01  +2.180% \u00b1 1.775%   7.66%",
+   "budget": "budget            \u226593.174%            \u22645.04e-03 \u22642.16e+00                     \u22646.362%"
+  },
+  "cand_IQ3_S_v1-qwen3_5_mmq": {
+   "verdict": "PASS",
+   "overall": "overall     33372  96.509%    97.612%  6.67e-04  4.67e-01  1.25e+01  -1.636% \u00b1 0.866%   5.66%",
+   "floor": "floor       33372  96.614%    97.662%  7.49e-04  4.86e-01  7.34e+00  -0.359% \u00b1 0.900%   5.89%",
+   "budget": "budget            \u226596.364%            \u22641.50e-03 \u22649.72e-01                     \u22643.433%"
+  },
+  "cand_IQ3_S_v1-qwen3_5_mmvq": {
+   "verdict": "PASS",
+   "overall": "overall     33372  97.126%    98.131%  5.98e-04  3.55e-01  6.44e+00  -0.608% \u00b1 0.658%   5.47%",
+   "floor": "floor       33372  96.758%    97.779%  7.33e-04  3.82e-01  1.28e+01  -0.492% \u00b1 0.941%   5.73%",
+   "budget": "budget            \u226596.508%            \u22641.47e-03 \u22647.65e-01                     \u22643.079%"
+  },
+  "plant_hc_inject_unscaled_IQ2_XS_v1-qwen3_5_mmq": {
+   "verdict": "FAIL: top-1 0.9259% < 96.9273%; KL p50 5.134e+00 > 1.070e-03; KL p99 7.364e+00 > 6.311e-01; |\u0394PPL vs floor| 2331171.606% > 3.230%",
+   "overall": "overall     33372   0.926%     0.944%  5.13e+00  7.36e+00  1.00e+01 +2355559.331% \u00b1 605344.533%  94.12%",
+   "floor": "floor       33372  97.177%    98.144%  5.35e-04  3.16e-01  1.03e+01  +1.046% \u00b1 0.843%   5.06%",
+   "budget": "budget            \u226596.927%            \u22641.07e-03 \u22646.31e-01                     \u22643.230%"
+  },
+  "plant_ple_gate_no_sqrt_IQ2_XS_v1-qwen3_5_mmq": {
+   "verdict": "FAIL: top-1 87.6244% < 96.9273%; KL p50 1.676e-02 > 1.070e-03; KL p99 4.451e+00 > 6.311e-01; |\u0394PPL vs floor| 11.260% > 3.230%",
+   "overall": "overall     33372  87.624%    88.932%  1.68e-02  4.45e+00  1.30e+01 +12.424% \u00b1 5.829%  18.08%",
+   "floor": "floor       33372  97.177%    98.144%  5.35e-04  3.16e-01  1.03e+01  +1.046% \u00b1 0.843%   5.06%",
+   "budget": "budget            \u226596.927%            \u22641.07e-03 \u22646.31e-01                     \u22643.230%"
+  },
+  "plant_qsa_pool_rope_last_IQ2_XS_v1-long_mmq": {
+   "verdict": "PASS",
+   "overall": "overall    122907  94.617%    95.929%  1.87e-03  6.52e-01  1.68e+01  -0.773% \u00b1 1.327%   6.29%",
+   "floor": "floor      122907  94.231%    95.565%  2.09e-03  7.52e-01  1.56e+01  -2.474% \u00b1 1.069%   6.59%",
+   "budget": "budget            \u226593.981%            \u22644.18e-03 \u22641.50e+00                     \u22643.742%"
+  },
+  "plant_qsa_select_shift_IQ2_XS_v1-long_mmq": {
+   "verdict": "FAIL: top-1 79.7961% < 93.9814%; KL p50 4.759e-02 > 4.183e-03; KL p99 4.103e+00 > 1.504e+00; |\u0394PPL vs floor| 39.576% > 4.030%",
+   "overall": "overall    122907  79.796%    81.269%  4.76e-02  4.10e+00  2.78e+01 +36.123% \u00b1 19.948%  16.32%",
+   "floor": "floor      122907  94.231%    95.565%  2.09e-03  7.52e-01  1.56e+01  -2.474% \u00b1 1.069%   6.59%",
+   "budget": "budget            \u226593.981%            \u22644.18e-03 \u22641.50e+00                     \u22644.030%"
+  },
+  "plant_qsa_select_shift_IQ2_XS_v1-qwen3_5_mmq": {
+   "verdict": "FAIL: top-1 88.6552% < 96.9273%; KL p50 1.042e-02 > 1.070e-03; KL p99 2.640e+00 > 6.311e-01; |\u0394PPL vs floor| 19.132% > 3.230%",
+   "overall": "overall     33372  88.655%    89.805%  1.04e-02  2.64e+00  8.93e+00 -18.286% \u00b1 4.700%  11.49%",
+   "floor": "floor       33372  97.177%    98.144%  5.35e-04  3.16e-01  1.03e+01  +1.046% \u00b1 0.843%   5.06%",
+   "budget": "budget            \u226596.927%            \u22641.07e-03 \u22646.31e-01                     \u22643.230%"
+  }
+ }
+}
