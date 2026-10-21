@@ -1,16 +1,18 @@
-"""Our Triton kernels for the gated-residual hyper-connections (`hc_gr_mix@1`, `hc_gr_combine@1`; std.hyper). Written
-for Holon after studying FreeToken's `kernel/triton/hc.py` (its separate norm, SiLU and mix kernels around cuBLAS
-projections): here the norm (its sums of squares too) is folded into the down projection and the mix into the up
-projection's epilogue, and a pending combine (the same block's previous half) rides along, so a mix is two launches;
-every product in float32 with IEEE sums (D10), each weight read in float32. Correct and graph-safe; tuned in FN's step
-7."""
+"""Our kernels for the gated-residual hyper-connections (`hc_gr_mix@1`, `hc_gr_combine@1`; std.hyper). Written for
+Holon after studying FreeToken's `kernel/triton/hc.py` (its separate norm, SiLU and mix kernels around cuBLAS
+projections). Decode and verify (GEMV-shaped, Triton): the norm (its sums of squares too) folded into the down
+projection, the mix into the up projection, a pending combine (the same block's previous half) riding along. Prefill:
+the two projections as cuBLAS SGEMMs (FN step 7: the Triton tiles' float32 dots reached 9% of the card's float32 peak,
+cuBLAS's 50%) between Triton prologue and epilogues. Every product in float32 with IEEE sums (D10), each weight read in
+float32. Correct and graph-safe."""
 from __future__ import annotations
 
 import torch
 import triton
 import triton.language as tl
 
-BM, BN, BK = 16, 64, 64          # token, output and reduction tiles
+BM, BN, BK = 16, 64, 64          # token, output and reduction tiles (`_down_sum`'s, and the hidden size's multiple)
+PREFILL_ROWS = 4096               # prefill: rows per pass (its float32 scratch: 2 × rows × S·H)
 # Decode and verify steps (at most GEMV_ROWS tokens) run GEMV-shaped kernels: each program holds a weight tile once and
 # loops over the tokens, `_down_gemv` over one (stream, K chunk). A one-token step takes two launches: every program of
 # `_mix_gemv` sums the partials in a fixed order and a pending combine rides along; past SUM_ROWS tokens the repeated
@@ -19,50 +21,6 @@ BM, BN, BK = 16, 64, 64          # token, output and reduction tiles
 # `_down` at 442 µs per decode call on the RTX PRO 6000 (six programs for a 10,240-long reduction): 78% of the step.
 GEMV_ROWS, SUM_ROWS, KCHUNK, BNV, BJ = 16, 1, 512, 16, 16
 WARPS = 4                        # every launch's; L0's stress case runs others
-
-
-@triton.jit
-def _down(r_ptr, y_ptr, wp_ptr, norm_ptr, down_ptr, inj_ptr, a_ptr, inj_out_ptr, rstd_ptr, T, H, RANK, eps,
-          S: tl.constexpr, PENDING: tl.constexpr, INJECT: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr,
-          BK: tl.constexpr):
-    """[silu(Rn · downᵀ / n) | 2 σ(Rn · injectᵀ / n)] for this program's output columns (down's rank, then inject's n),
-    Rn = R · rstd · (1 + norm). Per stream, the products of R · (1 + norm) and the sum of squares share one pass over
-    R (with a pending combine, R + w · y as it is loaded); the stream's partial is scaled by its rstd at the end. The
-    first column tile also stores each (token, stream)'s rstd for `_up_mix`."""
-    m = tl.program_id(0) * BM + tl.arange(0, BM)
-    n = tl.program_id(1) * BN + tl.arange(0, BN)
-    rows = m < T
-    is_down = n < RANK
-    is_inj = (n >= RANK) & (n < RANK + S) & INJECT
-    row = m[:, None].to(tl.int64)
-    acc = tl.zeros((BM, BN), tl.float32)
-    for s in tl.static_range(S):
-        part = tl.zeros((BM, BN), tl.float32)
-        sq = tl.zeros((BM,), tl.float32)
-        if PENDING:
-            wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
-        for k0 in range(0, H, BK):
-            k = k0 + tl.arange(0, BK)
-            col = s * H + k
-            x = tl.load(r_ptr + row * S * H + col[None, :], mask=rows[:, None], other=0.0)
-            if PENDING:
-                yv = tl.load(y_ptr + row * H + k[None, :], mask=rows[:, None], other=0.0).to(tl.float32)
-                x = x + wv[:, None] * yv
-            sq += tl.sum(x * x, 1)
-            x = x * (1.0 + tl.load(norm_ptr + col).to(tl.float32))[None, :]
-            w = tl.where(is_down[None, :],
-                         tl.load(down_ptr + n[None, :].to(tl.int64) * S * H + col[:, None], mask=is_down[None, :],
-                                 other=0.0).to(tl.float32),
-                         tl.load(inj_ptr + (n - RANK)[None, :].to(tl.int64) * S * H + col[:, None],
-                                 mask=is_inj[None, :], other=0.0).to(tl.float32))
-            part = tl.dot(x, w, part, input_precision="ieee")
-        rstd = tl.rsqrt(sq / H + eps)
-        acc += part * rstd[:, None]
-        if tl.program_id(1) == 0:
-            tl.store(rstd_ptr + m.to(tl.int64) * S + s, rstd, mask=rows)
-    acc = acc / S
-    tl.store(a_ptr + row * RANK + n[None, :], acc * tl.sigmoid(acc), mask=rows[:, None] & is_down[None, :])
-    tl.store(inj_out_ptr + row * S + (n - RANK)[None, :], 2.0 * tl.sigmoid(acc), mask=rows[:, None] & is_inj[None, :])
 
 
 @triton.jit
@@ -193,13 +151,57 @@ def _activations(part_ptr, sq_ptr, inj_out_ptr, t, T, H, RANK, NOUT, eps, kk, ii
 
 
 @triton.jit
-def _up_mix(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H, RANK,
-            S: tl.constexpr, PENDING: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
-    """x[:, j] = mean_s(σ(a · up[sH + j]ᵀ) · Rn[:, sH + j]) for this program's columns j of every stream. With a
-    pending combine, Rn = R + w · y, and the program stores it for exactly these elements (no other program touches
-    them) — only after every read of R has been used, behind a barrier: Triton may re-run a load where it converts
-    layouts (it did in the GEMV mix on sm_86), and a re-run load after the store would add w · y twice. The store's
-    values are recomputed from R and y as left (the same expression, so the same bits)."""
+def _prep(r_ptr, y_ptr, wp_ptr, norm_ptr, xn_ptr, sq_ptr, T, H, S: tl.constexpr, PENDING: tl.constexpr,
+          BM: tl.constexpr, BH: tl.constexpr):
+    """Prefill: Xn = (R + w · y) · (1 + norm) [T, S·H] (a pending combine applied as R is read; R unchanged) and each
+    (token, stream)'s sum of squares of R + w · y, for this program's rows of one stream."""
+    m = tl.program_id(0) * BM + tl.arange(0, BM)
+    s = tl.program_id(1)
+    rows = m < T
+    row = m[:, None].to(tl.int64)
+    if PENDING:
+        wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
+    sq = tl.zeros((BM,), tl.float32)
+    for h0 in range(0, H, BH):
+        k = h0 + tl.arange(0, BH)
+        col = s * H + k
+        x = tl.load(r_ptr + row * S * H + col[None, :], mask=rows[:, None], other=0.0)
+        if PENDING:
+            x = x + wv[:, None] * tl.load(y_ptr + row * H + k[None, :], mask=rows[:, None], other=0.0).to(tl.float32)
+        sq += tl.sum(x * x, 1)
+        tl.store(xn_ptr + row * S * H + col[None, :], x * (1.0 + tl.load(norm_ptr + col).to(tl.float32))[None, :],
+                 mask=rows[:, None])
+    tl.store(sq_ptr + m.to(tl.int64) * S + s, sq, mask=rows)
+
+
+@triton.jit
+def _act(p_ptr, sq_ptr, a_ptr, inj_out_ptr, rstd_ptr, T, H, RANK, NOUT, eps, S: tl.constexpr, BM: tl.constexpr,
+         BN: tl.constexpr):
+    """Prefill: the down projection's epilogue over the per-stream products P [S, T, NOUT] (cuBLAS's): per stream its
+    rstd, the mean over streams of P · rstd, then silu (a) and 2σ (the combine weights)."""
+    m = tl.program_id(0) * BM + tl.arange(0, BM)
+    n = tl.program_id(1) * BN + tl.arange(0, BN)
+    rows = m < T
+    row = m[:, None].to(tl.int64)
+    ok = rows[:, None] & (n < NOUT)[None, :]
+    acc = tl.zeros((BM, BN), tl.float32)
+    for s in tl.static_range(S):
+        rstd = tl.rsqrt(tl.load(sq_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0) / H + eps)
+        acc += tl.load(p_ptr + (s * T + row) * NOUT + n[None, :], mask=ok, other=0.0) * rstd[:, None]
+        if tl.program_id(1) == 0:
+            tl.store(rstd_ptr + m.to(tl.int64) * S + s, rstd, mask=rows)
+    acc = acc / S
+    tl.store(a_ptr + row * RANK + n[None, :], acc * tl.sigmoid(acc), mask=rows[:, None] & (n < RANK)[None, :])
+    tl.store(inj_out_ptr + row * S + (n - RANK)[None, :], 2.0 * tl.sigmoid(acc),
+             mask=rows[:, None] & ((n >= RANK) & (n < NOUT))[None, :])
+
+
+@triton.jit
+def _mix_out(u_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H, S: tl.constexpr, PENDING: tl.constexpr,
+             BM: tl.constexpr, BN: tl.constexpr):
+    """Prefill: x[:, j] = mean_s(σ(U[:, sH + j]) · Rn[:, sH + j]) for this program's columns j, U = a · upᵀ (cuBLAS's),
+    Rn = (R + w · y) · rstd · (1 + norm) from R as left; with a pending combine, R + w · y stored for exactly these
+    elements — R read once, written in the same layout after the value is used."""
     m = tl.program_id(0) * BM + tl.arange(0, BM)
     j = tl.program_id(1) * BN + tl.arange(0, BN)
     rows = m < T
@@ -207,31 +209,19 @@ def _up_mix(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H
     here = rows[:, None] & (j < H)[None, :]
     out = tl.zeros((BM, BN), tl.float32)
     for s in tl.static_range(S):
-        acc = tl.zeros((BM, BN), tl.float32)
-        for k0 in range(0, RANK, BK):
-            k = k0 + tl.arange(0, BK)
-            a = tl.load(a_ptr + row * RANK + k[None, :], mask=rows[:, None] & (k < RANK)[None, :], other=0.0)
-            w = tl.load(up_ptr + (s * H + j)[None, :].to(tl.int64) * RANK + k[:, None],
-                        mask=(j < H)[None, :] & (k < RANK)[:, None], other=0.0)
-            acc = tl.dot(a, w.to(tl.float32), acc, input_precision="ieee")
         col = s * H + j
-        rn = tl.load(r_ptr + row * S * H + col[None, :], mask=here, other=0.0)
+        p = r_ptr + row * S * H + col[None, :]
+        rn = tl.load(p, mask=here, other=0.0)
         if PENDING:
             wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
             rn = rn + wv[:, None] * tl.load(y_ptr + row * H + j[None, :], mask=here, other=0.0).to(tl.float32)
+        u = tl.load(u_ptr + row * S * H + col[None, :], mask=here, other=0.0)
         rstd = tl.load(rstd_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
-        rn = rn * rstd[:, None] * (1.0 + tl.load(norm_ptr + col, mask=j < H, other=0.0).to(tl.float32))[None, :]
-        out += tl.sigmoid(acc) * rn
+        scale = (1.0 + tl.load(norm_ptr + col, mask=j < H, other=0.0).to(tl.float32))[None, :]
+        out += tl.sigmoid(u) * (rn * rstd[:, None] * scale)
+        if PENDING:
+            tl.store(p, rn, mask=here)           # after its use, in the layout it was read in
     tl.store(x_ptr + row * H + j[None, :], (out / S).to(x_ptr.dtype.element_ty), mask=here)
-    if PENDING:
-        tl.debug_barrier()                      # every read of R above is done before any store below
-        for s in tl.static_range(S):
-            col = s * H + j
-            p = r_ptr + row * S * H + col[None, :]
-            wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
-            tl.store(p, tl.load(p, mask=here, other=0.0)
-                     + wv[:, None] * tl.load(y_ptr + row * H + j[None, :], mask=here, other=0.0).to(tl.float32),
-                     mask=here)
 
 
 @triton.jit
@@ -245,10 +235,11 @@ def _combine(r_ptr, y_ptr, w_ptr, H, S: tl.constexpr, BLOCK: tl.constexpr):
 
 
 def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype):
-    """Two launches: `_down` (its rstd folded in) and `_up_mix`, a pending combine (y_prev, w_prev: the same block's
-    previous half) riding along; at most GEMV_ROWS tokens, `_down_gemv` and `_mix_gemv`, with `_combine` (pending)
-    and `_down_sum` before and after `_down_gemv` past SUM_ROWS tokens. The returned w is a new tensor, never
-    w_prev."""
+    """At most GEMV_ROWS tokens (decode, verify): `_down_gemv` and `_mix_gemv`, with `_combine` (pending) and
+    `_down_sum` before and after `_down_gemv` past SUM_ROWS tokens. Prefill, in passes of PREFILL_ROWS rows: `_prep`
+    (Xn and the sums of squares, a pending combine applied as R is read), the down projection as one cuBLAS batched
+    SGEMM per stream (TF32 off: float32 products, IEEE sums, D10), `_act`, the up projection as one SGEMM, and
+    `_mix_out` (which applies a pending combine to R). The returned w is a new tensor, never w_prev."""
     t, width = r.shape
     hidden, rank = width // streams, down.shape[0]
     if hidden % BK or r.stride(1) != 1 or r.stride(0) != width:
@@ -285,11 +276,28 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
             not fused, rides, BJ, triton.next_power_of_2(rank), triton.next_power_of_2(max(nout - rank, 1)),
             num_warps=WARPS)
         return x, w
-    _down[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
-        r, y, w_prev, norm, down, inj, a, sink, rstd, t, hidden, rank, eps, streams, pending, inject is not None,
-        BM, BN, BK, num_warps=WARPS)
-    _up_mix[(triton.cdiv(t, BM), triton.cdiv(hidden, BN))](
-        a, up.contiguous(), r, y, w_prev, rstd, norm, x, t, hidden, rank, streams, pending, BM, BN, 32, num_warps=WARPS)
+    if torch.backends.cuda.matmul.allow_tf32:                  # D10: float32 products, IEEE sums
+        raise RuntimeError("hc_gr_mix: TF32 matmuls are enabled (torch.backends.cuda.matmul.allow_tf32)")
+    w_down = torch.cat([down.float(), inj.float()]) if inject is not None else down.float()   # [NOUT, S·H]
+    w_down = w_down.view(nout, streams, hidden).permute(1, 2, 0)                   # [S, H, NOUT]
+    w_up = up.float().t()                                                          # [rank, S·H]
+    for c0 in range(0, t, PREFILL_ROWS):                       # the scratch bounded at PREFILL_ROWS rows
+        c1 = min(t, c0 + PREFILL_ROWS)
+        n = c1 - c0
+        rc, xc = r[c0:c1], x[c0:c1]
+        yc, wc = (y[c0:c1], w_prev[c0:c1]) if pending else (y, w_prev)
+        xn = torch.empty(n, width, dtype=torch.float32, device=r.device)
+        sq = torch.empty(n, streams, dtype=torch.float32, device=r.device)
+        _prep[(triton.cdiv(n, 16), streams)](rc, yc, wc, norm, xn, sq, n, hidden, streams, pending, 16, BK,
+                                             num_warps=WARPS)
+        p = torch.bmm(xn.view(n, streams, hidden).transpose(0, 1), w_down)        # [S, n, NOUT]
+        ac, rs = a[c0:c1], rstd[c0:c1]
+        _act[(triton.cdiv(n, BM), triton.cdiv(nout, BN))](
+            p, sq, ac, sink[c0:c1], rs, n, hidden, rank, nout, eps, streams, BM, BN, num_warps=WARPS)
+        u = ac @ w_up                                                              # [n, S·H]
+        del xn
+        _mix_out[(triton.cdiv(n, 16), triton.cdiv(hidden, 128))](
+            u, rc, yc, wc, rs, norm, xc, n, hidden, streams, pending, 16, 128, num_warps=WARPS)
     return x, w
 
 
