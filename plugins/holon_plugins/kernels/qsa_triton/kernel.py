@@ -283,7 +283,15 @@ def _merge(part_ptr, lse_ptr, gate_ptr, out_ptr, stride_gate, stride_gate_head, 
     tl.store(out_ptr + t * stride_out + head * stride_out_head + d, o.to(out_ptr.dtype.element_ty))
 
 
+def _dense_rows(*views) -> None:
+    """Units may be strided (`stride(0)`), but each unit's rows must be dense: [.., rows, Dk] with Dk contiguous."""
+    for v in views:
+        if v.stride(2) != 1 or v.stride(1) != v.shape[2]:
+            raise ValueError(f"qsa: a unit's rows must be dense, not strides {v.stride()} for {tuple(v.shape)}")
+
+
 def qsa_index(k, raw, pooled, table, seq, positions, weight, cos_sin, ratio: int, eps: float) -> None:
+    _dense_rows(raw, pooled)
     t, d = k.shape
     if t:
         _index[(t,)](k, raw, pooled, table, seq, positions, weight, cos_sin, eps, k.stride(0), table.stride(0),
@@ -302,6 +310,7 @@ def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor) -> No
 
 
 def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_batch: int) -> torch.Tensor:
+    _dense_rows(pooled)
     t, heads, d = q.shape
     top = budget // ratio
     out = torch.empty(t, top + 1, dtype=torch.int32, device=q.device)
