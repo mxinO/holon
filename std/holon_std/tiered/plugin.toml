@@ -8,7 +8,10 @@ core_abi = ">=1.2,<2.0"   # shared objects, host pools, fill pools, step hooks, 
 
 [resources]
 provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tiered.gguf_direct@1",
-            "unit.std.tiered.static@1"]
+            "unit.std.tiered.static@1", "unit.std.tiered.rows@1"]
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"rows.place" = { help = "where std.tiered.rows@1 tables live: <name>:host or <name>:device, comma-separated, * for the rest (a table not named: its Ref's place)", default = "" }
 
 [properties]
 numerics = "exact"

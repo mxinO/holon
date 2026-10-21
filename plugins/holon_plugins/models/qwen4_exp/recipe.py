@@ -155,7 +155,7 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
         layers=tuple(LayerDecl(qsa if full else gdn, ffn, "indexed_attention" if full else "linear_attention")
                      for full in f["full"]),
         block=Ref("std.hyper.gr_block@1", n=n, rank=rank, eps=eps, pre=ple, pre_at=f["ple_layers"]),
-        embed=Ref("std.hyper.expand@1", inner=Ref("std.ops.embedding@1"), n=n),
+        embed=Ref("std.hyper.expand@1", inner=Ref("std.tiered.rows@1", name="token_embd"), n=n),
         norm=Ref("std.hyper.gr_mix@1", n=n, rank=rank, eps=eps),
         lm_head=Ref("std.ops.lm_head@1", tied=False), residual=Residual(n * hidden, "float32"),
         weights=WeightMap("gguf", rules=rules, skip=f["skip"]))

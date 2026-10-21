@@ -118,8 +118,11 @@ def run(a) -> dict:
     if a.phase == "verify":
         kw = {"max_draft_tokens": DRAFTS, "plugin_options": {"spec.k": str(DRAFTS), "mtp.path": a.pack},
               "slots": {"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k", "verifier": "std.spec.greedy"}}
+    opts = dict(o.split("=", 1) for o in a.options)
+    if opts:
+        kw["plugin_options"] = kw.get("plugin_options", {}) | opts
     engine = Engine(EngineConfig(a.model, max_model_len=a.ctx + 256, max_step_tokens=a.max_step_tokens, max_seqs=1,
-                                 cuda_graphs=False, overlap=False, **kw))
+                                 cuda_graphs=False, overlap=False, host_memory=a.host_memory, **kw))
     instrument(engine)
     prefill = a.phase == "prefill"
     if prefill:          # a warm-up prompt first (kernel autotuning, allocations), then the measured one
@@ -224,6 +227,8 @@ def main() -> None:
     r.add_argument("--ctx", type=int, default=4096)
     r.add_argument("--steps", type=int, default=8, help="measured decode or verify steps")
     r.add_argument("--max-step-tokens", type=int, default=8192)
+    r.add_argument("--options", nargs="*", default=[], help="plugin options, key=value (e.g. rows.place=ple:host)")
+    r.add_argument("--host-memory", type=int, default=0, help="EngineConfig.host_memory, bytes")
     r.add_argument("--out", required=True)
     s = sub.add_parser("summarize")
     s.add_argument("--rep", required=True)

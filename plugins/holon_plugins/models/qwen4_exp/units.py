@@ -21,7 +21,7 @@ from . import kernels
 
 LINEAR = "std.ops.linear@1"
 GROUP, HISTORY, CONV = "ple", "ple.history", "ple.conv"
-TABLE = Ref("std.ops.embedding@1")      # the n-gram table (std.tiered.rows@1 serves it from RAM or SSD later: D5)
+TABLE = Ref("std.tiered.rows@1", name="ple")   # the n-gram table, in VRAM or pinned RAM (`rows.place`, D5)
 
 
 @dataclasses.dataclass(eq=False)

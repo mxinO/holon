@@ -465,6 +465,36 @@ def test_get_rows_of_rows_narrower_than_256(ctx, name):
         assert same_bits(got, ref[ids]), f"{name}: get_rows ({dtype}) differs from gguf-py"
 
 
+def test_rows_on_the_host_gather_what_the_device_gathers(ctx, tmp_path):
+    """std.tiered.rows@1 on the host (FN's PLE table, D5): a 160-wide IQ4_NL table read from its file extent into a
+    mapped host pool, and gathered across the bus bit for bit as `qembedding` gathers it on the device."""
+    import types
+
+    from holon.api import Extent, Layout, QTensor, Scheme
+    from holon.core.memory import Pool
+    from holon_std.tiered.rows import Rows
+
+    blocks = random_blocks("iq4_nl", OUT, 160, seed=11)
+    (tmp_path / "t.gguf").write_bytes(b"\0" * 100 + blocks.tobytes())
+    q = QTensor(Layout(Scheme("ggml.iq4_nl"), "gguf.native"), (OUT, 160), {"blocks": torch.from_numpy(blocks)},
+                {"blocks": Extent(str(tmp_path / "t.gguf"), 100, blocks.nbytes)})
+
+    def pool(name, *, unit_bytes, min_units, pref_units, device, mapped):
+        p = Pool(name, unit_bytes=unit_bytes, segments=1, min_units=min_units, pref_units=pref_units,
+                 tokens_per_unit=None, priority=0, device=ctx.device, host=device == "host", mapped=mapped)
+        p._set(pref_units)
+        return p
+    host = types.SimpleNamespace(select_kernel=ctx.select_kernel, fingerprint=ctx.fingerprint, device=ctx.device,
+                                 dtype=torch.bfloat16, pool=pool,
+                                 options={"plugins": {"rows.place": "t:host"}})
+    rows = Rows(host, vocab=OUT, hidden=160, name="t")
+    assert rows.adopt_weights(host, "weight", q)
+    rows.bind_kernels(host)
+    assert rows._table.device.type == "cuda" and rows.weight.numel() == 0
+    ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
+    assert same_bits(rows(ids), dequantize("iq4_nl", blocks)[ids])
+
+
 def test_qembedding_real_table(ctx):
     path = next((p for p in FILES if p.name.endswith("Q4_K_M.gguf")), None)
     if path is None:
