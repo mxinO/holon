@@ -1919,8 +1919,8 @@ The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's chang
   `_down_sum`. Per mix on an RTX A5000: 26.3 against 29.7 µs (1 token), unchanged at 2–8.
 - **QSA's indexer q and k in one matmul** (a952ba9): split linears that can share one are merged once loaded into
   `index_qk_proj` (the layout transformers stores); the tiny model still matches HF.
-- **Measured on the RTX PRO 6000** (decode 4K, eager under nsys): 1,722 → 1,565 kernels per token, GPU 8.62 →
-  7.86 ms per step (−9%; HC mixes 2.18 → 1.71 ms).
+- **Measured on the RTX PRO 6000** (4K, eager under nsys, 37d8797): decode 1,722 → 1,565 kernels per token, GPU
+  8.62 → 7.82 ms per step (−9%; HC mixes 2.18 → 1.67 ms); a verify pass 2,489 → 2,477 kernels, 17.56 → 17.17 ms.
 - **Against the ≤ 768 gate:** the in-scope candidates left are small — the indexer's q norm and rope in one kernel
   (12), GDN's a / b projections in one GEMM (36; their recurrent kernel reads them as contiguous [T, HV], so a vendored
   `fla` patch or a copy), the PLE glue (≈ 4). That leaves ≈ 1,500. The remainder sits in the out-of-scope items: the

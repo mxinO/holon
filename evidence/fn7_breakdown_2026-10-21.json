@@ -1,7 +1,7 @@
 {
  "name": "fn7_breakdown",
  "date": "2026-10-21",
- "commit": "ae709298ba476ad370a0eb509d8ad3a560b5546b",
+ "commit": "c745e43bf5ababf97a7c0839bb97d03a607d6c22",
  "tool": "spikes/fn7/breakdown.py (eager steps under nsys; GPU time of each kernel, memcpy and memset attributed to the innermost component range)",
  "rtx-pro-6000_full_IQ2_XS_before_step7": {
   "decode_31744": {
@@ -2219,7 +2219,7 @@
   "decode_4096": {
    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
    "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
-   "commit": "a952ba97a4a59eccec4c9ccb334c482708de10ac",
+   "commit": "37d8797534d445d5fbd1dd9cef1e8dfe0442d7b0",
    "args": {
     "phase": "decode",
     "ctx": 4096,
@@ -2227,51 +2227,51 @@
     "max_step_tokens": 8192
    },
    "measured_steps": 8,
-   "gpu_ms_per_step": 7.8606,
+   "gpu_ms_per_step": 7.8232,
    "kernels_per_step": 1565.0,
    "memops_per_step": 4.0,
-   "wall_ms_median": 43.039,
+   "wall_ms_median": 42.901,
    "components": {
     "hc.mix": {
-     "ms": 1.71,
-     "share": 0.2175,
+     "ms": 1.667,
+     "share": 0.2131,
      "kernels": 194.0,
      "memops": 0.0,
      "top": {
       "_mix_gemv": [
-       1.0427,
+       0.9992,
        97.0
       ],
       "_down_gemv": [
-       0.6672,
+       0.6677,
        97.0
       ]
      }
     },
     "hc.combine": {
-     "ms": 0.0584,
-     "share": 0.0074,
+     "ms": 0.0585,
+     "share": 0.0075,
      "kernels": 48.0,
      "memops": 0.0,
      "top": {
       "_combine": [
-       0.0584,
+       0.0585,
        48.0
       ]
      }
     },
     "gdn": {
-     "ms": 1.87,
-     "share": 0.2379,
+     "ms": 1.8711,
+     "share": 0.2392,
      "kernels": 396.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       1.0222,
+       1.0227,
        108.0
       ],
       "kernel": [
-       0.2538,
+       0.2543,
        72.0
       ],
       "fused_sigmoid_gating_delta_rule_update_kernel": [
@@ -2279,7 +2279,7 @@
        36.0
       ],
       "_conv": [
-       0.1464,
+       0.1466,
        36.0
       ],
       "quantize_q8_1": [
@@ -2287,7 +2287,7 @@
        72.0
       ],
       "_gated_rmsnorm": [
-       0.0632,
+       0.0631,
        36.0
       ],
       "_conv_state": [
@@ -2297,33 +2297,33 @@
      }
     },
     "qsa": {
-     "ms": 1.0146,
-     "share": 0.1291,
+     "ms": 1.0153,
+     "share": 0.1298,
      "kernels": 169.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.3083,
+       0.3082,
        37.0
       ],
       "_topk": [
-       0.2481,
+       0.2491,
        12.0
       ],
       "_attend": [
-       0.137,
+       0.1368,
        12.0
       ],
       "_score": [
-       0.1181,
+       0.1179,
        12.0
       ],
       "kernel": [
-       0.0609,
+       0.0611,
        12.0
       ],
       "quantize_q8_1": [
-       0.0315,
+       0.0316,
        24.0
       ],
       "_merge": [
@@ -2339,7 +2339,7 @@
        12.0
       ],
       "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
-       0.0189,
+       0.019,
        12.0
       ],
       "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
@@ -2349,41 +2349,41 @@
      }
     },
     "moe": {
-     "ms": 1.8948,
-     "share": 0.2411,
+     "ms": 1.8982,
+     "share": 0.2426,
      "kernels": 240.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       1.2651,
+       1.2684,
        96.0
       ],
       "holon_moe_router": [
-       0.4705,
+       0.4699,
        48.0
       ],
       "moe_weighted_reduction_f32": [
-       0.0968,
+       0.0969,
        48.0
       ],
       "quantize_q8_1": [
-       0.0624,
+       0.0629,
        48.0
       ]
      }
     },
     "shared": {
-     "ms": 0.9235,
-     "share": 0.1175,
+     "ms": 0.9241,
+     "share": 0.1181,
      "kernels": 482.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.3723,
+       0.3728,
        121.0
       ],
       "quantize_q8_1": [
-       0.1243,
+       0.1242,
        96.0
       ],
       "elementwise_kernel": [
@@ -2391,7 +2391,7 @@
        48.0
       ],
       "dot_kernel": [
-       0.0897,
+       0.0898,
        48.0
       ],
       "vectorized_elementwise_kernel": [
@@ -2403,7 +2403,7 @@
        48.0
       ],
       "act_and_mul_kernel": [
-       0.0618,
+       0.0617,
        48.0
       ],
       "CatArrayBatchedCopy_vectorized": [
@@ -2413,13 +2413,13 @@
      }
     },
     "ple": {
-     "ms": 0.1114,
+     "ms": 0.1113,
      "share": 0.0142,
      "kernels": 9.0,
      "memops": 0.0,
      "top": {
       "Kernel2": [
-       0.0399,
+       0.0398,
        1.0
       ],
       "_ple_gate": [
@@ -2427,7 +2427,7 @@
        1.0
       ],
       "kernel": [
-       0.013,
+       0.0129,
        1.0
       ],
       "_ple_conv": [
@@ -2458,12 +2458,12 @@
     },
     "lm_head": {
      "ms": 0.2265,
-     "share": 0.0288,
+     "share": 0.0289,
      "kernels": 2.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.2252,
+       0.2251,
        1.0
       ],
       "quantize_q8_1": [
@@ -2473,13 +2473,13 @@
      }
     },
     "other": {
-     "ms": 0.0514,
-     "share": 0.0065,
+     "ms": 0.0513,
+     "share": 0.0066,
      "kernels": 25.0,
      "memops": 4.0,
      "top": {
       "index_elementwise_kernel": [
-       0.018,
+       0.0179,
        9.0
       ],
       "reduce_kernel": [
@@ -2491,7 +2491,7 @@
        4.0
       ],
       "unrolled_elementwise_kernel": [
-       0.0052,
+       0.0051,
        4.0
       ],
       "elementwise_kernel": [
@@ -2538,7 +2538,7 @@
   "verify_4096": {
    "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
    "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
-   "commit": "a952ba97a4a59eccec4c9ccb334c482708de10ac",
+   "commit": "37d8797534d445d5fbd1dd9cef1e8dfe0442d7b0",
    "args": {
     "phase": "verify",
     "ctx": 4096,
@@ -2546,67 +2546,75 @@
     "max_step_tokens": 8192
    },
    "measured_steps": 2,
-   "gpu_ms_per_step": 18.4051,
-   "kernels_per_step": 2329.0,
+   "gpu_ms_per_step": 17.174,
+   "kernels_per_step": 2477.0,
    "memops_per_step": 178.0,
-   "wall_ms_median": 80.438,
+   "wall_ms_median": 80.746,
    "components": {
     "hc.mix": {
-     "ms": 5.5721,
-     "share": 0.3028,
-     "kernels": 194.0,
+     "ms": 4.3761,
+     "share": 0.2548,
+     "kernels": 339.0,
      "memops": 0.0,
      "top": {
       "_mix_gemv": [
-       4.5008,
+       2.9716,
        97.0
       ],
       "_down_gemv": [
-       1.0713,
+       1.0593,
        97.0
+      ],
+      "_down_sum": [
+       0.286,
+       97.0
+      ],
+      "_combine": [
+       0.0592,
+       48.0
       ]
      }
     },
     "hc.combine": {
-     "ms": 0.0602,
-     "share": 0.0033,
+     "ms": 0.0605,
+     "share": 0.0035,
      "kernels": 48.0,
      "memops": 0.0,
      "top": {
       "_combine": [
-       0.0602,
+       0.0605,
        48.0
       ]
      }
     },
     "gdn": {
-     "ms": 3.7397,
-     "share": 0.2032,
+     "ms": 3.7363,
+     "share": 0.2176,
      "kernels": 576.0,
      "memops": 144.0,
      "top": {
       "Kernel2": [
-       1.2634,
+       1.2617,
        72.0
       ],
       "mul_mat_vec_q": [
-       1.222,
+       1.2185,
        108.0
       ],
       "fused_sigmoid_gating_delta_rule_update_kernel": [
-       0.3991,
+       0.3994,
        36.0
       ],
       "elementwise_kernel": [
-       0.2277,
+       0.2281,
        108.0
       ],
       "_conv": [
-       0.1578,
+       0.1583,
        36.0
       ],
       "memcpy": [
-       0.1546,
+       0.1552,
        144.0
       ],
       "quantize_q8_1": [
@@ -2614,99 +2622,99 @@
        72.0
       ],
       "indexSelectSmallIndex": [
-       0.0693,
+       0.0694,
        36.0
       ],
       "_gated_rmsnorm": [
-       0.0634,
+       0.0635,
        36.0
       ],
       "_conv_state": [
-       0.0527,
+       0.0528,
        36.0
       ],
       "vectorized_elementwise_kernel": [
-       0.0367,
+       0.0366,
        36.0
       ]
      }
     },
     "qsa": {
-     "ms": 1.1608,
-     "share": 0.0631,
+     "ms": 1.1533,
+     "share": 0.0672,
      "kernels": 193.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.3742,
+       0.3732,
        37.0
       ],
       "_topk": [
-       0.2641,
+       0.2618,
        12.0
       ],
       "_attend": [
-       0.153,
+       0.1496,
        12.0
       ],
       "_score": [
-       0.1147,
+       0.1135,
        12.0
       ],
       "Kernel2": [
-       0.0548,
+       0.0557,
        12.0
       ],
       "_index": [
-       0.0326,
+       0.0322,
        12.0
       ],
       "quantize_q8_1": [
-       0.0312,
+       0.0311,
        24.0
       ],
       "_merge": [
-       0.0295,
+       0.0296,
        12.0
       ],
       "elementwise_kernel": [
-       0.0267,
+       0.0266,
        12.0
       ],
       "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
-       0.022,
+       0.0218,
        12.0
       ],
       "splitKreduce_kernel": [
-       0.0216,
+       0.0217,
        12.0
       ],
       "_qk_rope_kv": [
-       0.0212,
+       0.0214,
        12.0
       ],
       "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
-       0.0152,
+       0.015,
        12.0
       ]
      }
     },
     "moe": {
-     "ms": 3.186,
-     "share": 0.1731,
+     "ms": 3.1988,
+     "share": 0.1863,
      "kernels": 240.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q_moe": [
-       2.4445,
+       2.4511,
        96.0
       ],
       "holon_moe_router": [
-       0.4749,
+       0.4783,
        48.0
       ],
       "quantize_q8_1": [
-       0.1643,
+       0.1671,
        48.0
       ],
       "moe_weighted_reduction_f32": [
@@ -2716,33 +2724,33 @@
      }
     },
     "shared": {
-     "ms": 1.0188,
-     "share": 0.0554,
+     "ms": 1.0161,
+     "share": 0.0592,
      "kernels": 434.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.4381,
+       0.4364,
        121.0
       ],
       "kernel": [
-       0.178,
+       0.1781,
        48.0
       ],
       "quantize_q8_1": [
-       0.1248,
+       0.1239,
        96.0
       ],
       "elementwise_kernel": [
-       0.1107,
+       0.1106,
        48.0
       ],
       "vectorized_elementwise_kernel": [
-       0.0753,
+       0.0754,
        48.0
       ],
       "act_and_mul_kernel": [
-       0.0613,
+       0.0611,
        48.0
       ],
       "CatArrayBatchedCopy_vectorized": [
@@ -2752,21 +2760,21 @@
      }
     },
     "ple": {
-     "ms": 0.1357,
-     "share": 0.0074,
+     "ms": 0.1334,
+     "share": 0.0078,
      "kernels": 13.0,
      "memops": 6.0,
      "top": {
       "Kernel2": [
-       0.0562,
+       0.0547,
        2.0
       ],
       "_ple_gate": [
-       0.0307,
+       0.0297,
        1.0
       ],
       "index_elementwise_kernel": [
-       0.009,
+       0.0091,
        2.0
       ],
       "_ple_conv": [
@@ -2774,7 +2782,7 @@
        1.0
       ],
       "_ple_rows": [
-       0.0081,
+       0.0082,
        1.0
       ],
       "_scatter_gather_elementwise_kernel": [
@@ -2794,7 +2802,7 @@
        1.0
       ],
       "dequantize_block_iq4_nl": [
-       0.0016,
+       0.0017,
        1.0
       ],
       "_ple_history": [
@@ -2808,13 +2816,13 @@
      }
     },
     "lm_head": {
-     "ms": 0.2749,
-     "share": 0.0149,
+     "ms": 0.2739,
+     "share": 0.016,
      "kernels": 2.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.2735,
+       0.2725,
        1.0
       ],
       "quantize_q8_1": [
@@ -2824,13 +2832,13 @@
      }
     },
     "mtp": {
-     "ms": 0.4251,
-     "share": 0.0231,
+     "ms": 0.4238,
+     "share": 0.0247,
      "kernels": 166.0,
      "memops": 15.0,
      "top": {
       "index_elementwise_kernel": [
-       0.0891,
+       0.0888,
        33.0
       ],
       "vectorized_elementwise_kernel": [
@@ -2838,27 +2846,27 @@
        54.0
       ],
       "Kernel2": [
-       0.0631,
+       0.062,
        5.0
       ],
       "unrolled_elementwise_kernel": [
-       0.052,
+       0.0521,
        30.0
       ],
       "kernel": [
-       0.0361,
+       0.0356,
        3.0
       ],
       "reduce_kernel": [
-       0.0218,
+       0.0216,
        3.0
       ],
       "memcpy": [
-       0.0151,
+       0.0152,
        12.0
       ],
       "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
-       0.0104,
+       0.0106,
        4.0
       ],
       "elementwise_kernel": [
@@ -2870,19 +2878,19 @@
        5.0
       ],
       "k_get_rows_kq": [
-       0.0092,
+       0.0091,
        4.0
       ],
       "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o256025601_tensorptrbf16gmemalign16o25601_tensorptrbf16gmemalign128o256025601___True_4__0": [
-       0.008,
+       0.0079,
        4.0
       ],
       "DeviceScanKernel": [
-       0.0047,
+       0.0048,
        3.0
       ],
       "indexSelectSmallIndex": [
-       0.0046,
+       0.0047,
        3.0
       ],
       "compute_cuda_kernel": [
@@ -2890,7 +2898,7 @@
        3.0
       ],
       "DeviceScanInitKernel": [
-       0.003,
+       0.0029,
        3.0
       ]
      }
@@ -2908,29 +2916,37 @@
      }
     },
     "mtp.hc.mix": {
-     "ms": 0.2777,
-     "share": 0.0151,
-     "kernels": 22.0,
+     "ms": 0.2466,
+     "share": 0.0144,
+     "kernels": 25.0,
      "memops": 0.0,
      "top": {
       "_mix_gemv": [
-       0.1918,
+       0.1543,
        11.0
       ],
       "_down_gemv": [
-       0.0859,
+       0.085,
        11.0
+      ],
+      "_down_sum": [
+       0.0059,
+       2.0
+      ],
+      "_combine": [
+       0.0014,
+       1.0
       ]
      }
     },
     "mtp.lm_head": {
-     "ms": 0.6794,
-     "share": 0.0369,
+     "ms": 0.6788,
+     "share": 0.0395,
      "kernels": 6.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.6755,
+       0.6749,
        3.0
       ],
       "quantize_q8_1": [
@@ -2940,21 +2956,21 @@
      }
     },
     "mtp.moe": {
-     "ms": 0.1538,
-     "share": 0.0084,
+     "ms": 0.1547,
+     "share": 0.009,
      "kernels": 20.0,
      "memops": 0.0,
      "top": {
       "mul_mat_vec_q": [
-       0.0569,
+       0.0564,
        6.0
       ],
       "mul_mat_vec_q_moe": [
-       0.0434,
+       0.0443,
        2.0
       ],
       "holon_moe_router": [
-       0.0396,
+       0.0399,
        4.0
       ],
       "moe_weighted_reduction_f32": [
@@ -2962,35 +2978,35 @@
        4.0
       ],
       "quantize_q8_1": [
-       0.0058,
+       0.006,
        4.0
       ]
      }
     },
     "mtp.qsa": {
-     "ms": 0.5662,
-     "share": 0.0308,
+     "ms": 0.5635,
+     "share": 0.0328,
      "kernels": 50.0,
      "memops": 1.0,
      "top": {
       "Kernel2": [
-       0.3219,
+       0.3196,
        9.0
       ],
       "_topk": [
-       0.0929,
+       0.0934,
        4.0
       ],
       "_attend": [
-       0.0492,
+       0.0491,
        4.0
       ],
       "_score": [
-       0.0396,
+       0.0393,
        4.0
       ],
       "kernel": [
-       0.0157,
+       0.0154,
        3.0
       ],
       "_merge": [
@@ -3001,11 +3017,11 @@
        0.0081,
        5.0
       ],
-      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+      "_qk_rope_kv": [
        0.0069,
        4.0
       ],
-      "_qk_rope_kv": [
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
        0.0069,
        4.0
       ],
@@ -3014,7 +3030,7 @@
        4.0
       ],
       "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
-       0.0051,
+       0.005,
        4.0
       ],
       "elementwise_kernel": [
@@ -3028,29 +3044,29 @@
      }
     },
     "mtp.shared": {
-     "ms": 0.092,
-     "share": 0.005,
+     "ms": 0.0935,
+     "share": 0.0054,
      "kernels": 28.0,
      "memops": 0.0,
      "top": {
       "kernel": [
-       0.0455,
+       0.0457,
        7.0
       ],
       "Kernel2": [
-       0.0144,
+       0.0157,
        2.0
       ],
       "elementwise_kernel": [
-       0.0086,
+       0.0087,
        4.0
       ],
       "vectorized_elementwise_kernel": [
-       0.0064,
+       0.0065,
        4.0
       ],
       "dot_kernel": [
-       0.0056,
+       0.0055,
        3.0
       ],
       "act_and_mul_kernel": [
@@ -3068,37 +3084,37 @@
      }
     },
     "other": {
-     "ms": 1.0574,
-     "share": 0.0575,
+     "ms": 1.0595,
+     "share": 0.0617,
      "kernels": 333.0,
      "memops": 12.0,
      "top": {
       "fused_sigmoid_gating_delta_rule_update_kernel": [
-       0.4187,
+       0.4194,
        36.0
       ],
       "elementwise_kernel": [
-       0.221,
+       0.2213,
        112.0
       ],
       "_conv": [
-       0.1649,
+       0.1657,
        36.0
       ],
       "index_elementwise_kernel": [
-       0.0674,
+       0.0673,
        33.0
       ],
       "vectorized_elementwise_kernel": [
-       0.0555,
+       0.0556,
        39.0
       ],
       "_conv_state": [
-       0.0507,
+       0.0508,
        36.0
       ],
       "unrolled_elementwise_kernel": [
-       0.0225,
+       0.0226,
        17.0
       ],
       "memcpy": [
@@ -3110,27 +3126,27 @@
        2.0
       ],
       "elementwise_kernel_with_index": [
-       0.0049,
+       0.0048,
        5.0
       ],
       "DeviceScanKernel": [
        0.0048,
        3.0
       ],
-      "_rewind": [
-       0.0041,
-       1.0
-      ],
       "indexSelectSmallIndex": [
-       0.0041,
+       0.004,
        2.0
+      ],
+      "_rewind": [
+       0.004,
+       1.0
       ],
       "_scatter_gather_elementwise_kernel": [
        0.0036,
        2.0
       ],
       "CatArrayBatchedCopy_vectorized": [
-       0.0033,
+       0.0034,
        2.0
       ],
       "compute_cuda_kernel": [
