@@ -1706,3 +1706,71 @@ pre-registered rule applies: the long set gains recall prompts before any lock.
   6000 (an A5000 runs out of memory in HF's GDN at 32K).
 - The first node's card reported uncorrectable ECC errors (an engine failed at its first allocation); a second node
   served the step.
+
+### 17.1 The failed gate, diagnosed (2026-10-21)
+
+**The culprit: the GEMV HC mix of 30c7fd7 (FN's own kernel), on its pending-combine path.** `_up_mix_gemv` added the
+block's pending combine to R inside the kernel, stored it and used it; with more than one warp, Triton re-ran the R
+loads where it converted layouts, so some columns of the mixer's output x read R with the combine applied twice. R
+itself stayed right. Every decode and verify step (≤ 16 tokens) took this path at every FFN half, so the decode path's
+FFN inputs were corrupted; prefill (8,192-token steps) never took it. The L0 caught it on an RTX A5000 after the merge
+with main (`mix x, 1 tokens, pending`: usage 4.7); it had passed on the RTX PRO 6000 at L0's shapes.
+- **The fix** (1f88194): the GEMV mix applies a pending combine with `_combine` first (the same fp32 expression), then
+  mixes R as left; one launch more per pending mix. L0 passes on sm_86 at 1, 7 and 77 tokens.
+- **The evidence** (IQ3_S, the full model on the RTX PRO 6000, `recall-4k`'s first 2,048 tokens, the decode path in
+  1-token steps against one prefill step; target log-probability decode − prefill, nats per token, by position band
+  0–511 / 512–1,023 / 1,024–2,047):
+
+| HC mix | mean | mean \|·\| | top-1 log-prob, decode (prefill −0.258) |
+|---|---|---|---|
+| 30c7fd7 (the step-5 runs) | +0.193 / +0.512 / +0.754 | 0.26 / 0.57 / 0.85 | −0.312 (flatter) |
+| fixed (1f88194) | −0.035 / −0.160 / +0.084 | 0.21 / 0.29 / 0.33 | −0.255 |
+
+  The old kernel raised the targets' probability systematically and flattened the predictions, as panel B's sign
+  argument said. The fixed paths still differ per token (mean \|·\| 0.2–0.3 on this high-entropy filler) with mixed signs.
+- **Ruled out first** (B's probes): causality is exact (changing the tokens from position 1,000 on leaves every row
+  before it bitwise, row 999's distribution included, on both paths); the output scale is the same (post-mixer ‖x‖
+  147.1 against 147.3); on a 4-layer slice no single swap of a decode-path op for its prefill form (the tiled HC at
+  T = 1, GDN's chunked kernel at T = 1, mmq at T = 1) removes the layer-0 difference, which is bf16-rounding sized
+  (0.5–0.8% relative at the GDN mixer's output) and grows to ≈ 8% relative R by layer 47 on the full model, the same
+  with either HC kernel.
+- **Every decode-path result of §17 ran with the racy kernel**: the decode-path L2 candidates, the decode-divergence
+  gate, MTP acceptance, the bounded checks, the snapshot and the kernel-only comparison. They are re-run with the fix
+  (17.2); the goldens, floors, prefill-path candidates and plants are unaffected.
+- **The failed gate passes with the fix:** L2 on IQ3_S's `v1-long` decode path, ΔPPL vs floor **+1.01% (budget
+  5.99%)** where it was −6.56% (6.36%); top-1 93.68% (floor 93.42%), KL p50 2.4e-3 (2.5e-3), KL p99 0.949 (1.08).
+  `recall-4k` now sits 0.31 nats per token above the golden, with sharper top-1s — the side of the mmvq floor (+0.12)
+  and of the decode run before 30c7fd7 (the tiled HC mix, 8-token steps: +0.30). This high-entropy filler prompt moves
+  as a whole with the logits' scale, so its NLL swings with any path's numerics; the racy kernel sat on the other side
+  (−0.37, flatter).
+
+**Panel B's minor findings:** the decode-divergence statistic is p95 (or the paired per-position KL) from now on, and
+step 7 re-runs it with more sessions; `qsa_index` / `qsa_select` refuse unit views whose rows are not dense (8a6071c);
+`qsa_attend`'s L0 already reads the gqa unit-segment KV views (`empty_cache`: q8_0's values and scales in one segment
+per unit, strided); `qsa_pool_rope_last` is recorded as caught by the tiny-model fixtures (`test_plants_fail`), like
+`qsa_dense_limit_off_by_one`, and `v1-long` does not grow for it.
+
+### 17.2 Re-runs with the fixed mix (2026-10-21; in progress)
+
+The decode-path results of §17 are re-run on the same node with 1f88194 (`IQ3_S` `v1-long` first, above). One new
+miss so far: **L2 on IQ2_XS's `v1-qwen3_5` decode path fails on ΔPPL vs floor, 1.95% > 1.57%** (with the racy kernel it
+passed at 1.27%), its top-1 and KL inside budget and the best of any path. A bisect on the full model (the same set in
+1-token steps, one decode-path op at a time forced to its prefill form) finds no decode-path error:
+
+| IQ2_XS `v1-qwen3_5`, 1-token steps | ΔPPL vs golden | top-1 | KL mean | KL p99 | ΔPPL vs mmvq floor (budget 1.57%) |
+|---|---|---|---|---|---|
+| decode path (1f88194) | +1.99% | 97.41% | 1.54e-2 | 0.296 | 1.95%: fails |
+| the same, CUDA graphs off | bitwise equal | | | | |
+| tiled HC mix at T = 1 | +1.45% | 97.38% | 1.48e-2 | 0.274 | 1.41%: passes |
+| every op in its prefill form (tiled HC, GDN chunked, mmq; graphs off) | −0.49% | 97.28% | 1.63e-2 | 0.345 | (mmq floor: −1.52%, budget 3.23%: passes) |
+| prefill path (one step per prompt) | +0.80% | 97.26% | 1.60e-2 | 0.301 | (mmq floor: −0.24%, 3.13%: passes) |
+| floors: mmvq / mmq | +0.03% / +1.05% | 97.27% / 97.18% | 1.69e-2 / 1.76e-2 | 0.301 / 0.316 | |
+
+- Paired per position, KL(golden ‖ ·) of the decode path differs from every other engine path by less than 0.5
+  standard errors (prompts as clusters), and sits 1.6 SE below its floor's. The NLL differences between these
+  equally-correct paths span 2.5 points of ΔPPL (clustered SEs 0.5–1.2%): two runs with the same op forms (the
+  all-swapped decode and the prefill) differ by 1.3%, 2.5 SE. ΔPPL on 24 sequences is the noise the judge's docstring
+  describes ("two correct bf16 paths differ by a paired SE of ≈ 0.9%").
+- The budget is narrow here because it caps the paired SE at √2 × the floor's own, and the mmvq floor's is the
+  smallest of the eight (0.37%; the mmq floor's 0.84% gives 3.13%). Uncapped, the budget would be 1.99%.
+- Not changed: the judge's rule (core's, shared). Escalated with these numbers for a decision.
