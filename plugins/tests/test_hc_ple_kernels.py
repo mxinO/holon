@@ -8,6 +8,10 @@ PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@
   half), for 0, 1, 7 and 77 tokens; the residual a pending combine leaves bitwise what `hc_gr_combine@1` leaves, and
   that within float32's elementwise budget. A block as the unit runs it (mix, combine riding in the next mix, its
   last combine applied) leaves R as the oracle's block does.
+- The in-place update of R under stress (the GEMV mix's race, FN step 5, §17.1): with a pending combine, at 1 to 300
+  tokens (the GEMV and tiled paths, few to many programs), 4 and 8 warps, repeated under side-stream load of varying
+  size (so programs run in other orders): R bitwise what `hc_gr_combine@1` leaves, x bitwise the same every repeat.
+  The racy kernel of 30c7fd7 fails it on sm_86.
 - `qwen4_exp.ple_rows@1` bitwise (rows and history), with wrapping int64 products, EOS at a row's start, inside it and
   in the history, decode rows, a zero-token row and rows without has_init.
 - `qwen4_exp.ple_block@1` within `l0.check(f32, H)` of the oracle (r, state and the returned conv inputs C); state
@@ -89,6 +93,39 @@ def test_hc(inject):
             _, w_f = hc.hc_gr_mix(r_ref, norm, down, up, gate, y_attn, w_a, STREAMS, EPS, torch.bfloat16)
             hc.hc_gr_combine(r_ref, y_ffn, w_f)
             _check(ours, r_ref, torch.float32, width, f"block, {t} tokens")
+
+
+@pytest.mark.parametrize("warps", [4, 8])
+def test_hc_in_place_stress(warps, monkeypatch):
+    from holon_plugins.kernels.hc_triton import kernel
+    monkeypatch.setattr(kernel, "WARPS", warps)
+    g = torch.Generator().manual_seed(1)
+    width = STREAMS * HIDDEN
+    norm = (torch.randn(width, generator=g) * 0.1).bfloat16().cuda()
+    down = (torch.randn(RANK, width, generator=g) / width ** 0.5).bfloat16().cuda()
+    up = (torch.randn(width, RANK, generator=g) / RANK ** 0.5).bfloat16().cuda()
+    gate = (torch.randn(STREAMS, width, generator=g) / width ** 0.5).cuda()
+    mix = _kernel(hc_kernels.MIX, "kernels.hc_triton", streams=STREAMS, hidden=HIDDEN, rank=RANK, eps=EPS,
+                  dtype="bfloat16", inject=True)
+    combine = _kernel(hc_kernels.COMBINE, "kernels.hc_triton", streams=STREAMS, hidden=HIDDEN, dtype="bfloat16")
+    side, load = torch.cuda.Stream(), torch.randn(2048, 2048, device="cuda")
+    for t in (1, 4, 16, 17, 77, 300):
+        r = torch.randn(t, width, generator=g).cuda()
+        y = torch.randn(t, HIDDEN, generator=g).bfloat16().cuda()
+        w_prev = 2 * torch.rand(t, STREAMS, generator=g).cuda()
+        want = r.clone()
+        combine(want, y, w_prev)
+        first = None
+        for rep in range(8):
+            with torch.cuda.stream(side):                # other work on the card: programs scheduled differently
+                for _ in range(rep % 4):
+                    load @ load
+            ours = r.clone()
+            x, _ = mix(ours, norm, down, up, gate, y, w_prev)
+            torch.cuda.synchronize()
+            assert torch.equal(ours, want), (t, warps, rep)
+            first = x if first is None else first
+            assert torch.equal(x, first), (t, warps, rep)
 
 
 # (slot, has_init, tokens): a prefill, decode rows, a zero-token row, rows with and without has_init

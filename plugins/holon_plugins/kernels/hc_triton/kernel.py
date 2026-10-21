@@ -18,6 +18,7 @@ BM, BN, BK = 16, 64, 64          # token, output and reduction tiles
 # 46 at 2), so `_combine` applies a pending combine first and `_down_sum` sums once. FN step 5 measured the tiled
 # `_down` at 442 µs per decode call on the RTX PRO 6000 (six programs for a 10,240-long reduction): 78% of the step.
 GEMV_ROWS, SUM_ROWS, KCHUNK, BNV, BJ = 16, 1, 512, 16, 16
+WARPS = 4                        # every launch's; L0's stress case runs others
 
 
 @triton.jit
@@ -195,7 +196,10 @@ def _activations(part_ptr, sq_ptr, inj_out_ptr, t, T, H, RANK, NOUT, eps, kk, ii
 def _up_mix(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H, RANK,
             S: tl.constexpr, PENDING: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
     """x[:, j] = mean_s(σ(a · up[sH + j]ᵀ) · Rn[:, sH + j]) for this program's columns j of every stream. With a
-    pending combine, the program also stores R + w · y for exactly these elements (no other program touches them)."""
+    pending combine, Rn = R + w · y, and the program stores it for exactly these elements (no other program touches
+    them) — only after every read of R has been used, behind a barrier: Triton may re-run a load where it converts
+    layouts (it did in the GEMV mix on sm_86), and a re-run load after the store would add w · y twice. The store's
+    values are recomputed from R and y as left (the same expression, so the same bits)."""
     m = tl.program_id(0) * BM + tl.arange(0, BM)
     j = tl.program_id(1) * BN + tl.arange(0, BN)
     rows = m < T
@@ -215,11 +219,19 @@ def _up_mix(a_ptr, up_ptr, r_ptr, y_ptr, wp_ptr, rstd_ptr, norm_ptr, x_ptr, T, H
         if PENDING:
             wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
             rn = rn + wv[:, None] * tl.load(y_ptr + row * H + j[None, :], mask=here, other=0.0).to(tl.float32)
-            tl.store(r_ptr + row * S * H + col[None, :], rn, mask=here)
         rstd = tl.load(rstd_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
         rn = rn * rstd[:, None] * (1.0 + tl.load(norm_ptr + col, mask=j < H, other=0.0).to(tl.float32))[None, :]
         out += tl.sigmoid(acc) * rn
     tl.store(x_ptr + row * H + j[None, :], (out / S).to(x_ptr.dtype.element_ty), mask=here)
+    if PENDING:
+        tl.debug_barrier()                      # every read of R above is done before any store below
+        for s in tl.static_range(S):
+            col = s * H + j
+            p = r_ptr + row * S * H + col[None, :]
+            wv = tl.load(wp_ptr + m.to(tl.int64) * S + s, mask=rows, other=0.0)
+            tl.store(p, tl.load(p, mask=here, other=0.0)
+                     + wv[:, None] * tl.load(y_ptr + row * H + j[None, :], mask=here, other=0.0).to(tl.float32),
+                     mask=here)
 
 
 @triton.jit
@@ -264,20 +276,20 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
         rn = torch.empty_like(r) if rides else r                # R + w · y, written by `_down_gemv`
         _down_gemv[(triton.cdiv(nout, BNV), streams * ks)](
             r, y, w_prev, norm, down, inj, part, sq, rn, t, hidden, rank, nout, streams, rides, inject is not None,
-            BNV, KCHUNK, num_warps=4)
+            BNV, KCHUNK, num_warps=WARPS)
         if not fused:
             _down_sum[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
-                part, sq, a, sink, rstd, t, hidden, rank, nout, eps, streams, ks, BM, BN, num_warps=4)
+                part, sq, a, sink, rstd, t, hidden, rank, nout, eps, streams, ks, BM, BN, num_warps=WARPS)
         _mix_gemv[(triton.cdiv(hidden, BJ),)](
             part, sq, a, rstd, up.contiguous(), r, rn, norm, x, sink, t, hidden, rank, nout, eps, streams, ks,
             not fused, rides, BJ, triton.next_power_of_2(rank), triton.next_power_of_2(max(nout - rank, 1)),
-            num_warps=4)
+            num_warps=WARPS)
         return x, w
     _down[(triton.cdiv(t, BM), triton.cdiv(nout, BN))](
         r, y, w_prev, norm, down, inj, a, sink, rstd, t, hidden, rank, eps, streams, pending, inject is not None,
-        BM, BN, BK, num_warps=4)
+        BM, BN, BK, num_warps=WARPS)
     _up_mix[(triton.cdiv(t, BM), triton.cdiv(hidden, BN))](
-        a, up.contiguous(), r, y, w_prev, rstd, norm, x, t, hidden, rank, streams, pending, BM, BN, 32, num_warps=4)
+        a, up.contiguous(), r, y, w_prev, rstd, norm, x, t, hidden, rank, streams, pending, BM, BN, 32, num_warps=WARPS)
     return x, w
 
 
