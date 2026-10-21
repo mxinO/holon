@@ -1867,3 +1867,64 @@ move those statistics. The bars (`spikes/fn7/consistency.py`: KL mean ≤ 0.13, 
 \|ΔNLL\| ≤ 0.75, MTP vs plain KL mean ≤ 0.13 up to the first differing token) are set at about twice that noise, and
 the decode-only plant `qsa_decode_select_shift` must fail them. Kernel races and other errors below the noise are
 L0's to find, on all three SMs.
+
+## 19. Step 7 record: perf closure (started 2026-10-21, on recommended defaults; the owner's answers pending)
+
+Scope until the owner answers: item 0 (where the time goes) and item 1 (launch fusions inside FN's own units and
+kernels). Out of scope: the `kernels.ggml_cuda` fusions (the shared expert, router + top-k) and the tensor-core HC
+prefill (a change to D10). Development rules (owner, 2026-10-21): affected tests only while developing, the full
+suite sharded at hand-off, no lock propagation before FN's close, plants and bounded checks once at the step's close,
+3-round A/Bs.
+
+### 19.1 Item 0: the breakdown
+
+`spikes/fn7/breakdown.py` profiles eager steps under nsys (graphs off, so every kernel sits under the host's NVTX
+ranges) and attributes each kernel's GPU time to its component. Records: `evidence/fn7_breakdown_2026-10-21.json`.
+The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's changes (7d94ed5); 4K / 32K context
+(31,744 tokens, the longest prompt's chat part); ms of GPU time per step, kernels in brackets:
+
+| Component | Decode 4K | Decode 32K | Verify 4K (1 + 3 rows, 3 draft sub-steps) | Prefill 4K (one step) | Prefill 32K (per 8,192-token step) |
+|---|---|---|---|---|---|
+| HC mix + combine | 2.24 (387) | 2.24 (387) | 4.46 (387) | 666.5 (243) | 1,147.3 (241) |
+| GDN (36 layers) | 1.92 (396) | 1.92 (396) | 3.76 (576) | 101.3 (1,404) | 194.6 (1,593) |
+| MoE routed | 1.99 (240) | 1.99 (240) | 3.27 (240) | 286.0 (1,824) | 471.1 (3,816) |
+| QSA (12 layers) | 1.06 (181) | 1.10 (181) | 1.35 (193) | 86.5 (387) | 215.6 (654) |
+| Shared expert | 1.01 (482) | 0.92 (482) | 1.02 (434) | 13.4 (580) | 24.4 (943) |
+| PLE (layer 1) | 0.11 (9) | 0.11 (9) | 0.13 (13) | 1.8 (9) | 3.3 (9) |
+| lm_head | 0.23 (2) | 0.23 (2) | 0.28 (2) | 0.3 (2) | 0.1 (0) |
+| MTP head (all of its sub-steps) | – | – | 2.22 (311) | – | – |
+| Other (sampling, planning copies, embedding) | 0.06 (25) | 0.06 (25) | 1.07 (333) | 0.5 (29) | 0.4 (24) |
+| **Step** | **8.62 (1,722)** | **8.57 (1,722)** | **17.56 (2,489)** | **1,156 (4,478)** | **2,057 (7,280)** |
+
+- **Decode is GPU-bound at ≈ 8.6 ms** (graph replay: 126.7 tok/s at 1K in §17.2, 7.9 ms), not launch-bound once
+  graphed; eager it takes 45 ms. Its four big parts: the HC mixes 26% (97 mixes, 22 µs each, against ≈ 7 µs to read
+  each mix's 13 MB of bf16 weights at the card's bandwidth: the largest FN-owned gap), the routed MoE 23%, GDN 22%,
+  QSA 12%; the shared expert 11% in 10 launches per layer.
+- **Prefill is the HC mixes' fp32 projections: 55–57%** of a step (D10's IEEE dot products; the tensor-core change is
+  out of scope), then the routed experts 23–25%, QSA 8–11%, GDN 9–10%.
+- **A verify pass costs 2.0× a decode step**; the MTP head is 2.2 ms of its 17.6 (its lm_head 0.68, its QSA 0.57).
+- **Launches per decode token: 1,722** — per GDN layer ≈ 34 (HC 8, GDN 11, MoE 5, shared expert 10), per QSA layer
+  ≈ 38 (QSA 15), PLE 9, embedding, output mixer and head ≈ 30.
+- **On the RTX 5080** the full model does not fit before step 6's PLE host table (28.8 GB in VRAM today). A 4-layer
+  IQ2_XS slice (layers 0–3, every expert, the PLE table cut to 1,000 rows per head) gives the same per-layer launch
+  counts and, per layer, decode 1.37 ms for 4 layers (lm_head 27%, HC 16%, MoE 15%, GDN 14%), prefill 4K 170 ms (HC
+  mixes 55%), the same shares as the full model's.
+
+### 19.2 Item 1 so far: launch fusions in FN's units and kernels
+
+- **HC, one-token steps in two launches** (ccb776d, ae70929): `_down_gemv` writes a pending combine's R + w · y to a
+  scratch buffer and every `_mix_gemv` program sums the partials itself, so no `_combine` and no `_down_sum` launch
+  (no kernel stores into a buffer it reads). Bitwise the same R, x and combine weights as before (64 cases on sm_86
+  and sm_120). At 2–16 tokens the repeated sums cost more than the launches saved, so verify keeps `_combine` and
+  `_down_sum`. Per mix on an RTX A5000: 26.3 against 29.7 µs (1 token), unchanged at 2–8.
+- **QSA's indexer q and k in one matmul** (a952ba9): split linears that can share one are merged once loaded into
+  `index_qk_proj` (the layout transformers stores); the tiny model still matches HF.
+- **Measured on the RTX PRO 6000** (decode 4K, eager under nsys): 1,722 → 1,565 kernels per token, GPU 8.62 →
+  7.86 ms per step (−9%; HC mixes 2.18 → 1.71 ms).
+- **Against the ≤ 768 gate:** the in-scope candidates left are small — the indexer's q norm and rope in one kernel
+  (12), GDN's a / b projections in one GEMM (36; their recurrent kernel reads them as contiguous [T, HV], so a vendored
+  `fla` patch or a copy), the PLE glue (≈ 4). That leaves ≈ 1,500. The remainder sits in the out-of-scope items: the
+  shared expert (10 launches per layer: two activation quantizations, gate / up / down, the BF16 shared gate's dot
+  product, sigmoid and product, SwiGLU, a cat) and router + top-k + reduction (5 per layer), and in GDN's 11 per layer
+  (three quantized matmuls with their two activation quantizations, conv, its state, the recurrent kernel, the norm).
+  ≤ 768 needs those; the owner's answer decides it.

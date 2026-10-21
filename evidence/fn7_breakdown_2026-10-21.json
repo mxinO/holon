@@ -1,0 +1,5374 @@
+{
+ "name": "fn7_breakdown",
+ "date": "2026-10-21",
+ "commit": "ae709298ba476ad370a0eb509d8ad3a560b5546b",
+ "tool": "spikes/fn7/breakdown.py (eager steps under nsys; GPU time of each kernel, memcpy and memset attributed to the innermost component range)",
+ "rtx-pro-6000_full_IQ2_XS_before_step7": {
+  "decode_31744": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "decode",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 8.5703,
+   "kernels_per_step": 1722.0,
+   "memops_per_step": 4.0,
+   "wall_ms_median": 45.348,
+   "components": {
+    "hc.mix": {
+     "ms": 2.1812,
+     "share": 0.2545,
+     "kernels": 339.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       1.2101,
+       97.0
+      ],
+      "_down_gemv": [
+       0.6658,
+       97.0
+      ],
+      "_down_sum": [
+       0.2463,
+       97.0
+      ],
+      "_combine": [
+       0.059,
+       48.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0591,
+     "share": 0.0069,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0591,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 1.9166,
+     "share": 0.2236,
+     "kernels": 396.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.0242,
+       108.0
+      ],
+      "kernel": [
+       0.2989,
+       72.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.2312,
+       36.0
+      ],
+      "_conv": [
+       0.147,
+       36.0
+      ],
+      "quantize_q8_1": [
+       0.0943,
+       72.0
+      ],
+      "_gated_rmsnorm": [
+       0.0636,
+       36.0
+      ],
+      "_conv_state": [
+       0.0574,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.1024,
+     "share": 0.1286,
+     "kernels": 181.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3095,
+       37.0
+      ],
+      "_topk": [
+       0.2553,
+       12.0
+      ],
+      "_attend": [
+       0.1638,
+       12.0
+      ],
+      "_score": [
+       0.1256,
+       12.0
+      ],
+      "kernel": [
+       0.1057,
+       24.0
+      ],
+      "quantize_q8_1": [
+       0.0317,
+       24.0
+      ],
+      "_merge": [
+       0.0309,
+       12.0
+      ],
+      "_index": [
+       0.0245,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 1.9915,
+     "share": 0.2324,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.3567,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4732,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0966,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.0651,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.9204,
+     "share": 0.1074,
+     "kernels": 482.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.37,
+       121.0
+      ],
+      "quantize_q8_1": [
+       0.1243,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.0992,
+       48.0
+      ],
+      "dot_kernel": [
+       0.0898,
+       48.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0731,
+       48.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0728,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.0615,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0298,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1134,
+     "share": 0.0132,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       0.04,
+       1.0
+      ],
+      "_ple_gate": [
+       0.03,
+       1.0
+      ],
+      "kernel": [
+       0.0145,
+       1.0
+      ],
+      "_ple_conv": [
+       0.009,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0081,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.006,
+       1.0
+      ],
+      "_ple_state": [
+       0.0025,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2266,
+     "share": 0.0264,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2253,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0013,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.0591,
+     "share": 0.0069,
+     "kernels": 25.0,
+     "memops": 4.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0183,
+       9.0
+      ],
+      "reduce_kernel": [
+       0.0145,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0059,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0051,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0032,
+       1.0
+      ],
+      "k_get_rows_kq": [
+       0.0024,
+       1.0
+      ],
+      "memcpy": [
+       0.002,
+       3.0
+      ],
+      "DeviceScanKernel": [
+       0.0018,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "decode_4096": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "decode",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 8.6186,
+   "kernels_per_step": 1722.0,
+   "memops_per_step": 4.0,
+   "wall_ms_median": 44.931,
+   "components": {
+    "hc.mix": {
+     "ms": 2.1775,
+     "share": 0.2527,
+     "kernels": 339.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       1.2075,
+       97.0
+      ],
+      "_down_gemv": [
+       0.665,
+       97.0
+      ],
+      "_down_sum": [
+       0.2465,
+       97.0
+      ],
+      "_combine": [
+       0.0585,
+       48.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0588,
+     "share": 0.0068,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0588,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 1.924,
+     "share": 0.2232,
+     "kernels": 396.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.0296,
+       108.0
+      ],
+      "kernel": [
+       0.3002,
+       72.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.2322,
+       36.0
+      ],
+      "_conv": [
+       0.1464,
+       36.0
+      ],
+      "quantize_q8_1": [
+       0.0943,
+       72.0
+      ],
+      "_gated_rmsnorm": [
+       0.0634,
+       36.0
+      ],
+      "_conv_state": [
+       0.0578,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.0615,
+     "share": 0.1232,
+     "kernels": 181.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.308,
+       37.0
+      ],
+      "_topk": [
+       0.2422,
+       12.0
+      ],
+      "_attend": [
+       0.1399,
+       12.0
+      ],
+      "_score": [
+       0.1176,
+       12.0
+      ],
+      "kernel": [
+       0.1037,
+       24.0
+      ],
+      "quantize_q8_1": [
+       0.0314,
+       24.0
+      ],
+      "_merge": [
+       0.0308,
+       12.0
+      ],
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+       0.0274,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 1.9922,
+     "share": 0.2311,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.3599,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4698,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.097,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.0654,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 1.0058,
+     "share": 0.1167,
+     "kernels": 482.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3719,
+       121.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.1562,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1244,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.0984,
+       48.0
+      ],
+      "dot_kernel": [
+       0.0898,
+       48.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0735,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.0614,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0301,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1132,
+     "share": 0.0131,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       0.0399,
+       1.0
+      ],
+      "_ple_gate": [
+       0.0301,
+       1.0
+      ],
+      "kernel": [
+       0.0145,
+       1.0
+      ],
+      "_ple_conv": [
+       0.009,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0081,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.006,
+       1.0
+      ],
+      "_ple_state": [
+       0.0024,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2264,
+     "share": 0.0263,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2251,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0013,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.0593,
+     "share": 0.0069,
+     "kernels": 25.0,
+     "memops": 4.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.018,
+       9.0
+      ],
+      "reduce_kernel": [
+       0.0145,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0058,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0051,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0032,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0026,
+       1.0
+      ],
+      "k_get_rows_kq": [
+       0.0023,
+       1.0
+      ],
+      "memcpy": [
+       0.002,
+       3.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "prefill_31744": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "prefill",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 4,
+   "gpu_ms_per_step": 2056.8066,
+   "kernels_per_step": 7280.0,
+   "memops_per_step": 1076.5,
+   "wall_ms_median": 2119.272,
+   "components": {
+    "hc.mix": {
+     "ms": 1126.6899,
+     "share": 0.5478,
+     "kernels": 192.75,
+     "memops": 0.0,
+     "top": {
+      "_down": [
+       640.1314,
+       96.0
+      ],
+      "_up_mix": [
+       486.5511,
+       96.0
+      ],
+      "_up_mix_gemv": [
+       0.0039,
+       0.25
+      ],
+      "_down_gemv": [
+       0.0028,
+       0.25
+      ],
+      "_down_sum": [
+       0.0006,
+       0.25
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 20.5811,
+     "share": 0.01,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       20.5811,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 194.5992,
+     "share": 0.0946,
+     "kernels": 1593.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       107.1191,
+       216.0
+      ],
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+       17.4581,
+       36.0
+      ],
+      "chunk_fwd_kernel_o": [
+       14.9074,
+       36.0
+      ],
+      "recompute_w_u_fwd_kernel": [
+       10.2283,
+       36.0
+      ],
+      "elementwise_kernel": [
+       9.2814,
+       216.0
+      ],
+      "_conv": [
+       7.7483,
+       36.0
+      ],
+      "merge_16x16_to_64x64_inverse_kernel": [
+       6.9557,
+       36.0
+      ],
+      "_gated_rmsnorm": [
+       6.1277,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 215.6359,
+     "share": 0.1048,
+     "kernels": 654.0,
+     "memops": 3.0,
+     "top": {
+      "_attend": [
+       149.334,
+       12.0
+      ],
+      "mul_mat_q": [
+       30.3116,
+       74.0
+      ],
+      "_score": [
+       25.875,
+       186.0
+      ],
+      "_topk": [
+       4.7123,
+       186.0
+      ],
+      "quantize_mmq_q8_1": [
+       1.7649,
+       74.0
+      ],
+      "_qk_rope_kv": [
+       1.6964,
+       12.0
+      ],
+      "Kernel2": [
+       1.227,
+       24.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       0.4829,
+       50.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 471.1018,
+     "share": 0.229,
+     "kernels": 3816.0,
+     "memops": 1056.0,
+     "top": {
+      "mul_mat_q": [
+       384.8883,
+       288.0
+      ],
+      "moe_weighted_reduction_f32": [
+       33.5016,
+       144.0
+      ],
+      "router_partials": [
+       28.6136,
+       144.0
+      ],
+      "quantize_mmq_q8_1": [
+       12.7032,
+       288.0
+      ],
+      "DeviceRadixSortOnesweepKernel": [
+       3.36,
+       528.0
+      ],
+      "topk_moe_cuda": [
+       1.7336,
+       144.0
+      ],
+      "DeviceScanKernel": [
+       1.0183,
+       264.0
+      ],
+      "memset": [
+       0.9328,
+       1056.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 24.4281,
+     "share": 0.0119,
+     "kernels": 943.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       15.3385,
+       242.0
+      ],
+      "quantize_mmq_q8_1": [
+       2.7766,
+       242.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       2.2977,
+       242.0
+      ],
+      "elementwise_kernel": [
+       1.8267,
+       48.0
+      ],
+      "Kernel2": [
+       1.4145,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.4909,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.1975,
+       25.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0857,
+       48.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 3.2709,
+     "share": 0.0016,
+     "kernels": 9.0,
+     "memops": 0.75,
+     "top": {
+      "Kernel2": [
+       1.3774,
+       2.0
+      ],
+      "_ple_conv": [
+       0.9631,
+       1.0
+      ],
+      "_ple_gate": [
+       0.823,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0482,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0443,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0094,
+       1.0
+      ],
+      "_ple_state": [
+       0.0029,
+       1.0
+      ],
+      "_ple_history": [
+       0.0017,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.0675,
+     "share": 0.0,
+     "kernels": 0.5,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.067,
+       0.25
+      ],
+      "quantize_q8_1": [
+       0.0005,
+       0.25
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.4322,
+     "share": 0.0002,
+     "kernels": 23.75,
+     "memops": 16.75,
+     "top": {
+      "elementwise_kernel": [
+       0.3195,
+       1.5
+      ],
+      "k_get_rows_kq": [
+       0.0477,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.0225,
+       9.0
+      ],
+      "memcpy": [
+       0.0195,
+       16.5
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0066,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0045,
+       3.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0039,
+       1.0
+      ],
+      "compute_cuda_kernel": [
+       0.0026,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "prefill_4096": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "prefill",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 1,
+   "gpu_ms_per_step": 1156.2093,
+   "kernels_per_step": 4478.0,
+   "memops_per_step": 410.0,
+   "wall_ms_median": 1162.513,
+   "components": {
+    "hc.mix": {
+     "ms": 656.7253,
+     "share": 0.568,
+     "kernels": 195.0,
+     "memops": 0.0,
+     "top": {
+      "_down": [
+       380.5348,
+       96.0
+      ],
+      "_up_mix": [
+       276.1612,
+       96.0
+      ],
+      "_up_mix_gemv": [
+       0.0164,
+       1.0
+      ],
+      "_down_gemv": [
+       0.0103,
+       1.0
+      ],
+      "_down_sum": [
+       0.0026,
+       1.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 9.8196,
+     "share": 0.0085,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       9.8196,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 101.253,
+     "share": 0.0876,
+     "kernels": 1404.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       60.3459,
+       108.0
+      ],
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+       8.8317,
+       36.0
+      ],
+      "chunk_fwd_kernel_o": [
+       5.9867,
+       36.0
+      ],
+      "elementwise_kernel": [
+       4.7376,
+       216.0
+      ],
+      "merge_16x16_to_64x64_inverse_kernel": [
+       3.9999,
+       36.0
+      ],
+      "recompute_w_u_fwd_kernel": [
+       3.7568,
+       36.0
+      ],
+      "_conv": [
+       3.6593,
+       36.0
+      ],
+      "quantize_mmq_q8_1": [
+       2.5954,
+       108.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 86.5253,
+     "share": 0.0748,
+     "kernels": 387.0,
+     "memops": 0.0,
+     "top": {
+      "_attend": [
+       62.0743,
+       12.0
+      ],
+      "mul_mat_q": [
+       17.0641,
+       37.0
+      ],
+      "_score": [
+       3.1142,
+       96.0
+      ],
+      "_topk": [
+       1.511,
+       96.0
+      ],
+      "_qk_rope_kv": [
+       0.8072,
+       12.0
+      ],
+      "quantize_mmq_q8_1": [
+       0.7611,
+       37.0
+      ],
+      "Kernel2": [
+       0.7014,
+       24.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       0.2647,
+       25.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 286.0254,
+     "share": 0.2474,
+     "kernels": 1824.0,
+     "memops": 384.0,
+     "top": {
+      "mul_mat_q": [
+       238.6307,
+       192.0
+      ],
+      "moe_weighted_reduction_f32": [
+       16.7463,
+       96.0
+      ],
+      "router_partials": [
+       16.0439,
+       96.0
+      ],
+      "quantize_mmq_q8_1": [
+       6.7681,
+       192.0
+      ],
+      "mm_ids_helper_compact": [
+       3.091,
+       96.0
+      ],
+      "DeviceRadixSortOnesweepKernel": [
+       1.3416,
+       192.0
+      ],
+      "topk_moe_cuda": [
+       1.05,
+       96.0
+      ],
+      "router_sum": [
+       0.5281,
+       96.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 13.3591,
+     "share": 0.0116,
+     "kernels": 580.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       8.7985,
+       121.0
+      ],
+      "quantize_mmq_q8_1": [
+       1.449,
+       121.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       1.251,
+       121.0
+      ],
+      "elementwise_kernel": [
+       0.8057,
+       48.0
+      ],
+      "kernel": [
+       0.553,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.2905,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.1339,
+       25.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0776,
+       48.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 1.753,
+     "share": 0.0015,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       0.7594,
+       2.0
+      ],
+      "_ple_conv": [
+       0.51,
+       1.0
+      ],
+      "_ple_gate": [
+       0.4127,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0306,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0269,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0086,
+       1.0
+      ],
+      "_ple_state": [
+       0.003,
+       1.0
+      ],
+      "_ple_history": [
+       0.0018,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2715,
+     "share": 0.0002,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2694,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0021,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.477,
+     "share": 0.0004,
+     "kernels": 29.0,
+     "memops": 26.0,
+     "top": {
+      "elementwise_kernel": [
+       0.3638,
+       3.0
+      ],
+      "index_elementwise_kernel": [
+       0.0341,
+       12.0
+      ],
+      "k_get_rows_kq": [
+       0.0272,
+       1.0
+      ],
+      "memcpy": [
+       0.0223,
+       25.0
+      ],
+      "reduce_kernel": [
+       0.0073,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0071,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0047,
+       3.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0041,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "verify_31744": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "verify",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 4,
+   "gpu_ms_per_step": 17.5192,
+   "kernels_per_step": 2490.0,
+   "memops_per_step": 178.75,
+   "wall_ms_median": 67.615,
+   "components": {
+    "hc.mix": {
+     "ms": 4.4008,
+     "share": 0.2512,
+     "kernels": 339.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       2.9994,
+       97.0
+      ],
+      "_down_gemv": [
+       1.0586,
+       97.0
+      ],
+      "_down_sum": [
+       0.2839,
+       97.0
+      ],
+      "_combine": [
+       0.0589,
+       48.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0604,
+     "share": 0.0034,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0604,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 3.7444,
+     "share": 0.2137,
+     "kernels": 576.0,
+     "memops": 144.0,
+     "top": {
+      "Kernel2": [
+       1.2609,
+       72.0
+      ],
+      "mul_mat_vec_q": [
+       1.2302,
+       108.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.3979,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.2279,
+       108.0
+      ],
+      "_conv": [
+       0.1584,
+       36.0
+      ],
+      "memcpy": [
+       0.1544,
+       144.0
+      ],
+      "quantize_q8_1": [
+       0.0932,
+       72.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0697,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.3916,
+     "share": 0.0794,
+     "kernels": 193.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3749,
+       37.0
+      ],
+      "_topk": [
+       0.2749,
+       12.0
+      ],
+      "Kernel2": [
+       0.2639,
+       24.0
+      ],
+      "_attend": [
+       0.1706,
+       12.0
+      ],
+      "_score": [
+       0.1306,
+       12.0
+      ],
+      "_index": [
+       0.0345,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0311,
+       24.0
+      ],
+      "_merge": [
+       0.0295,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 3.1893,
+     "share": 0.182,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q_moe": [
+       2.4531,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4728,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1615,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.1019,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 1.0218,
+     "share": 0.0583,
+     "kernels": 434.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.4441,
+       121.0
+      ],
+      "kernel": [
+       0.177,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1247,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.1104,
+       48.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0737,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.0614,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0305,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1319,
+     "share": 0.0075,
+     "kernels": 13.0,
+     "memops": 6.0,
+     "top": {
+      "Kernel2": [
+       0.0538,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0304,
+       1.0
+      ],
+      "_ple_conv": [
+       0.0086,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.0082,
+       2.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.008,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0079,
+       1.0
+      ],
+      "memcpy": [
+       0.0068,
+       6.0
+      ],
+      "_ple_state": [
+       0.0022,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.273,
+     "share": 0.0156,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2717,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0014,
+       1.0
+      ]
+     }
+    },
+    "mtp": {
+     "ms": 0.4248,
+     "share": 0.0242,
+     "kernels": 166.0,
+     "memops": 15.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0873,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0788,
+       54.0
+      ],
+      "Kernel2": [
+       0.0635,
+       5.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0523,
+       30.0
+      ],
+      "kernel": [
+       0.0363,
+       3.0
+      ],
+      "reduce_kernel": [
+       0.0217,
+       3.0
+      ],
+      "memcpy": [
+       0.0152,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
+       0.0104,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.combine": {
+     "ms": 0.0049,
+     "share": 0.0003,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0049,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.mix": {
+     "ms": 0.2944,
+     "share": 0.0168,
+     "kernels": 37.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1753,
+       11.0
+      ],
+      "_down_gemv": [
+       0.0852,
+       11.0
+      ],
+      "_down_sum": [
+       0.0284,
+       11.0
+      ],
+      "_combine": [
+       0.0054,
+       4.0
+      ]
+     }
+    },
+    "mtp.lm_head": {
+     "ms": 0.6793,
+     "share": 0.0388,
+     "kernels": 6.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.6754,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.0039,
+       3.0
+      ]
+     }
+    },
+    "mtp.moe": {
+     "ms": 0.1555,
+     "share": 0.0089,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.057,
+       6.0
+      ],
+      "mul_mat_vec_q_moe": [
+       0.0443,
+       2.0
+      ],
+      "holon_moe_router": [
+       0.0396,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0081,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0064,
+       4.0
+      ]
+     }
+    },
+    "mtp.qsa": {
+     "ms": 0.5847,
+     "share": 0.0334,
+     "kernels": 50.0,
+     "memops": 1.0,
+     "top": {
+      "Kernel2": [
+       0.3194,
+       9.0
+      ],
+      "_topk": [
+       0.0975,
+       4.0
+      ],
+      "_attend": [
+       0.0568,
+       4.0
+      ],
+      "_score": [
+       0.0476,
+       4.0
+      ],
+      "kernel": [
+       0.015,
+       3.0
+      ],
+      "_merge": [
+       0.0102,
+       4.0
+      ],
+      "splitKreduce_kernel": [
+       0.0082,
+       5.0
+      ],
+      "_index": [
+       0.0078,
+       4.0
+      ]
+     }
+    },
+    "mtp.shared": {
+     "ms": 0.0925,
+     "share": 0.0053,
+     "kernels": 28.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.046,
+       7.0
+      ],
+      "Kernel2": [
+       0.0146,
+       2.0
+      ],
+      "elementwise_kernel": [
+       0.0085,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0062,
+       4.0
+      ],
+      "dot_kernel": [
+       0.0057,
+       3.0
+      ],
+      "act_and_mul_kernel": [
+       0.0051,
+       4.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0046,
+       3.0
+      ],
+      "splitKreduce_kernel": [
+       0.0018,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 1.07,
+     "share": 0.0611,
+     "kernels": 334.0,
+     "memops": 12.75,
+     "top": {
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.4173,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.2222,
+       112.0
+      ],
+      "_conv": [
+       0.1751,
+       36.0
+      ],
+      "index_elementwise_kernel": [
+       0.069,
+       34.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0553,
+       39.0
+      ],
+      "_conv_state": [
+       0.0522,
+       36.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0224,
+       17.0
+      ],
+      "memcpy": [
+       0.0109,
+       11.75
+      ]
+     }
+    }
+   },
+   "spec": {
+    "spec_verify_steps": 6,
+    "spec_verify_steps_graphed": 0,
+    "spec_verify_steps_overlapped": 0,
+    "spec_drafted": 18,
+    "spec_rows_k3_accepting_1": 3,
+    "spec_rows_k3_accepting_0": 2,
+    "spec_rows_k3_accepting_3": 1
+   }
+  },
+  "verify_4096": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "24a333f10b98ce713ef7b4ff195812b60428fcd9",
+   "args": {
+    "phase": "verify",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 2,
+   "gpu_ms_per_step": 17.5602,
+   "kernels_per_step": 2489.0,
+   "memops_per_step": 178.0,
+   "wall_ms_median": 98.835,
+   "components": {
+    "hc.mix": {
+     "ms": 4.3961,
+     "share": 0.2503,
+     "kernels": 339.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       2.9936,
+       97.0
+      ],
+      "_down_gemv": [
+       1.0599,
+       97.0
+      ],
+      "_down_sum": [
+       0.2837,
+       97.0
+      ],
+      "_combine": [
+       0.059,
+       48.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0601,
+     "share": 0.0034,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0601,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 3.7633,
+     "share": 0.2143,
+     "kernels": 576.0,
+     "memops": 144.0,
+     "top": {
+      "Kernel2": [
+       1.2631,
+       72.0
+      ],
+      "mul_mat_vec_q": [
+       1.2475,
+       108.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.3976,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.2279,
+       108.0
+      ],
+      "_conv": [
+       0.158,
+       36.0
+      ],
+      "memcpy": [
+       0.1546,
+       144.0
+      ],
+      "quantize_q8_1": [
+       0.0932,
+       72.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0695,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.3463,
+     "share": 0.0767,
+     "kernels": 193.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3803,
+       37.0
+      ],
+      "_topk": [
+       0.2646,
+       12.0
+      ],
+      "Kernel2": [
+       0.2642,
+       24.0
+      ],
+      "_attend": [
+       0.1493,
+       12.0
+      ],
+      "_score": [
+       0.1131,
+       12.0
+      ],
+      "_index": [
+       0.0325,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0313,
+       24.0
+      ],
+      "_merge": [
+       0.0296,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 3.2686,
+     "share": 0.1861,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q_moe": [
+       2.5282,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4808,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1582,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.1014,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 1.0233,
+     "share": 0.0583,
+     "kernels": 434.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.4434,
+       121.0
+      ],
+      "kernel": [
+       0.1779,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1253,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.1094,
+       48.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0746,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.062,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0308,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1341,
+     "share": 0.0076,
+     "kernels": 13.0,
+     "memops": 6.0,
+     "top": {
+      "Kernel2": [
+       0.0546,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0305,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.0091,
+       2.0
+      ],
+      "_ple_conv": [
+       0.0086,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0082,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0081,
+       1.0
+      ],
+      "memcpy": [
+       0.0069,
+       6.0
+      ],
+      "_ple_state": [
+       0.0022,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2826,
+     "share": 0.0161,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2812,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0014,
+       1.0
+      ]
+     }
+    },
+    "mtp": {
+     "ms": 0.4218,
+     "share": 0.024,
+     "kernels": 166.0,
+     "memops": 15.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0866,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0786,
+       54.0
+      ],
+      "Kernel2": [
+       0.0625,
+       5.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.052,
+       30.0
+      ],
+      "kernel": [
+       0.0357,
+       3.0
+      ],
+      "reduce_kernel": [
+       0.0216,
+       3.0
+      ],
+      "memcpy": [
+       0.0152,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
+       0.0105,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.combine": {
+     "ms": 0.0049,
+     "share": 0.0003,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0049,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.mix": {
+     "ms": 0.2897,
+     "share": 0.0165,
+     "kernels": 37.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1723,
+       11.0
+      ],
+      "_down_gemv": [
+       0.0844,
+       11.0
+      ],
+      "_down_sum": [
+       0.0281,
+       11.0
+      ],
+      "_combine": [
+       0.005,
+       4.0
+      ]
+     }
+    },
+    "mtp.lm_head": {
+     "ms": 0.6795,
+     "share": 0.0387,
+     "kernels": 6.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.6757,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.0039,
+       3.0
+      ]
+     }
+    },
+    "mtp.moe": {
+     "ms": 0.1624,
+     "share": 0.0092,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0626,
+       6.0
+      ],
+      "mul_mat_vec_q_moe": [
+       0.0455,
+       2.0
+      ],
+      "holon_moe_router": [
+       0.0399,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0081,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0063,
+       4.0
+      ]
+     }
+    },
+    "mtp.qsa": {
+     "ms": 0.5663,
+     "share": 0.0322,
+     "kernels": 50.0,
+     "memops": 1.0,
+     "top": {
+      "Kernel2": [
+       0.319,
+       9.0
+      ],
+      "_topk": [
+       0.0957,
+       4.0
+      ],
+      "_attend": [
+       0.0493,
+       4.0
+      ],
+      "_score": [
+       0.0396,
+       4.0
+      ],
+      "kernel": [
+       0.0152,
+       3.0
+      ],
+      "_merge": [
+       0.0102,
+       4.0
+      ],
+      "splitKreduce_kernel": [
+       0.0082,
+       5.0
+      ],
+      "_index": [
+       0.0073,
+       4.0
+      ]
+     }
+    },
+    "mtp.shared": {
+     "ms": 0.095,
+     "share": 0.0054,
+     "kernels": 28.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0474,
+       7.0
+      ],
+      "Kernel2": [
+       0.0159,
+       2.0
+      ],
+      "elementwise_kernel": [
+       0.0085,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0061,
+       4.0
+      ],
+      "dot_kernel": [
+       0.0056,
+       3.0
+      ],
+      "act_and_mul_kernel": [
+       0.0051,
+       4.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0046,
+       3.0
+      ],
+      "splitKreduce_kernel": [
+       0.0018,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 1.0661,
+     "share": 0.0607,
+     "kernels": 333.0,
+     "memops": 12.0,
+     "top": {
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.4181,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.2256,
+       112.0
+      ],
+      "_conv": [
+       0.1652,
+       36.0
+      ],
+      "index_elementwise_kernel": [
+       0.0676,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0567,
+       39.0
+      ],
+      "_conv_state": [
+       0.0527,
+       36.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0225,
+       17.0
+      ],
+      "reduce_kernel": [
+       0.0118,
+       2.0
+      ]
+     }
+    }
+   },
+   "spec": {
+    "spec_verify_steps": 4,
+    "spec_verify_steps_graphed": 0,
+    "spec_verify_steps_overlapped": 0,
+    "spec_drafted": 12,
+    "spec_rows_k3_accepting_2": 2,
+    "spec_rows_k3_accepting_0": 1,
+    "spec_rows_k3_accepting_3": 1
+   }
+  }
+ },
+ "rtx-pro-6000_full_IQ2_XS_after_item1_so_far": {
+  "decode_4096": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "a952ba97a4a59eccec4c9ccb334c482708de10ac",
+   "args": {
+    "phase": "decode",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 7.8606,
+   "kernels_per_step": 1565.0,
+   "memops_per_step": 4.0,
+   "wall_ms_median": 43.039,
+   "components": {
+    "hc.mix": {
+     "ms": 1.71,
+     "share": 0.2175,
+     "kernels": 194.0,
+     "memops": 0.0,
+     "top": {
+      "_mix_gemv": [
+       1.0427,
+       97.0
+      ],
+      "_down_gemv": [
+       0.6672,
+       97.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0584,
+     "share": 0.0074,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0584,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 1.87,
+     "share": 0.2379,
+     "kernels": 396.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.0222,
+       108.0
+      ],
+      "kernel": [
+       0.2538,
+       72.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.2333,
+       36.0
+      ],
+      "_conv": [
+       0.1464,
+       36.0
+      ],
+      "quantize_q8_1": [
+       0.0937,
+       72.0
+      ],
+      "_gated_rmsnorm": [
+       0.0632,
+       36.0
+      ],
+      "_conv_state": [
+       0.0575,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.0146,
+     "share": 0.1291,
+     "kernels": 169.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3083,
+       37.0
+      ],
+      "_topk": [
+       0.2481,
+       12.0
+      ],
+      "_attend": [
+       0.137,
+       12.0
+      ],
+      "_score": [
+       0.1181,
+       12.0
+      ],
+      "kernel": [
+       0.0609,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0315,
+       24.0
+      ],
+      "_merge": [
+       0.0308,
+       12.0
+      ],
+      "_index": [
+       0.0249,
+       12.0
+      ],
+      "_qk_rope_kv": [
+       0.0207,
+       12.0
+      ],
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+       0.0189,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
+       0.0153,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 1.8948,
+     "share": 0.2411,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.2651,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4705,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0968,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.0624,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.9235,
+     "share": 0.1175,
+     "kernels": 482.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3723,
+       121.0
+      ],
+      "quantize_q8_1": [
+       0.1243,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.0982,
+       48.0
+      ],
+      "dot_kernel": [
+       0.0897,
+       48.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.074,
+       48.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0733,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.0618,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0301,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1114,
+     "share": 0.0142,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       0.0399,
+       1.0
+      ],
+      "_ple_gate": [
+       0.0299,
+       1.0
+      ],
+      "kernel": [
+       0.013,
+       1.0
+      ],
+      "_ple_conv": [
+       0.009,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0081,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.006,
+       1.0
+      ],
+      "_ple_state": [
+       0.0024,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0017,
+       1.0
+      ],
+      "_ple_history": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2265,
+     "share": 0.0288,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2252,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0013,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.0514,
+     "share": 0.0065,
+     "kernels": 25.0,
+     "memops": 4.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.018,
+       9.0
+      ],
+      "reduce_kernel": [
+       0.0073,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0058,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0052,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0032,
+       1.0
+      ],
+      "k_get_rows_kq": [
+       0.0023,
+       1.0
+      ],
+      "memcpy": [
+       0.002,
+       3.0
+      ],
+      "DeviceScanKernel": [
+       0.0018,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0018,
+       1.0
+      ],
+      "compute_cuda_kernel": [
+       0.0018,
+       1.0
+      ],
+      "DeviceScanInitKernel": [
+       0.001,
+       1.0
+      ],
+      "elementwise_kernel_with_index": [
+       0.001,
+       1.0
+      ],
+      "memset": [
+       0.0004,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "verify_4096": {
+   "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+   "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+   "commit": "a952ba97a4a59eccec4c9ccb334c482708de10ac",
+   "args": {
+    "phase": "verify",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 2,
+   "gpu_ms_per_step": 18.4051,
+   "kernels_per_step": 2329.0,
+   "memops_per_step": 178.0,
+   "wall_ms_median": 80.438,
+   "components": {
+    "hc.mix": {
+     "ms": 5.5721,
+     "share": 0.3028,
+     "kernels": 194.0,
+     "memops": 0.0,
+     "top": {
+      "_mix_gemv": [
+       4.5008,
+       97.0
+      ],
+      "_down_gemv": [
+       1.0713,
+       97.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0602,
+     "share": 0.0033,
+     "kernels": 48.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0602,
+       48.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 3.7397,
+     "share": 0.2032,
+     "kernels": 576.0,
+     "memops": 144.0,
+     "top": {
+      "Kernel2": [
+       1.2634,
+       72.0
+      ],
+      "mul_mat_vec_q": [
+       1.222,
+       108.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.3991,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.2277,
+       108.0
+      ],
+      "_conv": [
+       0.1578,
+       36.0
+      ],
+      "memcpy": [
+       0.1546,
+       144.0
+      ],
+      "quantize_q8_1": [
+       0.0929,
+       72.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0693,
+       36.0
+      ],
+      "_gated_rmsnorm": [
+       0.0634,
+       36.0
+      ],
+      "_conv_state": [
+       0.0527,
+       36.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0367,
+       36.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 1.1608,
+     "share": 0.0631,
+     "kernels": 193.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3742,
+       37.0
+      ],
+      "_topk": [
+       0.2641,
+       12.0
+      ],
+      "_attend": [
+       0.153,
+       12.0
+      ],
+      "_score": [
+       0.1147,
+       12.0
+      ],
+      "Kernel2": [
+       0.0548,
+       12.0
+      ],
+      "_index": [
+       0.0326,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0312,
+       24.0
+      ],
+      "_merge": [
+       0.0295,
+       12.0
+      ],
+      "elementwise_kernel": [
+       0.0267,
+       12.0
+      ],
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+       0.022,
+       12.0
+      ],
+      "splitKreduce_kernel": [
+       0.0216,
+       12.0
+      ],
+      "_qk_rope_kv": [
+       0.0212,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
+       0.0152,
+       12.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 3.186,
+     "share": 0.1731,
+     "kernels": 240.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q_moe": [
+       2.4445,
+       96.0
+      ],
+      "holon_moe_router": [
+       0.4749,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1643,
+       48.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.1023,
+       48.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 1.0188,
+     "share": 0.0554,
+     "kernels": 434.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.4381,
+       121.0
+      ],
+      "kernel": [
+       0.178,
+       48.0
+      ],
+      "quantize_q8_1": [
+       0.1248,
+       96.0
+      ],
+      "elementwise_kernel": [
+       0.1107,
+       48.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0753,
+       48.0
+      ],
+      "act_and_mul_kernel": [
+       0.0613,
+       48.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0307,
+       25.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1357,
+     "share": 0.0074,
+     "kernels": 13.0,
+     "memops": 6.0,
+     "top": {
+      "Kernel2": [
+       0.0562,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0307,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.009,
+       2.0
+      ],
+      "_ple_conv": [
+       0.0086,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0081,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0081,
+       1.0
+      ],
+      "memcpy": [
+       0.0068,
+       6.0
+      ],
+      "_ple_state": [
+       0.0022,
+       1.0
+      ],
+      "splitKreduce_kernel": [
+       0.0018,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0016,
+       1.0
+      ],
+      "_ple_history": [
+       0.0016,
+       1.0
+      ],
+      "elementwise_kernel_with_index": [
+       0.001,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.2749,
+     "share": 0.0149,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.2735,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0014,
+       1.0
+      ]
+     }
+    },
+    "mtp": {
+     "ms": 0.4251,
+     "share": 0.0231,
+     "kernels": 166.0,
+     "memops": 15.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0891,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0782,
+       54.0
+      ],
+      "Kernel2": [
+       0.0631,
+       5.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.052,
+       30.0
+      ],
+      "kernel": [
+       0.0361,
+       3.0
+      ],
+      "reduce_kernel": [
+       0.0218,
+       3.0
+      ],
+      "memcpy": [
+       0.0151,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
+       0.0104,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0095,
+       5.0
+      ],
+      "splitKreduce_kernel": [
+       0.0095,
+       5.0
+      ],
+      "k_get_rows_kq": [
+       0.0092,
+       4.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o256025601_tensorptrbf16gmemalign16o25601_tensorptrbf16gmemalign128o256025601___True_4__0": [
+       0.008,
+       4.0
+      ],
+      "DeviceScanKernel": [
+       0.0047,
+       3.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0046,
+       3.0
+      ],
+      "compute_cuda_kernel": [
+       0.0045,
+       3.0
+      ],
+      "DeviceScanInitKernel": [
+       0.003,
+       3.0
+      ]
+     }
+    },
+    "mtp.hc.combine": {
+     "ms": 0.0052,
+     "share": 0.0003,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0052,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.mix": {
+     "ms": 0.2777,
+     "share": 0.0151,
+     "kernels": 22.0,
+     "memops": 0.0,
+     "top": {
+      "_mix_gemv": [
+       0.1918,
+       11.0
+      ],
+      "_down_gemv": [
+       0.0859,
+       11.0
+      ]
+     }
+    },
+    "mtp.lm_head": {
+     "ms": 0.6794,
+     "share": 0.0369,
+     "kernels": 6.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.6755,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.0039,
+       3.0
+      ]
+     }
+    },
+    "mtp.moe": {
+     "ms": 0.1538,
+     "share": 0.0084,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0569,
+       6.0
+      ],
+      "mul_mat_vec_q_moe": [
+       0.0434,
+       2.0
+      ],
+      "holon_moe_router": [
+       0.0396,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0081,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0058,
+       4.0
+      ]
+     }
+    },
+    "mtp.qsa": {
+     "ms": 0.5662,
+     "share": 0.0308,
+     "kernels": 50.0,
+     "memops": 1.0,
+     "top": {
+      "Kernel2": [
+       0.3219,
+       9.0
+      ],
+      "_topk": [
+       0.0929,
+       4.0
+      ],
+      "_attend": [
+       0.0492,
+       4.0
+      ],
+      "_score": [
+       0.0396,
+       4.0
+      ],
+      "kernel": [
+       0.0157,
+       3.0
+      ],
+      "_merge": [
+       0.0102,
+       4.0
+      ],
+      "splitKreduce_kernel": [
+       0.0081,
+       5.0
+      ],
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+       0.0069,
+       4.0
+      ],
+      "_qk_rope_kv": [
+       0.0069,
+       4.0
+      ],
+      "_index": [
+       0.0066,
+       4.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
+       0.0051,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0022,
+       1.0
+      ],
+      "memset": [
+       0.0008,
+       1.0
+      ]
+     }
+    },
+    "mtp.shared": {
+     "ms": 0.092,
+     "share": 0.005,
+     "kernels": 28.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0455,
+       7.0
+      ],
+      "Kernel2": [
+       0.0144,
+       2.0
+      ],
+      "elementwise_kernel": [
+       0.0086,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0064,
+       4.0
+      ],
+      "dot_kernel": [
+       0.0056,
+       3.0
+      ],
+      "act_and_mul_kernel": [
+       0.0051,
+       4.0
+      ],
+      "reduce_1Block_kernel": [
+       0.0046,
+       3.0
+      ],
+      "splitKreduce_kernel": [
+       0.0018,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 1.0574,
+     "share": 0.0575,
+     "kernels": 333.0,
+     "memops": 12.0,
+     "top": {
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.4187,
+       36.0
+      ],
+      "elementwise_kernel": [
+       0.221,
+       112.0
+      ],
+      "_conv": [
+       0.1649,
+       36.0
+      ],
+      "index_elementwise_kernel": [
+       0.0674,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0555,
+       39.0
+      ],
+      "_conv_state": [
+       0.0507,
+       36.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0225,
+       17.0
+      ],
+      "memcpy": [
+       0.0108,
+       11.0
+      ],
+      "reduce_kernel": [
+       0.0102,
+       2.0
+      ],
+      "elementwise_kernel_with_index": [
+       0.0049,
+       5.0
+      ],
+      "DeviceScanKernel": [
+       0.0048,
+       3.0
+      ],
+      "_rewind": [
+       0.0041,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0041,
+       2.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0036,
+       2.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0033,
+       2.0
+      ],
+      "compute_cuda_kernel": [
+       0.0031,
+       2.0
+      ]
+     }
+    }
+   },
+   "spec": {
+    "spec_verify_steps": 4,
+    "spec_verify_steps_graphed": 0,
+    "spec_verify_steps_overlapped": 0,
+    "spec_drafted": 12,
+    "spec_rows_k3_accepting_2": 1,
+    "spec_rows_k3_accepting_0": 1,
+    "spec_rows_k3_accepting_3": 2
+   }
+  }
+ },
+ "rtx-5080_slice_4_layers_IQ2_XS_before_step7": {
+  "decode_31744": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "decode",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 1.3249,
+   "kernels_per_step": 180.0,
+   "memops_per_step": 4.0,
+   "wall_ms_median": 4.552,
+   "components": {
+    "hc.mix": {
+     "ms": 0.2134,
+     "share": 0.161,
+     "kernels": 31.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1094,
+       9.0
+      ],
+      "_down_gemv": [
+       0.0827,
+       9.0
+      ],
+      "_down_sum": [
+       0.0175,
+       9.0
+      ],
+      "_combine": [
+       0.0038,
+       4.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0038,
+     "share": 0.0029,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0038,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 0.1832,
+     "share": 0.1383,
+     "kernels": 33.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.1208,
+       9.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0222,
+       3.0
+      ],
+      "kernel": [
+       0.0167,
+       6.0
+      ],
+      "_conv": [
+       0.0098,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.006,
+       6.0
+      ],
+      "_gated_rmsnorm": [
+       0.0041,
+       3.0
+      ],
+      "_conv_state": [
+       0.0036,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 0.0961,
+     "share": 0.0725,
+     "kernels": 16.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0367,
+       4.0
+      ],
+      "_topk": [
+       0.0175,
+       1.0
+      ],
+      "_attend": [
+       0.012,
+       1.0
+      ],
+      "_score": [
+       0.0119,
+       1.0
+      ],
+      "kernel": [
+       0.0085,
+       2.0
+      ],
+      "quantize_q8_1": [
+       0.002,
+       2.0
+      ],
+      "_merge": [
+       0.002,
+       1.0
+      ],
+      "_index": [
+       0.0017,
+       1.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 0.194,
+     "share": 0.1464,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.1407,
+       8.0
+      ],
+      "holon_moe_router": [
+       0.0432,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.006,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0042,
+       4.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.0889,
+     "share": 0.0671,
+     "kernels": 40.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0297,
+       10.0
+      ],
+      "splitKreduce_kernel": [
+       0.0274,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0081,
+       8.0
+      ],
+      "kernel": [
+       0.0068,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0062,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0049,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0019,
+       2.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1305,
+     "share": 0.0985,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0791,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0244,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.009,
+       1.0
+      ],
+      "_ple_conv": [
+       0.0073,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0063,
+       1.0
+      ],
+      "_ple_state": [
+       0.002,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0013,
+       1.0
+      ],
+      "_ple_history": [
+       0.0012,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.3745,
+     "share": 0.2826,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3735,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.001,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.0406,
+     "share": 0.0306,
+     "kernels": 25.0,
+     "memops": 4.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0144,
+       9.0
+      ],
+      "reduce_kernel": [
+       0.0058,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0046,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.004,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0023,
+       1.0
+      ],
+      "k_get_rows_kq": [
+       0.0018,
+       1.0
+      ],
+      "memcpy": [
+       0.0015,
+       3.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0014,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "decode_4096": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "decode",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 1.3717,
+   "kernels_per_step": 180.0,
+   "memops_per_step": 4.0,
+   "wall_ms_median": 4.75,
+   "components": {
+    "hc.mix": {
+     "ms": 0.2141,
+     "share": 0.1561,
+     "kernels": 31.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1102,
+       9.0
+      ],
+      "_down_gemv": [
+       0.083,
+       9.0
+      ],
+      "_down_sum": [
+       0.0171,
+       9.0
+      ],
+      "_combine": [
+       0.0038,
+       4.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0038,
+     "share": 0.0027,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0038,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 0.1891,
+     "share": 0.1378,
+     "kernels": 33.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.121,
+       9.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0223,
+       3.0
+      ],
+      "kernel": [
+       0.0222,
+       6.0
+      ],
+      "_conv": [
+       0.0098,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.0061,
+       6.0
+      ],
+      "_gated_rmsnorm": [
+       0.0041,
+       3.0
+      ],
+      "_conv_state": [
+       0.0036,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 0.0935,
+     "share": 0.0681,
+     "kernels": 16.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0369,
+       4.0
+      ],
+      "_topk": [
+       0.0185,
+       1.0
+      ],
+      "_attend": [
+       0.011,
+       1.0
+      ],
+      "kernel": [
+       0.0094,
+       2.0
+      ],
+      "_score": [
+       0.0077,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.002,
+       2.0
+      ],
+      "BatchQKApplyRotaryPosIdsCosSinCacheHeadParallelismKernel": [
+       0.002,
+       1.0
+      ],
+      "_merge": [
+       0.002,
+       1.0
+      ],
+      "_index": [
+       0.0016,
+       1.0
+      ],
+      "_qk_rope_kv": [
+       0.0014,
+       1.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o1281281_tensorptrbf16gmemalign16o1281_tensorptrbf16gmemalign128o1281281___True_8_128_0": [
+       0.001,
+       1.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 0.2059,
+     "share": 0.1501,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.1528,
+       8.0
+      ],
+      "holon_moe_router": [
+       0.0428,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0061,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0043,
+       4.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.1102,
+     "share": 0.0804,
+     "kernels": 40.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.03,
+       10.0
+      ],
+      "splitKreduce_kernel": [
+       0.029,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0185,
+       4.0
+      ],
+      "kernel": [
+       0.0126,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0081,
+       8.0
+      ],
+      "elementwise_kernel": [
+       0.0062,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0018,
+       2.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1332,
+     "share": 0.0971,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0805,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0244,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0101,
+       1.0
+      ],
+      "_ple_conv": [
+       0.0073,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0063,
+       1.0
+      ],
+      "_ple_state": [
+       0.002,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0013,
+       1.0
+      ],
+      "_ple_history": [
+       0.0012,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.3743,
+     "share": 0.2729,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3733,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.001,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.0476,
+     "share": 0.0347,
+     "kernels": 25.0,
+     "memops": 4.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0145,
+       9.0
+      ],
+      "reduce_kernel": [
+       0.0118,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0046,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.004,
+       4.0
+      ],
+      "elementwise_kernel": [
+       0.0025,
+       1.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0021,
+       1.0
+      ],
+      "k_get_rows_kq": [
+       0.0019,
+       1.0
+      ],
+      "memcpy": [
+       0.0015,
+       3.0
+      ],
+      "DeviceScanKernel": [
+       0.0014,
+       1.0
+      ],
+      "compute_cuda_kernel": [
+       0.0014,
+       1.0
+      ],
+      "elementwise_kernel_with_index": [
+       0.0008,
+       1.0
+      ],
+      "DeviceScanInitKernel": [
+       0.0008,
+       1.0
+      ],
+      "memset": [
+       0.0003,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "prefill_31744": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "prefill",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 4,
+   "gpu_ms_per_step": 329.199,
+   "kernels_per_step": 615.0,
+   "memops_per_step": 106.0,
+   "wall_ms_median": 341.434,
+   "components": {
+    "hc.mix": {
+     "ms": 176.1161,
+     "share": 0.535,
+     "kernels": 16.75,
+     "memops": 0.0,
+     "top": {
+      "_down": [
+       98.5959,
+       8.0
+      ],
+      "_up_mix": [
+       77.5133,
+       8.0
+      ],
+      "_up_mix_gemv": [
+       0.0038,
+       0.25
+      ],
+      "_down_gemv": [
+       0.0025,
+       0.25
+      ],
+      "_down_sum": [
+       0.0006,
+       0.25
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 3.4382,
+     "share": 0.0104,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       3.4382,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 29.4016,
+     "share": 0.0893,
+     "kernels": 126.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       16.4728,
+       18.0
+      ],
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+       2.3978,
+       3.0
+      ],
+      "chunk_fwd_kernel_o": [
+       2.1129,
+       3.0
+      ],
+      "recompute_w_u_fwd_kernel": [
+       1.6626,
+       3.0
+      ],
+      "elementwise_kernel": [
+       1.2563,
+       18.0
+      ],
+      "_conv": [
+       1.1619,
+       3.0
+      ],
+      "merge_16x16_to_64x64_inverse_kernel": [
+       1.0242,
+       3.0
+      ],
+      "_gated_rmsnorm": [
+       0.9709,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 36.0576,
+     "share": 0.1095,
+     "kernels": 58.0,
+     "memops": 1.25,
+     "top": {
+      "_attend": [
+       26.0509,
+       1.0
+      ],
+      "mul_mat_q": [
+       4.9007,
+       8.0
+      ],
+      "_score": [
+       3.5387,
+       15.5
+      ],
+      "_topk": [
+       0.6958,
+       15.5
+      ],
+      "quantize_mmq_q8_1": [
+       0.2769,
+       8.0
+      ],
+      "Kernel2": [
+       0.2751,
+       2.0
+      ],
+      "_qk_rope_kv": [
+       0.2649,
+       1.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       0.0301,
+       4.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 72.3371,
+     "share": 0.2197,
+     "kernels": 318.0,
+     "memops": 88.0,
+     "top": {
+      "mul_mat_q": [
+       61.2952,
+       24.0
+      ],
+      "router_partials": [
+       3.9692,
+       12.0
+      ],
+      "moe_weighted_reduction_f32": [
+       3.9512,
+       12.0
+      ],
+      "quantize_mmq_q8_1": [
+       2.2024,
+       24.0
+      ],
+      "DeviceRadixSortOnesweepKernel": [
+       0.2366,
+       44.0
+      ],
+      "topk_moe_cuda": [
+       0.1925,
+       12.0
+      ],
+      "router_sum": [
+       0.1137,
+       12.0
+      ],
+      "DeviceScanKernel": [
+       0.0714,
+       22.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 3.2545,
+     "share": 0.0099,
+     "kernels": 59.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       2.3427,
+       20.0
+      ],
+      "quantize_mmq_q8_1": [
+       0.3491,
+       20.0
+      ],
+      "elementwise_kernel": [
+       0.2846,
+       4.0
+      ],
+      "kernel": [
+       0.1933,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.0369,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0339,
+       2.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       0.0074,
+       1.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0067,
+       4.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 7.8902,
+     "share": 0.024,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       4.6461,
+       2.0
+      ],
+      "_ple_conv": [
+       1.678,
+       1.0
+      ],
+      "_ple_gate": [
+       1.4723,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0426,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0391,
+       1.0
+      ],
+      "_ple_rows": [
+       0.008,
+       1.0
+      ],
+      "_ple_state": [
+       0.0027,
+       1.0
+      ],
+      "_ple_history": [
+       0.0014,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.0993,
+     "share": 0.0003,
+     "kernels": 0.5,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0989,
+       0.25
+      ],
+      "quantize_q8_1": [
+       0.0004,
+       0.25
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.6046,
+     "share": 0.0018,
+     "kernels": 23.75,
+     "memops": 16.75,
+     "top": {
+      "elementwise_kernel": [
+       0.4937,
+       1.5
+      ],
+      "k_get_rows_kq": [
+       0.0554,
+       1.0
+      ],
+      "memcpy": [
+       0.0185,
+       16.5
+      ],
+      "index_elementwise_kernel": [
+       0.0184,
+       9.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0054,
+       4.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0036,
+       3.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0031,
+       1.0
+      ],
+      "compute_cuda_kernel": [
+       0.0021,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "prefill_4096": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "prefill",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 1,
+   "gpu_ms_per_step": 169.5658,
+   "kernels_per_step": 394.0,
+   "memops_per_step": 59.0,
+   "wall_ms_median": 173.97,
+   "components": {
+    "hc.mix": {
+     "ms": 92.0366,
+     "share": 0.5428,
+     "kernels": 19.0,
+     "memops": 0.0,
+     "top": {
+      "_down": [
+       52.2,
+       8.0
+      ],
+      "_up_mix": [
+       39.8078,
+       8.0
+      ],
+      "_up_mix_gemv": [
+       0.0164,
+       1.0
+      ],
+      "_down_gemv": [
+       0.01,
+       1.0
+      ],
+      "_down_sum": [
+       0.0023,
+       1.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 1.6324,
+     "share": 0.0096,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       1.6324,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 14.8296,
+     "share": 0.0875,
+     "kernels": 108.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       8.4701,
+       9.0
+      ],
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+       1.2367,
+       3.0
+      ],
+      "chunk_fwd_kernel_o": [
+       1.0566,
+       3.0
+      ],
+      "recompute_w_u_fwd_kernel": [
+       0.8117,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.6645,
+       18.0
+      ],
+      "_conv": [
+       0.5992,
+       3.0
+      ],
+      "merge_16x16_to_64x64_inverse_kernel": [
+       0.5453,
+       3.0
+      ],
+      "_gated_rmsnorm": [
+       0.4163,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 13.2696,
+     "share": 0.0783,
+     "kernels": 33.0,
+     "memops": 1.0,
+     "top": {
+      "_attend": [
+       9.8809,
+       1.0
+      ],
+      "mul_mat_q": [
+       2.5107,
+       4.0
+      ],
+      "_score": [
+       0.2595,
+       8.0
+      ],
+      "_topk": [
+       0.1952,
+       8.0
+      ],
+      "Kernel2": [
+       0.1398,
+       2.0
+      ],
+      "_qk_rope_kv": [
+       0.1296,
+       1.0
+      ],
+      "quantize_mmq_q8_1": [
+       0.1241,
+       4.0
+      ],
+      "mul_mat_q_stream_k_fixup": [
+       0.0148,
+       2.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 41.2649,
+     "share": 0.2434,
+     "kernels": 152.0,
+     "memops": 32.0,
+     "top": {
+      "mul_mat_q": [
+       35.5118,
+       16.0
+      ],
+      "router_partials": [
+       2.0793,
+       8.0
+      ],
+      "moe_weighted_reduction_f32": [
+       2.0194,
+       8.0
+      ],
+      "quantize_mmq_q8_1": [
+       1.0811,
+       16.0
+      ],
+      "mm_ids_helper_compact": [
+       0.2008,
+       8.0
+      ],
+      "topk_moe_cuda": [
+       0.1061,
+       8.0
+      ],
+      "DeviceRadixSortOnesweepKernel": [
+       0.0869,
+       16.0
+      ],
+      "router_sum": [
+       0.0613,
+       8.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 1.6485,
+     "share": 0.0097,
+     "kernels": 38.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_q": [
+       1.2475,
+       10.0
+      ],
+      "quantize_mmq_q8_1": [
+       0.1672,
+       10.0
+      ],
+      "elementwise_kernel": [
+       0.1074,
+       4.0
+      ],
+      "kernel": [
+       0.0854,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.0206,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0137,
+       2.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0067,
+       4.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 4.1296,
+     "share": 0.0244,
+     "kernels": 9.0,
+     "memops": 0.0,
+     "top": {
+      "Kernel2": [
+       2.4454,
+       2.0
+      ],
+      "_ple_conv": [
+       0.8755,
+       1.0
+      ],
+      "_ple_gate": [
+       0.7503,
+       1.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0234,
+       1.0
+      ],
+      "dequantize_block_iq4_nl": [
+       0.0233,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0074,
+       1.0
+      ],
+      "_ple_state": [
+       0.003,
+       1.0
+      ],
+      "_ple_history": [
+       0.0014,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.3841,
+     "share": 0.0023,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.3825,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.3704,
+     "share": 0.0022,
+     "kernels": 29.0,
+     "memops": 26.0,
+     "top": {
+      "elementwise_kernel": [
+       0.2754,
+       3.0
+      ],
+      "index_elementwise_kernel": [
+       0.0269,
+       12.0
+      ],
+      "k_get_rows_kq": [
+       0.0256,
+       1.0
+      ],
+      "memcpy": [
+       0.0204,
+       25.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0055,
+       4.0
+      ],
+      "reduce_kernel": [
+       0.005,
+       1.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0036,
+       3.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0031,
+       1.0
+      ]
+     }
+    }
+   },
+   "spec": {}
+  },
+  "verify_31744": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "verify",
+    "ctx": 31744,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 5.034,
+   "kernels_per_step": 606.0,
+   "memops_per_step": 45.0,
+   "wall_ms_median": 13.108,
+   "components": {
+    "hc.mix": {
+     "ms": 0.431,
+     "share": 0.0856,
+     "kernels": 31.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.2783,
+       9.0
+      ],
+      "_down_gemv": [
+       0.1285,
+       9.0
+      ],
+      "_down_sum": [
+       0.0203,
+       9.0
+      ],
+      "_combine": [
+       0.004,
+       4.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0046,
+     "share": 0.0009,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0046,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 0.3266,
+     "share": 0.0649,
+     "kernels": 48.0,
+     "memops": 12.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.1445,
+       9.0
+      ],
+      "Kernel2": [
+       0.0921,
+       6.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0349,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0141,
+       9.0
+      ],
+      "_conv": [
+       0.0103,
+       3.0
+      ],
+      "memcpy": [
+       0.0102,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0062,
+       6.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0045,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 0.1256,
+     "share": 0.025,
+     "kernels": 17.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0445,
+       4.0
+      ],
+      "Kernel2": [
+       0.0203,
+       2.0
+      ],
+      "_topk": [
+       0.0186,
+       1.0
+      ],
+      "_attend": [
+       0.0171,
+       1.0
+      ],
+      "_score": [
+       0.0132,
+       1.0
+      ],
+      "_merge": [
+       0.0025,
+       1.0
+      ],
+      "_index": [
+       0.0023,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0021,
+       2.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 0.3613,
+     "share": 0.0718,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q_moe": [
+       0.3011,
+       8.0
+      ],
+      "holon_moe_router": [
+       0.0432,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0103,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0067,
+       4.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.0736,
+     "share": 0.0146,
+     "kernels": 36.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0362,
+       10.0
+      ],
+      "kernel": [
+       0.0117,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0081,
+       8.0
+      ],
+      "elementwise_kernel": [
+       0.0068,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0049,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0019,
+       2.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.141,
+     "share": 0.028,
+     "kernels": 12.0,
+     "memops": 6.0,
+     "top": {
+      "Kernel2": [
+       0.0799,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0244,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.0075,
+       2.0
+      ],
+      "_ple_conv": [
+       0.0075,
+       1.0
+      ],
+      "_ple_rows": [
+       0.0065,
+       1.0
+      ],
+      "memcpy": [
+       0.0056,
+       6.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0047,
+       1.0
+      ],
+      "_ple_state": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.4784,
+     "share": 0.095,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.4773,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0011,
+       1.0
+      ]
+     }
+    },
+    "mtp": {
+     "ms": 0.3864,
+     "share": 0.0768,
+     "kernels": 161.0,
+     "memops": 15.0,
+     "top": {
+      "Kernel2": [
+       0.0896,
+       5.0
+      ],
+      "index_elementwise_kernel": [
+       0.0686,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0612,
+       54.0
+      ],
+      "kernel": [
+       0.0509,
+       3.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0401,
+       30.0
+      ],
+      "reduce_kernel": [
+       0.0179,
+       3.0
+      ],
+      "memcpy": [
+       0.0119,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
+       0.0082,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.combine": {
+     "ms": 0.0041,
+     "share": 0.0008,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0041,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.mix": {
+     "ms": 0.303,
+     "share": 0.0602,
+     "kernels": 37.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1661,
+       11.0
+      ],
+      "_down_gemv": [
+       0.1108,
+       11.0
+      ],
+      "_down_sum": [
+       0.022,
+       11.0
+      ],
+      "_combine": [
+       0.0041,
+       4.0
+      ]
+     }
+    },
+    "mtp.lm_head": {
+     "ms": 1.1242,
+     "share": 0.2233,
+     "kernels": 6.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.1211,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.0031,
+       3.0
+      ]
+     }
+    },
+    "mtp.moe": {
+     "ms": 0.2054,
+     "share": 0.0408,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0837,
+       6.0
+      ],
+      "mul_mat_vec_q_moe": [
+       0.068,
+       2.0
+      ],
+      "holon_moe_router": [
+       0.0422,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0061,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0054,
+       4.0
+      ]
+     }
+    },
+    "mtp.qsa": {
+     "ms": 0.7261,
+     "share": 0.1442,
+     "kernels": 46.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.3742,
+       9.0
+      ],
+      "Kernel2": [
+       0.1307,
+       3.0
+      ],
+      "_topk": [
+       0.0824,
+       4.0
+      ],
+      "_attend": [
+       0.0554,
+       4.0
+      ],
+      "_score": [
+       0.0509,
+       4.0
+      ],
+      "_merge": [
+       0.0083,
+       4.0
+      ],
+      "_index": [
+       0.0061,
+       4.0
+      ],
+      "_qk_rope_kv": [
+       0.0057,
+       4.0
+      ]
+     }
+    },
+    "mtp.shared": {
+     "ms": 0.1119,
+     "share": 0.0222,
+     "kernels": 27.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0545,
+       10.0
+      ],
+      "Kernel2": [
+       0.0212,
+       2.0
+      ],
+      "splitKreduce_kernel": [
+       0.0209,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0064,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0049,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.2308,
+     "share": 0.0458,
+     "kernels": 135.0,
+     "memops": 12.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0532,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0437,
+       39.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0344,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0209,
+       13.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0177,
+       17.0
+      ],
+      "_conv": [
+       0.0128,
+       3.0
+      ],
+      "reduce_kernel": [
+       0.0102,
+       2.0
+      ],
+      "memcpy": [
+       0.0082,
+       11.0
+      ]
+     }
+    }
+   },
+   "spec": {
+    "spec_verify_steps": 10,
+    "spec_verify_steps_graphed": 0,
+    "spec_verify_steps_overlapped": 0,
+    "spec_drafted": 30,
+    "spec_rows_k3_accepting_0": 10
+   }
+  },
+  "verify_4096": {
+   "gpu": "NVIDIA GeForce RTX 5080",
+   "model": "slice-iq2_xs.gguf",
+   "commit": "467bcc7bf97eb152578ee19246cb4700e2201aa4",
+   "args": {
+    "phase": "verify",
+    "ctx": 4096,
+    "steps": 8,
+    "max_step_tokens": 8192
+   },
+   "measured_steps": 8,
+   "gpu_ms_per_step": 5.0688,
+   "kernels_per_step": 606.0,
+   "memops_per_step": 45.0,
+   "wall_ms_median": 13.083,
+   "components": {
+    "hc.mix": {
+     "ms": 0.4297,
+     "share": 0.0848,
+     "kernels": 31.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.2765,
+       9.0
+      ],
+      "_down_gemv": [
+       0.1291,
+       9.0
+      ],
+      "_down_sum": [
+       0.0204,
+       9.0
+      ],
+      "_combine": [
+       0.0038,
+       4.0
+      ]
+     }
+    },
+    "hc.combine": {
+     "ms": 0.0049,
+     "share": 0.001,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.0049,
+       4.0
+      ]
+     }
+    },
+    "gdn": {
+     "ms": 0.3314,
+     "share": 0.0654,
+     "kernels": 48.0,
+     "memops": 12.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.1483,
+       9.0
+      ],
+      "Kernel2": [
+       0.0926,
+       6.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0347,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0142,
+       9.0
+      ],
+      "_conv": [
+       0.0103,
+       3.0
+      ],
+      "memcpy": [
+       0.0101,
+       12.0
+      ],
+      "quantize_q8_1": [
+       0.0062,
+       6.0
+      ],
+      "indexSelectSmallIndex": [
+       0.0046,
+       3.0
+      ]
+     }
+    },
+    "qsa": {
+     "ms": 0.1204,
+     "share": 0.0237,
+     "kernels": 17.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0458,
+       4.0
+      ],
+      "Kernel2": [
+       0.0201,
+       2.0
+      ],
+      "_topk": [
+       0.0186,
+       1.0
+      ],
+      "_attend": [
+       0.0164,
+       1.0
+      ],
+      "_score": [
+       0.0078,
+       1.0
+      ],
+      "_merge": [
+       0.0024,
+       1.0
+      ],
+      "_index": [
+       0.0022,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0021,
+       2.0
+      ]
+     }
+    },
+    "moe": {
+     "ms": 0.3756,
+     "share": 0.0741,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q_moe": [
+       0.3144,
+       8.0
+      ],
+      "holon_moe_router": [
+       0.0433,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.011,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0069,
+       4.0
+      ]
+     }
+    },
+    "shared": {
+     "ms": 0.0749,
+     "share": 0.0148,
+     "kernels": 36.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0378,
+       10.0
+      ],
+      "kernel": [
+       0.0115,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0081,
+       8.0
+      ],
+      "elementwise_kernel": [
+       0.0068,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0048,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ],
+      "CatArrayBatchedCopy_vectorized": [
+       0.0019,
+       2.0
+      ]
+     }
+    },
+    "ple": {
+     "ms": 0.1424,
+     "share": 0.0281,
+     "kernels": 12.0,
+     "memops": 6.0,
+     "top": {
+      "Kernel2": [
+       0.0813,
+       2.0
+      ],
+      "_ple_gate": [
+       0.0242,
+       1.0
+      ],
+      "_ple_conv": [
+       0.0076,
+       1.0
+      ],
+      "index_elementwise_kernel": [
+       0.0074,
+       2.0
+      ],
+      "_ple_rows": [
+       0.0064,
+       1.0
+      ],
+      "memcpy": [
+       0.0058,
+       6.0
+      ],
+      "_scatter_gather_elementwise_kernel": [
+       0.0047,
+       1.0
+      ],
+      "_ple_state": [
+       0.0016,
+       1.0
+      ]
+     }
+    },
+    "lm_head": {
+     "ms": 0.4943,
+     "share": 0.0975,
+     "kernels": 2.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.4932,
+       1.0
+      ],
+      "quantize_q8_1": [
+       0.0011,
+       1.0
+      ]
+     }
+    },
+    "mtp": {
+     "ms": 0.4046,
+     "share": 0.0798,
+     "kernels": 161.0,
+     "memops": 15.0,
+     "top": {
+      "Kernel2": [
+       0.0898,
+       5.0
+      ],
+      "index_elementwise_kernel": [
+       0.0679,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0615,
+       54.0
+      ],
+      "kernel": [
+       0.0509,
+       3.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0404,
+       30.0
+      ],
+      "reduce_kernel": [
+       0.0358,
+       3.0
+      ],
+      "memcpy": [
+       0.0121,
+       12.0
+      ],
+      "kernel_cutlass_kernel_flashinfernormkernelsrmsnormRMSNormKernel_object_at__tensorptrbf16gmemalign128o10240102401_tensorptrbf16gmemalign16o102401_tensorptrbf16gmemalign128o10240102401___Tr_0": [
+       0.0082,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.combine": {
+     "ms": 0.004,
+     "share": 0.0008,
+     "kernels": 4.0,
+     "memops": 0.0,
+     "top": {
+      "_combine": [
+       0.004,
+       4.0
+      ]
+     }
+    },
+    "mtp.hc.mix": {
+     "ms": 0.3033,
+     "share": 0.0598,
+     "kernels": 37.0,
+     "memops": 0.0,
+     "top": {
+      "_up_mix_gemv": [
+       0.1665,
+       11.0
+      ],
+      "_down_gemv": [
+       0.1109,
+       11.0
+      ],
+      "_down_sum": [
+       0.0218,
+       11.0
+      ],
+      "_combine": [
+       0.0041,
+       4.0
+      ]
+     }
+    },
+    "mtp.lm_head": {
+     "ms": 1.124,
+     "share": 0.2217,
+     "kernels": 6.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       1.121,
+       3.0
+      ],
+      "quantize_q8_1": [
+       0.003,
+       3.0
+      ]
+     }
+    },
+    "mtp.moe": {
+     "ms": 0.2129,
+     "share": 0.042,
+     "kernels": 20.0,
+     "memops": 0.0,
+     "top": {
+      "mul_mat_vec_q": [
+       0.0902,
+       6.0
+      ],
+      "mul_mat_vec_q_moe": [
+       0.068,
+       2.0
+      ],
+      "holon_moe_router": [
+       0.0425,
+       4.0
+      ],
+      "quantize_q8_1": [
+       0.0061,
+       4.0
+      ],
+      "moe_weighted_reduction_f32": [
+       0.0061,
+       4.0
+      ]
+     }
+    },
+    "mtp.qsa": {
+     "ms": 0.6972,
+     "share": 0.1375,
+     "kernels": 46.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.3692,
+       9.0
+      ],
+      "Kernel2": [
+       0.1324,
+       3.0
+      ],
+      "_topk": [
+       0.0801,
+       4.0
+      ],
+      "_attend": [
+       0.0515,
+       4.0
+      ],
+      "_score": [
+       0.0315,
+       4.0
+      ],
+      "_merge": [
+       0.0083,
+       4.0
+      ],
+      "_index": [
+       0.0061,
+       4.0
+      ],
+      "_qk_rope_kv": [
+       0.0057,
+       4.0
+      ]
+     }
+    },
+    "mtp.shared": {
+     "ms": 0.1119,
+     "share": 0.0221,
+     "kernels": 27.0,
+     "memops": 0.0,
+     "top": {
+      "kernel": [
+       0.0544,
+       10.0
+      ],
+      "Kernel2": [
+       0.0213,
+       2.0
+      ],
+      "splitKreduce_kernel": [
+       0.0211,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0063,
+       4.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0048,
+       4.0
+      ],
+      "act_and_mul_kernel": [
+       0.004,
+       4.0
+      ]
+     }
+    },
+    "other": {
+     "ms": 0.2374,
+     "share": 0.0468,
+     "kernels": 135.0,
+     "memops": 12.0,
+     "top": {
+      "index_elementwise_kernel": [
+       0.0527,
+       33.0
+      ],
+      "vectorized_elementwise_kernel": [
+       0.0449,
+       39.0
+      ],
+      "fused_sigmoid_gating_delta_rule_update_kernel": [
+       0.0342,
+       3.0
+      ],
+      "elementwise_kernel": [
+       0.0207,
+       13.0
+      ],
+      "unrolled_elementwise_kernel": [
+       0.0175,
+       17.0
+      ],
+      "reduce_kernel": [
+       0.0175,
+       2.0
+      ],
+      "_conv": [
+       0.0124,
+       3.0
+      ],
+      "memcpy": [
+       0.0081,
+       11.0
+      ]
+     }
+    }
+   },
+   "spec": {
+    "spec_verify_steps": 10,
+    "spec_verify_steps_graphed": 0,
+    "spec_verify_steps_overlapped": 0,
+    "spec_drafted": 30,
+    "spec_rows_k3_accepting_0": 10
+   }
+  }
+ }
+}
