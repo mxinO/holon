@@ -3641,6 +3641,7 @@ development host under other users' load, so ±10% run to run; llama.cpp's conve
 
 The full suite's gain is FlashInfer's per-environment cache and the shared engine; the sharded run first took 1,339 s,
 every worker's torch using all CPUs (the CPU-engine files ran up to 30× slower), and 498 s with each worker's share.
-Two tests fail on `main` and here alike, `test_qwen3_5_plants.py`'s `gate-one-block` and `payload-one-block-early`
-plants (one patches a `GQA._split_gate` that no longer exists, the other's planted step has a stale signature): they
-run only where llama.cpp's converter is, so worktrees and CI skip them.
+Two tests failed on `main` in every run above, `test_qwen3_5_plants.py`'s `gate-one-block` and
+`payload-one-block-early` plants (one patched a `GQA._split_gate` that no longer exists, the other's planted step had
+a stale signature): they run only where llama.cpp's converter is, so worktrees and CI skipped them. Both are fixed
+against the current code and still bite.
