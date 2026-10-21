@@ -148,10 +148,16 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
      - A prefix hit is bitwise equal to recomputing.
      - Holon's MTP head, loaded from a Strata-format MTP pack the tool writes, matches the SG pooled reference within
        1e-4.
-   - **(b) Full model.** L2 Tier B, all-resident on the RTX PRO 6000, for ISTA IQ2_XS and IQ3_S, against
-     layer-streamed fp32 goldens (D2). Prompt sets:
-     - `v1-qwen3_5.jsonl`. Only 3 of its 24 prompts pass the 2,051-token dense limit.
-     - A new `v1-long.jsonl`: 8 prompts of 4K–32K tokens, 4 of them recall prompts.
+   - **(b) Full model** (owner decision 2026-10-21, §18: full-model L2 Tier B against fp32 goldens and bf16 floors is
+     dropped for FN; step 5's L2 results stay as history, §17). All-resident on the RTX PRO 6000, IQ2_XS and IQ3_S:
+     - **Self-consistency, no golden:** Holon's paths against each other on long prompts — the decode path (1-token
+       steps) vs prefill, chunked vs one-shot, MTP vs plain — per-token KL and NLL differences, with a bar near the
+       bf16 noise between correct paths (§18).
+     - **Task accuracy:** a fixed set of 60–100 public or synthetic items with checkable answers (multi-step math,
+       code run against tests, reasoning and multiple choice, needle / recall at 8K and 32K, multi-turn), Holon and
+       Strata greedy on the same file: Holon within a tolerance stated before the run, and no gibberish answer; the
+       answers saved.
+     - **A sample dump:** Holon's answers to a handful of hard questions, for a human look.
 2. **Bounded and run-identical** (full model, RTX PRO 6000):
    - chunked vs one-shot prefill (chunk 250: straddles 4-token blocks and the PLE window, and is not a multiple of 4);
    - prefix-hit resume vs recompute, with a 4K system prompt from `v1-long` (sparse decode after a restore);
@@ -1750,12 +1756,40 @@ step 7 re-runs it with more sessions; `qsa_index` / `qsa_select` refuse unit vie
 per unit, strided); `qsa_pool_rope_last` is recorded as caught by the tiny-model fixtures (`test_plants_fail`), like
 `qsa_dense_limit_off_by_one`, and `v1-long` does not grow for it.
 
-### 17.2 Re-runs with the fixed mix (2026-10-21; in progress)
+### 17.2 Re-runs with the fixed mix (2026-10-21)
 
-The decode-path results of §17 are re-run on the same node with 1f88194 (`IQ3_S` `v1-long` first, above). One new
-miss so far: **L2 on IQ2_XS's `v1-qwen3_5` decode path fails on ΔPPL vs floor, 1.95% > 1.57%** (with the racy kernel it
-passed at 1.27%), its top-1 and KL inside budget and the best of any path. A bisect on the full model (the same set in
-1-token steps, one decode-path op at a time forced to its prefill form) finds no decode-path error:
+Every decode-path result of §17 re-ran on the RTX PRO 6000 with 1f88194. The records are in
+`evidence/fn5_step5_rerun_rtx-pro-6000_2026-10-21.json`, the racy runs beside them as history.
+
+| Check | With the fixed mix | Step 5 (racy mix) |
+|---|---|---|
+| L2 decode path: IQ2_XS `v1-qwen3_5` / `v1-long` | 1.95% vs 1.57%: fails (below) / −0.75%: passes | 1.27% / −0.84%: pass |
+| L2 decode path: IQ3_S `v1-qwen3_5` / `v1-long` | −2.40%: passes / +1.01% vs 5.99%: passes | −0.12% / −6.56% vs 6.36%: fails |
+| Decode divergence (8 sessions), p95: sparse / MTP / dense; plants | 0.013 / 0.008 / 0.016; 0.077 / 0.079 fail (bound 0.041) | 0.019 / – / 0.016; 0.094 / 0.078 fail |
+| MTP accepted tokens per pass (≥ 2.2) | 2.73 (IQ2_XS), 2.76 (IQ3_S) | 2.71, 2.74 |
+| Bounded: prefix, overlap, chunk 250, graphs, MTP vs plain | all pass | all pass |
+| Snapshot ×3, 8K request, MTP on | run-identical | run-identical |
+| Launches per decode token / verify pass | 1,726 / 2,667 (one `_combine` more per pending mix) | 1,678 / 2,615 |
+
+At p99 the 8-session divergence gate is too noisy to separate the plants (dense p99 0.20 ± 0.16, bound 0.60, both
+plants under it); the pre-registered tightening to p95 separates them, as in step 5. Step 7 re-runs it with 29
+sessions (each prompt cut at four lengths; `gates.py --cuts 4`).
+
+**Kernel-only comparison with Strata, all-resident** (as §17; decode tok/s, Holon / Strata):
+
+| File, arm | 1K | 4K | 32K |
+|---|---|---|---|
+| IQ2_XS, drafting off | 126.7 / 135.8 (0.93) | 124.1 / 131.1 (0.95) | 122.2 / 137.5 (0.89) |
+| IQ2_XS, MTP | 166.2 / 224.5 (0.74) | 145.1 / 190.1 (0.76) | 203.1 / 231.2 (0.88) |
+| IQ3_S, drafting off | 119.3 / 124.9 (0.96) | 121.8 / 124.5 (0.98) | 115.1 / 126.1 (0.91) |
+| IQ3_S, MTP | 161.9 / 174.4 (0.93) | 148.6 / 168.2 (0.88) | 156.5 / 228.7 (0.68) |
+
+Prefill tok/s, drafting off: IQ2_XS 3,082 / 2,644 (1.17), 3,881 / 4,407 (0.88), 3,968 / 5,401 (0.73); IQ3_S 3,111 /
+2,735 (1.14), 3,801 / 4,482 (0.85), 3,851 / 5,497 (0.70). The decode ratios are within a few points of step 5's.
+
+**IQ2_XS `v1-qwen3_5`'s decode-path ΔPPL miss** (1.95% > 1.57%; its top-1 and KL inside budget and the best of any
+path). A bisect on the full model (the same set in 1-token steps, one decode-path op at a time forced to its prefill
+form) finds no decode-path error:
 
 | IQ2_XS `v1-qwen3_5`, 1-token steps | ΔPPL vs golden | top-1 | KL mean | KL p99 | ΔPPL vs mmvq floor (budget 1.57%) |
 |---|---|---|---|---|---|
@@ -1773,4 +1807,26 @@ passed at 1.27%), its top-1 and KL inside budget and the best of any path. A bis
   describes ("two correct bf16 paths differ by a paired SE of ≈ 0.9%").
 - The budget is narrow here because it caps the paired SE at √2 × the floor's own, and the mmvq floor's is the
   smallest of the eight (0.37%; the mmq floor's 0.84% gives 3.13%). Uncapped, the budget would be 1.99%.
-- Not changed: the judge's rule (core's, shared). Escalated with these numbers for a decision.
+- On the combined set (`v1-qwen3_5` + `v1-long`, the existing recordings concatenated) it passes: ΔPPL vs floor
+  +0.93% (budget 2.22%), top-1 95.24% (floor 94.83%), KL p99 0.574 (0.632). The judge's rule was not changed.
+- **Closed as moot** by the owner's change of FN's accuracy method (§18).
+
+## 18. Owner decision: FN's accuracy method (2026-10-21)
+
+Full-model L2 Tier B against layer-streamed fp32 goldens and bf16 floors is **dropped for FN**: too slow (1.5–3.6 h
+per golden on the CPU), and not what FN needs. No more goldens or floors are recorded; §17's L2 results stay as
+history. Acceptance 1(b) is restated (§1). FN's accuracy gates are now all fast:
+
+- **(a) L0 kernels against their oracles** (in place).
+- **(b) The tiny model on the CPU, exact against HF** (in place; acceptance 1(a)).
+- **(c) Self-consistency on the real model, no golden.** Holon's paths against each other on a few long prompts:
+  the decode path (1-token steps) vs prefill, chunked vs one-shot, MTP vs plain; per-token KL and NLL differences,
+  with the bar near the bf16 noise between correct paths (§17.1–17.2: paths with the same ops differ by mean |Δ
+  target log-prob| 0.2–0.3 nats on high-entropy filler, and by up to 1.3% in perplexity on `v1-qwen3_5`). This is
+  the check that exposed the HC race (+0.19 to +0.75 nats per token), so it stays.
+- **(d) Task accuracy on hard questions.** A fixed set of about 60–100 public or synthetic items with checkable
+  answers: multi-step math (exact numbers), code run against tests, reasoning and multiple choice, needle / recall at
+  8K and 32K, a couple of multi-turn. Holon and Strata greedy on the same file, both scored. Bar: Holon within a
+  tolerance stated before the run, and no gibberish answer; the answers saved for the owner to read. Licensing
+  checked and provenance recorded in the repository.
+- **(e) A sample dump:** a short readable file of Holon's answers to a handful of hard questions.
