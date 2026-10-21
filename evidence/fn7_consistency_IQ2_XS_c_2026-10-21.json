@@ -1,0 +1,95 @@
+{
+ "name": "fn7_consistency",
+ "date": "2026-10-21",
+ "gpu": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+ "plant": null,
+ "prompts": [
+  "summary-6k",
+  "recall-8k",
+  "recall-16k",
+  "chat-multiturn-20k"
+ ],
+ "bars": {
+  "kl_mean": 0.13,
+  "kl_p50": 0.007,
+  "band_dnll": 0.75
+ },
+ "commit": "bbdfc01 (the tree run; its git rev-parse read the enclosing repository)",
+ "decode": {
+  "n": 49596,
+  "kl_mean": 0.025074756546588552,
+  "kl_p50": 0.001810966297582115,
+  "kl_p99": 0.35511494237308383,
+  "dnll": -0.002061786407168272,
+  "worst_band_dnll": -0.5244738949718339,
+  "prompts": {
+   "summary-6k": {
+    "dnll": 0.018265522263753116,
+    "kl_mean": 0.04210209008753597,
+    "worst_band": -0.5244738949718339
+   },
+   "recall-8k": {
+    "dnll": -0.006265867978134686,
+    "kl_mean": 0.029890998428406902,
+    "worst_band": 0.0915857723029152
+   },
+   "recall-16k": {
+    "dnll": -0.02392500605375064,
+    "kl_mean": 0.04020593265104359,
+    "worst_band": -0.07960468000514698
+   },
+   "chat-multiturn-20k": {
+    "dnll": 0.011907552591017834,
+    "kl_mean": 0.006005230927186105,
+    "worst_band": 0.09189645155287629
+   }
+  },
+  "pass": true
+ },
+ "chunked": {
+  "n": 49596,
+  "kl_mean": 0.032523984683225406,
+  "kl_p50": 0.0020367045372687007,
+  "kl_p99": 0.5154467401080599,
+  "dnll": 0.057455909801637735,
+  "worst_band_dnll": 0.8942474652119472,
+  "prompts": {
+   "summary-6k": {
+    "dnll": 0.4735526581304404,
+    "kl_mean": 0.10134343439141472,
+    "worst_band": 0.8942474652119472
+   },
+   "recall-8k": {
+    "dnll": 0.05559024923702859,
+    "kl_mean": 0.03300018669402093,
+    "worst_band": 0.12469854184125317
+   },
+   "recall-16k": {
+    "dnll": 0.0030591907658702668,
+    "kl_mean": 0.04046533664200521,
+    "worst_band": 0.0963834361907061
+   },
+   "chat-multiturn-20k": {
+    "dnll": -0.012735823758309778,
+    "kl_mean": 0.006715497642761515,
+    "worst_band": -0.1418806164765556
+   }
+  },
+  "pass": false
+ },
+ "mtp": {
+  "tokens": 256,
+  "first_difference": [
+   130,
+   255,
+   39,
+   59
+  ],
+  "positions": 487,
+  "kl_mean": 0.001282016940238375,
+  "kl_p99": 0.01076369735617354,
+  "pass": true
+ },
+ "pass": false
+}

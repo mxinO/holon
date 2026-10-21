@@ -1978,6 +1978,18 @@ stated before the run (within 5 items, no Holon-only degenerate answer):
   `rn` scratch (no `_combine`), `_down_gemv` retuned for rows. Per mix on an RTX A5000: 69 → 49 µs at 4 rows, 117 →
   79 at 8 — 1.7× the one-row time, not the 1.5× target: the per-row reductions stay serial (holding the rows in one
   tile through Triton's IEEE dot or a deferred 3-D sum was slower). One row bitwise unchanged; L0 passes.
-- Pending on the cluster: B's 3-round decode / verify A/B, the self-consistency gate on both trees, the HC L0 on
-  sm_120.
+- **B's A/B** (3 rounds against bbdfc01, RTX PRO 6000): **MTP decode 214.1 → 239.4 tok/s at 4K (+12%), 159.2 →
+  168.3 at 32K (+6%)**; plain decode and prefill unchanged.
+- **The HC L0 on sm_120** (with the stress case) passes on both trees.
+- **Self-consistency (c) on C's tree fails one bar on one prompt:** chunked vs one-shot on `summary-6k` has a worst
+  1K band of +0.89 nats (bar 0.75; its mean +0.47, KL mean 0.10 on that prompt), decode vs prefill −0.52; the other
+  prompts are as before (bands ≤ 0.15). It is not an accuracy loss: against a float64 oracle the SGEMM path and the
+  Triton tiles it replaced have the same error at 250, 1,412, 4,096 and 5,508 rows (x relative 1.13e-7, R 7.6e-6
+  max, both). The SGEMMs only round differently, by row count (cuBLAS picks its kernel per shape), and `summary-6k`
+  moves as a whole with any such change (as `recall-4k` did in §17.1). The bar, set at 1.5× the worst band seen
+  before, does not hold this prompt's spread: for the owner (keep the bar and drop the prompt, widen the band bar,
+  or judge by KL alone).
+- **On B's tree** decode vs prefill and chunked vs one-shot give C's numbers exactly (B changes neither one-row decode
+  nor prefill), so the same one-prompt miss; MTP vs plain passes (KL mean 0.0017; first differences at 9, 35, 139
+  and 132 tokens).
 
