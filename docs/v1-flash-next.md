@@ -1734,6 +1734,17 @@ with main (`mix x, 1 tokens, pending`: usage 4.7); it had passed on the RTX PRO 
 
   The old kernel raised the targets' probability systematically and flattened the predictions, as panel B's sign
   argument said. The fixed paths still differ per token (mean \|·\| 0.2–0.3 on this high-entropy filler) with mixed signs.
+- **Correction (after the re-runs, 17.2): the full model does not separate the race from path noise; L0 found it.**
+  The racy − fixed difference on `recall-4k` is consistent across setups (+0.23 / +0.79 / +0.79 between the L2
+  recordings, +0.23 / +0.67 / +0.67 in the probe above), but the fixed decode path's own offset from prefill moves by
+  up to 0.5 nats per token with benign setup changes (the L2 recording, 4,006 tokens and 8 sequences: −0.21 / −0.49 /
+  −0.43; the probe, 2,048 tokens and one sequence: −0.04 / −0.16 / +0.08). Over all of `v1-long`, decode vs prefill
+  gives the same statistics with either kernel (IQ2_XS: KL mean 0.043 fixed, 0.045 racy; KL p50 0.0023 both; the worst
+  1K band's \|ΔNLL\| 0.50 and 0.63; IQ3_S: KL mean 0.063 and 0.057), the per-layer residual taps are equal (layer 0's
+  rel diff 6.95e-3 in both), and the top-1 sharpness shift has no consistent sign. So step 5's L2 miss (−6.56% against
+  6.36%) is not shown to be the race's doing: it sat at the margin on a prompt whose decode-path NLL swings by that
+  much with any path change. The race is a real bug (L0 fails on sm_86) and is fixed; full-model self-consistency
+  catches errors larger than this noise, not errors of the race's size (§18).
 - **Ruled out first** (B's probes): causality is exact (changing the tokens from position 1,000 on leaves every row
   before it bitwise, row 999's distribution included, on both paths); the output scale is the same (post-mixer ‖x‖
   147.1 against 147.3); on a 4-layer slice no single swap of a decode-path op for its prefill form (the tiled HC at
@@ -1822,11 +1833,37 @@ history. Acceptance 1(b) is restated (§1). FN's accuracy gates are now all fast
 - **(c) Self-consistency on the real model, no golden.** Holon's paths against each other on a few long prompts:
   the decode path (1-token steps) vs prefill, chunked vs one-shot, MTP vs plain; per-token KL and NLL differences,
   with the bar near the bf16 noise between correct paths (§17.1–17.2: paths with the same ops differ by mean |Δ
-  target log-prob| 0.2–0.3 nats on high-entropy filler, and by up to 1.3% in perplexity on `v1-qwen3_5`). This is
-  the check that exposed the HC race (+0.19 to +0.75 nats per token), so it stays.
+  target log-prob| 0.2–0.3 nats on high-entropy filler, and by up to 1.3% in perplexity on `v1-qwen3_5`). Kept as
+  the check that showed the HC race's shift on `recall-4k`; the re-runs show that shift sits inside the paths' noise
+  (§17.1's correction, below).
 - **(d) Task accuracy on hard questions.** A fixed set of about 60–100 public or synthetic items with checkable
   answers: multi-step math (exact numbers), code run against tests, reasoning and multiple choice, needle / recall at
   8K and 32K, a couple of multi-turn. Holon and Strata greedy on the same file, both scored. Bar: Holon within a
   tolerance stated before the run, and no gibberish answer; the answers saved for the owner to read. Licensing
   checked and provenance recorded in the repository.
+  - **The set** (`spikes/fn7/tasks/fn_tasks.jsonl`, 72 items, written by `spikes/fn7/tasks/build.py` with seed 7):
+    all synthetic, so it carries this repository's license and no third-party text — math 24 (eight templates with
+    exact answers computed by the generator), code 14 (specifications and asserts written here), reasoning 16
+    (seating orders and knights-and-knaves generated with one solution, weekday arithmetic; A–E), recall 12 (needle,
+    two-hop and sum needles in generated ledger filler of ≈ 8K and ≈ 31K tokens), multi-turn 6. Reference answers
+    (local) score 72 of 72 through the scorer, so the tests and answers agree.
+  - **The run** (`spikes/fn7/tasks/run.py`): IQ2_XS on the RTX PRO 6000; the chat template with thinking on; greedy,
+    8,192 new tokens at most; Holon plain decoding, Strata's no-approximation arm of §17 (drafting off).
+  - **The bar, stated before the first run:** Holon within 5 items (6.9 points) of Strata's score on the 72, and no
+    Holon answer degenerate (the token limit hit inside the reasoning, nothing after it, or a 40-character span
+    repeated 6 times) where Strata's is not.
+  - **The sample dump** (e): eight items' answers, written by the scorer (`--samples`).
 - **(e) A sample dump:** a short readable file of Holon's answers to a handful of hard questions.
+
+**Precision rule (owner, 2026-10-21):** no fp32 runs, and no CPU runs on big models — the CPU only for a super-tiny
+model, and only when really needed; bf16 on the GPU is the highest-precision reference worth running, since serving
+is always at lower bits. For FN: no new goldens or floors, nothing full-model on the CPU, the tiny-model HF match
+stays (seconds), and every self-consistency comparison runs in bf16 on the GPU. The step-5 re-runs that needed a
+golden or floor are dropped; MTP, bounded, snapshot, the Strata comparison, launches and step 7 stay.
+
+**What (c) can see** (measured on the step-5 recordings, §17.1's correction): decode vs prefill on `v1-long` gives KL
+mean 0.04–0.06, KL p50 0.002–0.003 and band \|ΔNLL\| up to 0.5 nats between correct paths, and the HC race did not
+move those statistics. The bars (`spikes/fn7/consistency.py`: KL mean ≤ 0.13, KL p50 ≤ 0.007, every 1K band's
+\|ΔNLL\| ≤ 0.75, MTP vs plain KL mean ≤ 0.13 up to the first differing token) are set at about twice that noise, and
+the decode-only plant `qsa_decode_select_shift` must fail them. Kernel races and other errors below the noise are
+L0's to find, on all three SMs.
