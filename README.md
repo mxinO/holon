@@ -229,9 +229,9 @@ lock's is warned about and that lock not used.
   an offloaded MoE's experts) starts only with `--host-memory BYTES`. Without it the start is refused with the bytes
   the pools need; a state tier's refusal names the flag and value, e.g. for `state_tier.host.bytes=16GiB`:
   `holon serve <model> --host-memory 17179869184`.
-- **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the
-  server retries a start that fails other than with a plugin or memory error 4 times, each up to 600 s, before falling
-  back to defaults.
+- **Ignore the lock:** `holon serve <model> --no-lock` serves defaults (`plans/defaults.toml`: the grammar processor)
+  and your flags. Use it if a start hangs: the server retries a start that fails other than with a plugin or memory
+  error 4 times, each up to 600 s, before falling back to defaults.
 - **Change or delete one key of the lock:** dict flags merge per key, and `key=` (empty value) deletes the lock's
   setting: `holon serve <model> --plugin-options kv.format=` serves the default KV format, and
   `holon serve <model> --slots logits_processor=` deselects the grammar processor.

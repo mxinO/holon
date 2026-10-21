@@ -15,8 +15,7 @@ log must hold no traceback.
   thinking with `output_config.effort`, `context_management`, `metadata.user_id`, streamed; a Read tool call, its
   result, then a mid-conversation system message; a side call with `stop_sequences`; `count_tokens`.
 
-    python bench/client_smoke.py [--model unsloth/Qwen3-8B-GGUF:Q4_K_M] [--gpu 0] [--port 0]
-                                 [--serve-args "--slots logits_processor=grammar.xgrammar"]
+    python bench/client_smoke.py [--model unsloth/Qwen3-8B-GGUF:Q4_K_M] [--gpu 0] [--port 0] [--serve-args "..."]
     python bench/client_smoke.py --server http://127.0.0.1:8000        # a server already running
 
 Exit status 1 when a check fails. The server's log goes to bench/.out/client_smoke/serve.log.
@@ -222,10 +221,7 @@ def main() -> int:
     ap.add_argument("--model", default="unsloth/Qwen3-8B-GGUF:Q4_K_M", help="what `holon serve` serves")
     ap.add_argument("--gpu", type=int, default=0, help="nvidia-smi index of the GPU")
     ap.add_argument("--port", type=int, default=0, help="the server's port (default: a free one)")
-    # Every lock selects the grammar processor; without a current lock (between propagation rounds) the defaults do
-    # not, and structured outputs are refused, so the smoke selects it.
-    ap.add_argument("--serve-args", default="--slots logits_processor=grammar.xgrammar",
-                    help="`holon serve` flags (default: the grammar processor every lock selects)")
+    ap.add_argument("--serve-args", default="", help="more `holon serve` flags")
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     log = OUT / "serve.log"

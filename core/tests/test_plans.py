@@ -57,10 +57,12 @@ def _lock(root, model_id, cls="rtx-4090/cu130-torch2.11", src="s1", sm=89):
 def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, case):
     """Found by the build alone (the file downloaded under another name); flags over the lock, dict flags per key and
     `key=` deleting one; the lock's pins as preferences; defaults first in the history, at SERVE_MAX_SEQS and the
-    model's `auto` length; a history that cannot be read is warned about and defaults serve. `holon models` shows the
+    model's `auto` length, with `defaults.toml`'s settings under the flags; a history that cannot be read is warned
+    about and defaults serve. `holon models` shows the
     same verdict per model, and a repository reference names the one model under it locked for this card (an existing
     local path stays a path)."""
     written = None
+    (tmp_path / "defaults.toml").write_text('slots = { logits_processor = "toy" }\nmax_seqs = 2\n')
     if case != "none":
         written = _lock(tmp_path, f"org/repo/Qwen3-8B-Q4_K_M@{BUILD}", **{
             "borrowed": {"cls": "rtx-5080/cu130-torch2.11", "sm": 120}, "outdated": {"src": "s0"}}.get(case, {}))
@@ -96,11 +98,11 @@ def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, 
         return
     flags = {"plugin_options": {"b": "", "c": "3"}, "kernels": {"rope": "x"}, "max_seqs": 4} if case == "flags" else {}
     model = types.SimpleNamespace(trained_context=lambda cfg, kind: cfg["n"]) if case == "none" else object()
-    history = cli.serve_history("m", flags, found, cli.auto_context(model, source))
+    history = cli.serve_history("m", flags, found, cli.auto_context(model, source), cli.serve_defaults(tmp_path))
     defaults = history[0][0]
     assert history[0][1] is None and defaults.clamp_context and defaults.kernel_preferences == {}
     assert defaults.max_model_len == (1000 if case == "none" else cli.AUTO_CONTEXT)
-    assert defaults.max_seqs == (4 if case == "flags" else cli.SERVE_MAX_SEQS)
+    assert defaults.max_seqs == (4 if case == "flags" else 2) and defaults.slots == {"logits_processor": "toy"}
     if case in ("outdated", "none"):                            # an outdated lock is a missing one (design §4.4)
         assert found is None and len(history) == 1
         return

@@ -3588,9 +3588,10 @@ process, which replaces §6's per-change propagation and the release's re-checks
 - **Propagation runs at a release or a milestone's close only**, one round covering everything merged since; between
   rounds a merge may outdate locks (`holon serve` then says so and serves another class's current lock or the
   defaults). A release tag is always propagated. A change lists the locks it outdates (`holon_tools impact
-  <base>..HEAD`). **Open (for the owner):** the defaults select no grammar processor, which every lock does, so
-  between rounds `main` refuses structured outputs (`response_format`, strict tools) with a 400 on a model whose
-  locks are all outdated — the real-client smoke met it (it now selects the processor itself).
+  <base>..HEAD`). The defaults take `plans/defaults.toml` (by hand, checked by `check_locks.py`), which selects the
+  grammar processor every lock selects (lead, 2026-10-21): without it, structured outputs (`response_format`,
+  strict tools) failed with a 400 between rounds on a model whose locks were all outdated, as the real-client smoke
+  found.
 - **A byte-identical trace advances a code change without a human.** `propagate` runs the snapshot trace twice; when
   only code pins changed (`commit`, `uv_lock`, units), both runs are identical and equal to the predecessor lock's
   trace, and no uncovered site changed, it appends the lock without L2 and without an approval. Any other change (engine

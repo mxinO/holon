@@ -21,6 +21,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import tomllib
 import typing
 from collections.abc import Mapping
 
@@ -98,11 +99,18 @@ def layered(base: dict[str, object], flags: dict[str, object]) -> dict[str, obje
     return out
 
 
-def serve_history(model: str, flags: dict[str, object], found: tuple | None, auto: int
-                  ) -> list[tuple[EngineConfig, str | None]]:
-    """The supervisor's history, oldest first: defaults + flags, then the lock (`plans.find`'s result) + flags. The
-    requested `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to what fits. The
-    defaults serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
+def serve_defaults(directory: pathlib.Path) -> dict[str, object]:
+    """The engine settings `holon serve` starts from without a current lock: `<plans>/defaults.toml` (written by hand,
+    unlike the locks: the plugins every lock selects, so serving between propagations keeps them), else none."""
+    path = directory / "defaults.toml"
+    return tomllib.loads(path.read_text()) if path.is_file() else {}
+
+
+def serve_history(model: str, flags: dict[str, object], found: tuple | None, auto: int,
+                  defaults: Mapping[str, object] | None = None) -> list[tuple[EngineConfig, str | None]]:
+    """The supervisor's history, oldest first: defaults (`serve_defaults`) + flags, then the lock (`plans.find`'s
+    result) + flags. The requested `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to
+    what fits. The defaults serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
     def config(base: dict[str, object]) -> EngineConfig:
         settings = {"clamp_context": True} | layered(base, flags)
         if settings.get("max_model_len", "auto") == "auto":
@@ -111,7 +119,7 @@ def serve_history(model: str, flags: dict[str, object], found: tuple | None, aut
 
     if "max_seqs" not in flags:
         _say(f"{'the fallback' if found else 'defaults'} without a lock: max_seqs {SERVE_MAX_SEQS} (--max-seqs)")
-    history = [(config({"max_seqs": SERVE_MAX_SEQS}), None)]
+    history = [(config({"max_seqs": SERVE_MAX_SEQS} | dict(defaults or {})), None)]
     if found is not None:
         history.append((config(plans.lock_overrides(found[0])), str(found[2])))
     return history
@@ -337,7 +345,7 @@ def main(argv: list[str] | None = None) -> None:
     model = local_model(args.model, plugins, flags.get("source"), rows, sized, flags.get("host_memory", 0))
     source, model_plugin = resolve_model(plugins, EngineConfig(model, source=flags.get("source")))
     found = None if args.no_lock else find_lock(args.plans, source, fp, current)
-    history = serve_history(model, flags, found, auto_context(model_plugin, source))
+    history = serve_history(model, flags, found, auto_context(model_plugin, source), serve_defaults(args.plans))
     history = checked_options(history, declared)
     config, lock = history[-1]
     bundle = model_plugin.bundle(source)
