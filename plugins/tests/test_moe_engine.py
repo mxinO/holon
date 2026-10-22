@@ -963,7 +963,7 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     end = c.slots()[c.size - 1].data_ptr() + c.unit_bytes
     (at, nbytes), = set(ranges)                      # one range, the tail's last bytes (512-byte aligned)
     assert store.borrowed["ring"] and at + nbytes == end and at % 512 == 0 and nbytes > store._loan_bytes - 512
-    assert store._loan.held() == 0
+    assert store._loan.held() == 0 and store._loan.lib.loan_overflow() == 0     # the range held every segment
     kept, real = [], store.activations
 
     def leaky(step):                                 # the plant: a buffer made in the loan and kept

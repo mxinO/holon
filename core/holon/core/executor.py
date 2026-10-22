@@ -638,5 +638,7 @@ class Executor:
                     acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
                     acc.top_ids += top.indices.tolist()
                     acc.top += top.values.tolist()
+                    del lp, top                     # (each piece freed before the next: the profile's peak)
+                del logits
             out.append(acc)
         return out

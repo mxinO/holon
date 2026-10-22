@@ -1019,7 +1019,8 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 // MemPool of the caching allocator asks them for its segments): first fit over the range's free extents, 512-byte
 // aligned, coalesced when a segment comes back. A segment the range cannot hold (the caching allocator's segments
 // for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each stream its own) is the
-// device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that way.
+// device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that way. (Failing it
+// instead does not make torch 2.11 return a MemPool's cached segments and ask again: the step stops, out of memory.)
 struct Loan {
     char * base = nullptr;
     size_t cap = 0;
