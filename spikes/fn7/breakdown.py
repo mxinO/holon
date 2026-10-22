@@ -120,6 +120,7 @@ def instrument(engine) -> None:
 
 
 def run(a) -> dict:
+    import numpy as np
     import torch
     from holon.api import SamplingParams
     from holon.core.engine import Engine, EngineConfig
@@ -149,8 +150,23 @@ def run(a) -> dict:
             pass
         for _ in range(2):
             engine.step()
+    store, missed = engine.ctx.shared_objects.get("std.moe.offload"), {"units": 0, "bytes": 0, "steps": 0}
+    if store is not None:      # the measured steps' fetched misses (not resident before the step, not the CPU's)
+        unit = np.array([[c.unit_bytes for _, c in sorted(store.groups[g].items())] for g in store._order])
+        prev = {"map": store.residency.host.copy()}
+
+        def tap(step, record) -> None:
+            if missed["on"]:
+                gone = record["routed"] & ~(prev["map"] >= 0).all(-1) & ~record["cpu"]
+                missed["units"] += int(gone.sum())
+                missed["bytes"] += int((gone[..., None] * unit[:, None, :]).sum())
+                missed["steps"] += 1
+            prev["map"] = store.residency.host.copy()
+        missed["on"] = False
+        store.taps.append(tap)
     walls = []
     torch.cuda.synchronize()
+    missed["on"] = True
     torch.cuda.profiler.start()
     while engine.has_work() and len(walls) < (10**6 if prefill else a.steps):
         t0 = time.perf_counter()
@@ -162,7 +178,8 @@ def run(a) -> dict:
     torch.cuda.profiler.stop()
     stats = {k: v for k, v in engine.stats().items() if k.startswith("spec")}
     engine.close()
-    return {"steps": len(walls), "wall_ms": [round(w * 1e3, 3) for w in walls], "spec": stats}
+    missed.pop("on")
+    return {"steps": len(walls), "wall_ms": [round(w * 1e3, 3) for w in walls], "spec": stats, "missed": missed}
 
 
 def summarize(a) -> dict:
@@ -226,6 +243,12 @@ def summarize(a) -> dict:
              for k in (*COMPONENTS, "mtp", *sorted(x for x in ms if x.startswith("mtp.")), "other") if k in ms}
     info = json.loads(pathlib.Path(a.run).read_text())
     walls = sorted(info["wall_ms"])
+    fetch_ms = sum(t for k in by_kernel for name, t in by_kernel[k].items() if name.startswith("k_fetch")) / n
+    m = info.get("missed") or {}
+    if m.get("steps") and fetch_ms:          # the fetches' rate: the steps' missed bytes over k_fetch's GPU time
+        info["fetch"] = {"ms_per_step": round(fetch_ms, 4), "mib_per_step": round(m["bytes"] / m["steps"] / 2**20, 2),
+                         "units_per_step": round(m["units"] / m["steps"], 2),
+                         "gbs": round(m["bytes"] / m["steps"] / (fetch_ms / 1e3) / 1e9, 1)}
     return info | {"measured_steps": n, "gpu_ms_per_step": round(total, 4),
                    "kernels_per_step": sum(kernels.values()) / n, "memops_per_step": sum(memops.values()) / n,
                    "wall_ms_median": walls[len(walls) // 2] if walls else None, "components": table}
