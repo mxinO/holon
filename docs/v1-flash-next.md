@@ -2416,3 +2416,94 @@ MTP rows still pay.
   skipping null slots, then the hits first again; item 8's `k_resolve` (48 launches, 0.50 ms) and router + shared-gate
   fusion; the 5090's 1K prefill.
 
+
+### 21.6 The lead's second round: verify misses, the 5090's 1K prompt, the hits first, the step peak's loan
+
+Each lever below is bitwise the v3 deployment's outputs where it ships as an option (checked on both cards with
+`spikes/fn7/bitwise.py`: a 4,096-token prompt in one step and 1-token decode steps, scores and top-20 equal), so gates
+(c) and (d) carry over from §21.4.
+
+**Verify misses (item 2).**
+- *Multi-token CPU kernels: a dead end, measured before building them.* On the 16 GB emulation (IQ2_XS, MTP on, the
+  v3 deployment), a verify pass's missed experts carry one of its four rows in 87.4% of cases, two in 10.3%, three in
+  1.9%, four in 0.6% (mean 1.16 rows; 251 missed pieces a pass). Decoding a weight once for a window's tokens saves
+  at most the repeated decode of the 13% multi-row experts, and a split would hand the CPU the one-row misses anyway.
+- *The CPU split on verify passes only:* `moe.cpu_min_tokens` (79855e3; F5b by pass size, D4: 2 at batch 1 is verify
+  passes only). Tune's split on the 5080 picked a share of 0.25 at 6 threads (+3.1% in its own 128-token runs, inside
+  their noise); the 3-round A/B at that share against v3 MTP: 110.8 / 96.7 / 102.3 against 110.1 / 111.6 / 108.9
+  (+0.6 / −13 / −6%). **Not shipped**: the verify windows' misses, fetched beside the CPU's, still cost more than the
+  CPU saves, as at decode (§21.3).
+- *The target's layer-0 routing from the drafts:* layer 0's misses are 1/48 of a verify pass's fetch (≈ 0.25 ms of
+  12.3), and the routing needs layer 0's mixer over the drafts, not the tokens alone. Its generalization was measured
+  instead (`pregate.py`, local): layer l + 1's router applied to layer l's MoE input predicts 63.5% of layer l + 1's
+  routed experts at top-k (53% of its misses, prefetching 1.8× the missed bytes), 80.5% at top-2k (75% of misses at
+  5.2× the bytes). Over a bus already 40% busy in a verify pass, that prefetch costs more bytes than it hides. Dropped.
+
+**The 5090's 1K prompt (item 3).** Strata, profiled at 1K (`STRATA_PREFILL_TIMING`, nsys; `spikes/fn7/h2d.py`): a
+1,023-token chunk's GPU timeline 474–503 ms, of which dequantization 36%, its expert GEMMs 22%, waiting for copies
+7–10%; 12.3–14.7 GB host-to-device per prompt at 48 GB/s (≈ 300 ms of copy-engine time, overlapped), the last ≈ 2 GB
+the lent slots refilled after the prompt. Holon's v3 at 1K (`breakdown.py`'s prefill phase, eager): the ring streams
+every missing piece — 30.8 GB at 46.6 GB/s, 660 ms of copies against 187 ms of kernels (166 ms of them overlapped),
+702 ms — while the prompt routes 19–21 GB of them. Strata stages only a 1,023-token chunk's routed misses; Holon's
+staging (`moe.ring_tokens` above the prompt) did too but in 512-token passes, fetching an expert per pass, at 30 GB/s.
+- `moe.stream_tokens` (2e6061a): a large-pass step below it stages its passes' routed misses into its lent slots, with
+  its tail lent too, one pass for the whole prompt. At 1K on the 5090: `k_fetch` at 47.0 GB/s for 18.6 GiB, 591 ms
+  (eager) against the ring's 702. Benched (3 rounds, `moe.stream_tokens=2048`): 1K prefill **1,710 against 1,364 tok/s
+  (+25%; 0.62 → 0.77 of Strata's 2,211 in that allocation)**, 4K and 32K unchanged (they stream). The rest of the gap:
+  the misses' fetch is not overlapped (Strata's copies run under its dequantization), and Holon's cache at 1K misses
+  more bytes (47% of experts against Strata's 54% of its smaller 2.05 MB experts).
+
+**The hits first, with mmvq skipping null slots (item 4).** mmvq with ids now stores an offload arena's null-slot
+entries' zeros without reading them (1ffac0a: vendor.patch; L0 with NaN-poisoned null slots). The split then won
+locally (RTX A5000, IQ2_XS: MTP decode +5%, decode +1–2%), but on the bar cards only a little: 5080 decode 93.4 / 93.2 /
+87.0 against 93.3 / 93.3 / 87.0, MTP 111.5 / 112.7 / 110.0 against 110.1 / 111.6 / 108.9 (+1%); 5090 decode −1 to −2%,
+MTP +1%. The cards' fetch is PCIe-bound and their expert compute small (1.6 ms of a 13.4 ms 5080 step), so the overlap
+hides little. Kept for MTP only.
+
+**Lending the step peak from the cache (item 1, approved).** Built per §21.2: the core asks shared objects
+(`ActivationLender`, ABI 1.5's optional hooks) for the prompt size from which they lend a step's activations, and then
+reserves only the worst step below it (at least an eager step of every slot's decode or verify rows); under
+`moe.lend_peak=on` a tail store lends its streaming steps their activations from the tail's last bytes
+(`activation_loan@1`: kernels.expert_io's MemPool over the range), and a buffer kept past a lending step stops the
+engine at the next launch. Toy proof on the GPU (bitwise the resident store, graphs on, the plant caught). +17 core
+code lines: FN at +44 of 47. What the card runs found:
+- The worst step's peak below 512 tokens was not its trunk but the prompt-logprob head (256 rows of a 248k vocabulary:
+  bf16, then f32 and its log-softmax): 504 of the 789 MiB. Prompt logprobs now take their f32 pass 64 rows at a time
+  (row-wise, the same bits): the smaller worst step is 323 MiB, so the loan frees 466 MiB on the 5080's 4K steps.
+- The caching allocator's segments for a step outgrow its allocations' peak (20 MiB segments for 1–10 MiB blocks,
+  each stream its own): 1.8 GiB of segments for the 0.79 GiB peak. The first card run ran out of the lent range; the
+  loan's allocator now takes first fit with coalescing over the range and lets a segment it cannot hold be the
+  device's (220 MiB at most on the 5080's step, inside the 3% margin).
+- Experts cached with the loan (19ac321): 5080 26.5% → 28.1% drafting off, 24.5% → 26.1% with the pack; 5090
+  47.3% → 49.9% and 45.4% → 47.9%. Bitwise the v3 deployment on both cards.
+- **Benched, it loses** (v4 = v3 + `moe.stream_tokens=2048 moe.lend_peak=on`, + `moe.split=on` with MTP; 3 rounds,
+  same allocation as v3 and Strata; tok/s, ratio to Strata):
+
+| Row | 5080 v3 | 5080 v4 | 5090 v3 | 5090 v4 |
+|---|---|---|---|---|
+| Decode 1K / 4K / 32K | 93.4 / 93.3 / 86.9 | 94.2 / 93.9 / 87.2 | 125.5 / 122.9 / 112.4 | 122.2 / 118.4 / 108.3 |
+| MTP decode | 110.5 / 112.0 / 109.2 (0.89 / 0.97 / 0.99) | 113.4 / 114.3 / 111.3 (0.91 / 0.99 / 1.00) | 152.6 / 143.6 / 151.5 (0.87 / 0.88 / 0.82) | 152.7 / 142.3 / 150.1 (0.87 / 0.87 / 0.81) |
+| Prefill | 1,573 / 3,284 / 3,129 | 1,370 / 3,266 / 3,113 | 1,363 / 5,101 / 6,103 | 1,513 / 4,591 / 5,990 |
+
+  On the 5080 the larger cache and the split give MTP +2–3%, but its 1K prefill loses 13% (that card's ring at 1K
+  beats staging; see below); on the 5090 the loan takes back half of `stream_tokens`' 1K gain (1,513 against 1,710)
+  and costs 4K prefill 10% and decode 3%. Each streaming step lends twice its peak (1.6 GiB on the 5080, more at the
+  5090's 8K steps) on top of its passes: those experts leave the cache for the step and come back only as decode
+  admits them, and a segment past the range costs a device sync at the next launch. **Not shipped** (`moe.lend_peak`
+  stays off; the core hook stays, unused by default). Fitting the loan to the allocations rather than the segments
+  would need an allocator torch does not offer a MemPool (expandable segments), or no caching allocator in the loan.
+
+**Item 5's remainder, by measured share** (the 5080's v3 decode step, 13.38 ms GPU, §21.4): `k_resolve` 0.50 ms (48
+launches of one CTA; halving it is 2%), the router 0.38 ms, the shared expert's gate (a cuBLAS split-K GEMV and its
+reduce, 0.32 ms) on the side stream, where the whole shared expert (1.09 ms) finishes inside the routed path's fetch
+(23 against ≈ 130 µs a layer) — fusing its gate into the router hides nothing; GDN's conv 0.12 ms. Not built this round:
+the fetch (3.8 ms decode, 12.3 ms a verify pass) is the step, and none of these touch it.
+
+**Where it stands.** Shipped as options for the deployments, bitwise: `moe.stream_tokens=2048` on the 5090 (1K
+prefill 0.62 → 0.77), `moe.split=on` with MTP (+1%). Below the bar still: MTP decode (5080 0.89 / 0.97 / 0.99 at
+1K / 4K / 32K; 5090 0.87 / 0.88 / 0.82), the 5090's 1K prefill (0.77). Dead ends, measured: multi-token CPU kernels
+(one-row misses), the verify-only CPU split (−6 to −13%), drafts' layer-0 routing and next-layer pre-gating (bytes),
+the loan (cache gained < what each prompt's lending costs). What is left on those cells is the misses' bytes and their
+fetch on the critical path: Strata's verify passes hand ≈ 40% of their misses to the CPU (its `pcie_share` against its
+hit rate) where Holon's CPU path loses, and its 1K prompt overlaps its copies with a dequantizing prefill that Holon's
+mmq does not need.
