@@ -52,8 +52,7 @@ namespace {
 
 #if defined(__x86_64__)
 // Holon: Q2_0 · Q8_0 for x86 (ggml-cpu has only the generic loop for Q2_0 there, ≈ 3× the time of the rest of an FN
-// expert): each 32-weight half's integer sum by SIMD — the 2-bit codes v in {0..3} unpacked to bytes in order, then
-// sum(v · y) − sum(y) = sum((v − 1) · y), exact in int32 —, and the float steps of
+// expert): each 32-weight half's integer sum by SIMD, exact in int32, and the float steps of
 // `ggml_vec_dot_q2_0_q8_0_generic` in its order (sumi += d1 · sumi_block per half, sumf += d0 · sumi per block),
 // so bitwise its result. Built for AVX2 + F16C by function attributes (both tiers' hosts have them; the rest of this
 // file keeps its flags). The blocks as ggml-common.h lays them out.
@@ -64,27 +63,31 @@ static_assert(sizeof(q2_0_block) == 18 && sizeof(q8_0_block) == 34, "ggml's bloc
 
 HOLON_AVX2 static inline float f16(uint16_t h) { return _cvtsh_ss(h); }
 
-HOLON_AVX2 static inline int32_t hsum_i32(__m256i v) {
-    const __m128i s = _mm_add_epi32(_mm256_castsi256_si128(v), _mm256_extracti128_si256(v, 1));
-    const __m128i t = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0x4e));
-    return _mm_cvtsi128_si32(_mm_add_epi32(t, _mm_shuffle_epi32(t, 0xb1)));
-}
-
-HOLON_AVX2 static inline int32_t q2_0_half(const uint8_t * qs, const int8_t * qy) {
-    uint64_t q;
-    std::memcpy(&q, qs, 8);
+// A block's two halves' integer sums: its 64 codes v unpacked to bytes in order (code 4j + t of a half is bits 2t of
+// its byte j), then sum((v − 1) · y) per half as ggml's own dots form it (|x| · sign(y, x) in maddubs: exact).
+HOLON_AVX2 static inline void q2_0_halves(const uint8_t * qs, const int8_t * y0, const int8_t * y1, int32_t & s0,
+                                          int32_t & s1) {
+    const __m128i q = _mm_loadu_si128(reinterpret_cast<const __m128i *>(qs));
     const __m128i m = _mm_set1_epi8(3);
-    const __m128i a0 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q)), m);         // byte j's codes 0, 1, 2, 3
-    const __m128i a1 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 2)), m);
-    const __m128i a2 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 4)), m);
-    const __m128i a3 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 6)), m);
-    const __m128i b01 = _mm_unpacklo_epi8(a0, a1), b23 = _mm_unpacklo_epi8(a2, a3);
-    const __m256i v = _mm256_set_m128i(_mm_unpackhi_epi16(b01, b23), _mm_unpacklo_epi16(b01, b23));  // code 4j + t
-    const __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(qy));
+    const __m128i a0 = _mm_and_si128(q, m), a1 = _mm_and_si128(_mm_srli_epi16(q, 2), m);
+    const __m128i a2 = _mm_and_si128(_mm_srli_epi16(q, 4), m), a3 = _mm_and_si128(_mm_srli_epi16(q, 6), m);
+    const __m128i lo01 = _mm_unpacklo_epi8(a0, a1), lo23 = _mm_unpacklo_epi8(a2, a3);     // bytes 0-7: half 0
+    const __m128i hi01 = _mm_unpackhi_epi8(a0, a1), hi23 = _mm_unpackhi_epi8(a2, a3);     // bytes 8-15: half 1
+    const __m256i one = _mm256_set1_epi8(1);
+    const __m256i x0 = _mm256_sub_epi8(_mm256_set_m128i(_mm_unpackhi_epi16(lo01, lo23), _mm_unpacklo_epi16(lo01, lo23)),
+                                       one);
+    const __m256i x1 = _mm256_sub_epi8(_mm256_set_m128i(_mm_unpackhi_epi16(hi01, hi23), _mm_unpacklo_epi16(hi01, hi23)),
+                                       one);
+    const __m256i v0 = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(y0));
+    const __m256i v1 = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(y1));
     const __m256i ones = _mm256_set1_epi16(1);
-    const __m256i vy = _mm256_madd_epi16(_mm256_maddubs_epi16(v, y), ones);
-    const __m256i sy = _mm256_madd_epi16(_mm256_maddubs_epi16(_mm256_set1_epi8(1), y), ones);
-    return hsum_i32(_mm256_sub_epi32(vy, sy));
+    const __m256i p0 = _mm256_madd_epi16(_mm256_maddubs_epi16(_mm256_sign_epi8(x0, x0), _mm256_sign_epi8(v0, x0)), ones);
+    const __m256i p1 = _mm256_madd_epi16(_mm256_maddubs_epi16(_mm256_sign_epi8(x1, x1), _mm256_sign_epi8(v1, x1)), ones);
+    __m256i h = _mm256_hadd_epi32(p0, p1);              // [p0 pairs, p1 pairs | p0 pairs, p1 pairs]
+    h = _mm256_hadd_epi32(h, h);                        // [p0 quarter, p1 quarter, … | …]
+    const __m128i t = _mm_add_epi32(_mm256_castsi256_si128(h), _mm256_extracti128_si256(h, 1));
+    s0 = _mm_cvtsi128_si32(t);
+    s1 = _mm_extract_epi32(t, 1);
 }
 
 HOLON_AVX2 void holon_vec_dot_q2_0_q8_0(int n, float * s, size_t, const void * vx, size_t, const void * vy, size_t,
@@ -94,11 +97,11 @@ HOLON_AVX2 void holon_vec_dot_q2_0_q8_0(int n, float * s, size_t, const void * v
     float sumf = 0.0f;
     for (int i = 0; i < n / 64; i++) {
         const float d0 = f16(x[i].d);
+        int32_t s0, s1;
+        q2_0_halves(x[i].qs, y[i * 2].qs, y[i * 2 + 1].qs, s0, s1);
         float sumi = 0.0f;
-        for (int k = 0; k < 2; k++) {
-            const q8_0_block * yb = &y[i * 2 + k];
-            sumi += f16(yb->d) * float(q2_0_half(&x[i].qs[k * 8], yb->qs));
-        }
+        sumi += f16(y[i * 2].d) * float(s0);
+        sumi += f16(y[i * 2 + 1].d) * float(s1);
         sumf += d0 * sumi;
     }
     *s = sumf;
