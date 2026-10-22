@@ -454,7 +454,8 @@ def _tail_checked(store):
     """D11's terms, asserted around `Lent` on every step that lends a tail (its tables copied on the device as the step
     goes, checked at its end: no host sync inside the step): call 0 lends n slots of the tail's class (`lends` row 0)
     and evicts, in every role, every expert holding a slot of the range, which the rounds then never pick; the range
-    (`tail_view`) is the class's last n slots, contiguous, and holds the bytes its clients asked for; no slot of the
+    (`tail_view`) is the class's last n slots, contiguous, and holds the bytes its clients' passes in this step take
+    (no more slots than those, nor than the tail's); no slot of the
     range is in the pool, the stage lists or the ring, nor mapped — at the step's start and after every layer —; what
     the step holds per class is what its pool holds (the range counted in neither), so a held ring has a slot for every
     missing piece and no step is short; at its end the empty slots it found lie below the lent ones, as they were, and
@@ -470,7 +471,9 @@ def _tail_checked(store):
         cls, n = self.tail
         c, classes = list(store.classes.values())[cls], store._class_index
         view = store.tail_view()
-        assert view.is_contiguous() and len(view) == n * c.unit_bytes >= max(f() for f in store.tail_bytes) > 0
+        need = max(f(store.step_tokens) for f in store.tail_bytes)       # the step's passes', at most the tail's
+        assert n <= store.tail[1] and need <= max(f() for f in store.tail_bytes)
+        assert view.is_contiguous() and len(view) == n * c.unit_bytes >= need > 0 and len(view) < need + c.unit_bytes
         assert view.data_ptr() == c.slots()[c.size - n].data_ptr()
         self._snap = {"before": before, "found": found, "maps": [store.residency.device.clone()],
                       "held": self._held(classes), "want": self._want(store.residency.device, classes)} | {

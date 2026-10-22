@@ -223,7 +223,8 @@ def freetoken_worker(a: argparse.Namespace, corpus: list[int]) -> dict:
 def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     """Strata's engine in `--serve` mode: `GEN <n> <ids>` on stdin; `T <id>` per token (flushed per verify window),
     then `DONE <generated> <prompt> <prompt_ms> <decode_ms> <reason> <accepted> <offered> <reused> <hits> <lookups>
-    ...` on stdout (St generate.cpp:10635-10732, 12936-12942). The PLE shard is the model's second."""
+    <RAM blobs> <file blobs> <file MB> <prompt read> <offloaded> ...` on stdout (St generate.cpp:10635-10732,
+    12936-12942). The PLE shard is the model's second."""
     ple = a.model.replace("-00001-of-00002.gguf", "-00002-of-00002.gguf")
     cmd = [*shlex.split(a.wrap), a.server, "--serve", "--native", a.model, "--ple-gguf", ple, "--max-context",
            str(a.ctx), "--eos-ids", str(STRATA_NO_EOS), "--prompt-cache", "0", *shlex.split(a.flags)]
@@ -258,9 +259,14 @@ def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             else:
                 raise RuntimeError(f"strata exited with {engine.wait()} during a request")
             gen, acc, off = int(f[1]), int(f[6]), int(f[7])
+            offloaded = int(f[15]) if len(f) > 15 else 0
             assert len(stamps) == gen == n and f[5] == "length", (len(stamps), f[:6])
             return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0]),
                     "reused": int(f[8]) + (resume or 0), "hit_rate": int(f[9]) / max(int(f[10]), 1),
+                    # Strata's own rate leaves out the misses the GPU read over PCIe (`offloaded`, St #588); over
+                    # every routed expert, as Holon counts: hits / (lookups + offloaded)
+                    "hit_rate_all": int(f[9]) / max(int(f[10]) + offloaded, 1),
+                    "pcie_share": offloaded / max(int(f[10]) + offloaded, 1),
                     "drafts_accepted": acc, "drafts_offered": off, "tokens_per_pass": gen / max(gen - acc, 1),
                     "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4])}
 
@@ -297,10 +303,27 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     engine_flags(flags)
     cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
     engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=a.ctx, prefix_cache=False))
+    store, seen = engine.ctx.shared_objects.get("std.moe.offload"), {"hits": 0, "routed": 0}
+    if store is not None:                   # an offload deployment: the decode rows' routed experts found resident
+        prev = {"map": store.residency.host.copy()}
+
+        def tap(step, record) -> None:
+            counts = record["counts"]                        # decode and verify rows' routes, [groups, experts]
+            seen["routed"] += int(counts.sum())
+            seen["hits"] += int(counts[(prev["map"] >= 0).all(-1)].sum())
+            prev["map"] = store.residency.host.copy()
+        store.taps.append(tap)
+
+    def passes() -> tuple[int, int]:
+        """Verify rows so far and the tokens they gave (each row: its accepted drafts and one token of its own)."""
+        rows = [(int(k.rsplit("_", 1)[1]), n) for k, n in engine.stats().items() if k.startswith("spec_rows_")]
+        return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows)
 
     def request(ids: list[int], n: int) -> dict:
         stamps, done = [], False
         torch.cuda.synchronize()
+        seen.update(hits=0, routed=0)
+        rows0, tokens0 = passes()
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
         while not done:
@@ -309,11 +332,17 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                     stamps += [time.perf_counter()] * len(d.token_ids)
                     done = d.finish_reason is not None
         assert len(stamps) == n, (len(stamps), n)
-        return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
+        rows, tokens = passes()
+        out = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
+        if rows > rows0:
+            out["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
+        if seen["routed"]:
+            out["hit_rate_all"] = seen["hits"] / seen["routed"]
+        return out
 
     warm, reqs = requests(a, corpus)
     request(warm["ids"], warm["output"])
-    results = {r["key"]: {k: round(v, 3) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+    results = {r["key"]: {k: round(v, 4) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
     engine.close()
     return {"results": results}
 

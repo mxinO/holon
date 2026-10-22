@@ -129,7 +129,9 @@ class TieredStore:
         if ring_lend not in ("coldest", "tail"):
             raise ValueError(f"{name}: ring_lend {ring_lend!r}: coldest or tail")
         self.ring_copy, self.ring_lend = ring_copy, ring_lend
-        self.tail_bytes: list[Callable[[], int]] = []        # the bytes the clients' passes take from a tail
+        self.tail_bytes: list[Callable[..., int]] = []       # the bytes the clients' passes take from a tail
+        #                                                      (their largest pass's; given a step's tokens, its)
+        self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
@@ -541,6 +543,10 @@ class TieredStore:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
+        if self._mode == "ring" and self.tail:          # a ring step lends what its own passes take, not the most
+            cls, n = self.tail
+            need = max((f(at) for f in self.tail_bytes), default=0)
+            self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         self.step, self.step_tokens = step.step, at
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
@@ -603,7 +609,7 @@ class TieredStore:
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
-            self.lent = Lent(self, self._mode, self.tail if self._mode == "ring" else None)
+            self.lent = Lent(self, self._mode, self._step_tail if self._mode == "ring" else None)
             self.lent.begin()
 
     def tail_view(self) -> torch.Tensor | None:

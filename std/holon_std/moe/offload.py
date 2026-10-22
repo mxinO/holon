@@ -149,10 +149,10 @@ class Offload(nn.Module):
         return [max((s.kernel.scratch_bytes(tokens) for s in self._stacks if takes_buffers(s.kernel)), default=0),
                 *(tokens * k * s.out_y * 4 if takes_buffers(s.kernel) else 0 for s in self._stacks)]
 
-    def _tail_bytes(self) -> int:
+    def _tail_bytes(self, tokens: int | None = None) -> int:
         """The bytes a lent tail must hold for this layer's largest pass (its stacks' `pass_rows` within the step
-        budget), each buffer at an ALIGN boundary of a range starting anywhere."""
-        tokens = min(pass_rows(self._stacks), self._max_pass or pass_rows(self._stacks))
+        budget; within a step of `tokens`, given), each buffer at an ALIGN boundary of a range starting anywhere."""
+        tokens = min(pass_rows(self._stacks), self._max_pass or pass_rows(self._stacks), tokens or 1 << 62)
         return sum(-(-n // ALIGN) * ALIGN for n in self._layout(tokens)) + ALIGN - 1
 
     def pass_buffers(self, tokens: int) -> tuple | None:
