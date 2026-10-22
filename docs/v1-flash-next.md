@@ -2262,9 +2262,69 @@ a lever. Each item: L0, the GPU self-consistency gate, a 3-round A/B. Developmen
   copy-engine DMA 46–54. So the in-engine ≈ 27 GB/s is not the gather kernel's bandwidth: it is two small launches per
   layer (2–4 MB). `expert_fetch@1` gains an optional `gather_roles` — a group's every role in one launch, chunks of
   both roles dealt round-robin over `expert_io.fetch_ctas` CTAs per role — which the store's resolver uses
-  (`expert_io.fetch_roles=off` withholds it for A/Bs). THP host pools would add ≈ 5% more and need a core platform
-  option: not built yet.
+  (`expert_io.fetch_roles=off` withholds it for A/Bs). In the engine on the 5080 (nsys, the breakdown's fetched
+  bytes over `k_fetch`'s time): **45.5 GB/s at decode** (164 MiB, 120 units a step: 3.79 ms, was 4.79 at ≈ 28) and
+  46.6 GB/s in a verify pass (574 MiB, 419 units: 12.9 ms, was 16.2): the target (≥ 40) met. 16 CTAs per role gain
+  nothing (decode 91.4 against 91.6 tok/s). THP host pools would add ≈ 5% more and need a core platform option: not
+  built.
 - **3 — the shared expert on a forked stream** (74bf2d3): `std.ffn.sum@1` runs its later parts on a side stream,
   joined just before `std.moe@1`'s combine reads their sum (`add_residual`'s `join`); bitwise the same on IQ2_XS with
   the offload store in prefill and graphed 1-token steps (`spikes/fn7/bitwise.py`), and the 5080's deployment with
   items 1 and 3 bitwise its base at a 4K prompt, prefill and decode. `ffn.fork=off` keeps one stream.
+
+**The 5080 A/B for items 1–3** (3 rounds each, same allocation as Strata's arms; base = 7159bcb's code with
+`ffn.fork=off`, `expert_io.fetch_roles=off`, the SM ring at `ring_tokens` 512; "new" = the fork, the one-launch
+fetch and the DMA ring; all at `memory_fraction` 0.97; Holon / Strata tok/s, Holon's hit rate counted its own way and
+Strata's both ways):
+
+| Row | 1K | 4K | 32K |
+|---|---|---|---|
+| Decode, base | 82.1 | 80.9 | 75.6 |
+| Decode, new | 91.5 / 88.5 (**1.03**) | 89.9 / 87.9 (**1.02**) | 83.9 / 81.2 (**1.03**) |
+| Prefill, base | 1,181 | 2,728 | 2,617 |
+| Prefill, new | 1,541 / 1,546 (**1.00**) | 2,843 / 2,747 (**1.04**) | 2,718 / 3,118 (0.87) |
+| MTP decode, base | 100.9 | 90.5 | 94.6 |
+| MTP decode, new | 109.8 / 130.1 (0.84) | 97.6 / 104.0 (0.94) | 102.8 / 116.4 (0.88) |
+| MTP prefill, new | 1,456 / 1,502 (0.97) | 2,756 / 2,722 (**1.01**) | 2,636 / 3,097 (0.85) |
+| Hit rate, every routed expert: Holon / Strata (Strata's own) | 0.85 / 0.82 (0.88) | 0.86 / 0.84 (0.89) | 0.84 / 0.79 (0.86) |
+| MTP tokens per pass: Holon / Strata | 2.97 / 2.88 | 2.45 / 2.25 | 3.00 / 3.05 |
+
+- Decode +11–12% (MTP +7–9%) from the fork and the one-launch fetch; drafting-off decode now at or above Strata's.
+- `ring_tokens` above 1,023 (the lead's first ask) made 1K prompts stage in CHUNK passes — each expert fetched once
+  per pass — and took 1K prefill to 946 tok/s; with the DMA ring at the default 512 a 1K prompt streams in one pass:
+  1,541. FN's deployment keeps 512 and takes `moe.ring_copy=dma`.
+- Counted the same way, Holon's cache hits more often than Strata's (0.84–0.86 against 0.79–0.84): the remaining
+  MTP and 32K-prefill gaps are not the cache.
+
+### 21.2 Item 5: where the 5080's VRAM goes, and what was cut
+
+`spikes/fn6/vram.py` on the 5080's MTP deployment (7159bcb's code, `memory_fraction` 0.97; MiB of 15,842): CUDA's
+context and modules **581** (the driver's used less torch's reserve); torch's reserve 13,960 — parameters 3,556
+(the HC weights 1,224 in bf16 as the file and Strata hold them; GDN's q/k/v, z and out 1,041 in the file's types; the
+lm_head 322; the routers 240, float32), pools 9,507 (the expert arena 8,156; QSA's KV 792 at 33,792 tokens in bf16,
+its index keys 149; GDN's state 216 and one checkpoint 108; the MTP head's KV and keys 78), the build's statics and
+workspaces 540 (FlashInfer's 193, the PLE verify buffer 160, ggml's mmq id workspaces 120 and its own 67, rope tables
+33); idle free memory **1,301**: the worst step's activation peak the state budget reserves (967) and the 3% margin.
+The "1.76 GB outside torch's pool" is these three: the context, the reserved peak and the margin.
+
+Cut, each bitwise (scores or KV compared) unless said:
+- the large expert passes' buffers into the arena (8c2b81b: a staging layout's own tail at the pool's end; the
+  minimum pool holds it, so the startup profile's worst step no longer counts them as activations): −75 of the peak;
+- the MTP drafter's predecessor hiddens in bf16 (8c2b81b): −80 of the peak;
+- the MTP head's front-only catch-up (87f4ef0, item 6): its prompt pass no longer runs the head's attention, FFN or HC
+  over 4,096 tokens: the MTP deployment's peak 1,089 → 827 MiB (the drafting-off one: 789);
+- the PLE verify buffer sized for verify rows (8f05872): −160 of statics;
+- ggml's mmq id workspaces from the pass scratch (0a698b1; the lent tail in a streaming step): −120 of statics;
+- the routers in bf16 (4acab45, `moe.router_dtype=bfloat16`; FN's are exactly bf16): −120 of parameters;
+- the MTP head's 512 experts in classes of their own (04b539f, item 6): all resident, its draft sub-steps never miss
+  (≈ 0.5 GB of the arena, as Strata keeps them).
+
+About 0.7 GB more for the cache on the MTP deployment (≈ +2 points of experts). **Lending the step peak from the cache
+(not built; the lead asked for a measure first):** the peak left is 0.79 GB (drafting off) / 0.83 GB (MTP) at 4K steps
+— R's float32 streams 160 MiB, GDN's chunked kernels' buffers ≈ 400, mmq's activation copies 80, the conv 80. Lending
+it as Strata does needs the core ledger: the state budget would stop subtracting the peak of steps whose activations
+a shared object lends (here the store's tail, per ring step), and the step's allocations would come from that loan (a
+pluggable-allocator `MemPool` over the tail's bytes, or kernels taking scratch from it). The hazard is a tensor that
+outlives its step in the loan (a lazily made workspace, a cached handle): a guard checking the pool holds nothing past
+the step's commit would catch it. ≈ +2.4 points of experts on the 5080. The context (581) and FlashInfer's split-KV
+workspace (193, sized by SM count for any batch) are what else remains above Strata.
