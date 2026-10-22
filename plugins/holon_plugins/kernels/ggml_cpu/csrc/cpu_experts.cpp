@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -49,6 +50,61 @@ DOT(ggml_vec_dot_iq4_xs_q8_K)
 
 namespace {
 
+#if defined(__x86_64__)
+// Holon: Q2_0 · Q8_0 for x86 (ggml-cpu has only the generic loop for Q2_0 there, ≈ 3× the time of the rest of an FN
+// expert): each 32-weight half's integer sum by SIMD — the 2-bit codes v in {0..3} unpacked to bytes in order, then
+// sum(v · y) − sum(y) = sum((v − 1) · y), exact in int32 —, and the float steps of
+// `ggml_vec_dot_q2_0_q8_0_generic` in its order (sumi += d1 · sumi_block per half, sumf += d0 · sumi per block),
+// so bitwise its result. Built for AVX2 + F16C by function attributes (both tiers' hosts have them; the rest of this
+// file keeps its flags). The blocks as ggml-common.h lays them out.
+#define HOLON_AVX2 __attribute__((target("avx2,f16c")))
+struct q2_0_block { uint16_t d; uint8_t qs[16]; };     // QK2_0 = 64 weights: an f16 scale, 2 bits each
+struct q8_0_block { uint16_t d; int8_t qs[32]; };      // QK8_0 = 32
+static_assert(sizeof(q2_0_block) == 18 && sizeof(q8_0_block) == 34, "ggml's block layouts");
+
+HOLON_AVX2 static inline float f16(uint16_t h) { return _cvtsh_ss(h); }
+
+HOLON_AVX2 static inline int32_t hsum_i32(__m256i v) {
+    const __m128i s = _mm_add_epi32(_mm256_castsi256_si128(v), _mm256_extracti128_si256(v, 1));
+    const __m128i t = _mm_add_epi32(s, _mm_shuffle_epi32(s, 0x4e));
+    return _mm_cvtsi128_si32(_mm_add_epi32(t, _mm_shuffle_epi32(t, 0xb1)));
+}
+
+HOLON_AVX2 static inline int32_t q2_0_half(const uint8_t * qs, const int8_t * qy) {
+    uint64_t q;
+    std::memcpy(&q, qs, 8);
+    const __m128i m = _mm_set1_epi8(3);
+    const __m128i a0 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q)), m);         // byte j's codes 0, 1, 2, 3
+    const __m128i a1 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 2)), m);
+    const __m128i a2 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 4)), m);
+    const __m128i a3 = _mm_and_si128(_mm_cvtsi64_si128(int64_t(q >> 6)), m);
+    const __m128i b01 = _mm_unpacklo_epi8(a0, a1), b23 = _mm_unpacklo_epi8(a2, a3);
+    const __m256i v = _mm256_set_m128i(_mm_unpackhi_epi16(b01, b23), _mm_unpacklo_epi16(b01, b23));  // code 4j + t
+    const __m256i y = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(qy));
+    const __m256i ones = _mm256_set1_epi16(1);
+    const __m256i vy = _mm256_madd_epi16(_mm256_maddubs_epi16(v, y), ones);
+    const __m256i sy = _mm256_madd_epi16(_mm256_maddubs_epi16(_mm256_set1_epi8(1), y), ones);
+    return hsum_i32(_mm256_sub_epi32(vy, sy));
+}
+
+HOLON_AVX2 void holon_vec_dot_q2_0_q8_0(int n, float * s, size_t, const void * vx, size_t, const void * vy, size_t,
+                                        int) {
+    const q2_0_block * x = static_cast<const q2_0_block *>(vx);
+    const q8_0_block * y = static_cast<const q8_0_block *>(vy);
+    float sumf = 0.0f;
+    for (int i = 0; i < n / 64; i++) {
+        const float d0 = f16(x[i].d);
+        float sumi = 0.0f;
+        for (int k = 0; k < 2; k++) {
+            const q8_0_block * yb = &y[i * 2 + k];
+            sumi += f16(yb->d) * float(q2_0_half(&x[i].qs[k * 8], yb->qs));
+        }
+        sumf += d0 * sumi;
+    }
+    *s = sumf;
+}
+#endif
+
 constexpr int PLANT_GATE_UP_ORDER = 1;   // judge-only: SwiGLU reads the merged halves swapped (cpu_gate_up_order)
 constexpr int MUTATE_SPLIT_K = 2;        // L0's mutation: a grouped token's down dot split in two parts of K
 constexpr int BAD_TABLE = 2;             // the task's error code: a malformed job table
@@ -65,7 +121,11 @@ Traits traits(int type) {
     const Traits q8_0{nullptr, GGML_TYPE_Q8_0, quantize_row_q8_0}, q8_k{nullptr, GGML_TYPE_Q8_K, quantize_row_q8_K};
     auto with = [](Traits t, vec_dot_t dot) { t.dot = dot; return t; };
     switch (type) {
+#if defined(__x86_64__)
+        case GGML_TYPE_Q2_0: return with(q8_0, holon_vec_dot_q2_0_q8_0);       // Holon: SIMD, bitwise the generic
+#else
         case GGML_TYPE_Q2_0: return with(q8_0, ggml_vec_dot_q2_0_q8_0);
+#endif
         case GGML_TYPE_Q4_0: return with(q8_0, ggml_vec_dot_q4_0_q8_0);
         case GGML_TYPE_Q5_0: return with(q8_0, ggml_vec_dot_q5_0_q8_0);
         case GGML_TYPE_Q8_0: return with(q8_0, ggml_vec_dot_q8_0_q8_0);
