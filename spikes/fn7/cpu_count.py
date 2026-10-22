@@ -10,7 +10,7 @@ from holon.api import SamplingParams
 model, flags = sys.argv[1], sys.argv[2]
 e = engine(model, flags, max_seqs=1, max_model_len=2048)
 s = e.ctx.shared_objects[STORE]
-prev, tot = {"map": s.residency.host.copy()}, {"steps": 0, "missed": 0, "cpu": 0}
+prev, tot = {"map": s.residency.host.copy()}, {"steps": 0, "missed": 0, "cpu": 0, "admitted": 0}
 def tap(step, record):
     c = record["counts"]
     if c.sum() > 8 and c.max() <= 4:
@@ -19,6 +19,8 @@ def tap(step, record):
         tot["steps"] += 1
         tot["missed"] += int(((c > 0) & ~res & ~cpu).sum())
         tot["cpu"] += int(cpu.sum())
+        recs = record["records"]                        # (group, a, b): a admitted (b its victim, or an empty slot)
+        tot["admitted"] += int(((recs[:, 1] >= 0) & (recs[:, 2] != -1)).sum()) if len(recs) else 0
     prev["map"] = s.residency.host.copy()
 s.taps.append(tap)
 rows = [json.loads(x) for x in open("judge/prompts/v1-long.jsonl") if x.strip()]
