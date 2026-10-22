@@ -42,7 +42,10 @@ class Lent:
         # `tail`: (the class, its last n slots) a tail step lends first; each class's slots from `end` on are not lent
         # to the ring and staging (its arena's end, the tail's start)
         self.store, self.mode, self.tail = store, mode, tail
-        self.end = store.lend_ends["tail" if tail else "coldest"]
+        self.end = store.lend_ends
+        if tail is not None:                # this step's tail (its own passes' size): the rest of the class lends
+            self.end = self.end.clone()
+            self.end[tail[0]] -= tail[1]
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:

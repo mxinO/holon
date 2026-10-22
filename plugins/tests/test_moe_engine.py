@@ -498,6 +498,8 @@ def _tail_checked(store):
         call, ring_ok = t["lent_call"], bool(t["ring_ok"])
         assert (t["maps"][0][held] == -1).all() and (call[held] == 0).all()
         assert (call != 0).eq(~held).all()                                  # the rounds never pick a holder
+        rounds = store.lent_slots.cpu().permute(0, 2, 1)[roles][(call > 0)[roles.any(1)]]
+        assert (rounds < lo).all(), "a round lent a slot past the step's lend end (held would count it, the pool not)"
         assert t["lend_needs"][0].tolist() == [n * (k == cls) for k in range(len(store.classes))]
         assert not any(inside(m.permute(0, 2, 1)[roles]).any() for m in t["maps"]), "a piece mapped in the tail"
         assert not inside(t["pool"][cls, :-1]).any(), "the pool holds the tail"              # (past it: the sink)

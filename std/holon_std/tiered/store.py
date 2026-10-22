@@ -434,13 +434,9 @@ class TieredStore:
             at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
             arenas[c.name] = c.slots(), c.host_view()
-        # each class's first slot a streaming step does not lend to its ring and staging: its arena's end, the tail's
-        # start in the tail's class
-        ends = [c.size for c in classes]
-        self.lend_ends = {"coldest": torch.tensor(ends, device=self.ctx.device)}
-        if self.tail:
-            ends[self.tail[0]] -= self.tail[1]
-            self.lend_ends["tail"] = torch.tensor(ends, device=self.ctx.device)
+        # each class's arena end: the first slot a streaming step does not lend to its ring and staging (a tail step
+        # takes its own tail off it, `Lent`)
+        self.lend_ends = torch.tensor([c.size for c in classes], device=self.ctx.device)
         # −1 − tier: every piece in the RAM tier (inclusive), or on the SSD until placed (exclusive)
         self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):

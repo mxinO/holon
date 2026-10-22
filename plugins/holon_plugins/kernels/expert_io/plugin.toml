@@ -23,3 +23,4 @@ module = "prebuild"
 
 [options]
 "expert_io.fetch_ctas" = { help = "CTAs per role of expert_fetch@1's one-launch gather of a group's roles", default = "8" }
+"expert_io.fetch_roles" = { help = "expert_fetch@1's one-launch gather of a group's roles: on, or off (one gather per role)", default = "on" }
