@@ -1012,9 +1012,50 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 #endif
 }
 
+// `activation_loan@1`: torch's pluggable-allocator entry points over the one device range `loan_set` names (a
+// MemPool of the caching allocator asks them for its segments). Segments are cut from the range in order, 512-byte
+// aligned; past its end the allocation fails (torch's out of memory, in the loan's pool); the cut restarts once every
+// segment is back.
+struct Loan {
+    char * base = nullptr;
+    size_t cap = 0, top = 0;
+    int64_t live = 0;
+};
+Loan loan;
+
+void loan_set(int64_t ptr, int64_t nbytes) {
+    TORCH_CHECK(loan.live == 0, "activation_loan@1: ", loan.live, " segments of the loan are still out");
+    loan.base = reinterpret_cast<char *>(ptr);
+    loan.cap = size_t(nbytes);
+    loan.top = 0;
+}
+
+int64_t loan_live() { return loan.live; }
+
 }  // namespace
 
+extern "C" {
+void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
+    const size_t n = (size_t(size) + 511) & ~size_t(511);
+    if (loan.base == nullptr || loan.top + n > loan.cap) {
+        return nullptr;
+    }
+    void * out = loan.base + loan.top;
+    loan.top += n;
+    ++loan.live;
+    return out;
+}
+
+void holon_loan_free(void *, ssize_t, int, cudaStream_t) {
+    if (--loan.live == 0) {
+        loan.top = 0;
+    }
+}
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("loan_set", &loan_set, "activation_loan@1: the range the loan's segments are cut from (none out)");
+    m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
     m.def("tiers", &tiers, "moe_tiers@1: the call's admissions and SSD misses through the exclusive RAM tier");

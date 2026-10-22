@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    import contextlib
+
     import numpy as np
     import torch
 
@@ -199,6 +201,18 @@ class EditsBeforeLaunch(Protocol):
         stream order. It returns them and enqueues no device work itself: what consumes the writes runs in the forward
         (e.g. a unit's apply kernel). An edit decided at the commit of step c applies at launch c + 2 on every path: a
         commit always precedes the launch two steps after it."""
+
+
+class ActivationLender(Protocol):
+    def lend_activations(self, peak: int) -> int:
+        """Once, at the startup profile, with the activation peak of the worst-case step (`max_step_tokens` prompt
+        tokens): the prompt tokens from which the object lends a step's activations `peak` bytes of its own memory (0:
+        none). The engine then reserves only the peak of the worst step below that size."""
+
+    def activations(self, step: BatchPlan) -> contextlib.AbstractContextManager | None:
+        """At an eager step's launch (after `before_launch`): a context its forward runs in, every device allocation
+        of the launching thread from the loan, or None where the step does not borrow. Nothing allocated in it may
+        outlive the step: the lender checks that at its next launch, and raises."""
 
 
 class ObservesCommits(Protocol):

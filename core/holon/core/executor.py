@@ -7,6 +7,7 @@ host copies of the step's results and the event that says they have landed.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 from typing import Any
 
@@ -106,11 +107,12 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
     return ends - n_logits.repeat(n_logits) + (np.arange(len(ends)) - first)
 
 
-def profile_rows(cfg: Any) -> list[int]:
-    """The rows of the worst-case step `state_memory` profiles: `max_step_tokens` prompt tokens in rows of at most
-    `max_model_len`, at most `max_seqs` of them."""
-    rows = [cfg.max_model_len] * (cfg.max_step_tokens // cfg.max_model_len)
-    return [r for r in (rows + [cfg.max_step_tokens % cfg.max_model_len])[:cfg.max_seqs] if r]
+def profile_rows(cfg: Any, tokens: int = 0) -> list[int]:
+    """The rows of the worst-case step `state_memory` profiles: `tokens` (default `max_step_tokens`) prompt tokens in
+    rows of at most `max_model_len`, at most `max_seqs` of them."""
+    tokens = tokens or cfg.max_step_tokens
+    rows = [cfg.max_model_len] * (tokens // cfg.max_model_len)
+    return [r for r in (rows + [tokens % cfg.max_model_len])[:cfg.max_seqs] if r]
 
 
 class Executor:
@@ -181,6 +183,7 @@ class Executor:
         self.copies = Copies(device, self.pools)               # MemOps with `after` or `lands_by`
         self.writes = Writes(device)                           # what shared objects write before a launch
         self._before = [o.before_launch for o in shared if hasattr(o, "before_launch")]
+        self._lenders = [o for o in shared if hasattr(o, "lend_activations")]
         self._observers = [o for o in shared if hasattr(o, "after_commit")]
         self._telemetry: list[dict[str, tuple[torch.Tensor, list[torch.Tensor]]]] | None = None   # at first launch
 
@@ -203,14 +206,15 @@ class Executor:
     def state_memory(self, ledger: Ledger, fraction: float) -> int:
         """Bytes for the state pools: `fraction` of the free memory, minus the activation peak of a worst-case step
         (`max_step_tokens` prompt tokens in rows of at most `max_model_len`, each sampled) run on minimum-size pools,
-        and minus the graphs' private pool."""
-        n = np.array(profile_rows(self.cfg), dtype=np.int32)
-        plan = host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
-                         np.zeros(int(n.sum()), dtype=np.int64))
+        and minus the graphs' private pool. Where a shared object lends the steps from some size their activations
+        (`lend_activations`, told the worst step's peak), the worst step below that size is the one reserved."""
         ledger.materialize(None)
         self.state.reset_padding()
         with torch.no_grad():
-            peak = platform.peak_memory(self.device, lambda: self._worst_step(plan))
+            peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan()))
+            lends = min((t for o in self._lenders if (t := o.lend_activations(peak))), default=0)
+            if 0 < lends <= self.cfg.max_step_tokens:
+                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(lends - 1)))
             if self.graphs is not None:
                 # Captured largest bucket first, the smaller ones reuse its blocks, so the pool is what the largest
                 # bucket's variants leave reserved.
@@ -220,6 +224,11 @@ class Executor:
                 self.graphs = graphs                     # the profile's graphs go before the free memory is read
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
+
+    def _profile_plan(self, tokens: int = 0) -> BatchPlan:
+        n = np.array(profile_rows(self.cfg, tokens), dtype=np.int32)
+        return host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
+                         np.zeros(int(n.sum()), dtype=np.int64))
 
     def _worst_step(self, plan: BatchPlan) -> None:
         """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs,
@@ -353,22 +362,24 @@ class Executor:
         if key is not None:
             sampled, accepts = self.graphs.run(key, lambda: self._decode(ctx))   # verify, rewind, drafter included
         else:
-            self._prepare(ctx)
-            h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
-            # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
-            logits = self._logits(ctx, h) if n_sampled else None
-            if prompt is not None:
-                recorded = self._prompt_logprobs(h, plan, prompt)
-            if (plan.n_logits > 1).any():           # verify rows
-                out, accepts = self.verifier.verify(logits, ctx)
-                sampled = self._store(ctx, out.tokens, accepts)
-                for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
-                    rewind(ctx)
-            elif plan.n_logits.any():
-                out = self.sampler.sample(logits, ctx)
-                sampled = self._store(ctx, out.tokens)
-            if self.drafter is not None:
-                self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
+            loan = next((c for o in self._lenders if (c := o.activations(plan)) is not None), None)
+            with loan or contextlib.nullcontext():          # its activations a shared object's loan (if any)
+                self._prepare(ctx)
+                h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
+                # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
+                logits = self._logits(ctx, h) if n_sampled else None
+                if prompt is not None:
+                    recorded = self._prompt_logprobs(h, plan, prompt)
+                if (plan.n_logits > 1).any():           # verify rows
+                    out, accepts = self.verifier.verify(logits, ctx)
+                    sampled = self._store(ctx, out.tokens, accepts)
+                    for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
+                        rewind(ctx)
+                elif plan.n_logits.any():
+                    out = self.sampler.sample(logits, ctx)
+                    sampled = self._store(ctx, out.tokens)
+                if self.drafter is not None:
+                    self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
         run_mem_ops(mem_ops, self.pools, "post_sample")
         draft_tokens = None
         if sampled is not None and self.drafter is not None:

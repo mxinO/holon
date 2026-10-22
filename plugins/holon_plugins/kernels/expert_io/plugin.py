@@ -21,6 +21,7 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
+LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
@@ -152,9 +153,36 @@ class MoeTiers:
                        owner, capacity, heat, io, moves, n_moves)
 
 
+class ActivationLoan:
+    """`activation_loan@1`: a MemPool of torch's caching allocator whose segments the native module's pluggable
+    allocator cuts from the range `use` names — a new pool at each `use` (the last one's segments go back with it), so
+    a step starts from an empty range; `held` is the current pool's live bytes."""
+
+    def __init__(self, modules: Modules, ctx) -> None:
+        self.lib = modules(ctx.fingerprint.sm)
+        self.allocator = torch.cuda.memory.CUDAPluggableAllocator(self.lib.__file__, "holon_loan_malloc",
+                                                                  "holon_loan_free")
+        self.pool = None
+        device = torch.device(ctx.device)
+        self.index = device.index if device.index is not None else torch.cuda.current_device()
+
+    def use(self, range_: torch.Tensor):
+        self.pool = None                              # the last pool's segments return (none alive: `held`)
+        self.lib.loan_set(range_.data_ptr(), range_.numel())
+        self.pool = torch.cuda.MemPool(self.allocator.allocator())
+        return torch.cuda.use_mem_pool(self.pool, self.index)
+
+    def held(self) -> int:
+        return 0 if self.pool is None else sum(b["size"] for seg in self.pool.snapshot() for b in seg["blocks"]
+                                               if b["state"] == "active_allocated")
+
+
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
+        regs.kernels.add(LOAN, KernelSpec(
+            op=LOAN, provider="kernels.expert_io", impl=functools.partial(ActivationLoan, modules),
+            requires=Constraint(sms=frozenset(extension.ARCHS)), props=frozenset({"deterministic"}), priority=10))
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
         regs.kernels.add(TIERS, KernelSpec(

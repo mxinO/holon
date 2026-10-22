@@ -45,7 +45,7 @@ from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
 from .residency import LAG, ResidencyMap
-from .resolver import CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
+from .resolver import ACTIVATION_LOAN, CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
 from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
@@ -54,6 +54,8 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
+LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments
+                                             # (1–10 MiB blocks come from 20 MiB ones): lent only in its steps
 
 
 @dataclasses.dataclass(eq=False)
@@ -112,7 +114,7 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
-                 policy: Ref | str = "",
+                 lend_peak: bool = False, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -137,6 +139,9 @@ class TieredStore:
         self.tail_bytes: list[Callable[..., int]] = []       # the bytes the clients' passes take from a tail
         #                                                      (their largest pass's; given a step's tokens, its)
         self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
+        # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
+        # ActivationLender), so the engine reserves only the worst step that streams nothing
+        self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_stream: torch.Stream | None = None
@@ -554,9 +559,14 @@ class TieredStore:
         else:
             self._mode = None
         self._step_tail = None
+        if self._loaned and (held := self._loan.held()):
+            raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
+                               "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
+                               "it)")
+        self._loaned = False
         if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
             cls, n = self.tail
-            need = max((f(at) for f in self.tail_bytes), default=0)
+            need = max((f(at) for f in self.tail_bytes), default=0) + self._loan_bytes
             self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         self.step, self.step_tokens = step.step, at
@@ -622,6 +632,29 @@ class TieredStore:
             self.lend_needs.zero_()
             self.lent = Lent(self, self._mode, self._step_tail)
             self.lent.begin()
+
+    def lend_activations(self, peak: int) -> int:
+        """The core's ActivationLender, at the startup profile: a tail store (`lend_peak`) lends its tail steps — from
+        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's rounding (`LOAN_MARGIN`,
+        `LOAN_SLACK`) past their passes' buffers at the tail's end, where its device has `activation_loan@1`; 0 where
+        it lends none."""
+        if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned):
+            return 0
+        self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
+        self._loan_bytes = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
+        self.tail = self._tail(lambda c: c.cap)        # the tail grows by the loan (for the final materialize)
+        return self.ring_tokens
+
+    def activations(self, step):
+        """The core's ActivationLender, at an eager step's launch: a tail step's forward allocates from the tail's
+        last `_loan_bytes` (lent with the tail at its first resolve: nothing reads the tail's experts before, they are
+        never read after); None for any other step."""
+        if self._loan is None or self._step_tail is None:
+            return None
+        cls, n = self._step_tail
+        c = list(self.classes.values())[cls]
+        self._loaned = True
+        return self._loan.use(c.slots()[c.size - n:].view(-1)[-self._loan_bytes:])
 
     def fetch_stream(self) -> torch.Stream:
         """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""
@@ -721,11 +754,12 @@ class TieredStore:
 
     # -- helpers ------------------------------------------------------------------------------------------------------
     def _own_bytes(self) -> int:
-        """The bytes a staging layout keeps for the large passes' buffers: the tail's, aligned."""
+        """The bytes a staging layout keeps for the large passes' buffers: the tail's (but its activation loan: a
+        staging layout lends none), aligned."""
         if not self.tail:
             return 0
         cls, n = self.tail
-        return -(-n * list(self.classes.values())[cls].unit_bytes // self._align) * self._align
+        return -(-(n * list(self.classes.values())[cls].unit_bytes - self._loan_bytes) // self._align) * self._align
 
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
@@ -738,7 +772,7 @@ class TieredStore:
         first = [classes.index(self.groups[g][0]) for g in self._order]
         cls = max(sorted(set(first)), key=first.count)
         c = classes[cls]
-        n = -(-max((f() for f in self.tail_bytes), default=0) // c.unit_bytes)
+        n = -(-(max((f() for f in self.tail_bytes), default=0) + self._loan_bytes) // c.unit_bytes)
         if slots(c) - n < self.prefill:
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "

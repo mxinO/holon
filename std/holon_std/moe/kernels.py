@@ -146,6 +146,11 @@ then `staging` slots, then cache slots.
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
 
+- `activation_loan@1` (FN step 7: a tail step's activations from its lent tail, the core's ActivationLender): an
+  instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
+  `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
+  — and `held() -> int`, the bytes allocated in it still alive. An allocation the range cannot hold fails.
+
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's
 file, always valid), and each layer call runs `moe_resolve → moe_tiers → [the SSD reads: cpu_task@1's copy task;
@@ -214,7 +219,7 @@ from __future__ import annotations
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
 MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
-EXPERT_PREFETCH = "expert_prefetch@1"
+EXPERT_PREFETCH, ACTIVATION_LOAN = "expert_prefetch@1", "activation_loan@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
 MOE_TIERS = "moe_tiers@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds

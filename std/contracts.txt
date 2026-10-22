@@ -1,4 +1,5 @@
 draft_policy.fixed_k@1  (std.spec.fixed_k)
+op.activation_loan@1  (std.moe)
 op.add_rmsnorm@1  (std.ops)
 op.attention.causal@1  (std.mixers.gqa)
 op.attention.paged_decode@1  (std.mixers.gqa)

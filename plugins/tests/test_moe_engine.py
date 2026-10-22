@@ -936,6 +936,55 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
+    """The core's ActivationLender under `moe.lend_peak` (FN step 7, the toy proof): the startup profile measures the
+    worst step, then reserves only the worst one below `ring_tokens` (smaller); a streaming step's forward allocates
+    from the tail's last bytes (`activation_loan@1`: kernels.expert_io's MemPool), the same range every time, past the
+    passes' buffers; the outputs are the resident store's bit for bit (CUDA graphs on, overlap on). A buffer kept from
+    inside a lending step stops the engine at the next launch."""
+    from holon.core import platform
+
+    file, prompts, want = gpu_moe
+    peaks, measure = [], platform.peak_memory
+
+    def peak_memory(device, fn):
+        peaks.append(measure(device, fn))
+        return peaks[-1]
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on"}
+    with mock.patch.object(platform, "peak_memory", peak_memory):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    assert len(peaks) == 2 and 0 < peaks[1] < peaks[0] and store._loan_bytes >= peaks[0]
+    ranges, use = [], store._loan.use
+    store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel())), use(r))[1]
+    assert _served(engine, prompts) == want
+    cls, n = store.tail
+    c = list(store.classes.values())[cls]
+    end = c.slots()[c.size - 1].data_ptr() + c.unit_bytes
+    assert store.borrowed["ring"] and set(ranges) == {(end - store._loan_bytes, store._loan_bytes)}
+    kept, real = [], store.activations
+
+    def leaky(step):                                 # the plant: a buffer made in the loan and kept
+        loan = real(step)
+        if loan is None:
+            return None
+
+        @contextlib.contextmanager
+        def keeping():
+            with loan:
+                kept.append(torch.empty(1 << 16, device="cuda"))
+                yield
+        return keeping()
+    store.activations = leaky
+    engine.add([(t + 7) % 512 for t in prompts[-1]], GREEDY)              # no prefix hit: a streaming step
+    with pytest.raises(RuntimeError, match="outlive"):
+        while engine.has_work():
+            engine.step()
+    assert kept
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;

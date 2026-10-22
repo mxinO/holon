@@ -511,6 +511,9 @@ def sequence_seed(seed: 'int', index: 'int') -> 'int'
 def to_term(obj: 'Any') -> 'Any'
 
 # holon.api.hooks (optional)
+protocol ActivationLender() optional, implemented by plugins
+  lend_activations(self, peak: 'int') -> 'int'
+  activations(self, step: 'BatchPlan') -> 'contextlib.AbstractContextManager | None'
 protocol AdmitsDrafts() optional, implemented by plugins
   admit(self, slot: 'int', tokens: 'list[int]') -> 'None'
 protocol AdoptsWeights() optional, implemented by plugins

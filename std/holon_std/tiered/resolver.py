@@ -9,6 +9,7 @@ from __future__ import annotations
 import torch
 
 RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
+ACTIVATION_LOAN = "activation_loan@1"
 TIERS, CPU_TASK = "moe_tiers@1", "cpu_task@1"
 
 

@@ -2,6 +2,8 @@
 applied per (token, slot), the slot-ordered combine. fp32 throughout, as the op contracts specify."""
 from __future__ import annotations
 
+import contextlib
+
 import torch
 
 CLAMP = 6.1e-5            # llama.cpp's guard on the top-k sum (never reached by softmax: the sum is ≥ k/E)
@@ -342,6 +344,20 @@ def copy_task(roles) -> None:
                     data = bytes(buf[offset - lo:offset - lo + nbytes])
                 units[unit, at:at + nbytes] = torch.frombuffer(bytearray(data), dtype=torch.uint8)
                 at += nbytes
+
+
+class ActivationLoan:
+    """The `activation_loan@1` oracle's terms, where no device allocator is lent: `use` places nothing (the step
+    allocates as it would), `held` is 0."""
+
+    def __init__(self, ctx=None) -> None:
+        pass
+
+    def use(self, range_: torch.Tensor) -> contextlib.AbstractContextManager:
+        return contextlib.nullcontext()
+
+    def held(self) -> int:
+        return 0
 
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
