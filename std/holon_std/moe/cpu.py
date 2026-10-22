@@ -18,7 +18,10 @@ rows and the output rows are mapped host pools, written and read in place by bot
 Options (EngineConfig.plugin_options, from `holon_tools tune`): `moe.cpu_plan` — `plan[1], plan[2], …, plan[N]`, the
 CPU's share of n misses (D4: deployment-level, never per request); past N the last entry's share, plan[n] =
 ⌊n · plan[N] / N⌋ —, and `moe.cpu_isa`, the CPU tier it was measured on: on a host of another tier the split is off
-(S5: the store forces F5a). The worker's threads are `cpu_task@1`'s options."""
+(S5: the store forces F5a), and `moe.cpu_min_tokens`, the fewest tokens of a pass that takes the share (default 1; 2
+at batch 1: verify passes only, a decode pass's misses all fetched — FN step 7: a verify window's misses are 87%
+one-token experts, which the CPU computes as fast as a decode's, against 3.6 times the bytes to fetch). The worker's
+threads are `cpu_task@1`'s options."""
 from __future__ import annotations
 
 import torch
@@ -38,8 +41,8 @@ def plan_table(text: str, experts: int) -> list[int] | None:
 
 
 class CpuShare:
-    def __init__(self, ctx, store, *, plan: list[int], tokens: int) -> None:
-        self.ctx, self.store, self.tokens = ctx, store, tokens
+    def __init__(self, ctx, store, *, plan: list[int], tokens: int, min_tokens: int = 1) -> None:
+        self.ctx, self.store, self.tokens, self.min_tokens = ctx, store, tokens, min_tokens
         self.top_k, self.jobs_max = store.top_k, min(store.items, tokens * store.top_k)
         self.plan = ctx.static("moe.cpu.plan", (store.items + 1,), torch.int32)
         self.plan.copy_(torch.tensor(plan, dtype=torch.int32, device="cpu"))       # (units are built on meta)
@@ -87,6 +90,10 @@ class CpuShare:
                                                layer.units(layer.down), host["rows"])
 
     # -- a pass ------------------------------------------------------------------------------------------------------
+    def takes(self, tokens: int) -> bool:
+        """Whether a pass of `tokens` tokens takes the CPU's share (by its size: D4)."""
+        return self.min_tokens <= tokens <= self.tokens
+
     def args(self) -> tuple[torch.Tensor, torch.Tensor]:
         """The resolve's `plan` and `jobs` for a pass with a CPU share."""
         return self.plan, self.device["jobs"]

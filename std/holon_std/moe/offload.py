@@ -21,8 +21,8 @@ default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
 `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
-dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
-misses: `cpu.py`)."""
+dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
+the CPU's share of the misses: `cpu.py`)."""
 from __future__ import annotations
 
 import torch
@@ -86,7 +86,8 @@ class Offload(nn.Module):
         self._facts = {"experts": experts, "top_k": top_k}
         # F5b: the CPU's share, unless the split was measured on another CPU tier (S5: F5a there)
         plan, isa = plan_table(str(opts.get("moe.cpu_plan", "")), experts), str(opts.get("moe.cpu_isa", ""))
-        self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root))) \
+        self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root),
+                                                          min_tokens=int(opts.get("moe.cpu_min_tokens", 1)))) \
             if plan and isa in ("", ctx.fingerprint.cpu_isa) else None
         self._stacks, self._slot, self._pending = [], None, None
 
@@ -181,7 +182,7 @@ class Offload(nn.Module):
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
         small pass's CPU share is published to the CPU (its entries read null slots: zeros until `patch`)."""
         kinds = self._kinds(len(ids))
-        if self._cpu is None or len(ids) > self._cpu.tokens:
+        if self._cpu is None or not self._cpu.takes(len(ids)):
             self._pending = None
             return self._resolver(ids, first, kinds=kinds)[0]
         slots, self._pending = self._resolver(ids, first, *self._cpu.args(),
@@ -193,7 +194,7 @@ class Offload(nn.Module):
         """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
         join) — the fetch on a side stream that `join()` makes the current stream wait for —, or (slots, None, None)
         where the pass does not split (F5b's CPU share: `route`'s; exclusive tiers, a resolve without it)."""
-        if self._cpu is not None and len(ids) <= self._cpu.tokens:
+        if self._cpu is not None and self._cpu.takes(len(ids)):
             return self.route(ids, first, x), None, None
         self._pending = None
         out = self._resolver(ids, first, kinds=self._kinds(len(ids)), split=True)

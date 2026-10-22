@@ -46,5 +46,6 @@ module = "reference"
 "moe.route_transform" = { help = "approx: a route transform's name (its plugin's contract moe_route_transform.<name>@1); offload store only" }
 "moe.cache" = { help = "VRAM cache slots per class, pinned: <class>=<slots or fraction>,… (* for the rest)", default = "fill free VRAM" }
 "moe.cpu_plan" = { help = "F5b, the CPU's share of a pass's misses: plan[1],…,plan[N] (the CPU takes plan[n] of n; past N the last entry's share; empty: none)", default = "" }
+"moe.cpu_min_tokens" = { help = "F5b: the fewest tokens of a pass that takes the CPU's share (2 at batch 1: verify passes only)", default = "1" }
 "moe.cpu_isa" = { help = "the CPU tier the split was measured on (from tune): on a host of another tier the split is off", default = "" }
 "moe.ram" = { help = "the RAM tier's units per class (the store forwards it to its first tier): <class>=<slots or fraction>,… (* for the rest); fewer than every piece makes RAM exclusive (a slower tier in moe.tiers holds the rest)", default = "every piece" }

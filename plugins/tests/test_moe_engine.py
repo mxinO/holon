@@ -761,6 +761,12 @@ def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path
     assert all(close)
     engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.cpu_isa": "another-tier"})
     assert CPU not in engine.ctx.shared_objects and _served(engine, prompts) == want
+    # `moe.cpu_min_tokens`: passes of fewer tokens fetch all their misses (verify-only at batch 1, by size)
+    engine = _engine(file, host_memory=1 << 24, plugin_options=split | {"moe.cpu_min_tokens": 2})
+    share, rows = engine.ctx.shared_objects[CPU], []
+    share.collect = lambda slot, y, cpu, f=share.collect: (rows.append(len(cpu)), f(slot, y, cpu))[1]
+    assert np.allclose(_served(engine, prompts)[1][0][2], want[1][0][2], atol=0.05)
+    assert share.takes(2) and not share.takes(1) and rows and min(rows) >= 2
 
 
 def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
