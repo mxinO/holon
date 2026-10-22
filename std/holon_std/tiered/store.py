@@ -131,6 +131,7 @@ class TieredStore:
         self.ring_copy, self.ring_lend = ring_copy, ring_lend
         self.tail_bytes: list[Callable[[], int]] = []        # the bytes the clients' passes take from a tail
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
+        self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -345,7 +346,11 @@ class TieredStore:
         # One fill pool, pinned or not, so both profile the same minimum and grow above the paged floor alike (a fill's
         # counts then pin exactly): its minimum caches nothing and cannot lend, so that layout stages a prefill pass
         # (after_materialize); a pinned arena short of its pinned size is refused at the first launch (before_launch).
-        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes)
+        # A layout that stages also keeps the tail's bytes for the large passes' buffers (`own_tail`), so the startup
+        # profile's worst step — on this minimum — takes them from the pool, not from the activations it measures.
+        self.tail = self._tail(lambda c: c.cap)
+        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes) + \
+            self._own_bytes()
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
                               pref_units=-(-most // self.granule), fill=True)
@@ -355,7 +360,6 @@ class TieredStore:
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
                                      for g in self._order])
         self._class_index = torch.from_numpy(self.class_table).to(self.ctx.device)
-        self.tail = self._tail(lambda c: c.cap)
         if self.exclusive:
             piece = np.zeros(self.residency.host.shape, dtype=np.int32)
             for c in classes:
@@ -398,12 +402,15 @@ class TieredStore:
         # A class the seed leaves short of a pass's staging (one few groups share, or an auxiliary model's) is seeded
         # that many of its hottest items first (`floors`), if its cap allows: a few cache slots more for it, where
         # staging slots of a pass's size in every class would hold more and cache nothing.
+        # A staging layout keeps its own tail at the pool's end (`own_tail`): the large passes' buffers.
         can_lend, floors = self.policy.device_owned and not self.exclusive, {}
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
+            keep = self._own_bytes() if staging == self.prefill else 0
             while True:
-                budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
+                budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes),
+                                 floors)
                 seed = self.policy.seed(self._profile_counts(), budget)
                 short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
                          and c.name not in floors and c.cap >= self.prefill}
@@ -416,6 +423,7 @@ class TieredStore:
             floors = {}
         if self.lending and self.tail:                           # this layout lends: its tail can stage a pass
             self._tail(lambda c: budget.taken[c.name])
+        self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
         free, arenas, at = {}, {}, 0
@@ -602,7 +610,10 @@ class TieredStore:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
         to its end; None in a step that lends none."""
         if self.lent is None or self.lent.tail is None:
-            return None
+            if self._own_tail is None or torch.cuda.is_current_stream_capturing():
+                return None                     # (a graphed step's passes allocate in the graphs' pool)
+            at, n = self._own_tail
+            return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n]
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
         return c.slots()[c.size - n:].view(-1)
@@ -677,6 +688,13 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
+    def _own_bytes(self) -> int:
+        """The bytes a staging layout keeps for the large passes' buffers: the tail's, aligned."""
+        if not self.tail:
+            return 0
+        cls, n = self.tail
+        return -(-n * list(self.classes.values())[cls].unit_bytes // self._align) * self._align
+
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
         class most groups have, ties to the lower class index — and its last n slots, enough for the clients'

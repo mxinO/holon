@@ -2164,6 +2164,9 @@ Before the lending fixes: decode 0.92 / 0.98 / 0.88, prefill 0.67 / 0.46 / 0.41,
   engines' answers were degenerate on both (§19.4), on the 5090 Strata's on both. Every engine-and-card pair's answer
   to them differs from the others' within the first 120–960 characters, so which run escapes is a matter of path;
   the 5080's Strata run escaped on both. Reported to the owner as measured; the bar is unchanged.
+  **Lead's recommendation, pending the owner (2026-10-22):** judge the clause on degenerate rates pooled across the
+  cards, with `code-08` / `code-12` treated as path chance. Pooled over the three cards' runs, Holon 5 / 216 (2.3%;
+  7 / 288 with the 5080's F5b-on run) and Strata 5 / 216 (2.3%): equal. The bar text stays until the owner answers.
 
 ### 20.4 The RTX 5080 decode step per component
 

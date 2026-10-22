@@ -48,6 +48,7 @@ class MTPDrafter:
         width, dtype = ((r.width, getattr(torch, r.dtype)) if self.residual and r is not None
                         else (target.spec.hidden, ctx.dtype))
         slots = ctx.options["max_seqs"] + 1
+        self.dtype = ctx.dtype                      # what the head's predecessor hiddens are cast to
         self.carry = ctx.static("drafter.mtp.carry", (slots, width), dtype)          # per slot: a hidden ...
         self.carry_at = ctx.static("drafter.mtp.carry_at", (slots,), torch.int64)    # ... and its position
         self.carry_at.fill_(-1)
@@ -67,7 +68,10 @@ class MTPDrafter:
         hn = h if self.residual else self.norm(h)                        # what the head takes, of every step token
         first = dev.query_start[:-1]
         slots = dev.slots
-        prev = hn.roll(1, 0)                                             # each token's predecessor in its row …
+        # each token's predecessor in its row, in the model's dtype (the head casts it so first: half a float32
+        # residual's bytes in a prompt step's peak) …
+        prev = torch.empty(hn.shape, dtype=self.dtype, device=hn.device)
+        prev[1:] = hn[:-1]
         start = dev.positions[first]                                     # a request's first token carries nothing
         carried = self.carry[slots] * ((self.carry_at[slots] == start - 1) & (start > 0))[:, None]
         prev[first] = carried.to(prev.dtype)                             # … or the slot's carried hidden

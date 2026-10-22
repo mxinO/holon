@@ -561,8 +561,11 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys):
 def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     """The worst step of the startup profile runs on minimum pools, where a fill cache holds nothing to lend: its
     expert passes are still a streaming step's (sized by the step's tokens, not by the layout). At batch 1 (staging
-    for one row, a pass's for prefill) the minimum pool still holds the layout that stages a pass."""
-    checkpoint, _ = tiny_moe
+    for one row, a pass's for prefill) the minimum pool still holds the layout that stages a pass. Under
+    `ring_lend = "tail"` the minimum also holds the tail's bytes, so the passes' buffers come from the pool — a lent
+    tail, or the staging layout's own — never from the activations the profile measures; it serves the resident
+    store's outputs."""
+    checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     engine = _engine(file, max_seqs=1, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                                              "moe.ring_tokens": 10})
@@ -574,6 +577,13 @@ def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     offload = engine.executor.model.layers[0].ffn._store
     assert not store.lending and store.large_passes(10)
     assert offload.pass_tokens(10) == min(s.kernel.pass_rows for s in offload._stacks) == CHUNK
+    want = _served(_engine(file, max_seqs=1), prompts)
+    engine = _engine(file, max_seqs=1, host_memory=1 << 24, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.ring_tokens": 10, "moe.ring_lend": "tail"})
+    store = engine.ctx.shared_objects[KEY]
+    engine.ledger.materialize(None)
+    assert store.lending or store._own_tail is not None
+    assert _served(engine, prompts) == want
 
 
 def test_a_floored_class_is_seeded_its_hottest_items_first():
