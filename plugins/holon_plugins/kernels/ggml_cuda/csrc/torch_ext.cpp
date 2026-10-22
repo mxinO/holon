@@ -284,14 +284,16 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check(router, x, {experts, hidden}, "router");
         check(partials, x, {holon_ggml_moe_router_partials(experts), tokens, experts}, "partials");
         check(logits, x, {tokens, experts}, "logits");
-        check_f32(router, "router");
+        TORCH_CHECK(router.scalar_type() == at::kFloat || router.scalar_type() == at::kBFloat16,
+                    "router: f32 or bf16 (its values exactly)");
         check_f32(partials, "partials");
         check_f32(logits, "logits");
         TORCH_CHECK(x.scalar_type() == at::kBFloat16 || x.scalar_type() == at::kFloat, "x: bf16 or f32");
         TORCH_CHECK(tokens > 0 && hidden % (32*holon_ggml_moe_router_partials(experts)) == 0 && experts % 64 == 0,
                     "tokens > 0; hidden a multiple of 32 x the chains, experts of 64");
-        holon_ggml_moe_router_logits(x.data_ptr(), x.scalar_type() == at::kBFloat16, router.data_ptr<float>(), tokens,
-                                     hidden, experts, partials.data_ptr<float>(), logits.data_ptr<float>(), stream());
+        holon_ggml_moe_router_logits(x.data_ptr(), x.scalar_type() == at::kBFloat16, router.data_ptr(),
+                                     router.scalar_type() == at::kBFloat16, tokens, hidden, experts,
+                                     partials.data_ptr<float>(), logits.data_ptr<float>(), stream());
     });
     m.def("moe_router_tiles", [](int64_t tokens) { return holon_ggml_moe_router_tiles(tokens); });
     m.def("moe_router", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & logits, at::Tensor & done,
@@ -305,7 +307,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check(logits, x, {tokens, experts}, "logits");
         check(weights, x, {tokens, k}, "weights");
         check(ids, x, {tokens, k}, "ids");
-        check_f32(router, "router");
+        TORCH_CHECK(router.scalar_type() == at::kFloat || router.scalar_type() == at::kBFloat16,
+                    "router: f32 or bf16 (its values exactly)");
         check_f32(logits, "logits");
         check_f32(weights, "weights");
         TORCH_CHECK(ids.scalar_type() == at::kInt, "ids: int32");
@@ -319,9 +322,10 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         TORCH_CHECK(k <= 32, "k <= 32");
         TORCH_CHECK(reinterpret_cast<uintptr_t>(x.data_ptr()) % (x.scalar_type() == at::kBFloat16 ? 8 : 16) == 0 &&
                     reinterpret_cast<uintptr_t>(router.data_ptr()) % 16 == 0,
-                    "x, router: 8-byte (bf16) or 16-byte (f32) and 16-byte aligned");
+                    "x, router: 8-byte (bf16) or 16-byte (f32) aligned; router 16-byte aligned");
         check_q8_1(xq, x, tokens, hidden);
-        holon_ggml_moe_router(x.data_ptr(), bf16(x, "x"), router.data_ptr<float>(), tokens, hidden, experts, k,
+        holon_ggml_moe_router(x.data_ptr(), bf16(x, "x"), router.data_ptr(), router.scalar_type() == at::kBFloat16,
+                              tokens, hidden, experts, k,
                               renormalize, logits.data_ptr<float>(), reinterpret_cast<uint32_t *>(done.data_ptr<int32_t>()),
                               weights.data_ptr<float>(), ids.data_ptr<int32_t>(), xq ? xq->data_ptr() : nullptr, stream());
     }, py::arg("x"), py::arg("router"), py::arg("logits"), py::arg("done"), py::arg("weights"), py::arg("ids"),

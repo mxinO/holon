@@ -5,7 +5,8 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
   `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
   unspecified weights. Facts: experts, top_k, renormalize.
-- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32) -> (weights [T, k] f32, ids [T, k] int32)`: the
+- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32, or bf16 under the fact router_dtype = bfloat16 —
+  its values, exactly) -> (weights [T, k] f32, ids [T, k] int32)`: the
   router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
   from x's exact f32 values, in an order the provider fixes (deterministic; it may depend on the call's row count, as a
   linear's kernel path does), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it

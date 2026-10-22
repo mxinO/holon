@@ -39,6 +39,6 @@ bool ggml_cuda_should_use_topk_moe(const ggml_tensor * gating_op,
 #define HOLON_ROUTER_ROWS 4
 #define HOLON_ROUTER_MAX_ROWS 16
 
-void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const float * w, int n_rows, int hidden, int n_experts,
-                                int n_expert_used, float clamp_val, float * logits, unsigned int * done,
+void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const void * w, bool w_bf16, int n_rows, int hidden,
+                                int n_experts, int n_expert_used, float clamp_val, float * logits, unsigned int * done,
                                 float * weights, int32_t * ids, void * x_q8_1, cudaStream_t stream);

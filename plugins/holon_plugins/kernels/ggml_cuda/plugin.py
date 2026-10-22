@@ -650,7 +650,7 @@ class MoeRouter:
     workspace, its tile counters a static buffer each call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
-                 dtype: str) -> None:
+                 dtype: str, router_dtype: str = "float32") -> None:
         self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
         self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize)
         self.rows = self.lib.moe_router_rows()
@@ -666,7 +666,7 @@ class MoeRouter:
         if len(x) >= CHUNK and self.prefill:
             return self.topk(self._logits(x, router))
         if not 0 < len(x) <= self.rows:
-            return self.topk(torch.nn.functional.linear(x.float(), router))
+            return self.topk(torch.nn.functional.linear(x.float(), router.float()))
         x = x.contiguous()
         if x.data_ptr() % 16:                                # the kernel's vector loads
             x = x.clone()
@@ -741,7 +741,8 @@ def _supports_moe_topk(f: dict) -> bool:
 
 
 def _supports_moe_router(f: dict) -> bool:
-    return _supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+    return (_supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+            and f.get("router_dtype", "float32") in ("float32", "bfloat16"))
 
 
 def _supports_moe_combine(f: dict) -> bool:

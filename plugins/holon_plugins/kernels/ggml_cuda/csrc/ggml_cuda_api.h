@@ -137,12 +137,12 @@ int64_t holon_ggml_moe_router_rows(void);
 // holon_ggml_moe_router_partials(experts) f32 fma chains over equal parts of hidden ascending, added in order (a row's
 // logits are the same at any tokens), `partials` [that many, tokens, experts] f32 scratch; hidden a multiple of 32
 // times that many, experts a multiple of 64.
-void holon_ggml_moe_router_logits(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
-                                  int64_t experts, float * partials, float * logits, void * stream);
+void holon_ggml_moe_router_logits(const void * x, int x_bf16, const void * router, int router_bf16, int64_t tokens,
+                                  int64_t hidden, int64_t experts, float * partials, float * logits, void * stream);
 int64_t holon_ggml_moe_router_partials(int64_t experts);
 int64_t holon_ggml_moe_router_tiles(int64_t tokens);
-void holon_ggml_moe_router(const void * x, int x_bf16, const float * router, int64_t tokens, int64_t hidden,
-                           int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
+void holon_ggml_moe_router(const void * x, int x_bf16, const void * router, int router_bf16, int64_t tokens,
+                           int64_t hidden, int64_t experts, int64_t k, int renormalize, float * logits, uint32_t * done,
                            float * weights, int32_t * ids, void * x_q8_1, void * stream);
 
 // out[t] = sum_j weights[t, j] * y[t, j] in f32, slot by slot, stored bf16: y [tokens, k, hidden] f32, out bf16.

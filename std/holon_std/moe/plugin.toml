@@ -33,6 +33,7 @@ module = "reference"
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
 "quant.act" = { help = "activation precision of quantized weights' matmuls", default = "a8", choices = ["a4", "a8"] }
+"moe.router_dtype" = { help = "the routers' storage: float32, or bfloat16 where the checkpoint's router values are exactly bf16 (the same logits, half the bytes)", default = "float32" }
 "moe.store" = { help = "the expert store's unit Ref: std.moe.offload@1 offloads experts to host memory", default = "std.moe.resident@1" }
 "moe.placement" = { help = "the offload store's placement policy (a unit Ref): placement.lfu@1 (F11; first-party plugins), placement.lru@1, placement.profile_decay@1, std.tiered.static@1", default = "placement.lfu@1" }
 "moe.placement.profile" = { help = "routing counts seeding placement, written by `holon_tools profile` (default name <checkpoint stem>.profile.json): a JSON file {\"checkpoint\": [[file, bytes], ...], \"layers\": {\"<layer>\": [count per expert]}} beside the checkpoint's file (named relative to its directory), refused on another checkpoint's files" }

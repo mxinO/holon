@@ -886,6 +886,19 @@ def test_moe_router(ctx, lib, n, hidden):
                     assert bitwise(logits_of(x[a:b]), gemm[a:b]), f"router GEMM rows {a}:{b}"
                 assert all(map(bitwise, route(x, router), choose(gemm)))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
+    rb = router.bfloat16()                 # a bf16 router (moe.router_dtype): its values as f32 or held bf16, same bits
+    for x in (x32.bfloat16(), x32):
+        held = []
+        for r in (rb.float(), rb):
+            logits = torch.empty(rows, n, device="cuda")
+            w, ids = torch.empty(rows, K, device="cuda"), torch.empty(rows, K, dtype=torch.int32, device="cuda")
+            lib.moe_router(x[:rows], r, logits, done, w[:, :min(K, n)], ids[:, :min(K, n)], True)
+            gemm = None
+            if n % 64 == 0:
+                gemm = torch.empty(len(x), n, device="cuda")
+                lib.moe_router_logits(x, r, torch.empty(lib.moe_router_partials(n), *gemm.shape, device="cuda"), gemm)
+            held.append((logits, w[:, :min(K, n)], ids[:, :min(K, n)], gemm))
+        assert all(bitwise(a, b) for a, b in zip(*held, strict=True) if a is not None), "a bf16 router's bits"
 
 
 def test_the_router_prepares_the_gate_up_input(ctx, lib):

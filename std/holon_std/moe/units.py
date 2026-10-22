@@ -256,7 +256,8 @@ def _store(ctx, **site):
 
 
 class MoE(nn.Module):
-    """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
+    """Mixture of experts: softmax top-k routing over an f32 router (held bf16 where `moe.router_dtype` asks and its
+    values allow; `moe_router@1`, or the f32 linear and
     `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
     time, or a whole pass where it declares `pass_rows` (D3′); the expert path, in f32 (design D3), a pass of the
     store's size (whole CHUNKs). `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
@@ -290,6 +291,11 @@ class MoE(nn.Module):
         # the router and top-k in one kernel where a provider serves them (bounded: its own f32 order), else the f32
         # linear and `moe_topk@1`
         router = topk | {"hidden": hidden, "dtype": dtype}
+        # `moe.router_dtype=bfloat16`: the router held in bf16 (half its bytes), which the checkpoint's values must be
+        # exactly (finalize_weights checks); its kernels take them as f32, the same logits
+        self._router_bf16 = str(ctx.options.get("plugins", {}).get("moe.router_dtype", "float32")) == "bfloat16"
+        if self._router_bf16:
+            router["router_dtype"] = "bfloat16"
         self._router = (ctx.select_kernel(kernels.MOE_ROUTER, site=site, **router).impl(ctx, **router)
                         if ctx.candidates(kernels.MOE_ROUTER, router) else None)
         self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
@@ -300,6 +306,12 @@ class MoE(nn.Module):
                                           **combine).impl(ctx, **combine)
 
     def finalize_weights(self, ctx) -> None:
+        if self._router_bf16:
+            w = self.router.detach()
+            if not torch.equal(w.bfloat16().float(), w):
+                raise ValueError(f"layer {self.layer}: moe.router_dtype bfloat16, but the router's values are not "
+                                 "exactly bf16 (keep float32)")
+            torch.utils.swap_tensors(self.router, nn.Parameter(w.bfloat16(), requires_grad=False))
         if hasattr(self, "gate_up"):
             if not hasattr(self._store, "fused"):
                 raise ValueError(f"layer {self.layer}: {type(self._store).__name__} holds no fused gate/up stacks")
@@ -317,7 +329,7 @@ class MoE(nn.Module):
         if self._prepare is not None:
             return self._prepare(x, self.router, self._gate_up.kernel)
         weights, ids = (self._router(x, self.router) if self._router is not None
-                        else self._topk(nn.functional.linear(x.float(), self.router)))
+                        else self._topk(nn.functional.linear(x.float(), self.router.float())))
         return weights, ids, x[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
