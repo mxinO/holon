@@ -18,3 +18,6 @@ python = ["triton"]
 
 [support]
 platforms = ["cuda"]
+
+[options]
+"hc.prefill" = { help = "hc_gr_mix's prefill projections: sgemm (float32 products, IEEE sums) or bf16x3 (three bf16 tensor-core products of the activation's exact split, float32 accumulation)", default = "sgemm" }

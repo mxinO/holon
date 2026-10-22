@@ -95,6 +95,36 @@ def test_hc(inject):
             _check(ours, r_ref, torch.float32, width, f"block, {t} tokens")
 
 
+def test_hc_prefill_bf16x3():
+    """`hc.prefill=bf16x3` (FN step 7 item 7): prefill's projections as three bf16 tensor-core products of the
+    activation's exact split, float32 accumulation — x, w and R within `l0.check` of the oracle as the SGEMMs are, at
+    FN's bf16 weights (inject too), with and without a pending combine."""
+    g = torch.Generator().manual_seed(1)
+    width = STREAMS * HIDDEN
+    norm = (torch.randn(width, generator=g) * 0.1).bfloat16()
+    down = (torch.randn(RANK, width, generator=g) / width ** 0.5).bfloat16()
+    up = (torch.randn(width, RANK, generator=g) / RANK ** 0.5).bfloat16()
+    gate = (torch.randn(STREAMS, width, generator=g) / width ** 0.5).bfloat16()
+    weights = [x.cuda() for x in (norm, down, up, gate)]
+    ctx = BuildContext(PluginSet(discover()), torch.device("cuda"),
+                       options={"kernels": {"hc_gr_mix": "kernels.hc_triton"}, "plugins": {"hc.prefill": "bf16x3"}})
+    facts = {"streams": STREAMS, "hidden": HIDDEN, "rank": RANK, "eps": EPS, "dtype": "bfloat16", "inject": True}
+    mix = ctx.select_kernel(hc_kernels.MIX, site="test", **facts).impl(ctx, **facts)
+    assert mix.prefill == "bf16x3"
+    for t in (77, 300):
+        r = torch.randn(t, width, generator=g) * torch.linspace(0.5, 4.0, STREAMS).repeat_interleave(HIDDEN)
+        y, w_prev = torch.randn(t, HIDDEN, generator=g).bfloat16(), 2 * torch.rand(t, STREAMS, generator=g)
+        for extra in ((None, None), (y, w_prev)):
+            ours = r.cuda()
+            x, w = mix(ours, *weights, *[e.cuda() if e is not None else None for e in extra])
+            r_ref = r.clone()
+            x_ref, w_ref = hc.hc_gr_mix(r_ref, norm, down, up, gate, *extra, STREAMS, EPS, torch.bfloat16)
+            what = f"bf16x3, {t} tokens{', pending' if extra[0] is not None else ''}"
+            _check(x, x_ref, torch.bfloat16, width, f"mix x, {what}")
+            _check(w, w_ref, torch.float32, width, f"mix w, {what}")
+            _check(ours, r_ref, torch.float32, 1, f"mix r, {what}")
+
+
 @pytest.mark.parametrize("warps", [4, 8])
 def test_hc_in_place_stress(warps, monkeypatch):
     from holon_plugins.kernels.hc_triton import kernel

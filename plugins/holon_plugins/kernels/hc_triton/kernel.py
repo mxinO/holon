@@ -266,7 +266,46 @@ def _combine(r_ptr, y_ptr, w_ptr, H, S: tl.constexpr, BLOCK: tl.constexpr):
     tl.store(p, tl.load(p, mask=c < H, other=0.0) + w * y, mask=c < H)
 
 
-def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype):
+@triton.jit
+def _mm3(a_ptr, b_ptr, c_ptr, M, N, K, sab, sam, sak, sbb, sbk, sbn, scb, scm, scn,
+         BM: tl.constexpr, BN: tl.constexpr, BK3: tl.constexpr):
+    """C[b] = A[b] (float32) · B[b] (bf16): A's exact split into three bf16 terms (hi, mid, lo: 24 bits of mantissa),
+    each times B on tensor cores into one float32 accumulator — float32 products of B's exact values, sums in the
+    tensor cores' order (FN step 7 item 7, the lead's D10 call)."""
+    pid_m, pid_n, b = tl.program_id(0), tl.program_id(1), tl.program_id(2)
+    rm, rn, rk = pid_m * BM + tl.arange(0, BM), pid_n * BN + tl.arange(0, BN), tl.arange(0, BK3)
+    acc = tl.zeros((BM, BN), dtype=tl.float32)
+    for k0 in range(0, K, BK3):
+        a = tl.load(a_ptr + b * sab + rm[:, None] * sam + (k0 + rk)[None, :] * sak,
+                    mask=(rm[:, None] < M) & ((k0 + rk)[None, :] < K), other=0.0)
+        w = tl.load(b_ptr + b * sbb + (k0 + rk)[:, None] * sbk + rn[None, :] * sbn,
+                    mask=((k0 + rk)[:, None] < K) & (rn[None, :] < N), other=0.0)
+        hi = a.to(tl.bfloat16)
+        rest = a - hi.to(tl.float32)
+        mid = rest.to(tl.bfloat16)
+        lo = (rest - mid.to(tl.float32)).to(tl.bfloat16)
+        acc = tl.dot(hi, w, acc)
+        acc = tl.dot(mid, w, acc)
+        acc = tl.dot(lo, w, acc)
+    tl.store(c_ptr + b * scb + rm[:, None] * scm + rn[None, :] * scn, acc, mask=(rm[:, None] < M) & (rn[None, :] < N))
+
+
+MM3 = (128, 64, 32)                  # its tile (rows, columns, depth): FN's shapes on an RTX A5000 and RTX 5080
+
+
+def bf16x3_bmm(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    """[B, M, K] float32 · [B, K, N] bf16 → [B, M, N] float32 by `_mm3` (any strides)."""
+    b, m, k = x.shape
+    n = w.shape[2]
+    c = torch.empty(b, m, n, dtype=torch.float32, device=x.device)
+    bm, bn, bk = MM3
+    _mm3[(triton.cdiv(m, bm), triton.cdiv(n, bn), b)](x, w, c, m, n, k, *x.stride(), *w.stride(), *c.stride(),
+                                                      bm, bn, bk, num_warps=4, num_stages=3)
+    return c
+
+
+def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: float, dtype: torch.dtype,
+              prefill: str = "sgemm"):
     """At most GEMV_ROWS tokens (decode, verify): `_down_gemv`, then `_mix_gemv` for one token, `_down_sum` and
     `_mix_rows` for more (a pending combine through `rn`). Prefill, in passes of PREFILL_ROWS rows: `_prep`
     (Xn and the sums of squares, a pending combine applied as R is read), the down projection as one cuBLAS batched
@@ -312,9 +351,11 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
         return x, w
     if torch.backends.cuda.matmul.allow_tf32:                  # D10: float32 products, IEEE sums
         raise RuntimeError("hc_gr_mix: TF32 matmuls are enabled (torch.backends.cuda.matmul.allow_tf32)")
-    w_down = torch.cat([down.float(), inj.float()]) if inject is not None else down.float()   # [NOUT, S·H]
+    x3 = prefill == "bf16x3" and down.dtype == up.dtype == inj.dtype == torch.bfloat16
+    cast = (lambda t: t) if x3 else (lambda t: t.float())       # bf16x3 reads the bf16 weights as they are
+    w_down = torch.cat([cast(down), cast(inj)]) if inject is not None else cast(down)   # [NOUT, S·H]
     w_down = w_down.view(nout, streams, hidden).permute(1, 2, 0)                   # [S, H, NOUT]
-    w_up = up.float().t()                                                          # [rank, S·H]
+    w_up = cast(up).t()                                                            # [rank, S·H]
     for c0 in range(0, t, PREFILL_ROWS):                       # the scratch bounded at PREFILL_ROWS rows
         c1 = min(t, c0 + PREFILL_ROWS)
         n = c1 - c0
@@ -324,11 +365,12 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
         sq = torch.empty(n, streams, dtype=torch.float32, device=r.device)
         _prep[(triton.cdiv(n, 16), streams)](rc, yc, wc, norm, xn, sq, n, hidden, streams, pending, 16, BK,
                                              num_warps=WARPS)
-        p = torch.bmm(xn.view(n, streams, hidden).transpose(0, 1), w_down)        # [S, n, NOUT]
+        xs = xn.view(n, streams, hidden).transpose(0, 1)
+        p = bf16x3_bmm(xs, w_down) if x3 else torch.bmm(xs, w_down)                # [S, n, NOUT]
         ac, rs = a[c0:c1], rstd[c0:c1]
         _act[(triton.cdiv(n, BM), triton.cdiv(nout, BN))](
             p, sq, ac, sink[c0:c1], rs, n, hidden, rank, nout, eps, streams, BM, BN, num_warps=WARPS)
-        u = ac @ w_up                                                              # [n, S·H]
+        u = bf16x3_bmm(ac[None], w_up[None])[0] if x3 else ac @ w_up              # [n, S·H]
         del xn
         _mix_out[(triton.cdiv(n, 16), triton.cdiv(hidden, 128))](
             u, rc, yc, wc, rs, norm, xc, n, hidden, streams, pending, 16, 128, num_warps=WARPS)

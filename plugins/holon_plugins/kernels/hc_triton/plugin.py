@@ -13,9 +13,14 @@ MIX, COMBINE = "hc_gr_mix", "hc_gr_combine"
 class Mix:
     def __init__(self, ctx, *, streams: int, hidden: int, rank: int, eps: float, dtype: str, inject: bool) -> None:
         self.streams, self.eps, self.dtype = streams, eps, getattr(torch, dtype)
+        # prefill's projections: float32 SGEMMs, or bf16x3 (`hc.prefill`; bf16 weights: three tensor-core products
+        # of the activation's exact split, the lead's D10 call for FN step 7)
+        self.prefill = str(ctx.options.get("plugins", {}).get("hc.prefill", "sgemm"))
+        if self.prefill not in ("sgemm", "bf16x3"):
+            raise ValueError(f"kernels.hc_triton: hc.prefill {self.prefill!r}: sgemm or bf16x3")
 
     def __call__(self, r, norm, down, up, inject, y_prev=None, w_prev=None):
-        return hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, self.streams, self.eps, self.dtype)
+        return hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, self.streams, self.eps, self.dtype, self.prefill)
 
 
 class Combine:
