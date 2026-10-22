@@ -2328,3 +2328,31 @@ pluggable-allocator `MemPool` over the tail's bytes, or kernels taking scratch f
 outlives its step in the loan (a lazily made workspace, a cached handle): a guard checking the pool holds nothing past
 the step's commit would catch it. ≈ +2.4 points of experts on the 5080. The context (581) and FlashInfer's split-KV
 workspace (193, sized by SM count for any batch) are what else remains above Strata.
+
+### 21.3 Items 4, 6, 7 and 8 so far
+
+- **4 — F5b's CPU path:** ggml-cpu has no x86 SIMD dot for Q2_0, FN's down type: its generic loop took most of an
+  expert's CPU time. Ours (bd50066, 8a94f86: AVX2 integer sums per 32-weight half, the generic's float steps in its
+  order: bitwise, L0 unchanged) takes an FN IQ2_XS expert on one core from 974 to 374 µs (a Zen 3 host). On the
+  5080's host (`spikes/fn7/cpu_expert.py`, AVX-512 build, 6 threads; each run spawns its threads, so a lone job's
+  136 µs carries that): 64–77 µs per expert at 4–8 jobs — the lead's ≤ 80 µs target, Strata's 60–76. Tune's split on
+  the new deployment then: F5a 110.2 tok/s (MTP, batch 1), the best share 0.4 at 6 threads 107.6 (−2.3%; it was
+  −7.7% and −11.7%); benched at that share F5b still costs 2–7% (decode 87.2 / 88.1 / 77.7 against 91.5 / 89.9 /
+  83.9; MTP 96.6 / 90.9 / 100.0 against 109.8 / 97.6 / 102.8). **Not shipped.** A token's CPU expert costs the same
+  per token in a verify window (4 tokens: 4 × 57 µs): multi-token kernels that decode the weights once, as Strata's,
+  are the next step for verify.
+- **The hits first** (7364b98, `moe.split=on`, off by default): the resolve returns the fetched entries' slots apart,
+  the fetch lands on a side stream while the pass runs the resident entries, then the fetched ones; bitwise the
+  resident store (GPU engine test). Measured on an RTX A5000: MTP decode 68 against 73 tok/s — the extra launches
+  and the two passes' null-slot entries cost more than the overlap saves there. A 5080 A/B is next.
+- **6 — MTP:** the front-only catch-up (87f4ef0): the step's tokens through the head's state writes only — the same
+  KV and index keys bitwise (tiny model), the same accepted drafts (IQ2_XS); the head's experts in classes of their
+  own, all 512 resident (04b539f).
+- **7 — HC prefill as bf16x3** (0bc7dce, `hc.prefill=bf16x3`): a Triton GEMM of three bf16 tensor-core products of
+  the activation's exact split into one float32 accumulator, reading the bf16 weights as they are; within L0 as the
+  SGEMMs are (w's usage 0.15 against 0.02). Per 4,096-row pass (`spikes/fn7/hc_bf16x3.py`): the down projection 1.02
+  against 1.58 ms on the 5080 (0.52 against 0.86 on the 5090), the up 0.75 against 0.85 (0.38 against 0.46).
+- **8 — D/E so far:** GDN's a and b projections merged on CUDA (06c10c1; a verify pass's two ≈ 15 µs cuBLAS kernels
+  per layer become one split-K of ≈ 5; 1.1 ms of a 5080 verify pass); the routers in bf16 (4acab45).
+- **Experts cached on the 5080** (`spikes/fn6/cached.py`, b23786b): drafting off 26.2% (8.64 GiB), with the MTP pack
+  24.2% (8.16 GiB); with `moe.router_dtype=bfloat16` 26.5% and **24.5%** — C-M1's ≥ 23% with the pack met (was 22.7).
