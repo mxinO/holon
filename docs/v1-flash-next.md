@@ -2507,3 +2507,45 @@ the loan (cache gained < what each prompt's lending costs). What is left on thos
 fetch on the critical path: Strata's verify passes hand ≈ 40% of their misses to the CPU (its `pcie_share` against its
 hit rate) where Holon's CPU path loses, and its 1K prompt overlaps its copies with a dequantizing prefill that Holon's
 mmq does not need.
+
+### 21.7 Design note: the layer-ahead stream of likely-routed misses (approved; for the perf reviewer before building)
+
+**Problem.** A streaming step (D8's ring) copies every piece a layer misses one layer ahead, overlapped with compute,
+but at the 5090's 1K prompt 30–45% of those pieces are routed by no token (§21.6: 30.8 GB streamed, 19–21 GB routed).
+`moe.stream_tokens` stages only routed misses, but after the layer's routing and on its critical path (k_fetch at 47
+GB/s, nothing to overlap). The aim: stream ahead only what the prompt will likely route, stage the rest when routed.
+
+**What is predicted, and from what.** Per layer g and expert e, the placement profile's routing share
+p(g, e) = count(g, e) / Σ_e count(g, e) · top_k (the profile the store already loads to seed: `moe.placement.profile`;
+uniform where there is none). A step of T prompt tokens routes e with probability ≈ 1 − (1 − p)^T, so a missing piece
+is *likely* when p ≥ 1 − (1 − τ)^(1/T) (τ: `moe.stream_likely`, e.g. 0.5; 0 keeps today's ring, everything streams).
+It is computed once per step on the device from a static [G, E] table and T (a few torch ops at the step's first
+resolve, as `Lent.begin` builds the ring today; no host sync). No router runs early: the prompt's own routing decides
+what is computed, as now.
+
+**How many bytes.** Streamed: the likely missing pieces; staged: the routed misses among the rest. Precision and
+recall of "likely" decide the total, so the first step is a measurement, not a build: a spike on the 5090 at 1K (and
+the 5080 at 1K / 4K) records each step's routed set against the missing pieces and reports, for τ ∈ {0.3, 0.5,
+0.7}, the bytes streamed, the routed bytes caught, the bytes staged after routing and the bytes streamed but unrouted.
+Build only if some τ streams ≲ 1.15× the routed bytes and leaves ≲ 25% of them to staging (the estimate then: the
+5090's 1K step bus-bound at ≈ 48 × 5.8 ms streamed, overlapped, plus ≈ 60 ms staged — about 1.2× Strata's 1K).
+
+**Interaction with the ring, staging and lending.** One step mode, the ring's, with a filtered want:
+- `Lent._want` / `_ring` take `missing & likely` instead of `missing`; the halves are sized as now from it (twice the
+  most likely-missing pieces of a layer per class).
+- Each ringed class also lends staging slots for its routed leftovers: at most the most *unlikely* missing pieces of a
+  layer per class (known at the step's start, so never short), placed after the halves in the class's pool, and the
+  layer's stage table points there instead of at the graphed steps' staging slots. Lent in total: 2·likely + unlikely
+  ≤ today's 2·missing, so a step lends no more than the ring does now (the tail, D11, unchanged).
+- The resolve is unchanged: a missing piece in the ring table reads its ring slot; any other routed miss is staged
+  (`k_fetch` into the stage list), as a staged class's are today. DMA ring copies keep their one host sync per step.
+- `moe.stream_tokens` folds into it (τ = 1: nothing likely, every routed miss staged; τ = 0: the ring).
+- Verify windows (graphed, never lending) are out of this mode: a graph-safe variant would need fixed prefetch slots
+  and a per-layer prediction (a pre-gate), which §21.6 measured at 53% of misses for 1.8× the bytes. Revisit only if
+  item 1's timeline shows the bus idle in a verify pass.
+
+**Determinism.** Placement only: which bytes move when. Every entry reads its expert's weights from some slot, so
+outputs stay bitwise the resident store's (the GPU bitwise test gains a `likely` case; the cards' `bitwise.py`). The
+prediction is a pure function of the profile table and the step's token count, so the step's lending, ring and stage
+tables are deterministic, and F11's replay sees the same `lends` records it models today (lending order and amounts
+come from the policy and the recorded needs; ring and stage copies never change residency).
