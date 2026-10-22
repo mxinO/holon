@@ -2367,3 +2367,27 @@ The deployment ("v3"): §20.1's, plus `moe.ring_copy=dma`, `memory_fraction` 0.9
 |---|---|---|---|---|---|---|
 | Decode | 94.7 / 88.9 (**1.07**) | 95.5 / 88.3 (**1.08**) | 86.9 / 81.6 (**1.06**) | 124.7 / 111.1 (**1.12**) | 124.6 / 107.8 (**1.16**) | 111.9 / 107.2 (**1.04**) |
 | Prefill | 1,570 / 1,544 (**1.02**) | 3,310 / 2,737 (**1.21**) | 3,147 / 3,110 (**1.01**) | 1,361 / 2,126 (0.64) | 5,083 / 4,549 (**1.12**) | 6,099 / 5,542 (**1.10**) |
+| MTP decode | 115.5 / 130.1 (0.89) | 110.6 / 104.2 (**1.06**) | 110.8 / 116.6 (0.95) | 152.7 / 189.5 (0.81) | 132.3 / 138.7 (0.95) | 156.0 / 177.8 (0.88) |
+| MTP prefill | 1,526 / 1,501 (**1.02**) | 3,262 / 2,708 (**1.20**) | 3,115 / 3,081 (**1.01**) | 1,335 / 2,082 (0.64) | 4,927 / 4,509 (**1.09**) | 6,030 / 5,518 (**1.09**) |
+| Hit rate (every routed expert), Holon / Strata | 0.86 / 0.82 | 0.88 / 0.84 | 0.85 / 0.79 | 0.93 / 0.92 | 0.94 / 0.92 | 0.92 / 0.92 |
+| MTP tokens per pass, Holon / Strata | 2.88 / 2.88 | 2.74 / 2.25 | 3.04 / 3.05 | 2.87 / 2.98 | 2.46 / 2.53 | 3.27 / 3.24 |
+
+The MTP rows ran after the fixes below (5080 b9db901; 5090 f9cf4a9), against Strata's arms of the same allocation.
+Against §20's step-6 tables: 5080 decode 0.91–0.92 → 1.06–1.08, MTP 0.77–0.86 → 0.89–1.06, prefill 0.76 / 1.00 /
+0.84 → 1.02 / 1.21 / 1.01; 5090 decode 0.93–1.03 → 1.04–1.16, MTP 0.70–0.78 → 0.81–0.95, prefill 0.57 / 0.89 / 0.86 →
+0.64 / 1.12 / 1.10. **Below the bar:** MTP decode at 1K on both (0.89, 0.81) and at 32K (0.95, 0.88), 4K on the 5090
+(0.95); the 5090's 1K prefill (0.64: a 1K prompt reads nearly every missing expert over the bus, ≈ 0.57 s of
+IQ3_S bytes at the link's rate; Strata's 0.48 s reads fewer, how not yet found). Experts cached: 5080 26.5% / 24.5%
+(with the pack), 5090 47.3% / 45.4%.
+
+**Gates on the v3 deployment** (bf16x3 changes the HC prefill's summation order; the rest is bitwise):
+- **(c)** passes on both cards — 5080 (b9db901): decode vs prefill KL mean 0.025, p50 0.0018, p99 0.36; chunked 0.022 /
+  0.0016 / 0.33; MTP vs plain 0.0020 (p99 0.024). 5090 (f9cf4a9): 0.031 / 0.0027 / 0.45; 0.030 / 0.0029 / 0.45; MTP
+  0.0044 (p99 0.063). Every band within 0.75 (reported).
+- **(d)** (Holon's answers under v3, scored against §20's Strata answers on the same card): 5080 Holon 70 / 72, Strata
+  70: the score clause passes; `code-08` and `code-12` again Holon-only degenerate (the clause the owner rules on,
+  §20.3); 5090 Holon **72 / 72**, Strata 70: passes.
+- **Two bugs the card runs found and fixed:** the MTP head's front-only catch-up left its MoE layer unrun on prompt
+  rows, so a streaming step's loan, returned after the last group, outlived the step (the next ring step short: the
+  5080's error 4 and mmq's column error; f9cf4a9, with a regression test); and once that let the startup profile's
+  minimum pool lend, a tail too large for it was refused at start instead of staging (b9db901).
