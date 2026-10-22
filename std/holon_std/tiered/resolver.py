@@ -85,8 +85,12 @@ class DeviceResolver:
                           store.n_moves)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
-        for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
-            gather(fetch[r], n[r:r + 1], c.units(), c.slots())
+        roles = getattr(self._fetch[0], "gather_roles", None)
+        if roles is not None:                    # every role's misses in one launch
+            roles(fetch, n, [c.units() for c in self.classes], [c.slots() for c in self.classes])
+        else:
+            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
+                gather(fetch[r], n[r:r + 1], c.units(), c.slots())
         if store.exclusive:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions

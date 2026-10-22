@@ -85,11 +85,20 @@ class MoeResolveLfu(MoeResolve):
 
 
 class ExpertFetch:
+    """`expert_fetch@1`, and its optional `gather_roles`: a group's every role in one launch (item 2 of FN's step 7: a
+    decode layer's two small gathers were two launches of 8 CTAs each, ≈ 27 GB/s on a 5080's link), on
+    `expert_io.fetch_ctas` CTAs per role (plugin option, default 8)."""
+
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, staging: int) -> None:
         self.lib = modules(ctx.fingerprint.sm)
+        self.ctas = int(ctx.options.get("plugins", {}).get("expert_io.fetch_ctas", 8))
 
     def __call__(self, fetch, n, src, dst) -> None:
         self.lib.fetch(fetch, n, src, dst, False)
+
+    def gather_roles(self, fetch, n, srcs, dsts) -> None:
+        """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch."""
+        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts))
 
 
 class ExpertPrefetch:

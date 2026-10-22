@@ -342,6 +342,16 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, dst)
     assert torch.equal(dst.cpu(), want)
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
+    if hasattr(fetch_, "gather_roles"):         # both roles in one launch: each its own list, units and slots
+        dst2 = torch.randint(0, 256, (K + staging + 30, unit + 16), dtype=torch.uint8, generator=g)
+        data2 = torch.randint(0, 256, (10, unit + 16), dtype=torch.uint8, generator=g)
+        units2 = torch.tensor([[3, 8, 1, 4, 6, 9], [K + 2, K, K + 7, K + 9, K + 1, K + 6]], dtype=torch.int32)
+        want2 = reference.expert_fetch(units2, 6, data2, dst2.clone())
+        first = reference.expert_fetch(units, 2, data, dst.cpu())
+        d2 = dst2.to(device)
+        fetch_.gather_roles(torch.stack([units, units2]).to(device), torch.tensor([2, 6], dtype=torch.int32,
+                            device=device), [src, data2.to(device)], [dst, d2])
+        assert torch.equal(dst.cpu(), first) and torch.equal(d2.cpu(), want2)
 
 
 def test_prefetch_is_selected_for_its_copy_mode():

@@ -404,6 +404,54 @@ __global__ void k_fetch(const int32_t * __restrict__ fetch, const int32_t * __re
     }
 }
 
+// Every role's fetch of a group in one launch (`expert_fetch@1`'s `gather_roles`): role r's units
+// src[r][fetch[r, 0, i]] -> dst[r][fetch[r, 1, i]] for i < min(n[r], staging). The roles' units are cut into chunks
+// of blockDim * UNROLL words, dealt round-robin to the CTAs over every role's units at once, so a launch keeps
+// CTAS * blockDim * UNROLL * 16 bytes of reads in flight across both roles' units, not one unit at a time.
+constexpr int MAX_ROLES = 8;
+struct Roles {
+    const uint4 * src[MAX_ROLES];
+    uint4 * dst[MAX_ROLES];
+    int64_t words[MAX_ROLES];
+    int roles, staging;
+};
+
+template <int UNROLL>
+__global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const Roles p) {
+    // a flat walk over (role, unit, chunk): chunk c of a unit is words [c·step, (c + 1)·step), step = blockDim·UNROLL
+    const int64_t step = int64_t(blockDim.x) * UNROLL;
+    int64_t flat = 0;
+    for (int r = 0; r < p.roles; ++r) {
+        const int count = min(n[r], p.staging);
+        const int64_t chunks = (p.words[r] + step - 1) / step;
+        const int32_t * f = fetch + int64_t(r) * 2 * p.staging;
+        const int64_t grid = gridDim.x;
+        for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * chunks;
+             c += grid) {                                    // global chunk flat + c falls to CTA (flat + c) % grid
+            const int b = int(c / chunks);
+            const int64_t base = (c % chunks) * step + threadIdx.x;
+            const uint4 * __restrict__ s = p.src[r] + int64_t(f[b]) * p.words[r];
+            uint4 * __restrict__ d = p.dst[r] + int64_t(f[p.staging + b]) * p.words[r];
+            uint4 v[UNROLL];
+#pragma unroll
+            for (int u = 0; u < UNROLL; ++u) {
+                const int64_t i = base + int64_t(u) * blockDim.x;
+                if (i < p.words[r]) {
+                    v[u] = s[i];
+                }
+            }
+#pragma unroll
+            for (int u = 0; u < UNROLL; ++u) {
+                const int64_t i = base + int64_t(u) * blockDim.x;
+                if (i < p.words[r]) {
+                    d[i] = v[u];
+                }
+            }
+        }
+        flat += int64_t(count) * chunks;
+    }
+}
+
 void check(const at::Tensor & t, const at::Tensor & like, at::ScalarType dtype, at::IntArrayRef shape, const char * name) {
     TORCH_CHECK(t.scalar_type() == dtype && t.device() == like.device() && t.is_contiguous() && t.sizes() == shape,
                 name, ": contiguous ", shape, " of ", dtype, " on ", like.device(), ", got ", t.sizes(), " of ",
@@ -866,6 +914,36 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
+void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at::Tensor> srcs,
+                  std::vector<at::Tensor> dsts, int64_t ctas) {
+    TORCH_CHECK(!dsts.empty() && dsts.size() == srcs.size() && int(dsts.size()) <= MAX_ROLES, "1 to ", MAX_ROLES,
+                " roles, a src and dst each");
+    const c10::cuda::CUDAGuard guard(dsts[0].device());
+    const int64_t roles = int64_t(dsts.size());
+    TORCH_CHECK(fetch.dim() == 3 && fetch.size(0) == roles && fetch.size(1) == 2, "fetch [roles, 2, staging]");
+    check(fetch, dsts[0], at::kInt, {roles, 2, fetch.size(2)}, "fetch");
+    check(n, dsts[0], at::kInt, {roles}, "n");
+    Roles p{};
+    p.roles = int(roles);
+    p.staging = int(fetch.size(2));
+    for (int64_t r = 0; r < roles; ++r) {
+        const at::Tensor & src = srcs[r];
+        const at::Tensor & dst = dsts[r];
+        TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) &&
+                    dst.size(1) % 16 == 0, "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
+        check(src, dsts[0], at::kByte, {src.size(0), src.size(1)}, "src");
+        check(dst, dsts[0], at::kByte, {dst.size(0), dst.size(1)}, "dst");
+        TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 &&
+                    reinterpret_cast<uintptr_t>(dst.data_ptr()) % 16 == 0, "src and dst 16-byte aligned");
+        p.src[r] = reinterpret_cast<const uint4 *>(src.data_ptr());
+        p.dst[r] = reinterpret_cast<uint4 *>(dst.data_ptr());
+        p.words[r] = dst.size(1) / 16;
+    }
+    k_fetch_roles<FETCH_UNROLL><<<int(ctas), FETCH_THREADS, 0, stream()>>>(fetch.data_ptr<int32_t>(),
+                                                                          n.data_ptr<int32_t>(), p);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
 // expert_prefetch@1 from the host's copy list: unit src[fetch[0, i]] -> slot dst[fetch[1, i]] for i < n, as one batch
 // of copy-engine DMA on `stream`, a run of consecutive units into consecutive slots one copy. `src` is pinned host
 // memory; the list is read before this returns.
@@ -929,6 +1007,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
+    m.def("fetch_roles", &gather_roles, "expert_fetch@1's gather_roles: every role's fetch of a group in one launch "
+          "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging)");
     m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
           "for i < min(n, staging)");
 }
