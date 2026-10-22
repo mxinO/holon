@@ -395,15 +395,25 @@ class TieredStore:
         size = self.arena.capacity * self.granule
         groups = list(self._order)
         # A layout lends a prefill pass's staging (D5) when every class can; else its staging slots hold that much.
+        # A class the seed leaves short of a pass's staging (one few groups share, or an auxiliary model's) is seeded
+        # that many of its hottest items first (`floors`), if its cap allows: a few cache slots more for it, where
+        # staging slots of a pass's size in every class would hold more and cache nothing.
+        can_lend, floors = self.policy.device_owned and not self.exclusive, {}
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
-            budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes))
-            seed = self.policy.seed(self._profile_counts(), budget)
-            self.lending = self.policy.device_owned and not self.exclusive and \
-                all(n >= self.prefill for n in budget.taken.values())
+            while True:
+                budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
+                seed = self.policy.seed(self._profile_counts(), budget)
+                short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
+                         and c.name not in floors and c.cap >= self.prefill}
+                if not (can_lend and staging < self.prefill and short):
+                    break
+                floors |= short
+            self.lending = can_lend and all(n >= self.prefill for n in budget.taken.values())
             if self.lending or staging == self.prefill:
                 break
+            floors = {}
         if self.lending and self.tail:                           # this layout lends: its tail can stage a pass
             self._tail(lambda c: budget.taken[c.name])
         self.stage = self.stages[classes[0].staging]
@@ -474,7 +484,7 @@ class TieredStore:
         vram, used = set(seed), dict.fromkeys(self.classes, 0)
         host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
                                                                                         dtype=np.int32)
-        for g, i in _Budget.warm_start(self._profile_counts()):
+        for g, i in _Budget.f2(self._profile_counts()):
             role = self.groups[groups[g]]
             if (g, i) in vram or any(used[c.name] >= c.held for c in role.values()):
                 continue
@@ -735,11 +745,13 @@ class TieredStore:
 
 class _Budget:
     """What a policy seeds within: the arena pool's bytes past every class's null and staging slots, each class's
-    pinned slots; an item takes a slot in each of its roles' classes."""
+    pinned slots; an item takes a slot in each of its roles' classes. `floors` (class -> items): the store's layout
+    wants that many of the class's items first (`warm_start`)."""
 
-    def __init__(self, store: TieredStore, nbytes: int) -> None:
+    def __init__(self, store: TieredStore, nbytes: int, floors: dict[str, int] | None = None) -> None:
         self.left, self.taken, self.granted = nbytes, dict.fromkeys(store.classes, 0), []
         self.classes = [list(store.groups[g].values()) for g in store._order]      # per group (in map order)
+        self.floors = floors or {}
 
     def take(self, group: int, item: int) -> bool:
         classes = self.classes[group]
@@ -752,8 +764,19 @@ class _Budget:
             self.taken[c.name] += 1
         return True
 
+    def warm_start(self, profile: np.ndarray) -> list[tuple[int, int]]:
+        """F2's order (`f2`), each floored class's first `floors[c]` items of it moved to the front."""
+        order = self.f2(profile)
+        if not self.floors:
+            return order
+        front = {}
+        for name, n in self.floors.items():
+            mine = [(g, i) for g, i in order if any(c.name == name for c in self.classes[g])]
+            front |= dict.fromkeys(mine[:n])
+        return list(front) + [x for x in order if x not in front]
+
     @staticmethod
-    def warm_start(profile: np.ndarray) -> list[tuple[int, int]]:
+    def f2(profile: np.ndarray) -> list[tuple[int, int]]:
         groups, items = profile.shape
         ranked = np.lexsort((np.broadcast_to(np.arange(items), profile.shape), -profile), axis=-1)   # per group
         floor = [(g, int(ranked[g, n])) for n in range(min(FLOOR, items)) for g in range(groups)]

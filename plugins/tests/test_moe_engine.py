@@ -576,6 +576,25 @@ def test_the_startup_profile_runs_a_streaming_pass(tiny_moe, tmp_path):
     assert offload.pass_tokens(10) == min(s.kernel.pass_rows for s in offload._stacks) == CHUNK
 
 
+def test_a_floored_class_is_seeded_its_hottest_items_first():
+    """A class the seed leaves short of a pass's staging (FN's IQ1_M gate/up of 3 layers, an MTP head's) is floored:
+    its groups' items in F2's order come first, so it can lend; the rest keep F2's order."""
+    from holon_std.tiered.store import _Budget
+
+    a, b, c = (types.SimpleNamespace(name=n, unit_bytes=1, cap=16) for n in "abc")
+    store = types.SimpleNamespace(classes={"a": a, "b": b, "c": c}, groups={0: {0: a, 1: b}, 1: {0: c, 1: b}},
+                                  _order={0: 0, 1: 1})
+    profile = np.array([list(range(16, 8, -1)), [1] + [0] * 7])      # group 1 (class c) cold: F2's 4 of it only
+    natural = _Budget(store, 18)
+    assert [x for x in natural.warm_start(profile) if natural.take(*x)] == _Budget.f2(profile)[:9]
+    assert natural.taken["c"] == 4
+    floored = _Budget(store, 18, {"c": 6})
+    order = floored.warm_start(profile)
+    f2 = _Budget.f2(profile)
+    assert order[:6] == [(1, i) for i in range(6)] and order[6:] == [x for x in f2 if x not in order[:6]]
+    assert len([x for x in order if floored.take(*x)]) == 9 and floored.taken["c"] == 6
+
+
 def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
     """A layout whose cache cannot lend a prefill pass's staging (a fill pool of 3 experts per class over the paged
     floor, F11 with the ring on) keeps its staging slots at a pass's size and never borrows: it serves as before. One
