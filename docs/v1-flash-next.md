@@ -2204,7 +2204,7 @@ graphed, a decode token takes ≈ 13.0 ms, Strata's 11.4):
 
 ### 20.5 The 5080's MTP rows: F5b off and on (owner, 2026-10-21)
 
-- **Tune's split** (`tune.split` at batch 1 with MTP, the deployment's flags; the card's 8-core CPU): F5a 95.1 tok/s;
+- **Tune's split** (`tune.split` at batch 1 with MTP, the deployment's flags): F5a 95.1 tok/s;
   the CPU's share at 0.5 with 2 / 4 / 6 threads 26.5 / 46.5 / 63.7; at 6 threads, shares 0.25 / 0.4 / 0.5 / 0.6 / 0.75
   / 1.0 give 87.7 / 76.1 / 63.7 / 56.4 / 43.7 / 20.4. Best: 0.25 at 6 threads, −7.7%: **not taken** by tune's ≥ 5%
   rule. (Before the lending fixes: F5a 87.5, best 77.2, −11.7%.)
@@ -2333,8 +2333,8 @@ workspace (193, sized by SM count for any batch) are what else remains above Str
 
 - **4 — F5b's CPU path:** ggml-cpu has no x86 SIMD dot for Q2_0, FN's down type: its generic loop took most of an
   expert's CPU time. Ours (bd50066, 8a94f86: AVX2 integer sums per 32-weight half, the generic's float steps in its
-  order: bitwise, L0 unchanged) takes an FN IQ2_XS expert on one core from 974 to 374 µs (a Zen 3 host). On the
-  5080's host (`spikes/fn7/cpu_expert.py`, AVX-512 build, 6 threads; each run spawns its threads, so a lone job's
+  order: bitwise, L0 unchanged) takes an FN IQ2_XS expert on one core from 974 to 374 µs (an AVX2 development
+  host). On the 5080's host (`spikes/fn7/cpu_expert.py`, AVX-512 build, 6 threads; each run spawns its threads, so a lone job's
   136 µs carries that): 64–77 µs per expert at 4–8 jobs — the lead's ≤ 80 µs target, Strata's 60–76. Tune's split on
   the new deployment then: F5a 110.2 tok/s (MTP, batch 1), the best share 0.4 at 6 threads 107.6 (−2.3%; it was
   −7.7% and −11.7%); benched at that share F5b still costs 2–7% (decode 87.2 / 88.1 / 77.7 against 91.5 / 89.9 /

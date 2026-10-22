@@ -45,7 +45,7 @@ class GatedSwiGLU(SwiGLU):
         return super().forward(x) * torch.sigmoid(self.gate(x))
 
 
-_SIDE: dict[torch.device, torch.cuda.Stream] = {}      # per device, the later parts' stream
+_SIDE: dict[torch.device, torch.Stream] = {}      # per device, the later parts' stream
 
 
 class Sum(nn.Module):
@@ -63,7 +63,7 @@ class Sum(nn.Module):
         self.parts = nn.ModuleList(ctx.unit(p, hidden=hidden, layer=layer) for p in parts)
         cuda = torch.device(ctx.device).type == "cuda" and \
             str(ctx.options.get("plugins", {}).get("ffn.fork", "on")) != "off"
-        self._side = _SIDE.setdefault(torch.device(ctx.device), torch.cuda.Stream(ctx.device)) if cuda else None
+        self._side = _SIDE.setdefault(torch.device(ctx.device), torch.Stream(device=ctx.device)) if cuda else None
 
     def _rest(self, x: torch.Tensor) -> torch.Tensor:
         acc = self.parts[1](x)
@@ -80,9 +80,9 @@ class Sum(nn.Module):
             return first(x) + self._rest(x)
         if self._side is None or not getattr(first, "joins", False):
             return add(x, self._rest(x))
-        main = torch.cuda.current_stream(x.device)
+        main = torch.accelerator.current_stream(x.device)
         self._side.wait_stream(main)                         # x is ready
-        with torch.cuda.stream(self._side):
+        with self._side:
             acc = self._rest(x)
         acc.record_stream(main)                             # read on the main stream: freed after its use there
         return add(x, acc, join=lambda: main.wait_stream(self._side))

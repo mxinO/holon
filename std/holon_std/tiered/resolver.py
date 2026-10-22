@@ -79,10 +79,10 @@ class DeviceResolver:
         slots, fetch, n, cpu = out[:4]
         self._prepared = False
         if split:                                # the fetch on a side stream; the hits' passes run meanwhile
-            main = torch.cuda.current_stream(ids.device)
+            main = torch.accelerator.current_stream(ids.device)
             side = store.fetch_stream()
             side.wait_stream(main)
-            with torch.cuda.stream(side):
+            with side:
                 self._gather(fetch, n)
             fetch.record_stream(side)            # the main stream's allocations must not reuse them meanwhile
             n.record_stream(side)

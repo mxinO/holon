@@ -134,7 +134,7 @@ class TieredStore:
         self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
-        self._fetch_stream: torch.cuda.Stream | None = None
+        self._fetch_stream: torch.Stream | None = None
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -609,19 +609,19 @@ class TieredStore:
             self.lent = Lent(self, self._mode, self._step_tail if self._mode == "ring" else None)
             self.lent.begin()
 
-    def fetch_stream(self) -> torch.cuda.Stream:
+    def fetch_stream(self) -> torch.Stream:
         """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""
         if self._fetch_stream is None:
-            self._fetch_stream = torch.cuda.Stream(self.ctx.device)
+            self._fetch_stream = torch.Stream(device=self.ctx.device)
         return self._fetch_stream
 
     def tail_view(self) -> torch.Tensor | None:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
-        to its end; None in a step that lends none."""
+        to its end; a staging layout's own tail (the pool's last bytes) in any step; else None."""
         if self.lent is None or self.lent.tail is None:
-            if self._own_tail is None or torch.cuda.is_current_stream_capturing():
-                return None                     # (a graphed step's passes allocate in the graphs' pool)
-            at, n = self._own_tail
+            if self._own_tail is None:
+                return None
+            at, n = self._own_tail              # fixed bytes of the pool, used within a step: graphs may hold them
             return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n]
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
