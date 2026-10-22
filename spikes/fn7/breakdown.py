@@ -150,7 +150,8 @@ def run(a) -> dict:
             pass
         for _ in range(2):
             engine.step()
-    store, missed = engine.ctx.shared_objects.get("std.moe.offload"), {"units": 0, "bytes": 0, "steps": 0}
+    store = engine.ctx.shared_objects.get("std.moe.offload")
+    missed = {"units": 0, "bytes": 0, "steps": 0, "absent_bytes": 0}
     if store is not None:      # the measured steps' fetched misses (not resident before the step, not the CPU's)
         unit = np.array([[c.unit_bytes for _, c in sorted(store.groups[g].items())] for g in store._order])
         prev = {"map": store.residency.host.copy()}
@@ -161,6 +162,8 @@ def run(a) -> dict:
                 missed["units"] += int(gone.sum())
                 missed["bytes"] += int((gone[..., None] * unit[:, None, :]).sum())
                 missed["steps"] += 1
+                # every piece not resident before the step (what a streaming step's ring reads), routed or not
+                missed["absent_bytes"] += int(((prev["map"] < 0) * unit[:, None, :]).sum())
             prev["map"] = store.residency.host.copy()
         missed["on"] = False
         store.taps.append(tap)
