@@ -2343,8 +2343,11 @@ workspace (193, sized by SM count for any batch) are what else remains above Str
   are the next step for verify.
 - **The hits first** (79b5883, `moe.split=on`, off by default): the resolve returns the fetched entries' slots apart,
   the fetch lands on a side stream while the pass runs the resident entries, then the fetched ones; bitwise the
-  resident store (GPU engine test). Measured on an RTX A5000: MTP decode 68 against 73 tok/s — the extra launches
-  and the two passes' null-slot entries cost more than the overlap saves there. A 5080 A/B is next.
+  resident store (GPU engine test). Measured on an RTX A5000: MTP decode 68 against 73 tok/s; on the 5080 (v3, same
+  allocation): decode 85.1 / 85.5 / 79.0 against 94.7 / 95.5 / 86.9, MTP 106.4 / 101.8 / 103.2 against 115.5 / 110.6
+  / 110.8 (−8 to −10%); the 5090 likewise (decode 113.0 / 113.0 / 102.6 against 124.7 / 124.6 / 111.9) — the extra
+  launches and the two passes' null-slot entries (mmvq computes them in full) cost more than the overlap saves. Kept
+  off; it needs mmvq to skip null slots first.
 - **6 — MTP:** the front-only catch-up (909ac48): the step's tokens through the head's state writes only — the same
   KV and index keys bitwise (tiny model), the same accepted drafts (IQ2_XS); the head's experts in classes of their
   own, all 512 resident (fd7f840).
@@ -2391,3 +2394,25 @@ IQ3_S bytes at the link's rate; Strata's 0.48 s reads fewer, how not yet found).
   rows, so a streaming step's loan, returned after the last group, outlived the step (the next ring step short: the
   5080's error 4 and mmq's column error; f9cf4a9, with a regression test); and once that let the startup profile's
   minimum pool lend, a tail too large for it was refused at start instead of staging (b9db901).
+
+**The 5080's v3 step per component** (nsys, eager; ms of GPU): decode 13.38 — the miss fetch 3.80 (164 MiB at 45.4
+GB/s), routed experts 1.62, resolve 0.50, router 0.38 (0.53 in float32), GDN 2.13 (2.22 before the a/b merge), HC
+2.07, shared expert 1.09 (on its side stream), QSA 1.05; a verify pass 31.1 — the fetch 12.3 (585 MiB, 46.4 GB/s),
+GDN 3.59 (4.06), HC 3.23, the MTP head 3.4 (its experts all resident: 1.02). The 5090's: decode 11.02 (the fetch
+3.56: 156 MiB at 46.0 GB/s), a verify pass 28.7 (the fetch 14.4: 648 MiB at 47.2 GB/s) — the verify's fetch is what the
+MTP rows still pay.
+
+### 21.5 Where step 7 stands, and what is next
+
+- **Met:** drafting-off decode and 4K / 32K prefill above Strata on both cards (1.01–1.21); the 5080's MTP at 4K
+  (1.06); hit rates counted both ways (Holon's higher); `k_fetch` at 45–46 GB/s; ≥ 23% experts cached on the 5080
+  with the pack (24.5%); F5b's CPU path within ≤ 80 µs per expert; gates (c) on both cards and (d)'s score on both.
+- **Below the bar:** MTP decode at 1K (0.89 / 0.81) and 32K (0.95 / 0.88), the 5090's 4K MTP (0.95); the 5090's 1K
+  prefill (0.64).
+- **Not shipped, measured:** F5b's split (−2 to −7%), the hits-first split (−8 to −10%), THP host pools (+≈ 5% on the
+  fetch alone; a core option).
+- **Next, in the lead's order:** multi-token CPU kernels for verify windows, then the split again (item 4); lending the
+  step peak from the cache (≈ +2.4 points of experts on the 5080; core ledger — the lead's go needed, §21.2); mmvq
+  skipping null slots, then the hits first again; item 8's `k_resolve` (48 launches, 0.50 ms) and router + shared-gate
+  fusion; the 5090's 1K prefill.
+

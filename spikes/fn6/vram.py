@@ -78,7 +78,8 @@ def main() -> None:
            "params_total": sum(per.values()),
            "other_live": {k: round(v / 2**20, 1) for k, v in other.most_common(25)},
            "other_live_total": sum(other.values()),
-           "statics": {k: round(v / 2**20, 1) for k, v in statics.most_common(25)}, "pools": pools, "pools_total": sum(p["bytes"] for p in pools.values()),
+           "statics": {k: round(v / 2**20, 1) for k, v in statics.most_common(25)},
+           "pools": pools, "pools_total": sum(p["bytes"] for p in pools.values()),
            **seen, "allocated": torch.cuda.memory_allocated(), "reserved": torch.cuda.memory_reserved(),
            "driver_used": total - free, "total": total}
     print(json.dumps(out, indent=1))
