@@ -67,7 +67,8 @@ class Lent:
             held.index_add_(0, classes.reshape(-1), s.n_before.long().repeat_interleave(roles))
         else:
             held = self._held(classes)
-        stage = torch.full_like(held, s.prefill)
+        # an auxiliary model's classes are not lent to (their layers never borrow: `done`)
+        stage = torch.where(s.lending_classes, s.prefill, 0)
         for k in range(1, 1 + (ROUNDS if self.mode == "ring" else 1)):
             want = self._want(res, classes) if self.mode == "ring" else stage
             if k == ROUNDS:                                                  # the last: the worst case
@@ -90,6 +91,7 @@ class Lent:
         lent = s.pool[:, :s.prefill][classes]
         lent = torch.where(lent >= 0, lent, graphed[None, :, -1:])         # short (SHORT): never past the arena
         ringed = ok[classes]                                                # [G, R]
+        ringed[s.borrowing_groups:] = False                                 # (an auxiliary layer: none)
         s.stage_tab.copy_(torch.where(ringed[..., None], graphed[None], lent))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ringed)
@@ -102,8 +104,9 @@ class Lent:
         s.stage_width.copy_(torch.where(ok.all(), s.staging, s.prefill).view(1))
 
     def _want(self, res: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
-        """Per class: twice the most pieces a layer of it misses."""
+        """Per class: twice the most pieces a layer of it misses (the target's layers)."""
         missing = (res < 0).sum(1)                                           # [G, R]
+        missing[self.store.borrowing_groups:] = 0
         want = torch.zeros(len(self.store.classes), dtype=torch.int64, device=res.device)
         return want.scatter_reduce_(0, classes.reshape(-1), missing.reshape(-1), "amax") * BUFFERS
 
@@ -175,14 +178,17 @@ class Lent:
         return s.ring[g], s.stage_tab[g]
 
     def done(self, g: int) -> None:
-        """After layer g's expert passes: its ring forgotten, layer g + 2's started; after the last, the lent slots
-        returned to their layers, empty."""
+        """After layer g's expert passes: its ring forgotten, layer g + 2's started; after the target's last, the lent
+        slots returned to their layers, empty. An auxiliary model's layers (after the target's in the map) never
+        borrow: their passes over a step's prompt rows may not run at all (the MTP head's front-only catch-up), and
+        the loan must not outlive the step."""
         s = self.store
+        last = s.borrowing_groups - 1
         if self.mode == "ring":
             s.ring[g].fill_(-1)
-            if g + BUFFERS < len(s.layers):
+            if g + BUFFERS <= last:
                 self._start(g + BUFFERS)
-        if g == len(s.layers) - 1:
+        if g == last:
             self._give_back()
 
     def _give_back(self) -> None:

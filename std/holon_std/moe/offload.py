@@ -90,6 +90,7 @@ class Offload(nn.Module):
     def _group(self) -> None:
         if self.layer is None:                  # an auxiliary model's layer: after every group added so far
             self.layer = max(self.store.groups, default=-1) + 1
+            self.store.mark_auxiliary(self.layer)
 
     def fused(self, gate_up: ExpertLinear) -> ArenaExperts:
         """A fused gate/up stack (per expert gate's rows then up's: the arena's layout) as pieces of the store."""

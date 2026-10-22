@@ -135,6 +135,7 @@ class TieredStore:
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_stream: torch.Stream | None = None
+        self._auxiliary: set[int] = set()                   # an auxiliary model's groups (`mark_auxiliary`)
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -205,7 +206,9 @@ class TieredStore:
     def _tables(self) -> None:
         """The device tables of every group added, then each resolver attached to its group's."""
         if self.residency is None:
-            pinned = [c.cap for c in self.classes.values() if c.cache is not None]
+            aux = {c.name for g in self._auxiliary for c in self.groups[g].values()} - \
+                {c.name for g in self.groups if g not in self._auxiliary for c in self.groups[g].values()}
+            pinned = [c.cap for c in self.classes.values() if c.cache is not None and c.name not in aux]
             for c in self.classes.values():
                 c.held = self.tiers[0].holds(c.name, len(c.pieces))
             self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
@@ -407,6 +410,8 @@ class TieredStore:
         # staging slots of a pass's size in every class would hold more and cache nothing.
         # A staging layout keeps its own tail at the pool's end (`own_tail`): the large passes' buffers.
         can_lend, floors = self.policy.device_owned and not self.exclusive, {}
+        # the classes a borrowing step lends from: the target's (an auxiliary model's layers never borrow)
+        lenders = {c.name for g in list(self._order)[:self.borrowing_groups] for c in self.groups[g].values()}
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
@@ -416,11 +421,11 @@ class TieredStore:
                                  floors)
                 seed = self.policy.seed(self._profile_counts(), budget)
                 short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
-                         and c.name not in floors and c.cap >= self.prefill}
+                         and c.name not in floors and c.cap >= self.prefill and c.name in lenders}
                 if not (can_lend and staging < self.prefill and short):
                     break
                 floors |= short
-            self.lending = can_lend and all(n >= self.prefill for n in budget.taken.values())
+            self.lending = can_lend and all(n >= self.prefill for c, n in budget.taken.items() if c in lenders)
             if self.lending or staging == self.prefill:
                 break
             floors = {}
@@ -438,6 +443,7 @@ class TieredStore:
         # each class's arena end: the first slot a streaming step does not lend to its ring and staging (a tail step
         # takes its own tail off it, `Lent`)
         self.lend_ends = torch.tensor([c.size for c in classes], device=self.ctx.device)
+        self.lending_classes = torch.tensor([c.name in lenders for c in classes], device=self.ctx.device)
         # −1 − tier: every piece in the RAM tier (inclusive), or on the SSD until placed (exclusive)
         self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):
@@ -634,8 +640,17 @@ class TieredStore:
     def layer_done(self, g: int) -> None:
         if self.lent is not None:
             self.lent.done(g)
-            if g == len(self.groups) - 1:
+            if g == self.borrowing_groups - 1:
                 self.lent = None
+
+    def mark_auxiliary(self, group: int) -> None:
+        """`group` is an auxiliary model's (FN D12a): after the target's in the map, never borrowing (`Lent.done`)."""
+        self._auxiliary.add(group)
+
+    @property
+    def borrowing_groups(self) -> int:
+        """The groups a borrowing step lends to, first in the map: the target's."""
+        return len(self.groups) - len(self._auxiliary)
 
     # -- the policy's means -------------------------------------------------------------------------------------------
     def lend(self, need: torch.Tensor, call: int = 1) -> torch.Tensor:

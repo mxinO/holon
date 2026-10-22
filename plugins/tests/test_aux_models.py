@@ -158,3 +158,35 @@ def test_sub_steps_at_the_length_limit(tiny_checkpoint, tiny_case):  # noqa: F81
 def test_no_aux_model_without_a_drafter(tiny_checkpoint):  # noqa: F811
     engine = _engine(tiny_checkpoint, drafting=False)
     assert "aux.kv" not in engine.executor.planners and "state.aux.kv" not in engine.ledger.pools
+
+
+def test_an_aux_layer_that_runs_no_prompt_rows_never_holds_a_loan(tmp_path_factory, tmp_path):
+    """An auxiliary model's MoE layer in the offload store (FN D12a) whose step tokens only write their KV (the MTP
+    head's front-only catch-up: its FFN never runs on prompt rows) leaves a streaming step's loan to the target's
+    layers: the lent slots come back after the target's last layer, every step's — not after the auxiliary layer's,
+    which never comes — so no loan outlives its step; the auxiliary classes are not lent to and their pins do not
+    stop the target's ring. The streams are the plain engine's."""
+    from .test_moe_engine import KEY, Q, _gguf_and_dense, _tiny_moe
+
+    checkpoint, prompts = _tiny_moe(tmp_path_factory, 4)
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    plain, want = _engine(file, drafting=False), []
+    for p in prompts:
+        rid, out = plain.add(p, GREEDY), []
+        while plain.has_work():
+            out += [t for d in plain.step() if d.rid == rid for t in d.token_ids]
+        want.append(out)
+    _oracle(prompts, want, ahead=True)
+    engine = _engine(file, host_memory=1 << 24, max_step_tokens=32, max_model_len=64, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "aux.write_kv": True})
+    store = engine.ctx.shared_objects[KEY]
+    assert store.lending and store.borrowing_groups == len(store.groups) - 1
+    lent = []
+    store.taps.append(lambda step, record: lent.append(store.lent is None))
+    rids = [engine.add(p, GREEDY) for p in prompts]
+    out = {r: [] for r in rids}
+    while engine.has_work():
+        for d in engine.step():
+            out[d.rid] += d.token_ids
+    assert [out[r] for r in rids] == want and store.borrowed["ring"] > 0 and all(lent)
+
