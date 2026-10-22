@@ -11,8 +11,9 @@ Two uses (`mode`, the host's choice at launch):
   `ring` table), so its expert passes, up to 4,096 tokens, fetch nothing but what a pass's own admissions unmap
   (into the graphed steps' staging slots). Lending makes misses, so the halves are sized after it: `ROUNDS` rounds of
   `lend(twice the most misses of a layer, per class, less what is held)`, the last asking for the worst case (twice
-  the layer's experts). Should the slots still fall short — a cache that can lend no more —, the step stages instead
-  (its ring empty, its stage list the lent slots: the device's choice, reported in `ring_ok`).
+  the layer's experts). Should a class's slots still fall short — a cache that can lend no more of it —, that class's
+  layers stage instead (their ring empty, their stage list its lent slots: the device's choice, reported in
+  `ring_ok`), the other classes streaming.
 - `stage`: the layer's routed misses are staged into lent slots (the resolve's `stage` list), where the store's own
   staging slots, sized for graphed steps, would not hold a pass's.
 
@@ -73,25 +74,29 @@ class Lent:
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
         want = self._want(res, classes) if self.mode == "ring" else stage
-        ring_ok = (held >= want).all() if self.mode == "ring" else torch.zeros((), dtype=torch.bool, device=res.device)
-        s.ring_ok.copy_(ring_ok.view(1))
-        s.errors.bitwise_or_((~ring_ok & (held < stage).any()).int() * SHORT)
+        # Per class: the ring where its lent slots hold both halves, else its layers stage into them (a small class —
+        # a type few layers share, FN's IQ1_M gate/up of 3 layers — cannot lend twice a layer's misses: it no longer
+        # stages every class). `ring_ok`: 1 every class streamed, 2 some, 0 none.
+        ok = held >= want if self.mode == "ring" else torch.zeros_like(held, dtype=torch.bool)
+        s.ring_ok.copy_((ok.all().int() + (ok.any() & ~ok.all()).int() * 2).view(1))
+        s.errors.bitwise_or_(((~ok) & (held < stage)).any().int() * SHORT)
         self._pool(res, classes)
         # a pass's misses past the ring (an earlier pass's admissions unmapped them) go to the graphed steps' staging
-        # slots; a stage step's to the pool's first ones
+        # slots; a staged class's to its pool's first ones
         graphed = torch.cat([s.stage, s.stage[:, -1:].expand(roles, s.prefill - s.stage.shape[1])], 1)
         lent = s.pool[:, :s.prefill][classes]
         lent = torch.where(lent >= 0, lent, graphed[None, :, -1:])         # short (SHORT): never past the arena
-        s.stage_tab.copy_(torch.where(ring_ok, graphed[None], lent))
+        ringed = ok[classes]                                                # [G, R]
+        s.stage_tab.copy_(torch.where(ringed[..., None], graphed[None], lent))
         if self.mode == "ring":
-            self._ring(res, classes, want // BUFFERS, ring_ok)
+            self._ring(res, classes, want // BUFFERS, ringed)
             if s.ring_copy == "dma":            # the step's one host sync: the second copy waits, after the first
                 fetch, n = s.ring_host
                 fetch.copy_(s.ring_fetch, non_blocking=True)
                 n.copy_(s.ring_n)
             for g in range(min(BUFFERS, groups)):
                 self._start(g)
-        s.stage_width.copy_(torch.where(ring_ok, s.staging, s.prefill).view(1))
+        s.stage_width.copy_(torch.where(ok.all(), s.staging, s.prefill).view(1))
 
     def _want(self, res: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
         """Per class: twice the most pieces a layer of it misses."""
@@ -128,12 +133,12 @@ class Lent:
         sink = s.pool.shape[1] - 1
         s.pool.fill_(-1).scatter_(1, torch.where(mine, mine.cumsum(1) - 1, sink), slots.expand(len(mine), -1))
 
-    def _ring(self, res: torch.Tensor, classes: torch.Tensor, half: torch.Tensor, ring_ok: torch.Tensor) -> None:
+    def _ring(self, res: torch.Tensor, classes: torch.Tensor, half: torch.Tensor, ringed: torch.Tensor) -> None:
         """The ring slots of every layer's missing pieces (its half at `half` per class), and their copies' tables;
-        none when the slots fell short."""
+        none for a layer's role whose class's slots fell short (`ringed` [G, R])."""
         s = self.store
         groups, experts, roles = res.shape
-        missing = (res < 0) & ring_ok                                        # [G, E, R]
+        missing = (res < 0) & ringed[:, None, :]                             # [G, E, R]
         rank = missing.cumsum(1) - 1
         base = (torch.arange(groups, device=res.device) % BUFFERS)[:, None] * half[classes]   # [G, R]
         at = (base[:, None, :] + rank).clamp(0, s.pool.shape[1] - 1)

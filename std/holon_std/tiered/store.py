@@ -553,6 +553,7 @@ class TieredStore:
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
             self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
+            self.borrowed["partial"] = self.borrowed.get("partial", 0) + (int(telemetry["ring_ok"][0]) == 2)
         self.residency.commit(step.step, record["records"], returned=mode is not None)
         for tap in self.taps:
             tap(step, record)
