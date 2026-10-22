@@ -678,6 +678,29 @@ def test_mmvq_skips_an_arenas_null_slots(ctx, stage, glu):
         assert torch.equal(got, want) and not got[:, ::2].any() and got[:, 1::2].any(), f"T={tokens}"
     assert {p for p, n in kernel.calls.items() if n} == {"mmvq/q8_1"}, kernel.calls
 
+
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_entries_split_across_calls_compose_the_one_call(ctx, stage):
+    """A pipelined pass (FN step 7): an entry's id −1 is skipped on purpose — mmq's id helper lists it last without a
+    range error, mmvq leaves its rows —, so calls over a partition of a pass's entries, each with the others' ids −1,
+    write into one `out` exactly the one call's rows (mmq at 300 tokens, a 1-token and an mmvq-limit tail)."""
+    k, out, rows = STAGES[stage]
+    s = stack("q4_k", EP, out, k, seed=51)
+    facts = {"layout": "ggml.q4_k/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
+             "rows_per_token": rows, "glu": "none", "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
+             "slots": EP + K}
+    kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
+    parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
+    for tokens in (300, 1, kernel.mmvq_tokens):
+        x, ids = placed_inputs(stage, tokens, seed=52)
+        want = kernel(x, parts, ids)
+        part = torch.randint(-1, 3, ids.shape, generator=torch.Generator().manual_seed(tokens)).cuda()
+        got = torch.full_like(want, torch.nan)
+        kernel.errors.zero_()
+        for i in range(-1, 3):
+            kernel(x, parts, torch.where(part == i, ids, -1), out=got)
+        assert torch.equal(got, want) and not int(kernel.errors), f"T={tokens}"
+
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq

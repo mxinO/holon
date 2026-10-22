@@ -645,6 +645,11 @@ static __global__ void mul_mat_vec_q(
     channel_y  = ncols_dst == 1 && ids ? fastmodulo(channel_dst, nchannels_y) : channel_dst;
     sample_dst = blockIdx.z;
 
+    // Holon: a negative id is an entry this call skips on purpose (another pass of a pipelined expert path computes
+    // it, FN step 7): its rows are left as they are
+    if (ncols_dst == 1 && ids && !shared_expert && int32_t(channel_x) < 0) {
+        return;
+    }
     // Holon: an offload arena's null slot (zero weights, fusion.null_slots): its entry's rows are 0 (what its zero
     // weights give for finite activations, no bias here), so the block reads nothing and stores zeros
     if (ncols_dst == 1 && ids && !shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
@@ -955,6 +960,9 @@ static __global__ void mul_mat_vec_q_moe(
     ggml_cuda_pdl_sync();
     const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
     const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
+    if (!shared_expert && int32_t(channel_x) < 0) { // Holon: an entry skipped on purpose: its rows left as they are
+        return;
+    }
     // Holon: a null slot's entry (fusion.null_slots): this token's rows are 0, nothing read (as mul_mat_vec_q)
     if (!shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
         if (threadIdx.x < c_rows_per_block && (c_rows_per_block == 1 || uint32_t(row0 + threadIdx.x) < nrows_x)) {

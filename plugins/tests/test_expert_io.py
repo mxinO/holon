@@ -387,6 +387,15 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
         fetch_.gather_roles(torch.stack([units, units2]).to(device), torch.tensor([2, 6], dtype=torch.int32,
                             device=device), [src, data2.to(device)], [dst, d2])
         assert torch.equal(dst.cpu(), first) and torch.equal(d2.cpu(), want2)
+        if getattr(fetch_, "parts", False):    # a pipelined pass's fetch, part by part: the same slots in the end
+            d2 = torch.zeros_like(dst2).to(device)
+            for i in range(4):
+                fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                    [data2.to(device)], [d2], part=i, parts=4)
+                if i == 1:                     # parts of ⌈6 / 4⌉ = 2 entries: the first two parts, four of them
+                    assert torch.equal(d2[units2[1, :4].long()].cpu(), data2[units2[0, :4].long()])
+                    assert not d2[units2[1, 4:].long()].any()
+            assert torch.equal(d2[units2[1].long()].cpu(), data2[units2[0].long()])
 
 
 def test_prefetch_is_selected_for_its_copy_mode():

@@ -863,7 +863,7 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
-                                           ("", "*=0.25 split"),
+                                           ("", "*=0.25 split"), ("", "*=0.75 pipe"),
                                            ("", "*=0.25 ssd"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -884,22 +884,27 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
     ssd, split = ring == "ssd", ring == "split"      # their copies on SMs / copy engines, "tail" lending a tail (D11)
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
-                                                     # resident entries first, the misses' fetch on a side stream
+    pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
+                                                     # "pipe": prompt steps stage, their misses in 4 fetched parts
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
-        "moe.ring_lend": "tail" if ring == "tail" else "coldest", "moe.split": "on" if split else "off"} | (
+        "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"} | (
+        {"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {}) | (
         {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
     mode = "warn" if ring == "dma" else "error"                   # "dma": one sync per streaming step, counted
-    with (route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
+    from holon_std.tiered.resolver import DeviceResolver
+    piped, pipelined = [], DeviceResolver._pipelined
+    spy = mock.patch.object(DeviceResolver, "_pipelined", lambda self, *a: piped.append(a[-1]) or pipelined(self, *a))
+    with (spy, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
           _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails):
         warnings.simplefilter("always")
         assert _served(engine, prompts) == want
-    assert bool(tails) == (ring == "tail")
+    assert bool(tails) == (ring in ("tail", "pipe"))
     syncs = [w for w in syncs if "called a synchronizing" in str(w.message)]
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
@@ -915,7 +920,9 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache != "" and cache != "*=0")
-        assert report["device_is_mirror"] and bool(store.borrowed["ring"]) == bool(ring), (report, store.borrowed)
+        assert report["device_is_mirror"] and bool(store.borrowed["ring"]) == bool(ring and not pipe), (
+            report, store.borrowed)
+        assert not pipe or (store.borrowed["stage"] and piped)
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}

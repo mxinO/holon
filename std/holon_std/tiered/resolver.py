@@ -58,7 +58,7 @@ class DeviceResolver:
 
     def __call__(self, ids: torch.Tensor, first: int, plan: torch.Tensor | None = None,
                  jobs: torch.Tensor | None = None, before_fetch=None,
-                 kinds: torch.Tensor | None = None, split: bool = False):
+                 kinds: torch.Tensor | None = None, split: bool = False, parts: int = 1):
         """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds, or `kinds`), the misses
         fetched; and
         `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without), handed
@@ -71,6 +71,7 @@ class DeviceResolver:
         if store.exclusive:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
         split = split and getattr(self.resolve, "splits", False) and not store.exclusive and before_fetch is None
+        parts = parts if getattr(self._fetch[0], "parts", False) and not store.exclusive and before_fetch is None else 1
         defer = store.cpu_admit and before_fetch is not None and getattr(self.resolve, "defers", False)
         out = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
@@ -89,6 +90,8 @@ class DeviceResolver:
             fetch.record_stream(side)            # the main stream's allocations must not reuse them meanwhile
             n.record_stream(side)
             return slots, cpu, out[4], lambda: main.wait_stream(side)
+        if parts > 1:                            # the misses part by part on a side stream, each part's entries known
+            return self._pipelined(slots, fetch, n, parts)
         if before_fetch is not None:
             before_fetch(cpu)
         if store.exclusive:
@@ -107,6 +110,33 @@ class DeviceResolver:
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
                 gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
         return slots, cpu
+
+    def _pipelined(self, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):
+        """(slots, part [T, k], landed): the misses' fetch in `parts` parts on the store's fetch stream — part i the
+        entries [i·q, (i + 1)·q) of each role's list, q = ⌈n / parts⌉ —, an entry's part the latest of its pieces'
+        (−1: resident or a null slot; a staged piece's rank is its stage slot's index in the list)."""
+        main = torch.accelerator.current_stream(slots.device)
+        side = self.store.fetch_stream()
+        side.wait_stream(main)
+        landed = []
+        with side:
+            for i in range(parts):
+                self._fetch[0].gather_roles(fetch, n, [c.units() for c in self.classes],
+                                            [c.slots() for c in self.classes], part=i, parts=parts)
+                event = torch.Event(device=slots.device)
+                event.record(side)
+                landed.append(lambda event=event: main.wait_event(event))
+        fetch.record_stream(side)
+        n.record_stream(side)
+        width = self.stage.shape[1]
+        part = torch.full(slots.shape[1:], -1, dtype=torch.int64, device=slots.device)
+        for r, c in enumerate(self.classes):
+            rank = torch.full((c.slots().shape[0],), -1, dtype=torch.int64, device=slots.device)
+            rank[self.stage[r].long()] = torch.arange(width, device=slots.device)
+            q = (n[r:r + 1].long().clamp(max=width) + parts - 1) // parts
+            at = rank[slots[r].long()]
+            part = torch.maximum(part, torch.where(at >= 0, at // q.clamp(min=1), -1))
+        return slots, part, landed
 
     def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:
         roles = getattr(self._fetch[0], "gather_roles", None)

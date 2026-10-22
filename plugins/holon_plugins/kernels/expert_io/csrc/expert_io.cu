@@ -439,7 +439,8 @@ struct Roles {
     uint4 * dst[MAX_ROLES];
     int64_t words[MAX_ROLES];
     int roles, staging;
-};
+    int part = 0, parts = 1;           // the call copies part `part` of `parts` of each role's list: its entries
+};                                     // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group)
 
 template <int UNROLL>
 __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const Roles p) {
@@ -447,13 +448,14 @@ __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t 
     const int64_t step = int64_t(blockDim.x) * UNROLL;
     int64_t flat = 0;
     for (int r = 0; r < p.roles; ++r) {
-        const int count = min(n[r], p.staging);
+        const int all = min(n[r], p.staging), q = (all + p.parts - 1) / p.parts;
+        const int first = min(all, p.part * q), count = min(all, first + q) - first;
         const int64_t chunks = (p.words[r] + step - 1) / step;
         const int32_t * f = fetch + int64_t(r) * 2 * p.staging;
         const int64_t grid = gridDim.x;
         for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * chunks;
              c += grid) {                                    // global chunk flat + c falls to CTA (flat + c) % grid
-            const int b = int(c / chunks);
+            const int b = first + int(c / chunks);
             const int64_t base = (c % chunks) * step + threadIdx.x;
             const uint4 * __restrict__ s = p.src[r] + int64_t(f[b]) * p.words[r];
             uint4 * __restrict__ d = p.dst[r] + int64_t(f[p.staging + b]) * p.words[r];
@@ -952,7 +954,7 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
 }
 
 void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at::Tensor> srcs,
-                  std::vector<at::Tensor> dsts, int64_t ctas) {
+                  std::vector<at::Tensor> dsts, int64_t ctas, int64_t part, int64_t parts) {
     TORCH_CHECK(!dsts.empty() && dsts.size() == srcs.size() && int(dsts.size()) <= MAX_ROLES, "1 to ", MAX_ROLES,
                 " roles, a src and dst each");
     const c10::cuda::CUDAGuard guard(dsts[0].device());
@@ -963,6 +965,9 @@ void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at
     Roles p{};
     p.roles = int(roles);
     p.staging = int(fetch.size(2));
+    TORCH_CHECK(parts >= 1 && 0 <= part && part < parts, "part ", part, " of ", parts);
+    p.part = int(part);
+    p.parts = int(parts);
     for (int64_t r = 0; r < roles; ++r) {
         const at::Tensor & src = srcs[r];
         const at::Tensor & dst = dsts[r];

@@ -96,6 +96,8 @@ class ExpertFetch:
     decode layer's two small gathers were two launches of 8 CTAs each, ≈ 27 GB/s on a 5080's link), on
     `expert_io.fetch_ctas` CTAs per role (plugin option, default 8); `expert_io.fetch_roles=off` withholds it."""
 
+    parts = True                           # `gather_roles(..., part, parts)`: one part of the lists (std.moe.kernels)
+
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, staging: int) -> None:
         self.lib = modules(ctx.fingerprint.sm)
         opts = ctx.options.get("plugins", {})
@@ -106,9 +108,10 @@ class ExpertFetch:
     def __call__(self, fetch, n, src, dst) -> None:
         self.lib.fetch(fetch, n, src, dst, False)
 
-    def gather_roles(self, fetch, n, srcs, dsts) -> None:
-        """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch."""
-        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts))
+    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
+        """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
+        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉."""
+        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts)
 
 
 class ExpertPrefetch:

@@ -114,7 +114,7 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
-                 lend_peak: bool = False, cpu_admit: bool = False, policy: Ref | str = "",
+                 lend_peak: bool = False, cpu_admit: bool = False, pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -128,6 +128,9 @@ class TieredStore:
         # from this many prompt tokens; below, it stages only its passes' routed misses into its lent slots (its tail
         # lent too)
         self.stream_tokens = stream_tokens
+        # `pipeline` (FN step 7): a staging step's large passes fetch their misses in this many parts on a side stream,
+        # each layer's resident entries computed first, then each part's as it lands (1: one fetch, then one pass)
+        self.pipeline = pipeline
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
@@ -674,6 +677,10 @@ class TieredStore:
         self._loaned = True
         loan = c.slots()[c.size - n:].view(-1)[-self._loan_bytes:]
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
+
+    def pipelines(self, tokens: int) -> int:
+        """The fetch parts of a pass of `tokens` in this step: `pipeline` in a staging step's large passes, else 1."""
+        return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
     def fetch_stream(self) -> torch.Stream:
         """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""

@@ -289,6 +289,7 @@ class MoE(nn.Module):
         # an RTX A5000's IQ2_XS MTP decode 68 against 73 tok/s — until it skips them)
         self._split = hasattr(self._store, "route_split") and \
             str(ctx.options.get("plugins", {}).get("moe.split", "off")) == "on"
+        self._pipelined = hasattr(self._store, "route_pipelined")       # (a staging step's large passes: the store's)
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
@@ -354,6 +355,23 @@ class MoE(nn.Module):
             return residual + y
         return self._forward(x, residual, join)
 
+    def _parts(self, xin, gate_up, down, part, landed, out_h, out_y, scratch) -> torch.Tensor:
+        """A pipelined pass: the entries of part −1 (resident pieces, null slots) first, then each part's as its
+        fetch lands, every call computing its own entries (the others' ids −1, their rows untouched) into one `out`
+        per stack — each row as the one call over every entry gives it (a call's rows do not depend on its others)."""
+        tokens, k = part.shape
+        if out_h is None:
+            out_h = torch.empty(tokens, k, self._gate_up.out_y, device=part.device)
+        if out_y is None:
+            out_y = torch.empty(tokens, k, self._down.out_y, device=part.device)
+        for i in range(-1, len(landed)):
+            if i >= 0:
+                landed[i]()
+            mine = part == i
+            h = self._gate_up(xin, torch.where(mine, gate_up, -1), out_h, scratch)
+            self._down(h, torch.where(mine, down, -1), out_y, scratch)
+        return out_y
+
     def _forward(self, x: torch.Tensor, residual: torch.Tensor | None, join=None) -> torch.Tensor:
         """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (whole CHUNKs, up to
         what the stacks' kernels take at their chunks' bits: the step's last partial chunk is a pass of its own, so
@@ -372,16 +390,21 @@ class MoE(nn.Module):
                 weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
-            misses = landed = None
+            misses = landed = part = None
             if self._split and b - a <= SPLIT_ROWS:   # the resident entries first, while the misses' fetch lands
                 (gate_up, down), misses, landed = self._store.route_split(ids, a, xc)
+            elif self._pipelined:                     # a staging step's large pass: its misses part by part
+                (gate_up, down), part, landed = self._store.route_pipelined(ids, a, xc)
             else:
                 gate_up, down = self._store.route(ids, a, xc)
             # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
             out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
                 None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
-            h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
-            y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
+            if part is not None:                      # each part's entries (−1 ids: skipped) into the same buffers
+                y = self._parts(xin, gate_up, down, part, landed, out_h, out_y, scratch)
+            else:
+                h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
+                y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
             if misses is not None:                    # then the fetched ones: each entry ran in one of the two,
                 landed()                              # its null slot's zero in the other
                 y.add_(self._down(self._gate_up(xin, misses[0], None, scratch), misses[1], None, scratch))

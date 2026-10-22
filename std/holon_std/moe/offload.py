@@ -50,6 +50,7 @@ def _store(ctx, experts: int, top_k: int):
                         ring_copy=str(opts.get("moe.ring_copy", "sm")),
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
                         stream_tokens=int(opts.get("moe.stream_tokens", 0)),
+                        pipeline=int(opts.get("moe.pipeline", 1)),
                         lend_peak=str(opts.get("moe.lend_peak", "off")) == "on",
                         cpu_admit=str(opts.get("moe.cpu_admit", "off")) == "on",
                         policy=str(opts.get("moe.placement", "")),
@@ -192,6 +193,19 @@ class Offload(nn.Module):
                                               before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu),
                                               kinds=kinds)
         return slots
+
+    def route_pipelined(self, ids: torch.Tensor, first: int, x: torch.Tensor):
+        """`route` for a staging step's large pass (`store.pipelines`): (slots [R, T, k], part [T, k], landed) — each
+        entry's part (−1: every piece resident, or a null slot), the misses fetched part by part on a side stream,
+        `landed[i]()` making the current stream wait for part i —; or (slots, None, None) where the pass is not
+        pipelined (one part, F5b's share, a fetch without parts)."""
+        parts = self.store.pipelines(len(ids))
+        if parts <= 1 or (self._cpu is not None and self._cpu.takes(len(ids))) or \
+                not all(takes_buffers(s.kernel) for s in self._stacks):        # (the parts share one `out` per stack)
+            return self.route(ids, first, x), None, None
+        self._pending = None
+        out = self._resolver(ids, first, kinds=self._kinds(len(ids)), parts=parts)
+        return out if len(out) == 3 else (out[0], None, None)
 
     def route_split(self, ids: torch.Tensor, first: int, x: torch.Tensor):
         """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
