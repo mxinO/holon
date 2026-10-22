@@ -426,11 +426,13 @@ class TieredStore:
                     break
                 floors |= short
             self.lending = can_lend and all(n >= self.prefill for c, n in budget.taken.items() if c in lenders)
+            if self.lending and self.tail:          # the tail's class must still stage a pass outside the tail: a
+                cls, n = self.tail                  # small pool (the startup profile's minimum) stages instead
+                c = classes[cls]
+                self.lending = budget.taken[c.name] - n >= self.prefill
             if self.lending or staging == self.prefill:
                 break
             floors = {}
-        if self.lending and self.tail:                           # this layout lends: its tail can stage a pass
-            self._tail(lambda c: budget.taken[c.name])
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage

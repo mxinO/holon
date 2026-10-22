@@ -2356,3 +2356,14 @@ workspace (193, sized by SM count for any batch) are what else remains above Str
   per layer become one split-K of ≈ 5; 1.1 ms of a 5080 verify pass); the routers in bf16 (7ea3d79).
 - **Experts cached on the 5080** (`spikes/fn6/cached.py`, f99b028): drafting off 26.2% (8.64 GiB), with the MTP pack
   24.2% (8.16 GiB); with `moe.router_dtype=bfloat16` 26.5% and **24.5%** — C-M1's ≥ 23% with the pack met (was 22.7).
+
+### 21.4 The bar tables after items 0–8 (f99b028 / f9cf4a9)
+
+The deployment ("v3"): §20.1's, plus `moe.ring_copy=dma`, `memory_fraction` 0.97 on both cards,
+`moe.router_dtype=bfloat16`, `hc.prefill=bf16x3`, the GDN a/b merge, the fork and the one-launch fetch (defaults).
+3 rounds, Strata's arms in the same allocation; Holon / Strata tok/s.
+
+| Row | RTX 5080 1K | 4K | 32K | RTX 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 94.7 / 88.9 (**1.07**) | 95.5 / 88.3 (**1.08**) | 86.9 / 81.6 (**1.06**) | 124.7 / 111.1 (**1.12**) | 124.6 / 107.8 (**1.16**) | 111.9 / 107.2 (**1.04**) |
+| Prefill | 1,570 / 1,544 (**1.02**) | 3,310 / 2,737 (**1.21**) | 3,147 / 3,110 (**1.01**) | 1,361 / 2,126 (0.64) | 5,083 / 4,549 (**1.12**) | 6,099 / 5,542 (**1.10**) |
