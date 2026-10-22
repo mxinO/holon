@@ -185,6 +185,16 @@ class Offload(nn.Module):
                                               kinds=kinds)
         return slots
 
+    def route_split(self, ids: torch.Tensor, first: int, x: torch.Tensor):
+        """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
+        join) — the fetch on a side stream that `join()` makes the current stream wait for —, or (slots, None, None)
+        where the pass does not split (F5b's CPU share: `route`'s; exclusive tiers, a resolve without it)."""
+        if self._cpu is not None and len(ids) <= self._cpu.tokens:
+            return self.route(ids, first, x), None, None
+        self._pending = None
+        out = self._resolver(ids, first, kinds=self._kinds(len(ids)), split=True)
+        return (out[0], out[2], out[3]) if len(out) == 4 else (out[0], None, None)
+
     def _kinds(self, tokens: int) -> torch.Tensor | None:
         """The row kinds of an auxiliary layer's pass: the step's (None) while its passes cover the step's tokens, then
         decode kinds (the drafter's sub-steps). A target layer's are the step's."""

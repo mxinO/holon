@@ -57,7 +57,7 @@ class DeviceResolver:
 
     def __call__(self, ids: torch.Tensor, first: int, plan: torch.Tensor | None = None,
                  jobs: torch.Tensor | None = None, before_fetch=None,
-                 kinds: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+                 kinds: torch.Tensor | None = None, split: bool = False):
         """Slots [roles, T, k] for `ids` [T, k], the step's tokens `first`… (their row kinds, or `kinds`), the misses
         fetched; and
         `cpu` [T, k], the entries the CPU computes (F5b: its share by `plan`, its jobs in `jobs`; none without), handed
@@ -69,12 +69,24 @@ class DeviceResolver:
         self.prepare(first)
         if store.exclusive:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
-        slots, fetch, n, cpu = self.resolve(
+        split = split and getattr(self.resolve, "splits", False) and not store.exclusive and before_fetch is None
+        out = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
             self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
             store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
-            store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs, **self.state)
+            store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs,
+            **({"split": True} if split else {}), **self.state)
+        slots, fetch, n, cpu = out[:4]
         self._prepared = False
+        if split:                                # the fetch on a side stream; the hits' passes run meanwhile
+            main = torch.cuda.current_stream(ids.device)
+            side = store.fetch_stream()
+            side.wait_stream(main)
+            with torch.cuda.stream(side):
+                self._gather(fetch, n)
+            fetch.record_stream(side)            # the main stream's allocations must not reuse them meanwhile
+            n.record_stream(side)
+            return slots, cpu, out[4], lambda: main.wait_stream(side)
         if before_fetch is not None:
             before_fetch(cpu)
         if store.exclusive:
@@ -85,17 +97,20 @@ class DeviceResolver:
                           store.n_moves)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
+        self._gather(fetch, n)
+        if store.exclusive:
+            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
+                gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
+                gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
+        return slots, cpu
+
+    def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:
         roles = getattr(self._fetch[0], "gather_roles", None)
         if roles is not None:                    # every role's misses in one launch
             roles(fetch, n, [c.units() for c in self.classes], [c.slots() for c in self.classes])
         else:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(fetch[r], n[r:r + 1], c.units(), c.slots())
-        if store.exclusive:
-            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
-                gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
-                gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
-        return slots, cpu
 
     def done(self) -> None:
         """After the layer's expert passes (the step's ring moves on)."""

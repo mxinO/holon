@@ -8,6 +8,7 @@ from torch import nn
 from . import kernels
 
 CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
+SPLIT_ROWS = 16                    # passes of at most this many tokens (decode, verify) split an offload store's call
 ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/v1-moe-prefill.md D10)
 
 
@@ -283,6 +284,11 @@ class MoE(nn.Module):
                                    act_dtype=ctx.dtype, **stack)
         self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
+        # an offload store's decode and verify passes run their resident entries while the misses land (`moe.split=on`;
+        # off by default: mmvq computes a null slot's entries in full, so the two passes cost twice the expert work —
+        # an RTX A5000's IQ2_XS MTP decode 68 against 73 tok/s — until it skips them)
+        self._split = hasattr(self._store, "route_split") and \
+            str(ctx.options.get("plugins", {}).get("moe.split", "off")) == "on"
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
@@ -366,12 +372,19 @@ class MoE(nn.Module):
                 weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
-            gate_up, down = self._store.route(ids, a, xc)
+            misses = landed = None
+            if self._split and b - a <= SPLIT_ROWS:   # the resident entries first, while the misses' fetch lands
+                (gate_up, down), misses, landed = self._store.route_split(ids, a, xc)
+            else:
+                gate_up, down = self._store.route(ids, a, xc)
             # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
             out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
                 None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
             h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
             y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
+            if misses is not None:                    # then the fetched ones: each entry ran in one of the two,
+                landed()                              # its null slot's zero in the other
+                y.add_(self._down(self._gate_up(xin, misses[0], None, scratch), misses[1], None, scratch))
             if residual is None:
                 self._combine(y, weights, out[a:b])
             else:
@@ -379,5 +392,7 @@ class MoE(nn.Module):
                     join()
                     join = None
                 self._combine.add(y, weights, residual[a:b], out[a:b])
+        if join is not None:                          # no pass read the residual (no tokens): joined all the same
+            join()
         self._store.finish()
         return out

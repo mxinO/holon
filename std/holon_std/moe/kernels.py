@@ -99,6 +99,10 @@ then `staging` slots, then cache slots.
   then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
   CPU's share passes a zero `plan` (and a table of its own); the caller sizes `jobs` for its calls with a share (T ≤
   T', c ≤ J): past it `errors[0]` |= `JOBS` and the table's contents are unspecified.
+- Optional `split` (an instance with `splits = True`): `split=True` also returns `miss_slots` [R, T, k] — each entry
+  whose piece the call fetches (staged or admitted) reads its slot there and its null slot j in `slots`, every other
+  entry the reverse — so a caller can run the entries already resident while the fetch lands (FN step 7: the hits
+  first), the two passes' outputs summing to the one pass's (a null slot's output is zero).
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's

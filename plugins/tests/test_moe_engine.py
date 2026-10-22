@@ -848,6 +848,7 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
+                                           ("", "*=0.25 split"),
                                            ("", "*=0.25 ssd"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -866,12 +867,13 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
-    ssd = ring == "ssd"                              # their copies on SMs / copy engines, "tail" lending a tail (D11)
-    ring = "" if ssd else ring                       # first; "ssd": RAM holds a quarter
+    ssd, split = ring == "ssd", ring == "split"      # their copies on SMs / copy engines, "tail" lending a tail (D11)
+    ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
+                                                     # resident entries first, the misses' fetch on a side stream
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
-        "moe.ring_lend": "tail" if ring == "tail" else "coldest"} | (
+        "moe.ring_lend": "tail" if ring == "tail" else "coldest", "moe.split": "on" if split else "off"} | (
         {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left

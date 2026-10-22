@@ -40,21 +40,23 @@ class Modules:
 
 class MoeResolve:
     plant = 0                              # judge-only: the calibration bugs' bits (judge/holon_judge/planted.py)
+    splits = True                          # `split`: the fetched entries' slots apart (std.moe.kernels)
 
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, **state):
+                 errors, delta, n_delta, group, plan, jobs, split: bool = False, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
         cpu = torch.empty(tokens, k, dtype=torch.int32, device=ids.device)
+        missed = torch.empty_like(slots) if split else None
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
                          misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
-                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging)
-        return slots, fetch, n_fetch, cpu
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed)
+        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ())
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
         """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id

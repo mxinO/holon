@@ -236,6 +236,22 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
             row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
             assert want["fetch"][r, 1, row].item() == source[r]                  # gathered straight into its slot
     assert len(admitted) == len(records)
+    if getattr(resolve, "splits", False):     # `split`: the same call, the fetched entries' slots apart
+        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
+        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
+        delta, n_delta = _log(capacity, 2, device)
+        hits, _, _, _, miss = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
+                                      dev["counts"], torch.zeros(E, dtype=torch.int32, device=device), dev["ring"],
+                                      dev["stage"], dev["empty"], dev["n_empty"], *words, delta, n_delta, 3, plan,
+                                      jobs, split=True, **{n: dev[n] for n in state})
+        null = torch.arange(K, dtype=torch.int32).expand(ROLES, tokens, K)
+        hits, miss = hits.cpu(), miss.cpu()
+        assert ((hits == null) | (miss == null)).all()
+        assert torch.equal(torch.where(miss != null, miss, hits), want["slots"])
+        for r in range(ROLES):                # the misses' slots are the fetch's destinations, the hits' never
+            dst = set(want["fetch"][r, 1, :int(want["n_fetch"][r])].tolist())
+            assert set(miss[r][miss[r] != null[r]].tolist()) <= dst
+            assert not set(hits[r].flatten().tolist()) & (dst - {-1})
 
 
 def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:

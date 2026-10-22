@@ -70,7 +70,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                           int32_t * __restrict__ errors, int32_t * __restrict__ delta, int32_t * __restrict__ n_delta,
                           int group, int cap, State st, int32_t * __restrict__ slots, int32_t * __restrict__ fetch,
                           int32_t * __restrict__ n_fetch, int32_t * __restrict__ cpu, int tokens, int k, int experts,
-                          int roles, int staging) {
+                          int roles, int staging, int32_t * __restrict__ miss_slots) {
     extern __shared__ int32_t shared[];
     int32_t * need = shared;                           // [roles, experts]
     int32_t * best = need + roles * experts;           // [experts]: its least routing rank (INT_MAX: not routed); then,
@@ -355,20 +355,29 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         cpu[i] = on_cpu ? i : -1;
         for (int r = 0; r < roles; ++r) {
             int32_t at = j;
-            if (live_entry && !on_cpu) {
+            bool fetched = false;                      // its piece is this call's fetch (staged, or admitted: need's
+            if (live_entry && !on_cpu) {               // -2 - slot)
                 at = L.residency[e * roles + r];
                 const int32_t rg = L.ring[e * roles + r];
                 if (at < 0 && rg < 0) {                // staged
                     at = L.stage[r * L.F + min(need[r * experts + e], L.F - 1)];
+                    fetched = true;
                 } else {
+                    fetched = need[r * experts + e] <= -2;
                     at = at < 0 ? rg : at;
                     if (at < k + staging || at >= L.limits[r]) {      // corrupt: never read past the arena
                         at = j;
+                        fetched = false;
                         atomicOr(errors, RANGE);
                     }
                 }
             }
-            slots[r * entries + i] = at;
+            if (miss_slots != nullptr) {               // split: the fetched entries in miss_slots, the rest in slots,
+                miss_slots[r * entries + i] = fetched ? at : j;      // each reading its null slot j in the other
+                slots[r * entries + i] = fetched ? j : at;
+            } else {
+                slots[r * entries + i] = at;
+            }
         }
     }
 }
@@ -466,7 +475,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
              const at::Tensor & ring, const at::Tensor & stage, const at::Tensor & empty, at::Tensor & n_empty,
              at::Tensor & misses, at::Tensor & errors, at::Tensor & delta, at::Tensor & n_delta, int64_t group,
              const std::vector<at::Tensor> & state, int64_t plant, const at::Tensor & plan, at::Tensor & jobs,
-             at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging) {
+             at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging,
+             const std::optional<at::Tensor> & miss_slots) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && stage.dim() == 2 && empty.dim() == 2 &&
                 delta.dim() == 2, "ids [T, k] on CUDA");
@@ -494,6 +504,9 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     check(plan, ids, at::kInt, {experts + 1}, "plan");
     check(jobs, ids, at::kInt, {jobs.size(0), jobs.size(1)}, "jobs");
     check(cpu, ids, at::kInt, {tokens, k}, "cpu");
+    if (miss_slots) {
+        check(*miss_slots, ids, at::kInt, {roles, tokens, k}, "miss_slots");
+    }
     TORCH_CHECK(jobs.dim() == 2 && jobs.size(1) >= 4, "jobs [J + 1, 4 + T']");
     State st{nullptr, nullptr, nullptr, int(plant)};
     if (policy == LFU) {
@@ -519,7 +532,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), L, counts.data_ptr<int32_t>(), routed.data_ptr<int32_t>(),
         misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(),
         int(group), int(delta.size(0)), st, slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(),
-        n_fetch.data_ptr<int32_t>(), cpu.data_ptr<int32_t>(), tokens, k, experts, roles, staging);
+        n_fetch.data_ptr<int32_t>(), cpu.data_ptr<int32_t>(), tokens, k, experts, roles, staging,
+        miss_slots ? miss_slots->data_ptr<int32_t>() : nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

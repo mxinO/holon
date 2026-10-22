@@ -134,6 +134,7 @@ class TieredStore:
         self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
+        self._fetch_stream: torch.cuda.Stream | None = None
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -607,6 +608,12 @@ class TieredStore:
             self.lend_needs.zero_()
             self.lent = Lent(self, self._mode, self._step_tail if self._mode == "ring" else None)
             self.lent.begin()
+
+    def fetch_stream(self) -> torch.cuda.Stream:
+        """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""
+        if self._fetch_stream is None:
+            self._fetch_stream = torch.cuda.Stream(self.ctx.device)
+        return self._fetch_stream
 
     def tail_view(self) -> torch.Tensor | None:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
