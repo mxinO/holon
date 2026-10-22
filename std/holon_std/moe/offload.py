@@ -217,6 +217,8 @@ class ArenaExperts(nn.Module):
         self._store = owner.store
         self.glu, self.out, self.out_y = glu, out, out // 2 if glu == "swiglu" else out
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
+        if owner._aux:                  # an auxiliary model's pieces in classes of their own (an MTP head's: its draft
+            name = f"aux.{name}"        # sub-steps never compete with the target's layers for slots; floored whole)
         unit = sum(x[0].nbytes for x in extents)
         for e in range(like.experts):
             self.cls = owner.store.add(owner.layer, e, role, name, unit, [x[e] for x in extents])
