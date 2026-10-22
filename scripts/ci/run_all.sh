@@ -16,5 +16,6 @@ python3 check_abi.py --base "${1:-origin/main}" || rc=1                         
 python3 check_commit_messages.py "${1:-origin/main}" || rc=1                    # commit messages vs base: no private names
 (cd ../.. && uv lock --check -q) || rc=1                                         # uv.lock matches the pyprojects
 bash check_core_diff.sh "${1:-origin/main}" || true
+python3 check_lock_impact.py "${1:-origin/main}" || true                         # warns: the locks a merge outdates
 if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1; else echo "skip import contracts (import-linter not installed)"; fi
 exit $rc

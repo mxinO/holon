@@ -93,6 +93,7 @@ def hybrid(tiny_hybrid):
     return _setup(build, _trace(320, 8, 140, (20, 60), 8), PRESSURE | {"state_tier.h2d_rate": "2e6"})
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("model", ["dense", "hybrid"])
 def test_the_clean_checks_pass(model, request):
     clean = request.getfixturevalue(model).clean
@@ -118,6 +119,7 @@ def test_the_clean_checks_pass(model, request):
 # - swap-onto-lower: recomputed and cached bytes give the same greedy outputs on the tiny fp32 model;
 # - adopt-source-reused and its join variant: a CPU step's adopt has run by the end of its launch (the GPU judges them
 #   in the `fork` loop).
+@pytest.mark.slow
 @pytest.mark.parametrize("plant", ["promote-unwaited", "waiter-unref", "store-unwaited", "promote-wrong-unit",
                                    "gate-on-landing", "promote-preempts", "kids-any-level", "interior-drop"])
 def test_a_tier_plant_is_caught(plant, dense):
@@ -127,6 +129,7 @@ def test_a_tier_plant_is_caught(plant, dense):
     assert result["verdict"] == "caught", result
 
 
+@pytest.mark.slow
 def test_a_hybrid_resumes_through_the_level_bitwise(tiny_hybrid, tmp_path):
     """Tier invariance with pages through the SSD level, and checkpoints written back to it: the host level at its
     floor for pages and one unit over it for each payload pool (a checkpoint read back from the level is the bare
@@ -143,6 +146,7 @@ def test_a_hybrid_resumes_through_the_level_bitwise(tiny_hybrid, tmp_path):
     assert got["tested"]["tier.level_units.plugin.ssm_state.checkpoints"] > 0      # checkpoints written back too
 
 
+@pytest.mark.slow
 def test_the_level_below_host_passes_the_checks(dense_ssd):
     clean = dense_ssd.clean
     assert {c: clean[c]["verdict"] for c in ("invariance", "identity", "restart")} == dict.fromkeys(
@@ -168,6 +172,7 @@ def test_the_level_passes_run_identity_without_a_watermark_and_with_late_io(tiny
 
 # free-on-ticket is not here: at the host pools' floors the tier's internal check catches it (a RuntimeError from
 # _read_back); above them the window did not open on this trace (docs/v1-kv-tiers.md §13, "After the tag").
+@pytest.mark.slow
 @pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
 def test_a_level_plant_is_caught(plant, dense_ssd):
     factory, checks = TIER_PLANTS[plant]
@@ -175,6 +180,7 @@ def test_a_level_plant_is_caught(plant, dense_ssd):
     assert result["verdict"] == "caught", result
 
 
+@pytest.mark.slow
 def test_a_late_copy_onto_reused_units_is_caught(tiny_checkpoint):
     """load-reuse-unwaited in the `reuse` loop (an aborted gated request's loading blocks evictable at once, a heavy
     newcomer) with copies landing up to 8 launches late and answers long enough to read the reused pages back."""
@@ -190,6 +196,7 @@ def test_a_late_copy_onto_reused_units_is_caught(tiny_checkpoint):
     assert result["verdict"] == "caught", result
 
 
+@pytest.mark.slow
 def test_the_audit_catches_a_tentative_filed_a_block_early(tiny_hybrid):
     """`answer:1` alone, answers crossing aligned positions: the block before each tentative's holds no checkpoint, so
     tentative-shift files there, and the audit (every payload at (depth + 1) × block) fails run-identity. With
@@ -207,6 +214,7 @@ def test_the_audit_catches_a_tentative_filed_a_block_early(tiny_hybrid):
     assert result["checks"]["identity"]["findings"]["a payload filed away from its position"] > 0
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("plant, broken", [("branch-off-by-one", {"branch, tier"}),
                                            ("tentative-shift", {"answer:1, tier"})])
 def test_the_policies_plants_fail_bounded(tiny_hybrid, plant, broken):
@@ -258,6 +266,7 @@ def test_a_branch_checkpoint_resumes_bitwise_as_recomputed_with_equal_chunks(tin
     assert got[2] == 128 and got[:2] == want[:2]
 
 
+@pytest.mark.slow
 def test_the_cli_judges_a_tiny_model(tiny_checkpoint, tmp_path, capsys):
     rng = random.Random(1)
     prompts = tmp_path / "prompts.jsonl"

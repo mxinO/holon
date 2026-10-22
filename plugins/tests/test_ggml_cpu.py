@@ -66,6 +66,7 @@ def _table(spec: list[tuple[int, list[int]]]) -> torch.Tensor:
     return jobs
 
 
+@pytest.mark.model
 @pytest.mark.parametrize("name, file, layer", CASES)
 def test_cpu_experts_match_the_oracle_and_a_token_is_bitwise_alone_or_grouped(plugin, name, file, layer):
     plugin, tier = plugin

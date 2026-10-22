@@ -30,7 +30,7 @@ jobs:
       - name: tests (CPU)
         env:
           CUDA_VISIBLE_DEVICES: ""
-        run: . .venv/bin/activate && python -m pytest core std plugins judge testing tools -q -p no:cacheprovider
+        run: . .venv/bin/activate && python -m pytest core std plugins judge testing tools -q -p no:cacheprovider -m ""
       - name: trim the uv cache
         if: always()
         run: uv cache prune --ci

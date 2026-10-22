@@ -36,9 +36,10 @@ url = "https://download.pytorch.org/whl/cu130"
 explicit = true           # only torch comes from it
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.6", "import-linter>=2.1", "httpx",  # httpx: FastAPI's TestClient
+dev = ["pytest>=8", "pytest-xdist", "ruff>=0.6", "import-linter>=2.1", "httpx",  # httpx: FastAPI's TestClient
        "scipy", "jsonschema",                                     # statistical tests; bench/conformance.py
        "sentencepiece",                                           # llama.cpp's converter (test_dflash's q8_0 draft)
+       "openai", "anthropic",                                     # bench/client_smoke.py: the real client SDKs
        "holonlm-testing", "holonlm-judge", "holonlm-tools"]       # test-only plugins, the judge, the lock tools
 
 [tool.ruff]
@@ -52,7 +53,13 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.pytest.ini_options]
 testpaths = ["core/tests", "judge/tests", "plugins/tests", "tools/tests"]
-addopts = "-p no:libtmux"
+# A dev run leaves out the slow and real-model tests; the pre-merge full run takes everything with `-m ""` (sharded
+# over GPUs: the root conftest.py), and `-m "not l0"` where the per-arch L0 job ran the kernel files (docs/release.md
+# §22).
+addopts = "-p no:libtmux -m 'not slow and not model'"
+markers = ["slow: over ~8 s (servers spawned, conversions, end-to-end CLIs, bounded and tier judges)",
+           "model: loads a real checkpoint from the Hugging Face cache",
+           "l0: a kernel against its oracle (the per-arch L0 job)"]
 
 # Design §1 invariants 2–3: import contracts (plugins added as they appear).
 [tool.importlinter]

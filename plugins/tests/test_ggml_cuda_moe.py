@@ -89,7 +89,7 @@ from .test_ggml_cuda import (
     reserve,
 )
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 E, K = 32, 8                    # the type sweep's stacks (E = 128, Qwen3-30B-A3B's, for routings and graphs)
 EQ = 128
@@ -349,6 +349,7 @@ def test_linear_experts_at_in_640(ctx, lib, name):
         check_pass_rows(small, stack(name, 8, 256, 640, seed=14).parts, h, uniform(9 * CHUNK, 8, seed=9), name)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs"])
 def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
     sg, sd = qwen_stacks[name]
@@ -424,6 +425,7 @@ def test_every_tile_of_every_entry_is_written(ctx, lib, name):
     assert int(errors) == 0
 
 
+@pytest.mark.slow
 def test_mixed_types_in_one_layer(ctx, sm):
     """A std.moe layer with IQ3_S gate/up (mmq above 6 tokens on sm_86) and IQ4_XS down (mmvq up to 8) at 7 tokens:
     each stack takes its own path, as the per-instance counters show, and matches the emulator."""

@@ -69,8 +69,8 @@ def test_ngram_speculation_is_plain_greedy(tiny_checkpoint, tiny_case):  # noqa:
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
-@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
-def test_ngram_speculation_captures_graphs():
+@pytest.mark.model
+def test_ngram_speculation_captures_graphs(qwen3_0_6b_engine):
     # The drafter runs inside the captured decode and verify graphs: nothing in it may sync with the host. Greedy
     # output stays plain greedy's up to bf16 batch-shape rounding (an agreement bound).
     from transformers import AutoTokenizer
@@ -80,7 +80,7 @@ def test_ngram_speculation_captures_graphs():
     prompts = [tok(text)["input_ids"], tok("1, 2, 3, 4, 5, 6, 7, 8,")["input_ids"]]
     params = SamplingParams(temperature=0.0, max_tokens=32, ignore_eos=True)
     cfg = dict(model=str(SNAP), dtype=torch.bfloat16, max_seqs=4, max_model_len=256)
-    plain = Engine(EngineConfig(**cfg)).generate(prompts, params)
+    plain = qwen3_0_6b_engine.generate(prompts, params)
     engine = Engine(EngineConfig(**cfg, max_draft_tokens=3, plugin_options={"spec.k": "3", "spec.fallback": 2},
                                  slots={"drafter": "drafters.ngram", "draft_policy": "std.spec.fixed_k",
                                         "verifier": "std.spec.greedy"}))
@@ -93,6 +93,8 @@ def test_ngram_speculation_captures_graphs():
     assert stats["spec_verify_steps"] > 0 and stats["spec_verify_steps_graphed"] == stats["spec_verify_steps"]
 
 
+@pytest.mark.slow
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_verify_graphs_equal_eager_on_the_same_padded_plans():
     # M0.4 §1.4: a graphed engine and one that runs the very same padded plans eagerly (its graph runner calls the

@@ -72,6 +72,7 @@ def run(tiny_checkpoint, tiny_prompts):
     return compare
 
 
+@pytest.mark.slow
 def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run):
     report = run(configs=CONFIGS | MIXED)
     results = report["results"]
@@ -83,6 +84,7 @@ def test_configurations_agree_with_the_reference_and_the_prefix_cache_saves(run)
     assert results["baseline"]["mixed_steps"] == 0 and results["mixed 8"]["mixed_steps"] > 0
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("plant, broken", [
     ("adoption-off-by-one", {"prefix on, depth 1", "prefix on, depth 0"}),
     ("wrong-block", {"prefix on, depth 1", "prefix on, depth 0"}),

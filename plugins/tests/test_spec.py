@@ -153,6 +153,7 @@ def test_drafts_never_cross_max_model_len(tiny_checkpoint, tiny_case, oracle):  
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_host_length_decode_kernels_wait_for_verify_commits():
     # FlashInfer decode plans from host lengths; with drafts every other step, a request's next decode row must wait

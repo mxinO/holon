@@ -9,7 +9,7 @@ from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_testing.ref_kernels.kernels import BY_OP
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 DTYPES = [torch.bfloat16, torch.float16]
 
 
@@ -71,6 +71,7 @@ def test_silu_mul(dtype):
     _close(fast(gate_up), ref(gate_up))
 
 
+@pytest.mark.slow
 def test_prebuilt_modules_load_without_compiling(tmp_path):
     """`holon prebuild`'s FlashInfer modules are what a first start loads: FlashInfer runs each module's own ninja build
     before loading it, so a module prebuilt without its directory's ninja log compiled again at first use (found by

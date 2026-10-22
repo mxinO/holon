@@ -100,6 +100,7 @@ GOLDENS = pathlib.Path(__file__).resolve().parents[1] / "goldens"
 CLASS_SM = {"rtx-5080": 120, "rtx-5090": 120, "rtx-4090": 89, "rtx-3090": 86}      # the lock classes' SMs
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("floor", sorted(GOLDENS.glob("*/*-rows*-floor.safetensors")), ids=lambda p: p.stem)
 def test_a_per_shape_floor_routes_as_the_table_does(floor):
     """D2 (docs/m07-perf.md §6): a committed per-shape floor emulates each shape on the path the ggml plugin's

@@ -15,7 +15,7 @@ from holon_plugins.kernels.triton_attn.plugin import FORMAT, Verify
 from holon_std.mixers.gqa.kernels import kv_dtype
 from holon_testing.ref_kernels.kernels import PagedAttention
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 PAGE, MAX_SEQS = 16, 8
 GEOMETRIES = [(32, 8, 128), (16, 4, 256), (24, 4, 256),    # Qwen3-8B, Qwen3.5 / Qwen3.8 full-attention layers

@@ -24,6 +24,8 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `offload_ctx.py` | v1 offload's reference rows (docs/v1-offload.md acceptance 3, D14): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts, llama-server and FreeToken arms interleaved over rounds, peak VRAM; `spikes/x4_refs/` |
 | `tier_resume.py` | milestone K's resume rows on a 27B lock with the state tier (`docs/v1-kv-tiers.md` acceptance 3): 3a (a parked conversation resumed from VRAM, RAM and SSD, idle or beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain steps), 3f (the two-engine restart); same-session interleaved arms, clocks sampled per row |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
+| `perf_smoke.py` | the per-change perf smoke (docs/release.md §22): `holon_tg.py` batch-1 decode of this tree against main's checkout, ABBA rounds of fresh processes, each asserted to import its own tree, clock-screened |
+| `client_smoke.py` | the real-client smoke at each merge (docs/release.md §22): `holon serve` driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
@@ -101,6 +103,22 @@ taken before release step 7 drew each turn at its own offset, so their corpus pr
 - Evidence: `evidence/bench_<workload>_<gpu-class>_<date>.json` with the command, commit, GPU class, baseline
   commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
   timings and worker logs stay in `bench/.out/` (gitignored).
+
+## Smokes per change and per merge (docs/release.md §22)
+
+```bash
+git worktree add --detach local/worktrees/main-build main          # main's build, once (and `holon prebuild` if its kernels differ)
+python bench/perf_smoke.py --base local/worktrees/main-build --gpu 0 \
+    --model ~/.cache/huggingface/hub/models--unsloth--Qwen3-8B-GGUF/snapshots/<rev>/Qwen3-8B-Q4_K_M.gguf
+python bench/client_smoke.py --gpu 0                                # unsloth/Qwen3-8B-GGUF:Q4_K_M by default
+```
+
+`perf_smoke.py` prints each round's candidate / base tokens/s and a verdict: "slower" (exit 1) or "faster" only when
+all three rounds agree beyond 2%, "void" (exit 3) when a clock screen failed (rerun on an idle card). A planted 3%
+slowdown (two extra copies of each quantized matmul's input) read "slower" in all three rounds (0.968 / 0.968 /
+0.971). `client_smoke.py` prints one line
+per client and exits 1 on any failed check or a traceback in the server's log (`bench/.out/client_smoke/serve.log`).
+pi and Claude Code themselves run in `demo/pi_run.py` and `demo/run.py` (below) where they are installed.
 
 ## GGUF against llama.cpp (M0.1)
 

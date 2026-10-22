@@ -17,6 +17,7 @@ FILE = glob.glob(os.path.expanduser(
 pytestmark = pytest.mark.skipif(not FILE, reason="needs the Qwen3.8-27B UD-IQ3_S file")
 
 
+@pytest.mark.model
 @pytest.mark.parametrize("name", ["blk.0.ssm_out.weight", "blk.14.attn_qkv.weight"])
 def test_the_floors_offsets_follow_the_untiled_weights(name):
     reader = gguf.GGUFReader(FILE[0])
