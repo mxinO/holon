@@ -88,7 +88,7 @@ def route_dump(engine) -> Iterator[Trace]:
 
     def tap(step, record) -> None:
         trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["scope"].copy(),
-                            "cpu": record["cpu"].copy(),
+                            "cpu": record["cpu"] & (not record.get("cpu_admitted", False)),   # (admitted: any miss)
                             "records": record["records"].copy(), "lends": record["lends"],
                             "resident": resident(store, step.step),
                             "empty": np.array([len(e) for e in store.residency.empty]),

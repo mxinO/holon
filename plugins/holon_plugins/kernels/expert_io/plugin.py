@@ -47,17 +47,18 @@ class MoeResolve:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, split: bool = False, **state):
+                 errors, delta, n_delta, group, plan, jobs, split: bool = False, defer: bool = False, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
         cpu = torch.empty(tokens, k, dtype=torch.int32, device=ids.device)
         missed = torch.empty_like(slots) if split else None
+        later, n_later = (torch.empty_like(fetch), torch.empty_like(n_fetch)) if defer else (None, None)
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
                          misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
-                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed)
-        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ())
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed, later, n_later)
+        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ()) + ((later, n_later) if defer else ())
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
         """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id
@@ -80,7 +81,10 @@ STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state
 
 class MoeResolveLfu(MoeResolve):
     """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/v1-moe-prefill.md D11): F11 keeps no
-    spares, so the experts holding the range are all it picks. Device ops, no host sync."""
+    spares, so the experts holding the range are all it picks. Device ops, no host sync. It also `defers`: the CPU's
+    experts are admitted as any miss, their pieces' fetch listed apart (`later`, `n_later`)."""
+
+    defers = True
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   **state) -> torch.Tensor:

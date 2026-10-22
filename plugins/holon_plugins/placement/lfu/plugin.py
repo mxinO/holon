@@ -36,16 +36,18 @@ class Lfu:
 class Resolve:
     """The CPU provider: the oracle, writing what the contract writes in place."""
 
+    defers = True                          # the CPU's experts admitted, their fetch apart (`defer`)
+
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, score):
+                 errors, delta, n_delta, group, plan, jobs, score, defer: bool = False):
         out = reference.moe_resolve_lfu(ids, kinds, residency, host, limits, self.staging, score, group, ring, stage,
-                                        empty, int(n_empty[0]), plan)
+                                        empty, int(n_empty[0]), plan, defer)
         counts += out["counts"]
         routed |= out["routed"]
-        misses.clamp_(min=int(out["n_fetch"].max()))
+        misses.clamp_(min=int(max(out["n_fetch"].max(), out["n_later"].max() if defer else 0)))
         residency.copy_(out["residency"])
         score.copy_(out["score"])
         at = int(n_delta[0])
@@ -60,7 +62,8 @@ class Resolve:
         jobs[0, 0] = len(out["jobs"])
         for i, row in enumerate(out["jobs"]):
             jobs[1 + i, :len(row)] = torch.tensor(row)
-        return out["slots"], out["fetch"], out["n_fetch"], out["cpu"]
+        return (out["slots"], out["fetch"], out["n_fetch"], out["cpu"]) + (
+            (out["later"], out["n_later"]) if defer else ())
 
     def lend(self, need, residency, classes, score) -> torch.Tensor:
         return reference.lend(need.cpu().numpy(), residency, classes, score)

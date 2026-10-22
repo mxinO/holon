@@ -22,8 +22,8 @@ below, its large passes stage their routed misses into its lent slots, as Strata
 `moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
 reserving only the worst smaller step's peak; default `off`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
-dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
-the CPU's share of the misses: `cpu.py`)."""
+dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa`, `moe.cpu_min_tokens` and
+`moe.cpu_admit` (F5b, the CPU's share of the misses: `cpu.py`)."""
 from __future__ import annotations
 
 import torch
@@ -51,6 +51,7 @@ def _store(ctx, experts: int, top_k: int):
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
                         stream_tokens=int(opts.get("moe.stream_tokens", 0)),
                         lend_peak=str(opts.get("moe.lend_peak", "off")) == "on",
+                        cpu_admit=str(opts.get("moe.cpu_admit", "off")) == "on",
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,

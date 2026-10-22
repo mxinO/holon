@@ -73,7 +73,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
                           int32_t * __restrict__ errors, int32_t * __restrict__ delta, int32_t * __restrict__ n_delta,
                           int group, int cap, State st, int32_t * __restrict__ slots, int32_t * __restrict__ fetch,
                           int32_t * __restrict__ n_fetch, int32_t * __restrict__ cpu, int tokens, int k, int experts,
-                          int roles, int staging, int32_t * __restrict__ miss_slots) {
+                          int roles, int staging, int32_t * __restrict__ miss_slots, int32_t * __restrict__ later,
+                          int32_t * __restrict__ n_later) {
     extern __shared__ int32_t shared[];
     int32_t * need = shared;                           // [roles, experts]
     int32_t * best = need + roles * experts;           // [experts]: its least routing rank (INT_MAX: not routed); then,
@@ -240,7 +241,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             if (live[e]) {                             // routed by the call that picks victims: the victims' scope
                 routed[e] |= 2;
             }
-            const bool is_cand = dec[e] && missing && !(share && best[e] >= 0);    // not the CPU's
+            // not the CPU's — but with `later`, the CPU's too (their fetch deferred: they serve the call from the CPU)
+            const bool is_cand = dec[e] && missing && !(share && best[e] >= 0 && later == nullptr);
             const bool is_vict = !is_cand && whole && (!live[e] || (st.plant & PLANT_VICTIM_NEEDED));
             // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,
             // ties by expert id: ascending in the packed order.
@@ -327,27 +329,38 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         int32_t * row = need + warp * experts;
         int32_t * units = fetch + warp * 2 * L.F, * dst = units + L.F;
         const int32_t * stage = L.stage + warp * L.F;
-        int seen = 0, staged = 0;
+        int seen = 0, staged = 0, deferred = 0;
         for (int base_e = 0; base_e < experts; base_e += 32) {
             const int e = base_e + lane;
             const int v = e < experts ? row[e] : 0;
-            const unsigned all = __ballot_sync(0xffffffffu, v != 0), mine = __ballot_sync(0xffffffffu, v == 1);
+            const bool on_cpu = later != nullptr && share && e < experts && best[e] >= 0;   // admitted, the CPU's
+            const unsigned all = __ballot_sync(0xffffffffu, v != 0 && !on_cpu), mine = __ballot_sync(0xffffffffu, v == 1);
+            const unsigned defer = __ballot_sync(0xffffffffu, v != 0 && on_cpu);
             const unsigned below = (1u << lane) - 1;
             const int rank = seen + __popc(all & below), srank = staged + __popc(mine & below);
-            if (v != 0 && rank < L.F) {
-                const int32_t unit = L.host[e * roles + warp];
+            const int32_t unit = e < experts ? L.host[e * roles + warp] : 0;
+            if (v != 0 && !on_cpu && rank < L.F) {
                 units[rank] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
                 dst[rank] = v == 1 ? stage[min(srank, L.F - 1)] : -2 - v;
+            }
+            const int drank = deferred + __popc(defer & below);
+            if (v != 0 && on_cpu && drank < L.F) {         // (an admitted piece: v = -2 - slot)
+                later[warp * 2 * L.F + drank] = unit >= 0 ? unit : -2 - e;
+                later[warp * 2 * L.F + L.F + drank] = -2 - v;
             }
             if (v == 1) {
                 row[e] = srank;
             }
             seen += __popc(all);
             staged += __popc(mine);
+            deferred += __popc(defer);
         }
         if (lane == 0) {
             n_fetch[warp] = seen;
-            atomicMax(misses, seen);
+            atomicMax(misses, max(seen, deferred));
+            if (n_later != nullptr) {
+                n_later[warp] = deferred;
+            }
         }
     }
     __syncthreads();
@@ -479,7 +492,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
              at::Tensor & misses, at::Tensor & errors, at::Tensor & delta, at::Tensor & n_delta, int64_t group,
              const std::vector<at::Tensor> & state, int64_t plant, const at::Tensor & plan, at::Tensor & jobs,
              at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging,
-             const std::optional<at::Tensor> & miss_slots) {
+             const std::optional<at::Tensor> & miss_slots, const std::optional<at::Tensor> & later,
+             const std::optional<at::Tensor> & n_later) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && stage.dim() == 2 && empty.dim() == 2 &&
                 delta.dim() == 2, "ids [T, k] on CUDA");
@@ -510,6 +524,11 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     if (miss_slots) {
         check(*miss_slots, ids, at::kInt, {roles, tokens, k}, "miss_slots");
     }
+    TORCH_CHECK(later.has_value() == n_later.has_value(), "later and n_later together");
+    if (later) {
+        check(*later, ids, at::kInt, {roles, 2, width}, "later");
+        check(*n_later, ids, at::kInt, {roles}, "n_later");
+    }
     TORCH_CHECK(jobs.dim() == 2 && jobs.size(1) >= 4, "jobs [J + 1, 4 + T']");
     State st{nullptr, nullptr, nullptr, int(plant)};
     if (policy == LFU) {
@@ -536,7 +555,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
         misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(),
         int(group), int(delta.size(0)), st, slots.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(),
         n_fetch.data_ptr<int32_t>(), cpu.data_ptr<int32_t>(), tokens, k, experts, roles, staging,
-        miss_slots ? miss_slots->data_ptr<int32_t>() : nullptr);
+        miss_slots ? miss_slots->data_ptr<int32_t>() : nullptr, later ? later->data_ptr<int32_t>() : nullptr,
+        n_later ? n_later->data_ptr<int32_t>() : nullptr);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

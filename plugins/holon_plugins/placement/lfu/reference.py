@@ -34,11 +34,14 @@ DECAY = np.float32(0.915)
 def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, host: torch.Tensor,
                     limits: torch.Tensor, staging: int, score: torch.Tensor, group: int,
                     ring: torch.Tensor | None = None, stage: torch.Tensor | None = None,
-                    empty: torch.Tensor | None = None, n_empty: int = 0, plan: torch.Tensor | None = None) -> dict:
+                    empty: torch.Tensor | None = None, n_empty: int = 0, plan: torch.Tensor | None = None,
+                    defer: bool = False) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, F]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
     increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
     `score`, `n_empty`, the delta `records`. `ring` defaults to none, `stage` to the staging slots k + i, `empty` to
-    none; and the CPU's share (`plan`, default none; `cpu_share`), its `cpu [T, k]` and job rows `jobs`."""
+    none; and the CPU's share (`plan`, default none; `cpu_share`), its `cpu [T, k]` and job rows `jobs`. With `defer`,
+    the CPU's experts are candidates too: an admitted one's pieces are listed apart, `later [R, 2, F]` and `n_later [R]`
+    (fetched after the call: the CPU serves its entries), never in `fetch`."""
     t, k = ids.shape
     experts, roles = residency.shape
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
@@ -63,7 +66,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 s = s + np.float32(1.0)
             score[e] = s
         cache = [all(k + staging <= int(before[e, r]) < int(limits[r]) for r in range(roles)) for e in range(experts)]
-        cands = sorted((e for e in range(experts) if counts[e] and (before[e] < 0).all() and e not in taken),
+        cands = sorted((e for e in range(experts) if counts[e] and (before[e] < 0).all() and (defer or e not in taken)),
                        key=lambda e: (-score[e], e))
         victims = sorted((e for e in range(experts) if cache[e] and e not in needed), key=lambda e: (score[e], e))
         spare = min(len(cands), n_empty)
@@ -83,7 +86,13 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     fetch = torch.full((roles, 2, width), -1, dtype=torch.int64)
     n_fetch = torch.zeros(roles, dtype=torch.int64)
     errors = 0
+    later = torch.full((roles, 2, width), -1, dtype=torch.int64)
+    n_later = torch.zeros(roles, dtype=torch.int64)
     for r in range(roles):
+        deferred = sorted(taken & admitted)
+        n_later[r] = len(deferred)
+        for i, e in enumerate(deferred[:width]):
+            later[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e, after[e, r]])
         missing = sorted({e for e in routed[live].tolist()
                           if before[e, r] < 0 and (ring[e, r] < 0 or e in admitted)} - taken)
         staged = {e: i for i, e in enumerate(e for e in missing if e not in admitted)}
@@ -105,7 +114,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 errors |= RANGE
     return {"slots": slots.int(), "fetch": fetch.int(), "n_fetch": n_fetch.int(), "counts": counts.int(),
             "routed": seen, "errors": errors, "residency": after.int(), "score": torch.from_numpy(score),
-            "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs}
+            "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs} | (
+        {"later": later.int(), "n_later": n_later.int()} if defer else {})
 
 
 def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, ring: torch.Tensor,

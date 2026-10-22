@@ -114,7 +114,7 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
-                 lend_peak: bool = False, policy: Ref | str = "",
+                 lend_peak: bool = False, cpu_admit: bool = False, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -142,6 +142,9 @@ class TieredStore:
         # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
         # ActivationLender), so the engine reserves only the worst step that streams nothing
         self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
+        # `cpu_admit` (F5b): the CPU's experts are admitted as any miss (a variant that `defers`), their pieces fetched
+        # after the call on a side stream (the CPU serves the call), joined after the target's last layer
+        self.cpu_admit, self.defer, self._later = cpu_admit, {}, []
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_stream: torch.Stream | None = None
@@ -294,6 +297,11 @@ class TieredStore:
                 self.prefetch[c.name] = self.ctx.select_kernel(
                     EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
                 ).impl(self.ctx, **facts, copy=self.ring_copy)
+            self.defer = {}
+            for c in self.classes.values() if self.cpu_admit else ():
+                self.defer[c.name] = self.ctx.select_kernel(
+                    EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}.later", unit_bytes=c.unit_bytes, copy="sm"
+                ).impl(self.ctx, unit_bytes=c.unit_bytes, copy="sm")
             for errors in self._watched:
                 self.watch(errors)
         for r in self.resolvers:
@@ -598,7 +606,8 @@ class TieredStore:
         routed = telemetry["routed"].numpy()
         record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
                   "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
-                  "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted)
+                  "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted,
+                  "cpu_admitted": self.cpu_admit,               # but with `cpu_admit`, as any miss)
                   "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
@@ -689,7 +698,21 @@ class TieredStore:
         """Layer g's ring and stage tables for the step (at its first pass)."""
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
+    def fetch_later(self, g: int, classes: list, later: torch.Tensor, n_later: torch.Tensor) -> None:
+        """Group g's admitted CPU experts' pieces (`later` [R, 2, F], `n_later` [R]) into their slots, on side streams
+        after the work enqueued so far; joined after the target's last layer (`layer_done`)."""
+        for r, c in enumerate(classes):
+            copy = self.defer[c.name]
+            copy.start((g, r), later[r], n_later[r:r + 1], c.units(), c.slots())
+            later.record_stream(copy.stream)
+            n_later.record_stream(copy.stream)
+            self._later.append((c.name, (g, r)))
+
     def layer_done(self, g: int) -> None:
+        if self._later and g == self.borrowing_groups - 1:      # before any later step reads those slots
+            for name, key in self._later:
+                self.defer[name].wait(key)
+            self._later.clear()
         if self.lent is not None:
             self.lent.done(g)
             if g == self.borrowing_groups - 1:

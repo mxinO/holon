@@ -992,8 +992,9 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;
     prompt logprobs stay close to the resident store's at the same step size (bounded), two engines serve the same
-    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted; with exclusive tiers too,
-    the I/O worker reading SSD pieces beside the CPU's), and a dead worker fails
+    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted — or with `moe.cpu_admit`
+    admitted as any miss, their copies after the layer on side streams; with exclusive tiers too, the I/O worker
+    reading SSD pieces beside the CPU's), and a dead worker fails
     open: the wait gives up after its time bound and the step's commit stops the engine."""
     from holon_judge.placement import parity, route_dump
 
@@ -1006,16 +1007,22 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
              "cpu_task.threads": 2, "cpu_task.timeout": 0.5}
     short = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.5"}   # + exclusive tiers
     runs = []
-    for policy, ram in (("std.tiered.static@1", {}), ("std.tiered.static@1", {}), ("", short), ("", {})):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | {"moe.placement": policy},
+    admit = {"moe.cpu_admit": "on"}                           # the CPU's experts admitted, their copies deferred
+    for policy, ram, more in (("std.tiered.static@1", {}, {}), ("std.tiered.static@1", {}, {}), ("", short, {}),
+                              ("", {}, admit), ("", {}, {})):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | more | {"moe.placement": policy},
                              **small)
         with route_dump(engine) as trace:
             runs.append(_served(engine, prompts))
         worker = engine.ctx.shared_objects["cpu_task.compute"].native
         assert worker.served() > 0 and worker.flag() == 0 and engine.stats()["graphs"] > 0
-        assert sum(s["cpu"].sum() for s in trace.steps) > 0
+        assert (sum(s["cpu"].sum() for s in trace.steps) > 0) != bool(more)      # (admitted: replayed as any miss)
         if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
+        if more:
+            store = engine.ctx.shared_objects[KEY]
+            assert store.defer and not store._later
+            engine.close()
         if ram:                                   # the I/O worker beside the compute one, both clean
             io = engine.ctx.shared_objects["cpu_task.io"].native
             assert io.served() > 0 and io.flag() == 0

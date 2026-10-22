@@ -252,6 +252,25 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
             dst = set(want["fetch"][r, 1, :int(want["n_fetch"][r])].tolist())
             assert set(miss[r][miss[r] != null[r]].tolist()) <= dst
             assert not set(hits[r].flatten().tolist()) & (dst - {-1})
+    if getattr(resolve, "defers", False) and share:     # `defer`: the CPU's experts admitted, their copy listed apart
+        want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
+                      *state.values(), 3, case["ring"], stage, case["empty"], int(case["n_empty"][0]), plan.cpu(),
+                      True)
+        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
+        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
+        delta, n_delta = _log(capacity + E, 2, device)
+        slots, fetch, n_fetch, cpu, later, n_later = resolve(
+            dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"],
+            torch.zeros(E, dtype=torch.int32, device=device), dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
+            *words, delta, n_delta, 3, plan, jobs, defer=True, **{n: dev[n] for n in state})
+        assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(cpu.cpu(), want["cpu"])
+        assert torch.equal(dev["residency"].cpu(), want["residency"]) and torch.equal(n_later.cpu(), want["n_later"])
+        assert torch.equal(n_fetch.cpu(), want["n_fetch"])
+        for r in range(ROLES):
+            assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
+            assert torch.equal(later[r, :, :int(n_later[r])].cpu(), want["later"][r, :, :int(n_later[r])])
+        taken = {row[0] for row in want["jobs"]}
+        assert int(want["n_later"].sum()) == ROLES * len(taken & {a for _, a, _ in want["records"]})
 
 
 def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:
