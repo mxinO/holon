@@ -100,11 +100,15 @@ class PLE(nn.Module):
         self.ngram, self.eos = ngram, eos
         history, conv = ctx.state(HISTORY, layer), ctx.state(CONV, layer)
         self._state = None if history is None else (history[1], conv[1])
+        self._wide: torch.Tensor | None = None       # a wider verify step's C (`rewind` reads it)
         if self._state is not None:
             rows_max = ctx.options["max_seqs"] + 1
-            tokens = max(ctx.options["max_step_tokens"], rows_max * (1 + ctx.options["max_draft_tokens"]))
+            verify = rows_max * (1 + ctx.options["max_draft_tokens"])       # a verify step's rows (graphed)
+            tokens = max(ctx.options["max_step_tokens"], verify)
+            # C of a verify step's tokens, kept for `rewind`: static for the verify rows alone (n·H float32 a token);
+            # a step that also carries prompt rows takes a buffer of its own (`_wide`)
             self._saved = (ctx.static("qwen4_exp.ple.saved.ids", (tokens,), torch.int64),
-                           ctx.static("qwen4_exp.ple.saved.c", (tokens, width), torch.float32),
+                           ctx.static("qwen4_exp.ple.saved.c", (verify, width), torch.float32),
                            ctx.static("qwen4_exp.ple.saved.history", (rows_max, 2), torch.int64),
                            ctx.static("qwen4_exp.ple.saved.window", (rows_max, self.window, width), torch.float32))
 
@@ -142,8 +146,10 @@ class PLE(nn.Module):
             window_s[:rows].copy_(state[slots])
             scratch_h, scratch_c = history_s[:rows].clone(), window_s[:rows].clone()
             ids_s[:t].copy_(dev.input_ids)
-            c_s[:t].copy_(self._run(r, dev.input_ids, scratch_h, scratch_c, torch.arange(rows, device=r.device),
-                                    meta.query_start, meta.has_init))
+            self._wide = None if t <= len(c_s) else torch.empty(t, c_s.shape[1], dtype=c_s.dtype, device=r.device)
+            (c_s if self._wide is None else self._wide)[:t].copy_(
+                self._run(r, dev.input_ids, scratch_h, scratch_c, torch.arange(rows, device=r.device),
+                          meta.query_start, meta.has_init))
             return r
         if meta.publishes:                         # the state before the step: in-step checkpoints start from it
             before_h, before_c = history[slots].clone(), state[slots].clone()
@@ -161,6 +167,7 @@ class PLE(nn.Module):
         if self._state is None or not (meta := ctx.meta(GROUP)).verify:
             return
         ids_s, c_s, history_s, window_s = self._saved
+        c_s, self._wide = (c_s if self._wide is None else self._wide), None
         history, state = self._views()
         rows, w, slots = len(meta.slots), meta.width, meta.slots.long()
         end = 1 + ctx.seq_table.n_accept[slots]                             # tokens that stand, per row
