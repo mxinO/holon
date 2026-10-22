@@ -18,6 +18,7 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda/atomic>
+#include <nvtx3/nvToolsExt.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <torch/extension.h>
@@ -284,7 +285,9 @@ void serve(std::shared_ptr<State> st) {
                 }
                 any = true;
                 const auto [fn, arg] = st->tasks[s];
+                nvtxRangePushA("cpu_task");                // the task as nsys shows it (the GPU's k_signal / k_wait beside)
                 const bool failed = st->flag() != 0 || pool.run(fn, arg) != 0;
+                nvtxRangePop();
                 if (failed) {
                     st->cpu_flag().fetch_or(TASK, __ATOMIC_RELAXED);
                 }
