@@ -654,6 +654,30 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     assert int(errors) == ID_ERRORS["slots"], "more slots than the bound"
 
 
+
+@pytest.mark.parametrize(("stage", "glu"), [("gate_up", "none"), ("gate_up", "swiglu"), ("down", "none")])
+def test_mmvq_skips_an_arenas_null_slots(ctx, stage, glu):
+    """An arena binding's mmvq calls (one token, and the multi-token kernel at the type's limit) store 0 for an entry
+    on a null slot (below top_k, std.moe.kernels) without reading the slot: NaN-poisoned null slots give the bits of
+    zeroed ones, and the other entries' rows are unchanged."""
+    k, out, rows = STAGES[stage]
+    s = stack("q4_k", EP, out, k, seed=41)
+    facts = {"layout": "ggml.q4_k/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
+             "rows_per_token": rows, "glu": glu, "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
+             "slots": EP + K}
+    kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
+    zero = torch.cat([torch.zeros_like(s.parts["blocks"][:K]), s.parts["blocks"]])
+    poisoned = zero.clone()
+    poisoned[:K] = 0xFF
+    x, ids = placed_inputs(stage, kernel.mmvq_tokens, seed=42)
+    slots = ids.int() + K
+    slots[:, ::2] = torch.arange(0, K, 2, dtype=torch.int32, device="cuda")      # even ranks on their null slots
+    for tokens in sorted({1, kernel.mmvq_tokens}):
+        want = kernel(x[:tokens], {"blocks": zero}, slots[:tokens])
+        got = kernel(x[:tokens], {"blocks": poisoned}, slots[:tokens])
+        assert torch.equal(got, want) and not got[:, ::2].any() and got[:, 1::2].any(), f"T={tokens}"
+    assert {p for p, n in kernel.calls.items() if n} == {"mmvq/q8_1"}, kernel.calls
+
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq

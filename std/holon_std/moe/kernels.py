@@ -65,7 +65,8 @@ then `staging` slots, then cache slots.
   a consumer that does not know the handle reads instead). It may expose `pass_rows` as @2's (the same promise, at the
   bits of its `CHUNK`-row calls over the same slots). An instance has `errors`, a device int32 word [1] its
   calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
-  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
+  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena). An entry on a null
+  slot may get its rows of 0 without the slot being read (its zero weights' product, for finite activations).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]

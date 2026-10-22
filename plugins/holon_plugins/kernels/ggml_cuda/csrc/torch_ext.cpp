@@ -84,7 +84,8 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
              at::Tensor & y, bool swiglu, const std::optional<at::Tensor> & gate_scale,
              const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0,
              const std::optional<at::Tensor> & errors = std::nullopt,
-             const std::optional<at::Tensor> & xq = std::nullopt, int64_t ids_j_tokens = INT64_MAX) {
+             const std::optional<at::Tensor> & xq = std::nullopt, int64_t ids_j_tokens = INT64_MAX,
+             int64_t null_slots = 0) {
     const c10::cuda::CUDAGuard guard(x.device());
     TORCH_CHECK(x.dim() == 3 && ids.dim() == 2 && y.dim() == 3, "x, ids, y: 3, 2 and 3 dimensions");
     const int64_t tokens = ids.size(0), k = ids.size(1), rows = x.size(1), in = x.size(2), out_y = y.size(2);
@@ -107,7 +108,7 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
         holon_ggml_mmvq_id(type, w.data_ptr(), n, out, in, x.data_ptr(), bf16(x, "x"), xq ? xq->data_ptr() : nullptr,
                            rows, ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), swiglu,
                            scale(gate_scale, x, n, "gate_scale"),
-                           scale(up_scale, x, n, "up_scale"), ws.data_ptr(), ws.numel(), stream());
+                           scale(up_scale, x, n, "up_scale"), int(null_slots), ws.data_ptr(), ws.numel(), stream());
     } else {
         const int64_t n = w.size(0) / out;
         TORCH_CHECK(swiglu || !gate_scale, "mmq with ids: a gate scale needs the fused SwiGLU");
@@ -203,10 +204,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     });
     m.def("mmvq_id", [](int64_t type, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids, at::Tensor & y,
                         bool swiglu, const std::optional<at::Tensor> & gate_scale,
-                        const std::optional<at::Tensor> & up_scale, at::Tensor & ws, const std::optional<at::Tensor> & xq) {
-        experts(true, type, 0, w, x, ids, y, swiglu, gate_scale, up_scale, ws, 0, std::nullopt, xq);
+                        const std::optional<at::Tensor> & up_scale, at::Tensor & ws, const std::optional<at::Tensor> & xq,
+                        int64_t null_slots) {
+        TORCH_CHECK(null_slots >= 0 && null_slots <= ids.size(1), "mmvq with ids: null_slots in [0, k]");
+        experts(true, type, 0, w, x, ids, y, swiglu, gate_scale, up_scale, ws, 0, std::nullopt, xq, INT64_MAX,
+                null_slots);
     }, py::arg("type"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("swiglu"),
-       py::arg("gate_scale"), py::arg("up_scale"), py::arg("ws"), py::arg("xq") = py::none());
+       py::arg("gate_scale"), py::arg("up_scale"), py::arg("ws"), py::arg("xq") = py::none(),
+       py::arg("null_slots") = 0);
     // `ids_j_tokens`: D2's batched-decode rule (the plugin's IDS_J_TOKENS); upstream's (J against the tokens) without
     m.def("mmq_id", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
                        at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,

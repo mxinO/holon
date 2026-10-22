@@ -645,6 +645,21 @@ static __global__ void mul_mat_vec_q(
     channel_y  = ncols_dst == 1 && ids ? fastmodulo(channel_dst, nchannels_y) : channel_dst;
     sample_dst = blockIdx.z;
 
+    // Holon: an offload arena's null slot (zero weights, fusion.null_slots): its entry's rows are 0 (what its zero
+    // weights give for finite activations, no bias here), so the block reads nothing and stores zeros
+    if (ncols_dst == 1 && ids && !shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
+        if (threadIdx.y == 0 && threadIdx.x < rows_per_cuda_block &&
+            (rows_per_cuda_block == 1 || uint32_t(row0 + threadIdx.x) < stride_col_dst)) {
+            const uint32_t d = sample_dst*stride_sample_dst + channel_dst*stride_channel_dst + row0 + threadIdx.x;
+            if (fusion.dst_bf16) {
+                ((nv_bfloat16 *) dst)[d] = 0.0f;
+            } else {
+                dst[d] = 0.0f;
+            }
+        }
+        return;
+    }
+
     const uint32_t sample_x    = fastdiv(sample_dst, sample_ratio);
     const uint32_t sample_y    = sample_dst;
 
@@ -940,6 +955,13 @@ static __global__ void mul_mat_vec_q_moe(
     ggml_cuda_pdl_sync();
     const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
     const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
+    // Holon: a null slot's entry (fusion.null_slots): this token's rows are 0, nothing read (as mul_mat_vec_q)
+    if (!shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
+        if (threadIdx.x < c_rows_per_block && (c_rows_per_block == 1 || uint32_t(row0 + threadIdx.x) < nrows_x)) {
+            dst[channel_dst*stride_channel_dst + token_idx*stride_col_dst + row0 + threadIdx.x] = 0.0f;
+        }
+        return;
+    }
 
     const block_q8_1 * y = ((const block_q8_1 *) vy) + channel_y*stride_channel_y + token_idx*stride_col_y;
     const int kbx_offset  = channel_x*stride_channel_x + row0*stride_row_x;
@@ -1482,6 +1504,7 @@ void ggml_cuda_mul_mat_vec_q(
 
     ggml_cuda_mm_fusion_args_device fusion_local{};
     fusion_local.dst_bf16 = dst->type == GGML_TYPE_BF16;
+    fusion_local.null_slots = fusion && ids ? fusion->null_slots : 0; // Holon: an arena's null slots
 
     if (fusion) {
         const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;

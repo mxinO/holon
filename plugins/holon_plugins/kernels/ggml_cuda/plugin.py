@@ -474,10 +474,13 @@ class QEmbedding:
 
 
 class LinearExperts(_Matmul):
-    def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
+    def __init__(self, ext: Extension, act: dict[str, str], ctx, arena: bool = False, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
         self.ext, self.rows_per_token = ext, facts["rows_per_token"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
+        # over an arena, slots below top_k are null slots (zero weights, std.moe.kernels): mmvq stores their entries'
+        # zeros without reading them (a pass of the resident entries, or of the fetched ones, costs its own work only)
+        self.null_slots = self.top_k if arena else 0
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
@@ -605,7 +608,7 @@ class LinearExperts(_Matmul):
             if tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), x, ids, y, self.swiglu, gate_scale,
-                                 up_scale, self.workspace, xq=xq)
+                                 up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
             return y
         self._check_buffers(x, tokens, out, scratch)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
@@ -616,7 +619,7 @@ class LinearExperts(_Matmul):
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
-                                 gate_scale, up_scale, self.workspace, xq=xq)
+                                 gate_scale, up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
                 continue
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
@@ -786,7 +789,8 @@ class Plugin:
             for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
                                        (QLINEAR_GLU, QLinearGlu, _supports_qlinear_glu),
                                        (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts),
-                                       (LINEAR_EXPERTS_ARENA, LinearExperts, _supports_linear_experts)):
+                                       (LINEAR_EXPERTS_ARENA, functools.partial(LinearExperts, arena=True),
+                                        _supports_linear_experts)):
                 add(op, functools.partial(impl, ext, act),
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
         add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)

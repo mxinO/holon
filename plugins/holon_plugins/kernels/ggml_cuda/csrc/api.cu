@@ -404,8 +404,8 @@ size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int6
 void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, int64_t in, const void * x, int x_bf16,
                         const void * x_q8_1, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k,
                         float * y, int swiglu,
-                        const float * gate_scale, const float * up_scale, void * workspace, size_t workspace_bytes,
-                        void * stream) {
+                        const float * gate_scale, const float * up_scale, int null_slots, void * workspace,
+                        size_t workspace_bytes, void * stream) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_type t = (ggml_type) type;
     const int64_t out_y = swiglu ? out/2 : out;
@@ -425,7 +425,8 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
         fusion.gate_scale = gate_scale ? &g_scale : nullptr;
     }
     fusion.x_scale = up_scale ? &x_scale : nullptr;
-    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, &ids_t, &dst, swiglu || up_scale ? &fusion : nullptr);
+    fusion.null_slots = null_slots;           // an arena's null slots: their entries store 0, computing nothing
+    ggml_cuda_mul_mat_vec_q(c.ctx, &src0, &src1, &ids_t, &dst, swiglu || up_scale || null_slots ? &fusion : nullptr);
 }
 
 void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int64_t out, int64_t in, const void * x,

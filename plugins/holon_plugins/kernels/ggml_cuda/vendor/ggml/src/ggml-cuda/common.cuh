@@ -1574,6 +1574,7 @@ struct ggml_cuda_mm_fusion_args_host {
     const ggml_tensor * shared_up = nullptr;
     const ggml_tensor * shared_gate = nullptr;
     ggml_tensor * shared_dst = nullptr;
+    int32_t null_slots = 0; // Holon: ids below this name an offload arena's null slots (zero weights): not computed
 };
 struct ggml_cuda_mm_fusion_args_device {
     const void * x_bias = nullptr;
@@ -1588,6 +1589,7 @@ struct ggml_cuda_mm_fusion_args_device {
     float * shared_dst = nullptr;
     uint32_t shared_stride_col_dst = 0;
     bool dst_bf16 = false; // Holon: mul_mat_vec_q stores bf16 instead of f32 (dst is passed as void *)
+    int32_t null_slots = 0; // Holon: an entry whose id is below this (a null slot: zero weights) stores 0, reads nothing
 };
 
 // Holon: a * b in f32 without flushing subnormals (fast math would), as the f32 multiply by NVFP4's scale2 that a
