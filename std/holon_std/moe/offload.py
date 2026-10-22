@@ -218,6 +218,7 @@ class Offload(nn.Module):
         """The experts' outputs `y` [T, k, H] of the pass `route` resolved, its CPU share's rows in place."""
         if self._pending is not None:
             self._cpu.collect(self._slot, y, self._pending)
+            self._pending = None                # (a step's tensor: none outlives it, an activation loan's least)
         return y
 
     def finish(self) -> None:

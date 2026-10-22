@@ -961,7 +961,9 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     cls, n = store.tail
     c = list(store.classes.values())[cls]
     end = c.slots()[c.size - 1].data_ptr() + c.unit_bytes
-    assert store.borrowed["ring"] and set(ranges) == {(end - store._loan_bytes, store._loan_bytes)}
+    (at, nbytes), = set(ranges)                      # one range, the tail's last bytes (512-byte aligned)
+    assert store.borrowed["ring"] and at + nbytes == end and at % 512 == 0 and nbytes > store._loan_bytes - 512
+    assert store._loan.held() == 0
     kept, real = [], store.activations
 
     def leaky(step):                                 # the plant: a buffer made in the loan and kept
@@ -981,7 +983,8 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
         while engine.has_work():
             engine.step()
     assert kept
-    engine.close()
+    kept.clear()
+    engine.close()                                  # (the loan's range free for the next engine)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

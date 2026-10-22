@@ -167,10 +167,14 @@ class ActivationLoan:
         self.index = device.index if device.index is not None else torch.cuda.current_device()
 
     def use(self, range_: torch.Tensor):
-        self.pool = None                              # the last pool's segments return (none alive: `held`)
+        self.release()
         self.lib.loan_set(range_.data_ptr(), range_.numel())
         self.pool = torch.cuda.MemPool(self.allocator.allocator())
         return torch.cuda.use_mem_pool(self.pool, self.index)
+
+    def release(self) -> None:
+        """The pool's segments back (none alive: `held`), the range free for the next `use`."""
+        self.pool = None
 
     def held(self) -> int:
         return 0 if self.pool is None else sum(b["size"] for seg in self.pool.snapshot() for b in seg["blocks"]

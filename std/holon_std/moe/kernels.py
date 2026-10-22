@@ -149,7 +149,8 @@ then `staging` slots, then cache slots.
 - `activation_loan@1` (FN step 7: a tail step's activations from its lent tail, the core's ActivationLender): an
   instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
   `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
-  — and `held() -> int`, the bytes allocated in it still alive. An allocation the range cannot hold fails.
+  — `held() -> int`, the bytes allocated in it still alive, and `release()`: the range free again (nothing held). An
+  allocation the range cannot hold fails.
 
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's

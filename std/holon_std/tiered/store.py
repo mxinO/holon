@@ -541,6 +541,9 @@ class TieredStore:
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
+            if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
+                raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail (moe.lend_peak), but "
+                                   "this layout stages: its large steps could not lend them")
         self._step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
         if step.row_kind is None:                                    # launched plans are the scheduler's
@@ -563,6 +566,8 @@ class TieredStore:
             raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
                                "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
                                "it)")
+        if self._loaned:
+            self._loan.release()
         self._loaned = False
         if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
             cls, n = self.tail
@@ -608,6 +613,8 @@ class TieredStore:
     def shutdown(self) -> None:
         """The I/O worker first (its reads use the file tier's descriptors), then the tiers — unless the worker left
         its coordinator behind (still in a read past its time bound): then the descriptors stay open."""
+        if self._loan is not None:
+            self._loan.release()
         service = getattr(self.io, "service", None) if self.exclusive else None    # (a native worker's)
         if service is not None:
             service.shutdown()
@@ -638,9 +645,11 @@ class TieredStore:
         `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's rounding (`LOAN_MARGIN`,
         `LOAN_SLACK`) past their passes' buffers at the tail's end, where its device has `activation_loan@1`; 0 where
         it lends none."""
-        if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned):
+        if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned
+                and self.ctx.candidates(ACTIVATION_LOAN, {})):
             return 0
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
+        self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
         self._loan_bytes = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
         self.tail = self._tail(lambda c: c.cap)        # the tail grows by the loan (for the final materialize)
         return self.ring_tokens
@@ -654,7 +663,8 @@ class TieredStore:
         cls, n = self._step_tail
         c = list(self.classes.values())[cls]
         self._loaned = True
-        return self._loan.use(c.slots()[c.size - n:].view(-1)[-self._loan_bytes:])
+        loan = c.slots()[c.size - n:].view(-1)[-self._loan_bytes:]
+        return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     def fetch_stream(self) -> torch.Stream:
         """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""
@@ -672,7 +682,8 @@ class TieredStore:
             return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n]
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
-        return c.slots()[c.size - n:].view(-1)
+        view = c.slots()[c.size - n:].view(-1)
+        return view[:len(view) - self._loan_bytes]          # (the activation loan's bytes past the passes')
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""

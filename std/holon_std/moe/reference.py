@@ -359,6 +359,9 @@ class ActivationLoan:
     def held(self) -> int:
         return 0
 
+    def release(self) -> None:
+        pass
+
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:
     """The `expert_fetch@1` oracle: `dst` with units `src[fetch[0, i]]` in slots `fetch[1, i]` for i < min(n,

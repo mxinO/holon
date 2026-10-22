@@ -207,14 +207,16 @@ class Executor:
         """Bytes for the state pools: `fraction` of the free memory, minus the activation peak of a worst-case step
         (`max_step_tokens` prompt tokens in rows of at most `max_model_len`, each sampled) run on minimum-size pools,
         and minus the graphs' private pool. Where a shared object lends the steps from some size their activations
-        (`lend_activations`, told the worst step's peak), the worst step below that size is the one reserved."""
+        (`lend_activations`, told the worst step's peak), the worst step below that size (at least an eager step of
+        every slot's decode or verify rows) is the one reserved."""
         ledger.materialize(None)
         self.state.reset_padding()
         with torch.no_grad():
             peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan()))
             lends = min((t for o in self._lenders if (t := o.lend_activations(peak))), default=0)
-            if 0 < lends <= self.cfg.max_step_tokens:
-                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(lends - 1)))
+            small = max(lends - 1, self.cfg.max_seqs * (1 + self.cfg.max_draft_tokens))   # (eager decode rows too)
+            if lends and small < self.cfg.max_step_tokens:
+                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(small)))
             if self.graphs is not None:
                 # Captured largest bucket first, the smaller ones reuse its blocks, so the pool is what the largest
                 # bucket's variants leave reserved.
