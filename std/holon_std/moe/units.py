@@ -323,14 +323,20 @@ class MoE(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward(x, None)
 
-    def add_residual(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
-        the composition (the ffn unit interface's optional member, std.blocks.prenorm)."""
-        if not hasattr(self._combine, "add"):
-            return residual + self._forward(x, None)
-        return self._forward(x, residual)
+    joins = True                             # add_residual takes a `join` (std.ffn.sum@1's side stream)
 
-    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
+    def add_residual(self, x: torch.Tensor, residual: torch.Tensor, join=None) -> torch.Tensor:
+        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
+        the composition (the ffn unit interface's optional member, std.blocks.prenorm). `join()`, given, runs just
+        before `residual` is first read (a residual computed on another stream joins there, std.ffn.sum@1)."""
+        if not hasattr(self._combine, "add"):
+            y = self._forward(x, None)
+            if join is not None:
+                join()
+            return residual + y
+        return self._forward(x, residual, join)
+
+    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None, join=None) -> torch.Tensor:
         """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (whole CHUNKs, up to
         what the stacks' kernels take at their chunks' bits: the step's last partial chunk is a pass of its own, so
         every row's chunk and kernel path are a chunk's); with `residual`, its add in the combine."""
@@ -357,6 +363,9 @@ class MoE(nn.Module):
             if residual is None:
                 self._combine(y, weights, out[a:b])
             else:
+                if join is not None:
+                    join()
+                    join = None
                 self._combine.add(y, weights, residual[a:b], out[a:b])
         self._store.finish()
         return out

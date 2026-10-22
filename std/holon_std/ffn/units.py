@@ -45,22 +45,44 @@ class GatedSwiGLU(SwiGLU):
         return super().forward(x) * torch.sigmoid(self.gate(x))
 
 
+_SIDE: dict[torch.device, torch.cuda.Stream] = {}      # per device, the later parts' stream
+
+
 class Sum(nn.Module):
     """FFN parts summed (D7): each `parts` Ref built at this layer (e.g. routed experts, then a gated shared expert).
     The later parts are summed in order, then added to the first part's output — in the first part's own kernel when
     it has the ffn interface's `add_residual` (std.moe@1: its combine's `add`, one launch less), bitwise the plain add
-    (for two parts, the same sum as before: IEEE addition commutes)."""
+    (for two parts, the same sum as before: IEEE addition commutes). On CUDA, where the first part takes a `join`
+    (std.moe@1), the later parts run on a stream of their own beside it — the shared expert beside the routed
+    experts' router, resolve and fetch — and join just before its combine reads their sum: the same kernels on the
+    same inputs, so bitwise the same, in graphs too (the side stream forks from and joins the capture's). The plugin
+    option `ffn.fork=off` keeps them on one stream."""
 
     def __init__(self, ctx, *, hidden: int, parts: tuple[Ref, ...], layer: int = 0) -> None:
         super().__init__()
         self.parts = nn.ModuleList(ctx.unit(p, hidden=hidden, layer=layer) for p in parts)
+        cuda = torch.device(ctx.device).type == "cuda" and \
+            str(ctx.options.get("plugins", {}).get("ffn.fork", "on")) != "off"
+        self._side = _SIDE.setdefault(torch.device(ctx.device), torch.cuda.Stream(ctx.device)) if cuda else None
+
+    def _rest(self, x: torch.Tensor) -> torch.Tensor:
+        acc = self.parts[1](x)
+        for part in self.parts[2:]:
+            acc = acc + part(x)
+        return acc
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        first, rest = self.parts[0], self.parts[1:]
-        if not len(rest):
+        first = self.parts[0]
+        if len(self.parts) == 1:
             return first(x)
-        acc = rest[0](x)
-        for part in rest[1:]:
-            acc = acc + part(x)
         add = getattr(first, "add_residual", None)
-        return add(x, acc) if add is not None else first(x) + acc
+        if add is None:
+            return first(x) + self._rest(x)
+        if self._side is None or not getattr(first, "joins", False):
+            return add(x, self._rest(x))
+        main = torch.cuda.current_stream(x.device)
+        self._side.wait_stream(main)                         # x is ready
+        with torch.cuda.stream(self._side):
+            acc = self._rest(x)
+        acc.record_stream(main)                             # read on the main stream: freed after its use there
+        return add(x, acc, join=lambda: main.wait_stream(self._side))
