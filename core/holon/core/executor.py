@@ -24,6 +24,7 @@ from .memory import Copies, Ledger, run_mem_ops
 from .state import StateManager
 
 PROMPT_LOGPROB_CHUNK = 256     # rows of full-vocabulary logits materialized at once for prompt logprobs
+LOGPROB_F32_ROWS = 64          # of them, rows taken to f32 log-probabilities at once (row-wise: the same bits)
 BUCKETS = (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)      # decode batch sizes captured as graphs
 
 # Sampler variants captured at startup: greedy, sampled, sampled with filters (logprob steps run eagerly).
@@ -245,7 +246,7 @@ class Executor:
         if h.shape[1:] != (width,) or h.dtype != dtype:     # what taps and the drafter are built for (below)
             raise ValueError(f"the trunk returns [T, {h.shape[1]}] {h.dtype}, not the [T, {width}] {dtype} the model "
                              "declares (ModelSpec.residual)")
-        self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
+        self.model.head(h[:PROMPT_LOGPROB_CHUNK])[:LOGPROB_F32_ROWS].float().log_softmax(-1)
         if self.drafter is not None:                 # its pass over the step's tokens
             self._run_drafter(ctx, h)
         del h
@@ -628,12 +629,14 @@ class Executor:
         for r in prompt:
             acc, base = Logprobs([], [], []), int(qstart[r.row])
             for a in range(r.first, r.end, chunk):
-                b = min(a + chunk, r.end)
-                lp = self.model.head(h[base + a: base + b]).float().log_softmax(-1)
-                target = torch.as_tensor(r.targets[a - r.first: b - r.first], device=lp.device)
-                top = lp.topk(r.k)
-                acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
-                acc.top_ids += top.indices.tolist()
-                acc.top += top.values.tolist()
+                logits = self.model.head(h[base + a: base + min(a + chunk, r.end)])
+                for c in range(a, min(a + chunk, r.end), LOGPROB_F32_ROWS):
+                    b = min(c + LOGPROB_F32_ROWS, a + chunk, r.end)
+                    lp = logits[c - a: b - a].float().log_softmax(-1)
+                    target = torch.as_tensor(r.targets[c - r.first: b - r.first], device=lp.device)
+                    top = lp.topk(r.k)
+                    acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
+                    acc.top_ids += top.indices.tolist()
+                    acc.top += top.values.tolist()
             out.append(acc)
         return out

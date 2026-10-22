@@ -5,7 +5,10 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/extension.h>
 
+#include <algorithm>
 #include <climits>
+#include <iterator>
+#include <map>
 #include <cstdint>
 #include <vector>
 
@@ -1013,49 +1016,90 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 }
 
 // `activation_loan@1`: torch's pluggable-allocator entry points over the one device range `loan_set` names (a
-// MemPool of the caching allocator asks them for its segments). Segments are cut from the range in order, 512-byte
-// aligned; past its end the allocation fails (torch's out of memory, in the loan's pool); the cut restarts once every
-// segment is back.
+// MemPool of the caching allocator asks them for its segments): first fit over the range's free extents, 512-byte
+// aligned, coalesced when a segment comes back. A segment the range cannot hold (the caching allocator's segments
+// for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each stream its own) is the
+// device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that way.
 struct Loan {
     char * base = nullptr;
-    size_t cap = 0, top = 0;
-    int64_t live = 0;
+    size_t cap = 0;
+    std::map<size_t, size_t> free;                     // offset -> bytes
+    int64_t live = 0, outside = 0, most = 0;
 };
 Loan loan;
+
+size_t loan_round(ssize_t size) { return (size_t(size) + 511) & ~size_t(511); }
 
 void loan_set(int64_t ptr, int64_t nbytes) {
     TORCH_CHECK(loan.live == 0, "activation_loan@1: ", loan.live, " segments of the loan are still out");
     loan.base = reinterpret_cast<char *>(ptr);
-    loan.cap = size_t(nbytes);
-    loan.top = 0;
+    loan.cap = size_t(nbytes) & ~size_t(511);
+    loan.free.clear();
+    loan.free[0] = loan.cap;
 }
 
 int64_t loan_live() { return loan.live; }
+
+int64_t loan_overflow() { return loan.most; }
 
 }  // namespace
 
 extern "C" {
 void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
-    const size_t n = (size_t(size) + 511) & ~size_t(511);
-    if (loan.base == nullptr || loan.top + n > loan.cap) {
+    const size_t n = loan_round(size);
+    for (auto it = loan.free.begin(); it != loan.free.end(); ++it) {
+        if (it->second >= n) {
+            const size_t at = it->first, left = it->second - n;
+            loan.free.erase(it);
+            if (left) {
+                loan.free[at + n] = left;
+            }
+            ++loan.live;
+            return loan.base + at;
+        }
+    }
+    void * out = nullptr;
+    if (cudaMalloc(&out, n) != cudaSuccess) {
+        cudaGetLastError();
         return nullptr;
     }
-    void * out = loan.base + loan.top;
-    loan.top += n;
     ++loan.live;
+    loan.outside += int64_t(n);
+    loan.most = std::max(loan.most, loan.outside);
     return out;
 }
 
-void holon_loan_free(void *, ssize_t, int, cudaStream_t) {
-    if (--loan.live == 0) {
-        loan.top = 0;
+void holon_loan_free(void * ptr, ssize_t size, int, cudaStream_t) {
+    char * p = static_cast<char *>(ptr);
+    if (p < loan.base || p >= loan.base + loan.cap) {                // the device's
+        cudaFree(ptr);
+        loan.outside -= int64_t(loan_round(size));
+        --loan.live;
+        return;
     }
+    size_t at = size_t(p - loan.base), n = loan_round(size);
+    auto next = loan.free.lower_bound(at);
+    if (next != loan.free.end() && at + n == next->first) {          // the extent after it
+        n += next->second;
+        next = loan.free.erase(next);
+    }
+    if (next != loan.free.begin()) {                                 // the extent before it
+        auto prev = std::prev(next);
+        if (prev->first + prev->second == at) {
+            at = prev->first;
+            n += prev->second;
+            loan.free.erase(prev);
+        }
+    }
+    loan.free[at] = n;
+    --loan.live;
 }
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_set", &loan_set, "activation_loan@1: the range the loan's segments are cut from (none out)");
     m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
+    m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
     m.def("tiers", &tiers, "moe_tiers@1: the call's admissions and SSD misses through the exclusive RAM tier");
