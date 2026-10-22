@@ -1,0 +1,6303 @@
+{
+ "name": "fn6_e2e",
+ "date": "2026-10-22",
+ "method": "FN step 6 (docs/v1-flash-next.md section 20): the offload deployment end to end on the bar cards. Bench: bench/offload_ctx.py, batch 1, contexts 1K/4K/32K, corpus fn, 3 rounds, medians of tok/s; Strata with its step-0 calibration (no-approximation arms), same allocation as Holon's. Gates: spikes/fn7/consistency.py (c), spikes/fn7/tasks (d; answers in evidence/fn6_tasks_2026-10-22/). Breakdown: spikes/fn7/breakdown.py under nsys, eager steps, ms of GPU time per step (prefill GPU sums include the ring's concurrent copies; wall_ms is the step's). Hit rate: decode lookups of v1-long prompts (cut to 4,096 tokens) that found their expert resident.",
+ "cards": {
+  "rtx-5080": {
+   "file": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",
+   "commit": "57e7bb4",
+   "bars_deployment_memory_fraction_0.97": {
+    "records": [
+     "fn6_rtx-5080",
+     "fn6m_rtx-5080"
+    ],
+    "off/decode/1024": [
+     80.3,
+     87.9,
+     0.914
+    ],
+    "off/decode/4096": [
+     79.5,
+     87.3,
+     0.911
+    ],
+    "off/decode/32768": [
+     74.1,
+     80.5,
+     0.92
+    ],
+    "off/prefill/1024": [
+     1165.3,
+     1540.2,
+     0.757
+    ],
+    "off/prefill/4096": [
+     2746.3,
+     2733.0,
+     1.005
+    ],
+    "off/prefill/32768": [
+     2632.6,
+     3121.1,
+     0.843
+    ],
+    "mtp/decode/1024": [
+     98.4,
+     128.4,
+     0.766
+    ],
+    "mtp/decode/4096": [
+     88.5,
+     102.5,
+     0.863
+    ],
+    "mtp/decode/32768": [
+     92.5,
+     115.0,
+     0.804
+    ],
+    "mtp/prefill/1024": [
+     1088.0,
+     1495.6,
+     0.727
+    ],
+    "mtp/prefill/4096": [
+     2617.2,
+     2680.0,
+     0.977
+    ],
+    "mtp/prefill/32768": [
+     2515.8,
+     3092.9,
+     0.813
+    ]
+   },
+   "bars_memory_fraction_0.9": {
+    "records": [
+     "fn6_rtx-5080",
+     "fn6r_rtx-5080"
+    ],
+    "off/decode/1024": [
+     77.6,
+     87.9,
+     0.883
+    ],
+    "off/decode/4096": [
+     77.0,
+     87.3,
+     0.882
+    ],
+    "off/decode/32768": [
+     72.4,
+     80.5,
+     0.899
+    ],
+    "off/prefill/1024": [
+     1137.0,
+     1540.2,
+     0.738
+    ],
+    "off/prefill/4096": [
+     2743.7,
+     2733.0,
+     1.004
+    ],
+    "off/prefill/32768": [
+     2628.7,
+     3121.1,
+     0.842
+    ],
+    "mtp/decode/1024": [
+     93.5,
+     128.4,
+     0.728
+    ],
+    "mtp/decode/4096": [
+     84.7,
+     102.5,
+     0.826
+    ],
+    "mtp/decode/32768": [
+     88.0,
+     115.0,
+     0.765
+    ],
+    "mtp/prefill/1024": [
+     1046.8,
+     1495.6,
+     0.7
+    ],
+    "mtp/prefill/4096": [
+     2310.1,
+     2680.0,
+     0.862
+    ],
+    "mtp/prefill/32768": [
+     2236.2,
+     3092.9,
+     0.723
+    ]
+   },
+   "bars_f5b_on_memory_fraction_0.9": {
+    "records": [
+     "fn6_rtx-5080",
+     "fn6_f5b_rtx-5080"
+    ],
+    "off/decode/1024": [
+     70.3,
+     87.9,
+     0.8
+    ],
+    "off/decode/4096": [
+     72.7,
+     87.3,
+     0.833
+    ],
+    "off/decode/32768": [
+     67.9,
+     80.5,
+     0.843
+    ],
+    "off/prefill/1024": [
+     1138.2,
+     1540.2,
+     0.739
+    ],
+    "off/prefill/4096": [
+     2740.8,
+     2733.0,
+     1.003
+    ],
+    "off/prefill/32768": [
+     2632.6,
+     3121.1,
+     0.843
+    ],
+    "mtp/decode/1024": [
+     81.1,
+     128.4,
+     0.632
+    ],
+    "mtp/decode/4096": [
+     74.5,
+     102.5,
+     0.727
+    ],
+    "mtp/decode/32768": [
+     85.0,
+     115.0,
+     0.739
+    ],
+    "mtp/prefill/1024": [
+     1050.0,
+     1495.6,
+     0.702
+    ],
+    "mtp/prefill/4096": [
+     2310.9,
+     2680.0,
+     0.862
+    ],
+    "mtp/prefill/32768": [
+     2242.3,
+     3092.9,
+     0.725
+    ]
+   },
+   "bars_before_lending_fixes_037232e": {
+    "records": [
+     "fn6_rtx-5080"
+    ],
+    "off/decode/1024": [
+     73.9,
+     87.9,
+     0.841
+    ],
+    "off/decode/4096": [
+     72.5,
+     87.3,
+     0.83
+    ],
+    "off/decode/32768": [
+     69.2,
+     80.5,
+     0.86
+    ],
+    "off/prefill/1024": [
+     1220.1,
+     1540.2,
+     0.792
+    ],
+    "off/prefill/4096": [
+     1698.6,
+     2733.0,
+     0.622
+    ],
+    "off/prefill/32768": [
+     1627.1,
+     3121.1,
+     0.521
+    ],
+    "mtp/decode/1024": [
+     81.8,
+     128.4,
+     0.637
+    ],
+    "mtp/decode/4096": [
+     73.2,
+     102.5,
+     0.714
+    ],
+    "mtp/decode/32768": [
+     77.6,
+     115.0,
+     0.675
+    ],
+    "mtp/prefill/1024": [
+     1148.6,
+     1495.6,
+     0.768
+    ],
+    "mtp/prefill/4096": [
+     1609.6,
+     2680.0,
+     0.601
+    ],
+    "mtp/prefill/32768": [
+     1545.3,
+     3092.9,
+     0.5
+    ]
+   },
+   "strata_hit_rate_tokens_per_pass": {
+    "strata_na_off": {
+     "1024/0": [
+      0.88,
+      1.0
+     ],
+     "1024/1": [
+      0.88,
+      1.0
+     ],
+     "1024/2": [
+      0.91,
+      1.0
+     ],
+     "4096/0": [
+      0.89,
+      1.0
+     ],
+     "4096/1": [
+      0.89,
+      1.0
+     ],
+     "4096/2": [
+      0.87,
+      1.0
+     ],
+     "32768/0": [
+      0.86,
+      1.0
+     ],
+     "32768/1": [
+      0.86,
+      1.0
+     ],
+     "32768/2": [
+      0.85,
+      1.0
+     ]
+    },
+    "strata_na_mtp": {
+     "1024/0": [
+      0.9,
+      2.84
+     ],
+     "1024/1": [
+      0.88,
+      2.91
+     ],
+     "1024/2": [
+      0.91,
+      2.88
+     ],
+     "4096/0": [
+      0.9,
+      2.84
+     ],
+     "4096/1": [
+      0.92,
+      2.21
+     ],
+     "4096/2": [
+      0.87,
+      2.25
+     ],
+     "32768/0": [
+      0.86,
+      3.01
+     ],
+     "32768/1": [
+      0.84,
+      3.05
+     ],
+     "32768/2": [
+      0.87,
+      3.2
+     ]
+    }
+   },
+   "cached_experts": [
+    {
+     "flags": "--max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json",
+     "lending": true,
+     "classes": {
+      "gate_up.iq2_s.1280x2560": {
+       "cache": 3967,
+       "pieces": 17408,
+       "unit_bytes": 1049600
+      },
+      "down.q2_0.2560x640": {
+       "cache": 5718,
+       "pieces": 24576,
+       "unit_bytes": 460800
+      },
+      "gate_up.iq1_m.1280x2560": {
+       "cache": 512,
+       "pieces": 1536,
+       "unit_bytes": 716800
+      },
+      "gate_up.iq2_xxs.1280x2560": {
+       "cache": 1239,
+       "pieces": 5632,
+       "unit_bytes": 844800
+      }
+     },
+     "cached_bytes": 8212326400,
+     "cached_fraction": 0.2316,
+     "vram_reserved": 14027849728,
+     "vram_total": 16611278848
+    },
+    {
+     "flags": "--max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy",
+     "lending": true,
+     "classes": {
+      "gate_up.iq2_s.1280x2560": {
+       "cache": 3172,
+       "pieces": 17408,
+       "unit_bytes": 1049600
+      },
+      "down.q2_0.2560x640": {
+       "cache": 5208,
+       "pieces": 25088,
+       "unit_bytes": 460800
+      },
+      "gate_up.iq1_m.1280x2560": {
+       "cache": 512,
+       "pieces": 1536,
+       "unit_bytes": 716800
+      },
+      "gate_up.iq2_xxs.1280x2560": {
+       "cache": 1012,
+       "pieces": 5632,
+       "unit_bytes": 844800
+      },
+      "gate_up.q2_0.1280x2560": {
+       "cache": 512,
+       "pieces": 512,
+       "unit_bytes": 921600
+      }
+     },
+     "cached_bytes": 7422976000,
+     "cached_fraction": 0.2053,
+     "vram_reserved": 13692305408,
+     "vram_total": 16611278848
+    },
+    {
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json",
+     "lending": true,
+     "classes": {
+      "gate_up.iq2_s.1280x2560": {
+       "cache": 4398,
+       "pieces": 17408,
+       "unit_bytes": 1049600
+      },
+      "down.q2_0.2560x640": {
+       "cache": 6273,
+       "pieces": 24576,
+       "unit_bytes": 460800
+      },
+      "gate_up.iq1_m.1280x2560": {
+       "cache": 512,
+       "pieces": 1536,
+       "unit_bytes": 716800
+      },
+      "gate_up.iq2_xxs.1280x2560": {
+       "cache": 1363,
+       "pieces": 5632,
+       "unit_bytes": 844800
+      }
+     },
+     "cached_bytes": 9025203200,
+     "cached_fraction": 0.2546,
+     "vram_reserved": 14845739008,
+     "vram_total": 16611278848
+    },
+    {
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy",
+     "lending": true,
+     "classes": {
+      "gate_up.iq2_s.1280x2560": {
+       "cache": 3593,
+       "pieces": 17408,
+       "unit_bytes": 1049600
+      },
+      "down.q2_0.2560x640": {
+       "cache": 5755,
+       "pieces": 25088,
+       "unit_bytes": 460800
+      },
+      "gate_up.iq1_m.1280x2560": {
+       "cache": 513,
+       "pieces": 1536,
+       "unit_bytes": 716800
+      },
+      "gate_up.iq2_xxs.1280x2560": {
+       "cache": 1137,
+       "pieces": 5632,
+       "unit_bytes": 844800
+      },
+      "gate_up.q2_0.1280x2560": {
+       "cache": 512,
+       "pieces": 512,
+       "unit_bytes": 921600
+      }
+     },
+     "cached_bytes": 8223232000,
+     "cached_fraction": 0.2274,
+     "vram_reserved": 14489223168,
+     "vram_total": 16611278848
+    }
+   ],
+   "hit_rate": [
+    {
+     "lookups": 168000,
+     "hits": 135287,
+     "steps": 350,
+     "hit_rate": 0.8053,
+     "miss_experts_per_step": 93.47,
+     "miss_mb_per_step": 128.48,
+     "flags": "--max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json"
+    },
+    {
+     "lookups": 266840,
+     "hits": 205729,
+     "steps": 140,
+     "hit_rate": 0.771,
+     "miss_experts_per_step": 355.8,
+     "miss_mb_per_step": 490.3,
+     "flags": "--max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy"
+    }
+   ],
+   "ring_diag_8k": [
+    "prefill 3.22 s peak misses 486",
+    "  {\"mode\": \"ring\", \"tail\": [0, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[375, 0, 0, 0], [852, 477, 708, 806], [40, 0, 512, 150], [0, 0, 512, 18], [0, 0, 512, 50]], \"n_before\": 0}",
+    "  {\"mode\": \"ring\", \"tail\": [0, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[375, 0, 0, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0]], \"n_before\": 2803}",
+    "prefill 3.07 s peak misses 486",
+    "  {\"mode\": \"ring\", \"tail\": [0, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[375, 0, 0, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0]], \"n_before\": 2803}",
+    "  {\"mode\": \"ring\", \"tail\": [0, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[375, 0, 0, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0], [0, 0, 512, 0]], \"n_before\": 2803}"
+   ],
+   "ring_diag_8k_before_floors": [
+    "ring_tokens 512 lending False tail (0, 375) prefill 512 staging 10 ring_copy sm",
+    "classes [('gate_up.iq2_s.1280x2560', 4077, 17408, 17408), ('down.q2_0.2560x640', 5506, 24576, 24576), ('gate_up.iq1_m.1280x2560', 823, 1536, 1536), ('gate_up.iq2_xxs.1280x2560', 1650, 5632, 5632)]",
+    "prefill 5.47 s peak misses 394",
+    "prefill 5.27 s peak misses 394"
+   ],
+   "ring_exact": [
+    "{} {'ring': 2, 'stage': 0, 'partial': 2}",
+    "{'moe.ring_tokens': '0'} {'ring': 0, 'stage': 2, 'partial': 0}",
+    "bitwise True True"
+   ],
+   "f5b_split": {
+    "f5a": 95.05951511749862,
+    "threads_at_half": {
+     "2": 26.522218800333263,
+     "4": 46.51062613704103,
+     "6": 63.718669965545566
+    },
+    "shares": {
+     "0.25": 87.7438261687433,
+     "0.4": 76.0748847050615,
+     "0.5": 63.718669965545566,
+     "0.6": 56.41438128471503,
+     "0.75": 43.74297054946948,
+     "1.0": 20.443848472197637
+    },
+    "best": {
+     "share": 0.25,
+     "threads": 6
+    },
+    "gain": -0.07695903918416525,
+    "taken": false,
+    "options": {
+     "moe.cpu_plan": "0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,10,10,10",
+     "moe.cpu_isa": "x86-avx512",
+     "cpu_task.threads": "6"
+    },
+    "taken_by_tune": {}
+   },
+   "f5b_split_before_floors": {
+    "f5a": 87.48310028970171,
+    "threads_at_half": {
+     "2": 19.622355699869264,
+     "4": 39.223161603477116,
+     "6": 50.13603922674082
+    },
+    "shares": {
+     "0.25": 77.21149535990128,
+     "0.4": 59.223331863640446,
+     "0.5": 50.13603922674082,
+     "0.6": 48.163270283397225,
+     "0.75": 41.30039043011228,
+     "1.0": 27.89904083158972
+    },
+    "best": {
+     "share": 0.25,
+     "threads": 6
+    },
+    "gain": -0.11741244761314862,
+    "taken": false,
+    "options": {
+     "moe.cpu_plan": "0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,10,10,10",
+     "moe.cpu_isa": "x86-avx512",
+     "cpu_task.threads": "6"
+    },
+    "taken_by_tune": {}
+   },
+   "gate_c": {
+    "name": "fn7_consistency",
+    "date": "2026-10-21",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+    "plant": null,
+    "prompts": [
+     "summary-6k",
+     "recall-8k",
+     "recall-16k",
+     "chat-multiturn-20k"
+    ],
+    "bars": {
+     "kl_mean": 0.13,
+     "kl_p50": 0.007,
+     "band_dnll": 0.75
+    },
+    "commit": "21bb40f3ca30ca76adc5ec76340b6041178d4c68",
+    "decode": {
+     "n": 49596,
+     "kl_mean": 0.024531036858392644,
+     "kl_p50": 0.0017775456128033568,
+     "kl_p99": 0.35217245212639436,
+     "dnll": -0.02262759246874569,
+     "worst_band_dnll": -0.40517727886390276,
+     "prompts": {
+      "summary-6k": {
+       "dnll": -0.211372913706192,
+       "kl_mean": 0.043871438029894946,
+       "worst_band": -0.40517727886390276
+      },
+      "recall-8k": {
+       "dnll": -0.010109114997115929,
+       "kl_mean": 0.029732286518199848,
+       "worst_band": -0.03669385174272577
+      },
+      "recall-16k": {
+       "dnll": -0.017391187323564934,
+       "kl_mean": 0.03829987715766933,
+       "worst_band": -0.07071404500836209
+      },
+      "chat-multiturn-20k": {
+       "dnll": 0.020443415027821158,
+       "kl_mean": 0.005780847439059393,
+       "worst_band": 0.1462270062001888
+      }
+     },
+     "pass": true
+    },
+    "chunked": {
+     "n": 49596,
+     "kl_mean": 0.02354899825526121,
+     "kl_p50": 0.0018798947495541297,
+     "kl_p99": 0.3554199211215434,
+     "dnll": 0.020784742722061558,
+     "worst_band_dnll": 0.36684143844992434,
+     "prompts": {
+      "summary-6k": {
+       "dnll": 0.21073547448359076,
+       "kl_mean": 0.039477783966864174,
+       "worst_band": 0.36684143844992434
+      },
+      "recall-8k": {
+       "dnll": -0.07253392842940729,
+       "kl_mean": 0.031026300358279597,
+       "worst_band": -0.11270999939793658
+      },
+      "recall-16k": {
+       "dnll": -0.023526640124403208,
+       "kl_mean": 0.0361216729335039,
+       "worst_band": -0.05665987320919896
+      },
+      "chat-multiturn-20k": {
+       "dnll": 0.04194971081568242,
+       "kl_mean": 0.005809756105303947,
+       "worst_band": 0.19855100458687502
+      }
+     },
+     "pass": true
+    },
+    "mtp": {
+     "tokens": 256,
+     "first_difference": [
+      69,
+      4,
+      39,
+      109
+     ],
+     "positions": 225,
+     "kl_mean": 0.0008930535268676043,
+     "kl_p99": 0.007516177113787345,
+     "pass": true
+    },
+    "pass": true
+   },
+   "gate_c_f5b_on": {
+    "name": "fn7_consistency",
+    "date": "2026-10-21",
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+    "plant": null,
+    "prompts": [
+     "summary-6k",
+     "recall-8k",
+     "recall-16k",
+     "chat-multiturn-20k"
+    ],
+    "bars": {
+     "kl_mean": 0.13,
+     "kl_p50": 0.007,
+     "band_dnll": 0.75
+    },
+    "commit": "57e7bb485dccc8a7db335d24ecd045af4969b238",
+    "decode": {
+     "n": 49596,
+     "kl_mean": 0.024852516205274653,
+     "kl_p50": 0.0018224024674975132,
+     "kl_p99": 0.37044031245211473,
+     "dnll": -0.029954291032309722,
+     "worst_band_dnll": -0.414030890422339,
+     "prompts": {
+      "summary-6k": {
+       "dnll": -0.3057038302659955,
+       "kl_mean": 0.047113657958949784,
+       "worst_band": -0.414030890422339
+      },
+      "recall-8k": {
+       "dnll": -0.005662301066987356,
+       "kl_mean": 0.030184062868261287,
+       "worst_band": 0.05569154222138195
+      },
+      "recall-16k": {
+       "dnll": -0.019980481373970887,
+       "kl_mean": 0.037914409651123804,
+       "worst_band": -0.09394997743260092
+      },
+      "chat-multiturn-20k": {
+       "dnll": 0.028648457089054644,
+       "kl_mean": 0.005818348746558399,
+       "worst_band": 0.18068275952359303
+      }
+     },
+     "pass": true,
+     "band_within": true
+    },
+    "chunked": {
+     "n": 49596,
+     "kl_mean": 0.02354899825526121,
+     "kl_p50": 0.0018798947495541297,
+     "kl_p99": 0.3554199211215434,
+     "dnll": 0.020784742722061558,
+     "worst_band_dnll": 0.36684143844992434,
+     "prompts": {
+      "summary-6k": {
+       "dnll": 0.21073547448359076,
+       "kl_mean": 0.039477783966864174,
+       "worst_band": 0.36684143844992434
+      },
+      "recall-8k": {
+       "dnll": -0.07253392842940729,
+       "kl_mean": 0.031026300358279597,
+       "worst_band": -0.11270999939793658
+      },
+      "recall-16k": {
+       "dnll": -0.023526640124403208,
+       "kl_mean": 0.0361216729335039,
+       "worst_band": -0.05665987320919896
+      },
+      "chat-multiturn-20k": {
+       "dnll": 0.04194971081568242,
+       "kl_mean": 0.005809756105303947,
+       "worst_band": 0.19855100458687502
+      }
+     },
+     "pass": true,
+     "band_within": true
+    },
+    "mtp": {
+     "tokens": 256,
+     "first_difference": [
+      64,
+      255,
+      39,
+      79
+     ],
+     "positions": 441,
+     "kl_mean": 0.0026020539296111194,
+     "kl_p99": 0.06216073602756756,
+     "pass": true
+    },
+    "pass": true
+   },
+   "gate_d": {
+    "holon": {
+     "correct": 71,
+     "of": 72,
+     "degenerate": 2,
+     "code": 13,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 16,
+     "recall": 12
+    },
+    "strata": {
+     "correct": 70,
+     "of": 72,
+     "degenerate": 0,
+     "code": 13,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 15,
+     "recall": 12
+    }
+   },
+   "gate_d_f5b_on": {
+    "holon_f5b": {
+     "correct": 70,
+     "of": 72,
+     "degenerate": 2,
+     "code": 12,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 16,
+     "recall": 12
+    },
+    "strata": {
+     "correct": 70,
+     "of": 72,
+     "degenerate": 0,
+     "code": 13,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 15,
+     "recall": 12
+    }
+   },
+   "breakdown": {
+    "decode_31744": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 15.782,
+     "kernels_per_step": 1730.0,
+     "wall_ms_median": 46.577,
+     "components": {
+      "moe": {
+       "ms": 8.655,
+       "top": {
+        "k_fetch": [
+         5.8485,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.5981,
+         96.0
+        ],
+        "holon_moe_router": [
+         0.5336,
+         48.0
+        ],
+        "k_resolve": [
+         0.5211,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0728,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0501,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 2.22,
+       "top": {
+        "mul_mat_vec_q": [
+         1.4664,
+         108.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.266,
+         36.0
+        ],
+        "kernel": [
+         0.1982,
+         72.0
+        ],
+        "_conv": [
+         0.1246,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0729,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.049,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.042,
+       "top": {
+        "_mix_gemv": [
+         1.1254,
+         97.0
+        ],
+        "_down_gemv": [
+         0.9171,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.115,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4331,
+         37.0
+        ],
+        "_topk": [
+         0.2116,
+         12.0
+        ],
+        "_attend": [
+         0.144,
+         12.0
+        ],
+        "_score": [
+         0.1412,
+         12.0
+        ],
+        "kernel": [
+         0.0716,
+         12.0
+        ],
+        "quantize_q8_1": [
+         0.0243,
+         24.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 1.107,
+       "top": {
+        "mul_mat_vec_q": [
+         0.38,
+         121.0
+        ],
+        "splitKreduce_kernel": [
+         0.3444,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0971,
+         96.0
+        ],
+        "kernel": [
+         0.0825,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0743,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0583,
+         48.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.379,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3777,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.138,
+       "top": {
+        "kernel": [
+         0.0791,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0243,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0157,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0077,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0067,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.078,
+       "top": {
+        "memcpy": [
+         0.0306,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0143,
+         9.0
+        ],
+        "k_get_rows_kq": [
+         0.0087,
+         1.0
+        ],
+        "reduce_kernel": [
+         0.0059,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0046,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0042,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0459,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "decode_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 14.617,
+     "kernels_per_step": 1730.0,
+     "wall_ms_median": 46.598,
+     "components": {
+      "moe": {
+       "ms": 7.591,
+       "top": {
+        "k_fetch": [
+         4.7903,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.6138,
+         96.0
+        ],
+        "holon_moe_router": [
+         0.5303,
+         48.0
+        ],
+        "k_resolve": [
+         0.5036,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0731,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0496,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 2.215,
+       "top": {
+        "mul_mat_vec_q": [
+         1.4623,
+         108.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.2663,
+         36.0
+        ],
+        "kernel": [
+         0.1974,
+         72.0
+        ],
+        "_conv": [
+         0.1239,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.073,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0491,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.025,
+       "top": {
+        "_mix_gemv": [
+         1.1139,
+         97.0
+        ],
+        "_down_gemv": [
+         0.9113,
+         97.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 1.098,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3736,
+         121.0
+        ],
+        "splitKreduce_kernel": [
+         0.3408,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0972,
+         96.0
+        ],
+        "kernel": [
+         0.0818,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0731,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0601,
+         48.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.044,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4304,
+         37.0
+        ],
+        "_topk": [
+         0.2028,
+         12.0
+        ],
+        "_attend": [
+         0.1325,
+         12.0
+        ],
+        "_score": [
+         0.0945,
+         12.0
+        ],
+        "kernel": [
+         0.071,
+         12.0
+        ],
+        "quantize_q8_1": [
+         0.0243,
+         24.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.379,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3779,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.138,
+       "top": {
+        "kernel": [
+         0.0794,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0244,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0155,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0075,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0066,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.08,
+       "top": {
+        "memcpy": [
+         0.0312,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.014,
+         9.0
+        ],
+        "k_get_rows_kq": [
+         0.0097,
+         1.0
+        ],
+        "reduce_kernel": [
+         0.0058,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0045,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0043,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0465,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "prefill_31744": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 3237.383,
+     "kernels_per_step": 5709.625,
+     "wall_ms_median": 1554.215,
+     "components": {
+      "moe": {
+       "ms": 2322.97,
+       "top": {
+        "k_fetch": [
+         1815.9844,
+         276.0
+        ],
+        "mul_mat_q": [
+         412.8926,
+         180.0
+        ],
+        "router_partials": [
+         24.5106,
+         90.0
+        ],
+        "moe_weighted_reduction_f32": [
+         23.938,
+         90.0
+        ],
+        "tensor_kernel_scan_outer_dim": [
+         13.5019,
+         5.0
+        ],
+        "quantize_mmq_q8_1": [
+         13.2187,
+         180.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 469.082,
+       "top": {
+        "Kernel2": [
+         367.5633,
+         192.0
+        ],
+        "_mix_out": [
+         49.7247,
+         96.0
+        ],
+        "_prep": [
+         43.6979,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         4.923,
+         288.0
+        ],
+        "_act": [
+         2.1377,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         1.0322,
+         96.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 217.254,
+       "top": {
+        "_attend": [
+         156.4747,
+         12.0
+        ],
+        "mul_mat_q": [
+         29.5941,
+         37.0
+        ],
+        "_score": [
+         21.6705,
+         93.0
+        ],
+        "_topk": [
+         4.4445,
+         93.0
+        ],
+        "_qk_rope_kv": [
+         1.5825,
+         12.0
+        ],
+        "Kernel2": [
+         1.5257,
+         12.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 180.862,
+       "top": {
+        "mul_mat_q": [
+         100.8088,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         14.8524,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         13.1341,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         9.8716,
+         36.0
+        ],
+        "elementwise_kernel": [
+         8.5123,
+         216.0
+        ],
+        "_conv": [
+         7.3826,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 20.612,
+       "top": {
+        "mul_mat_q": [
+         15.1078,
+         121.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.41,
+         121.0
+        ],
+        "elementwise_kernel": [
+         1.3032,
+         48.0
+        ],
+        "kernel": [
+         1.1155,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.2956,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.1884,
+         25.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 19.191,
+       "top": {
+        "_combine": [
+         19.1912,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 6.003,
+       "top": {
+        "Kernel2": [
+         2.3854,
+         2.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         1.9228,
+         1.0
+        ],
+        "_ple_conv": [
+         0.9,
+         1.0
+        ],
+        "_ple_gate": [
+         0.752,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0261,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0094,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.358,
+       "top": {
+        "k_get_rows_kq": [
+         1.0004,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.2822,
+         2.25
+        ],
+        "memcpy": [
+         0.0405,
+         26.75
+        ],
+        "index_elementwise_kernel": [
+         0.0173,
+         8.5
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0054,
+         4.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0036,
+         3.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.051,
+       "top": {
+        "mul_mat_vec_q": [
+         0.051,
+         0.125
+        ],
+        "quantize_q8_1": [
+         0.0002,
+         0.125
+        ]
+       }
+      }
+     }
+    },
+    "prefill_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 3189.468,
+     "kernels_per_step": 5797.0,
+     "wall_ms_median": 1491.808,
+     "components": {
+      "moe": {
+       "ms": 2306.957,
+       "top": {
+        "k_fetch": [
+         1779.1493,
+         288.0
+        ],
+        "mul_mat_q": [
+         431.6319,
+         192.0
+        ],
+        "router_partials": [
+         25.3989,
+         96.0
+        ],
+        "moe_weighted_reduction_f32": [
+         24.5912,
+         96.0
+        ],
+        "quantize_mmq_q8_1": [
+         13.4816,
+         192.0
+        ],
+        "tensor_kernel_scan_outer_dim": [
+         13.4207,
+         5.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 481.946,
+       "top": {
+        "Kernel2": [
+         376.9993,
+         192.0
+        ],
+        "_mix_out": [
+         51.2887,
+         96.0
+        ],
+        "_prep": [
+         45.4808,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         4.9386,
+         288.0
+        ],
+        "_act": [
+         2.1869,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         1.0288,
+         96.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 186.42,
+       "top": {
+        "mul_mat_q": [
+         103.7147,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         15.3012,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         13.5869,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         10.2547,
+         36.0
+        ],
+        "elementwise_kernel": [
+         8.7733,
+         216.0
+        ],
+        "_conv": [
+         7.5592,
+         36.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 164.894,
+       "top": {
+        "_attend": [
+         122.8556,
+         12.0
+        ],
+        "mul_mat_q": [
+         30.4731,
+         37.0
+        ],
+        "_score": [
+         3.7726,
+         96.0
+        ],
+        "_topk": [
+         2.5711,
+         96.0
+        ],
+        "_qk_rope_kv": [
+         1.6336,
+         12.0
+        ],
+        "Kernel2": [
+         1.5542,
+         12.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 20.944,
+       "top": {
+        "mul_mat_q": [
+         15.2369,
+         121.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.492,
+         121.0
+        ],
+        "elementwise_kernel": [
+         1.3469,
+         48.0
+        ],
+        "kernel": [
+         1.2608,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.3006,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.2029,
+         25.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 19.887,
+       "top": {
+        "_combine": [
+         19.8865,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 6.178,
+       "top": {
+        "Kernel2": [
+         2.4425,
+         2.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         1.9955,
+         1.0
+        ],
+        "_ple_conv": [
+         0.9181,
+         1.0
+        ],
+        "_ple_gate": [
+         0.7779,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0268,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0102,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.83,
+       "top": {
+        "k_get_rows_kq": [
+         1.0464,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.6718,
+         4.0
+        ],
+        "memcpy": [
+         0.0621,
+         34.0
+        ],
+        "index_elementwise_kernel": [
+         0.0269,
+         12.0
+        ],
+        "reduce_kernel": [
+         0.0057,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0055,
+         4.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.413,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4113,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0019,
+         1.0
+        ]
+       }
+      }
+     }
+    },
+    "verify_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 35.931,
+     "kernels_per_step": 2596.3333333333335,
+     "wall_ms_median": 69.073,
+     "components": {
+      "moe": {
+       "ms": 21.001,
+       "top": {
+        "k_fetch": [
+         16.2206,
+         96.0
+        ],
+        "mul_mat_vec_q_moe": [
+         3.428,
+         96.0
+        ],
+        "k_resolve": [
+         0.586,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.5322,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.1243,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0778,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 4.068,
+       "top": {
+        "mul_mat_vec_q": [
+         1.865,
+         108.0
+        ],
+        "Kernel2": [
+         1.1085,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.4217,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1675,
+         108.0
+        ],
+        "_conv": [
+         0.129,
+         36.0
+        ],
+        "memcpy": [
+         0.1232,
+         144.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 3.175,
+       "top": {
+        "_mix_rows": [
+         1.6335,
+         97.0
+        ],
+        "_down_gemv": [
+         1.3155,
+         97.0
+        ],
+        "_down_sum": [
+         0.2262,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.292,
+       "top": {
+        "mul_mat_vec_q": [
+         0.5464,
+         37.0
+        ],
+        "_topk": [
+         0.2239,
+         12.0
+        ],
+        "_attend": [
+         0.1926,
+         12.0
+        ],
+        "_score": [
+         0.097,
+         12.0
+        ],
+        "Kernel2": [
+         0.0709,
+         12.0
+        ],
+        "_merge": [
+         0.0292,
+         12.0
+        ]
+       }
+      },
+      "mtp.lm_head": {
+       "ms": 1.146,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1428,
+         3.0
+        ],
+        "quantize_q8_1": [
+         0.0031,
+         3.0
+        ]
+       }
+      },
+      "mtp.moe": {
+       "ms": 1.137,
+       "top": {
+        "k_fetch": [
+         0.9121,
+         8.0
+        ],
+        "mul_mat_vec_q": [
+         0.0696,
+         6.0
+        ],
+        "mul_mat_vec_q_moe": [
+         0.0534,
+         2.0
+        ],
+        "k_resolve": [
+         0.0466,
+         4.0
+        ],
+        "holon_moe_router": [
+         0.0432,
+         4.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.006,
+         4.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.993,
+       "top": {
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.4301,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1712,
+         113.0
+        ],
+        "_conv": [
+         0.1474,
+         36.0
+        ],
+        "index_elementwise_kernel": [
+         0.0545,
+         34.333333333333336
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0435,
+         39.0
+        ],
+        "memcpy": [
+         0.04,
+         24.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.924,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4734,
+         121.0
+        ],
+        "kernel": [
+         0.1408,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0979,
+         96.0
+        ],
+        "elementwise_kernel": [
+         0.082,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.058,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.0481,
+         48.0
+        ]
+       }
+      },
+      "mtp.qsa": {
+       "ms": 0.704,
+       "top": {
+        "kernel": [
+         0.3685,
+         9.0
+        ],
+        "Kernel2": [
+         0.1439,
+         3.0
+        ],
+        "_topk": [
+         0.0774,
+         4.0
+        ],
+        "_attend": [
+         0.0492,
+         4.0
+        ],
+        "_score": [
+         0.0316,
+         4.0
+        ],
+        "_merge": [
+         0.0083,
+         4.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.489,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4881,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "mtp": {
+       "ms": 0.423,
+       "top": {
+        "Kernel2": [
+         0.0964,
+         5.0
+        ],
+        "index_elementwise_kernel": [
+         0.0726,
+         33.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0619,
+         54.0
+        ],
+        "kernel": [
+         0.0518,
+         3.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.04,
+         30.0
+        ],
+        "k_get_rows_kq": [
+         0.0295,
+         4.0
+        ]
+       }
+      },
+      "mtp.hc.mix": {
+       "ms": 0.245,
+       "top": {
+        "_down_gemv": [
+         0.1104,
+         11.0
+        ],
+        "_mix_gemv": [
+         0.0974,
+         9.0
+        ],
+        "_mix_rows": [
+         0.0329,
+         2.0
+        ],
+        "_down_sum": [
+         0.0046,
+         2.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.166,
+       "top": {
+        "Kernel2": [
+         0.09,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0247,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0182,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0084,
+         1.0
+        ],
+        "index_elementwise_kernel": [
+         0.0068,
+         2.0
+        ],
+        "_ple_rows": [
+         0.0068,
+         1.0
+        ]
+       }
+      },
+      "mtp.shared": {
+       "ms": 0.112,
+       "top": {
+        "kernel": [
+         0.0541,
+         10.0
+        ],
+        "splitKreduce_kernel": [
+         0.022,
+         3.0
+        ],
+        "Kernel2": [
+         0.0209,
+         2.0
+        ],
+        "elementwise_kernel": [
+         0.0063,
+         4.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0048,
+         4.0
+        ],
+        "act_and_mul_kernel": [
+         0.004,
+         4.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.052,
+       "top": {
+        "_combine": [
+         0.0523,
+         48.0
+        ]
+       }
+      },
+      "mtp.hc.combine": {
+       "ms": 0.004,
+       "top": {
+        "_combine": [
+         0.004,
+         4.0
+        ]
+       }
+      }
+     }
+    }
+   },
+   "breakdown_before_floors": {
+    "decode_31744": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 15.71,
+     "kernels_per_step": 1730.0,
+     "wall_ms_median": 46.605,
+     "components": {
+      "moe": {
+       "ms": 8.579,
+       "top": {
+        "k_fetch": [
+         5.795,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.597,
+         96.0
+        ],
+        "holon_moe_router": [
+         0.5326,
+         48.0
+        ],
+        "k_resolve": [
+         0.5006,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0727,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.05,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 2.222,
+       "top": {
+        "mul_mat_vec_q": [
+         1.4686,
+         108.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.2659,
+         36.0
+        ],
+        "kernel": [
+         0.1977,
+         72.0
+        ],
+        "_conv": [
+         0.124,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0729,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0489,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.04,
+       "top": {
+        "_mix_gemv": [
+         1.1229,
+         97.0
+        ],
+        "_down_gemv": [
+         0.917,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.116,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4339,
+         37.0
+        ],
+        "_topk": [
+         0.212,
+         12.0
+        ],
+        "_attend": [
+         0.1432,
+         12.0
+        ],
+        "_score": [
+         0.1417,
+         12.0
+        ],
+        "kernel": [
+         0.0712,
+         12.0
+        ],
+        "quantize_q8_1": [
+         0.0243,
+         24.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 1.111,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3814,
+         121.0
+        ],
+        "splitKreduce_kernel": [
+         0.3463,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.097,
+         96.0
+        ],
+        "kernel": [
+         0.0824,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0742,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0583,
+         48.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.38,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3785,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.138,
+       "top": {
+        "kernel": [
+         0.0791,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0245,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0152,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0075,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0068,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.08,
+       "top": {
+        "memcpy": [
+         0.033,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0143,
+         9.0
+        ],
+        "k_get_rows_kq": [
+         0.0083,
+         1.0
+        ],
+        "reduce_kernel": [
+         0.0059,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0046,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0042,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0458,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "decode_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 14.226,
+     "kernels_per_step": 1730.0,
+     "wall_ms_median": 46.526,
+     "components": {
+      "moe": {
+       "ms": 7.201,
+       "top": {
+        "k_fetch": [
+         4.4132,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.6235,
+         96.0
+        ],
+        "holon_moe_router": [
+         0.5292,
+         48.0
+        ],
+        "k_resolve": [
+         0.4811,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0733,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0497,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 2.219,
+       "top": {
+        "mul_mat_vec_q": [
+         1.4643,
+         108.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.2669,
+         36.0
+        ],
+        "kernel": [
+         0.1988,
+         72.0
+        ],
+        "_conv": [
+         0.1229,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0733,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0492,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.019,
+       "top": {
+        "_mix_gemv": [
+         1.1089,
+         97.0
+        ],
+        "_down_gemv": [
+         0.9105,
+         97.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 1.097,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3733,
+         121.0
+        ],
+        "splitKreduce_kernel": [
+         0.3394,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0974,
+         96.0
+        ],
+        "kernel": [
+         0.0821,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0733,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0602,
+         48.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.046,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4316,
+         37.0
+        ],
+        "_topk": [
+         0.203,
+         12.0
+        ],
+        "_attend": [
+         0.1325,
+         12.0
+        ],
+        "_score": [
+         0.0948,
+         12.0
+        ],
+        "kernel": [
+         0.0707,
+         12.0
+        ],
+        "quantize_q8_1": [
+         0.0244,
+         24.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.38,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3786,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.139,
+       "top": {
+        "kernel": [
+         0.0798,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0246,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0157,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0075,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0067,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.078,
+       "top": {
+        "memcpy": [
+         0.0308,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.014,
+         9.0
+        ],
+        "k_get_rows_kq": [
+         0.0088,
+         1.0
+        ],
+        "reduce_kernel": [
+         0.0058,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0045,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0042,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.047,
+       "top": {
+        "_combine": [
+         0.0467,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "prefill_31744": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 2403.758,
+     "kernels_per_step": 5117.625,
+     "wall_ms_median": 2517.499,
+     "components": {
+      "moe": {
+       "ms": 1524.446,
+       "top": {
+        "k_fetch": [
+         1036.6104,
+         180.0
+        ],
+        "mul_mat_q": [
+         407.6156,
+         180.0
+        ],
+        "router_partials": [
+         24.129,
+         90.0
+        ],
+        "moe_weighted_reduction_f32": [
+         23.6541,
+         90.0
+        ],
+        "quantize_mmq_q8_1": [
+         13.4451,
+         180.0
+        ],
+        "k_resolve": [
+         12.3293,
+         90.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 449.9,
+       "top": {
+        "Kernel2": [
+         352.0343,
+         192.0
+        ],
+        "_mix_out": [
+         49.0969,
+         96.0
+        ],
+        "_prep": [
+         41.7824,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         4.4416,
+         288.0
+        ],
+        "_act": [
+         1.6899,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.8519,
+         96.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 211.048,
+       "top": {
+        "_attend": [
+         153.0688,
+         12.0
+        ],
+        "mul_mat_q": [
+         28.2949,
+         37.0
+        ],
+        "_score": [
+         20.9677,
+         93.0
+        ],
+        "_topk": [
+         4.1845,
+         93.0
+        ],
+        "Kernel2": [
+         1.4881,
+         12.0
+        ],
+        "_qk_rope_kv": [
+         1.4857,
+         12.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 172.557,
+       "top": {
+        "mul_mat_q": [
+         98.9576,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         14.3775,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         12.3757,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         9.3051,
+         36.0
+        ],
+        "elementwise_kernel": [
+         7.7291,
+         216.0
+        ],
+        "_conv": [
+         6.9484,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 19.558,
+       "top": {
+        "mul_mat_q": [
+         14.6046,
+         121.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.2737,
+         121.0
+        ],
+        "elementwise_kernel": [
+         1.2358,
+         48.0
+        ],
+        "kernel": [
+         0.9125,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.2405,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.1671,
+         25.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 18.977,
+       "top": {
+        "_combine": [
+         18.977,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 5.875,
+       "top": {
+        "Kernel2": [
+         2.3753,
+         2.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         1.8895,
+         1.0
+        ],
+        "_ple_conv": [
+         0.8477,
+         1.0
+        ],
+        "_ple_gate": [
+         0.7274,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0235,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0078,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.346,
+       "top": {
+        "k_get_rows_kq": [
+         0.988,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.2819,
+         2.25
+        ],
+        "memcpy": [
+         0.0413,
+         26.75
+        ],
+        "index_elementwise_kernel": [
+         0.0173,
+         8.5
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0054,
+         4.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0036,
+         3.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.051,
+       "top": {
+        "mul_mat_vec_q": [
+         0.0509,
+         0.125
+        ],
+        "quantize_q8_1": [
+         0.0003,
+         0.125
+        ]
+       }
+      }
+     }
+    },
+    "prefill_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 2422.319,
+     "kernels_per_step": 5205.0,
+     "wall_ms_median": 2428.671,
+     "components": {
+      "moe": {
+       "ms": 1574.95,
+       "top": {
+        "k_fetch": [
+         1064.8693,
+         192.0
+        ],
+        "mul_mat_q": [
+         427.0186,
+         192.0
+        ],
+        "router_partials": [
+         25.0397,
+         96.0
+        ],
+        "moe_weighted_reduction_f32": [
+         24.1871,
+         96.0
+        ],
+        "quantize_mmq_q8_1": [
+         13.7525,
+         192.0
+        ],
+        "k_resolve": [
+         12.8871,
+         96.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 463.098,
+       "top": {
+        "Kernel2": [
+         361.9969,
+         192.0
+        ],
+        "_mix_out": [
+         50.718,
+         96.0
+        ],
+        "_prep": [
+         43.3811,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         4.4089,
+         288.0
+        ],
+        "_act": [
+         1.7468,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.8236,
+         96.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 177.877,
+       "top": {
+        "mul_mat_q": [
+         101.9431,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         14.8024,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         12.6017,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         9.6499,
+         36.0
+        ],
+        "elementwise_kernel": [
+         7.9666,
+         216.0
+        ],
+        "_conv": [
+         7.1223,
+         36.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 158.173,
+       "top": {
+        "_attend": [
+         118.8614,
+         12.0
+        ],
+        "mul_mat_q": [
+         29.1418,
+         37.0
+        ],
+        "_score": [
+         3.147,
+         96.0
+        ],
+        "_topk": [
+         2.3424,
+         96.0
+        ],
+        "_qk_rope_kv": [
+         1.5421,
+         12.0
+        ],
+        "Kernel2": [
+         1.5266,
+         12.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 20.2,
+       "top": {
+        "mul_mat_q": [
+         15.0536,
+         121.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.3625,
+         121.0
+        ],
+        "elementwise_kernel": [
+         1.274,
+         48.0
+        ],
+        "kernel": [
+         1.0114,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.2468,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.1725,
+         25.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 19.689,
+       "top": {
+        "_combine": [
+         19.689,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 6.105,
+       "top": {
+        "Kernel2": [
+         2.4461,
+         2.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         1.9963,
+         1.0
+        ],
+        "_ple_conv": [
+         0.8716,
+         1.0
+        ],
+        "_ple_gate": [
+         0.7542,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0242,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0083,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.819,
+       "top": {
+        "k_get_rows_kq": [
+         1.0381,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.6711,
+         4.0
+        ],
+        "memcpy": [
+         0.0593,
+         34.0
+        ],
+        "index_elementwise_kernel": [
+         0.028,
+         12.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0056,
+         4.0
+        ],
+        "reduce_kernel": [
+         0.0052,
+         1.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.41,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4078,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0018,
+         1.0
+        ]
+       }
+      }
+     }
+    },
+    "verify_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 37.083,
+     "kernels_per_step": 2596.3333333333335,
+     "wall_ms_median": 69.735,
+     "components": {
+      "moe": {
+       "ms": 20.812,
+       "top": {
+        "k_fetch": [
+         16.0498,
+         96.0
+        ],
+        "mul_mat_vec_q_moe": [
+         3.4295,
+         96.0
+        ],
+        "k_resolve": [
+         0.566,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.53,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.1278,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0774,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 4.062,
+       "top": {
+        "mul_mat_vec_q": [
+         1.8634,
+         108.0
+        ],
+        "Kernel2": [
+         1.106,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.4212,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1668,
+         108.0
+        ],
+        "_conv": [
+         0.1284,
+         36.0
+        ],
+        "memcpy": [
+         0.1229,
+         144.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 3.17,
+       "top": {
+        "_mix_rows": [
+         1.631,
+         97.0
+        ],
+        "_down_gemv": [
+         1.3142,
+         97.0
+        ],
+        "_down_sum": [
+         0.2252,
+         97.0
+        ]
+       }
+      },
+      "mtp.moe": {
+       "ms": 2.482,
+       "top": {
+        "k_fetch": [
+         2.2799,
+         8.0
+        ],
+        "mul_mat_vec_q": [
+         0.0601,
+         6.0
+        ],
+        "k_resolve": [
+         0.0504,
+         4.0
+        ],
+        "holon_moe_router": [
+         0.0433,
+         4.0
+        ],
+        "mul_mat_vec_q_moe": [
+         0.0381,
+         2.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.006,
+         4.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.288,
+       "top": {
+        "mul_mat_vec_q": [
+         0.5459,
+         37.0
+        ],
+        "_topk": [
+         0.2231,
+         12.0
+        ],
+        "_attend": [
+         0.1912,
+         12.0
+        ],
+        "_score": [
+         0.0972,
+         12.0
+        ],
+        "Kernel2": [
+         0.071,
+         12.0
+        ],
+        "_merge": [
+         0.0292,
+         12.0
+        ]
+       }
+      },
+      "mtp.lm_head": {
+       "ms": 1.156,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1527,
+         3.0
+        ],
+        "quantize_q8_1": [
+         0.0031,
+         3.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.992,
+       "top": {
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.4301,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1709,
+         113.0
+        ],
+        "_conv": [
+         0.1476,
+         36.0
+        ],
+        "index_elementwise_kernel": [
+         0.0545,
+         34.333333333333336
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0434,
+         39.0
+        ],
+        "_conv_state": [
+         0.0392,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.919,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4708,
+         121.0
+        ],
+        "kernel": [
+         0.1401,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0973,
+         96.0
+        ],
+        "elementwise_kernel": [
+         0.0817,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0577,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.0479,
+         48.0
+        ]
+       }
+      },
+      "mtp.qsa": {
+       "ms": 0.704,
+       "top": {
+        "kernel": [
+         0.3687,
+         9.0
+        ],
+        "Kernel2": [
+         0.1439,
+         3.0
+        ],
+        "_topk": [
+         0.0771,
+         4.0
+        ],
+        "_attend": [
+         0.0493,
+         4.0
+        ],
+        "_score": [
+         0.0315,
+         4.0
+        ],
+        "_merge": [
+         0.0084,
+         4.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.491,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4895,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0011,
+         1.0
+        ]
+       }
+      },
+      "mtp": {
+       "ms": 0.425,
+       "top": {
+        "Kernel2": [
+         0.0988,
+         5.0
+        ],
+        "index_elementwise_kernel": [
+         0.0718,
+         33.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0618,
+         54.0
+        ],
+        "kernel": [
+         0.055,
+         3.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0396,
+         30.0
+        ],
+        "k_get_rows_kq": [
+         0.0263,
+         4.0
+        ]
+       }
+      },
+      "mtp.hc.mix": {
+       "ms": 0.247,
+       "top": {
+        "_down_gemv": [
+         0.1108,
+         11.0
+        ],
+        "_mix_gemv": [
+         0.0985,
+         9.0
+        ],
+        "_mix_rows": [
+         0.0331,
+         2.0
+        ],
+        "_down_sum": [
+         0.0046,
+         2.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.166,
+       "top": {
+        "Kernel2": [
+         0.0903,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0246,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0186,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0086,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0068,
+         1.0
+        ],
+        "index_elementwise_kernel": [
+         0.0065,
+         2.0
+        ]
+       }
+      },
+      "mtp.shared": {
+       "ms": 0.113,
+       "top": {
+        "kernel": [
+         0.0545,
+         10.0
+        ],
+        "splitKreduce_kernel": [
+         0.0216,
+         3.0
+        ],
+        "Kernel2": [
+         0.0213,
+         2.0
+        ],
+        "elementwise_kernel": [
+         0.0063,
+         4.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0048,
+         4.0
+        ],
+        "act_and_mul_kernel": [
+         0.0041,
+         4.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.052,
+       "top": {
+        "_combine": [
+         0.0521,
+         48.0
+        ]
+       }
+      },
+      "mtp.hc.combine": {
+       "ms": 0.004,
+       "top": {
+        "_combine": [
+         0.0042,
+         4.0
+        ]
+       }
+      }
+     }
+    }
+   },
+   "chat": {
+    "usage": {
+     "prompt_tokens": 69,
+     "completion_tokens": 406,
+     "total_tokens": 475,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "client_seconds": 5.84,
+    "content": "Dark waves crash below  \nA steady beam cuts the night  \nGuiding ships to home  \n\nThe first line contrasts the chaotic sea with the lighthouse\u2019s calm, persistent light, suggesting danger and stability. The beam becomes a guiding path, turning darkness into a route toward safety and home."
+   }
+  },
+  "rtx-5090": {
+   "file": "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S",
+   "commit": "57e7bb4",
+   "bars_deployment_memory_fraction_0.9": {
+    "records": [
+     "fn6b_rtx-5090"
+    ],
+    "off/decode/1024": [
+     106.3,
+     109.7,
+     0.969
+    ],
+    "off/decode/4096": [
+     108.8,
+     106.0,
+     1.026
+    ],
+    "off/decode/32768": [
+     98.5,
+     106.5,
+     0.925
+    ],
+    "off/prefill/1024": [
+     1247.8,
+     2207.6,
+     0.565
+    ],
+    "off/prefill/4096": [
+     4244.1,
+     4779.0,
+     0.888
+    ],
+    "off/prefill/32768": [
+     5069.1,
+     5917.2,
+     0.857
+    ],
+    "mtp/decode/1024": [
+     144.7,
+     185.5,
+     0.78
+    ],
+    "mtp/decode/4096": [
+     113.5,
+     149.6,
+     0.759
+    ],
+    "mtp/decode/32768": [
+     128.1,
+     183.9,
+     0.697
+    ],
+    "mtp/prefill/1024": [
+     1170.8,
+     2174.4,
+     0.538
+    ],
+    "mtp/prefill/4096": [
+     3942.8,
+     4743.4,
+     0.831
+    ],
+    "mtp/prefill/32768": [
+     4830.7,
+     5883.1,
+     0.821
+    ]
+   },
+   "bars_before_lending_fixes_037232e": {
+    "records": [
+     "fn6_rtx-5090"
+    ],
+    "off/decode/1024": [
+     100.9,
+     109.2,
+     0.924
+    ],
+    "off/decode/4096": [
+     104.2,
+     106.0,
+     0.983
+    ],
+    "off/decode/32768": [
+     93.7,
+     106.0,
+     0.884
+    ],
+    "off/prefill/1024": [
+     1466.5,
+     2199.2,
+     0.667
+    ],
+    "off/prefill/4096": [
+     2206.7,
+     4758.4,
+     0.464
+    ],
+    "off/prefill/32768": [
+     2391.3,
+     5878.0,
+     0.407
+    ],
+    "mtp/decode/1024": [
+     124.5,
+     189.0,
+     0.659
+    ],
+    "mtp/decode/4096": [
+     96.5,
+     138.2,
+     0.698
+    ],
+    "mtp/decode/32768": [
+     110.1,
+     175.9,
+     0.626
+    ],
+    "mtp/prefill/1024": [
+     1369.8,
+     2156.3,
+     0.635
+    ],
+    "mtp/prefill/4096": [
+     2079.9,
+     4724.2,
+     0.44
+    ],
+    "mtp/prefill/32768": [
+     2280.4,
+     5843.3,
+     0.39
+    ]
+   },
+   "strata_hit_rate_tokens_per_pass": {
+    "strata_na_off": {
+     "1024/0": [
+      0.93,
+      1.0
+     ],
+     "1024/1": [
+      0.92,
+      1.0
+     ],
+     "1024/2": [
+      0.95,
+      1.0
+     ],
+     "4096/0": [
+      0.95,
+      1.0
+     ],
+     "4096/1": [
+      0.93,
+      1.0
+     ],
+     "4096/2": [
+      0.92,
+      1.0
+     ],
+     "32768/0": [
+      0.92,
+      1.0
+     ],
+     "32768/1": [
+      0.93,
+      1.0
+     ],
+     "32768/2": [
+      0.96,
+      1.0
+     ]
+    },
+    "strata_na_mtp": {
+     "1024/0": [
+      0.94,
+      3.24
+     ],
+     "1024/1": [
+      0.95,
+      2.25
+     ],
+     "1024/2": [
+      0.96,
+      2.84
+     ],
+     "4096/0": [
+      0.96,
+      3.08
+     ],
+     "4096/1": [
+      0.95,
+      2.51
+     ],
+     "4096/2": [
+      0.93,
+      2.53
+     ],
+     "32768/0": [
+      0.94,
+      3.16
+     ],
+     "32768/1": [
+      0.94,
+      3.41
+     ],
+     "32768/2": [
+      0.95,
+      3.24
+     ]
+    }
+   },
+   "ring_diag_8k": [
+    "classes [('gate_up.iq4_xs.1280x2560', 532, 512, 512), ('down.iq4_nl.2560x640', 8610, 19968, 19968), ('gate_up.iq3_xxs.1280x2560', 3839, 8704, 8704), ('gate_up.iq3_s.1280x2560', 2015, 5120, 5120), ('gate_up.iq2_s.1280x2560', 4324, 10240, 10240), ('down.q2_0.2560x640', 2060, 4608, 4608)]",
+    "prefill 1.83 s peak misses 410",
+    "  {\"mode\": \"ring\", \"tail\": [4, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[0, 0, 0, 0, 375, 0], [0, 498, 758, 664, 778, 561], [30, 0, 0, 126, 0, 98], [60, 0, 0, 32, 0, 11], [904, 0, 0, 202, 0, 0]], \"n_before\": 0}",
+    "prefill 1.67 s peak misses 415",
+    "  {\"mode\": \"ring\", \"tail\": [4, 375], \"ring_ok\": 2, \"errors\": 0, \"needs\": [[0, 0, 0, 0, 375, 0], [512, 0, 0, 0, 0, 0], [512, 0, 0, 0, 0, 0], [512, 0, 0, 0, 0, 0], [512, 0, 0, 0, 0, 0]], \"n_before\": 3707}"
+   ],
+   "gate_c": {
+    "name": "fn7_consistency",
+    "date": "2026-10-21",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+    "plant": null,
+    "prompts": [
+     "summary-6k",
+     "recall-8k",
+     "recall-16k",
+     "chat-multiturn-20k"
+    ],
+    "bars": {
+     "kl_mean": 0.13,
+     "kl_p50": 0.007,
+     "band_dnll": 0.75
+    },
+    "commit": "21bb40f3ca30ca76adc5ec76340b6041178d4c68",
+    "decode": {
+     "n": 49596,
+     "kl_mean": 0.03174980234821483,
+     "kl_p50": 0.003059186184227005,
+     "kl_p99": 0.46115456572555674,
+     "dnll": 0.01238211274612402,
+     "worst_band_dnll": 0.3245005349690331,
+     "prompts": {
+      "summary-6k": {
+       "dnll": 0.2517005372300335,
+       "kl_mean": 0.06625997820038466,
+       "worst_band": 0.3245005349690331
+      },
+      "recall-8k": {
+       "dnll": -0.10547516536026791,
+       "kl_mean": 0.0421743757950791,
+       "worst_band": -0.15325101290421728
+      },
+      "recall-16k": {
+       "dnll": -0.0061639287176131555,
+       "kl_mean": 0.04434338843177934,
+       "worst_band": 0.07173538431128157
+      },
+      "chat-multiturn-20k": {
+       "dnll": 0.0086051394732671,
+       "kl_mean": 0.007647266802647948,
+       "worst_band": 0.16438235613369426
+      }
+     },
+     "pass": true
+    },
+    "chunked": {
+     "n": 49596,
+     "kl_mean": 0.033226051103127874,
+     "kl_p50": 0.00282985086749248,
+     "kl_p99": 0.4695712106271456,
+     "dnll": 0.03054224368860245,
+     "worst_band_dnll": 0.5826254231299117,
+     "prompts": {
+      "summary-6k": {
+       "dnll": 0.3588847254276219,
+       "kl_mean": 0.08307171618069802,
+       "worst_band": 0.5826254231299117
+      },
+      "recall-8k": {
+       "dnll": -0.024858926110327764,
+       "kl_mean": 0.032779330772759636,
+       "worst_band": -0.057978718211808555
+      },
+      "recall-16k": {
+       "dnll": 0.005025858133981279,
+       "kl_mean": 0.04610347293336439,
+       "worst_band": 0.06473455257395472
+      },
+      "chat-multiturn-20k": {
+       "dnll": -0.01739397032525613,
+       "kl_mean": 0.009011538210333242,
+       "worst_band": -0.25627594152301736
+      }
+     },
+     "pass": true
+    },
+    "mtp": {
+     "tokens": 256,
+     "first_difference": [
+      23,
+      255,
+      149,
+      40
+     ],
+     "positions": 471,
+     "kl_mean": 0.01075418003730101,
+     "kl_p99": 0.14871808469073863,
+     "pass": true
+    },
+    "pass": true
+   },
+   "gate_d": {
+    "holon": {
+     "correct": 71,
+     "of": 72,
+     "degenerate": 1,
+     "code": 13,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 16,
+     "recall": 12
+    },
+    "strata": {
+     "correct": 70,
+     "of": 72,
+     "degenerate": 2,
+     "code": 12,
+     "math": 24,
+     "multiturn": 6,
+     "reasoning": 16,
+     "recall": 12
+    }
+   },
+   "breakdown": {
+    "decode_31744": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 15.803,
+     "kernels_per_step": 1739.0,
+     "wall_ms_median": 44.17,
+     "components": {
+      "moe": {
+       "ms": 10.003,
+       "top": {
+        "k_fetch": [
+         7.8487,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.065,
+         96.0
+        ],
+        "k_resolve": [
+         0.5323,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.3948,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0768,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0541,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 1.898,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1959,
+         108.0
+        ],
+        "kernel": [
+         0.2148,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.1945,
+         36.0
+        ],
+        "_conv": [
+         0.1212,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0758,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0503,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 1.445,
+       "top": {
+        "_mix_gemv": [
+         0.8629,
+         97.0
+        ],
+        "_down_gemv": [
+         0.5819,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 0.991,
+       "top": {
+        "mul_mat_vec_q": [
+         0.353,
+         37.0
+        ],
+        "_topk": [
+         0.2142,
+         12.0
+        ],
+        "_attend": [
+         0.1373,
+         12.0
+        ],
+        "_score": [
+         0.1166,
+         12.0
+        ],
+        "kernel": [
+         0.0546,
+         12.0
+        ],
+        "quantize_q8_1": [
+         0.025,
+         24.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.93,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3283,
+         128.0
+        ],
+        "splitKreduce_kernel": [
+         0.2039,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0989,
+         96.0
+        ],
+        "kernel": [
+         0.0874,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0796,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0588,
+         48.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.321,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3196,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0011,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.1,
+       "top": {
+        "kernel": [
+         0.045,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0252,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0112,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0078,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0066,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.068,
+       "top": {
+        "memcpy": [
+         0.024,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0145,
+         9.0
+        ],
+        "reduce_kernel": [
+         0.006,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0046,
+         4.0
+        ],
+        "k_get_rows_kq": [
+         0.0045,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.0043,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0464,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "decode_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 12.822,
+     "kernels_per_step": 1739.0,
+     "wall_ms_median": 43.441,
+     "components": {
+      "moe": {
+       "ms": 6.958,
+       "top": {
+        "k_fetch": [
+         4.8234,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.086,
+         96.0
+        ],
+        "k_resolve": [
+         0.4926,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.3937,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0774,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0509,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 1.919,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1829,
+         108.0
+        ],
+        "kernel": [
+         0.2495,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.1937,
+         36.0
+        ],
+        "_conv": [
+         0.1207,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0751,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0503,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 1.404,
+       "top": {
+        "_mix_gemv": [
+         0.8245,
+         97.0
+        ],
+        "_down_gemv": [
+         0.5799,
+         97.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 1.032,
+       "top": {
+        "mul_mat_vec_q": [
+         0.324,
+         128.0
+        ],
+        "splitKreduce_kernel": [
+         0.2039,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.1308,
+         48.0
+        ],
+        "kernel": [
+         0.1251,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0982,
+         96.0
+        ],
+        "elementwise_kernel": [
+         0.0776,
+         48.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 0.967,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3485,
+         37.0
+        ],
+        "_topk": [
+         0.228,
+         12.0
+        ],
+        "_attend": [
+         0.1152,
+         12.0
+        ],
+        "_score": [
+         0.1003,
+         12.0
+        ],
+        "kernel": [
+         0.0538,
+         12.0
+        ],
+        "_merge": [
+         0.0249,
+         12.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.319,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3183,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0011,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.1,
+       "top": {
+        "kernel": [
+         0.0441,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0254,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0113,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0077,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0066,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.075,
+       "top": {
+        "memcpy": [
+         0.0241,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0145,
+         9.0
+        ],
+        "reduce_kernel": [
+         0.012,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0046,
+         4.0
+        ],
+        "k_get_rows_kq": [
+         0.0045,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.0044,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.047,
+       "top": {
+        "_combine": [
+         0.0469,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "prefill_31744": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 3526.007,
+     "kernels_per_step": 9202.75,
+     "wall_ms_median": 1609.283,
+     "components": {
+      "moe": {
+       "ms": 2524.621,
+       "top": {
+        "k_fetch": [
+         2036.2551,
+         384.0
+        ],
+        "mul_mat_q": [
+         377.7004,
+         288.0
+        ],
+        "router_partials": [
+         27.514,
+         144.0
+        ],
+        "moe_weighted_reduction_f32": [
+         24.4774,
+         144.0
+        ],
+        "k_resolve": [
+         20.5622,
+         144.0
+        ],
+        "tensor_kernel_scan_outer_dim": [
+         13.8192,
+         5.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 503.552,
+       "top": {
+        "Kernel2": [
+         404.3829,
+         384.0
+        ],
+        "_mix_out": [
+         50.1223,
+         192.0
+        ],
+        "_prep": [
+         43.2316,
+         192.0
+        ],
+        "unrolled_elementwise_kernel": [
+         3.1809,
+         288.0
+        ],
+        "_act": [
+         1.8772,
+         192.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.7524,
+         96.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 225.345,
+       "top": {
+        "_attend": [
+         151.1231,
+         12.0
+        ],
+        "mul_mat_q": [
+         38.8356,
+         74.0
+        ],
+        "_score": [
+         25.0125,
+         186.0
+        ],
+        "_topk": [
+         5.2144,
+         186.0
+        ],
+        "_qk_rope_kv": [
+         1.6528,
+         12.0
+        ],
+        "quantize_mmq_q8_1": [
+         1.5715,
+         74.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 220.148,
+       "top": {
+        "mul_mat_q": [
+         135.4669,
+         216.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         17.7334,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         13.5351,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         10.2506,
+         36.0
+        ],
+        "elementwise_kernel": [
+         8.7179,
+         216.0
+        ],
+        "_conv": [
+         7.6193,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 23.265,
+       "top": {
+        "mul_mat_q": [
+         16.9219,
+         256.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.9562,
+         256.0
+        ],
+        "elementwise_kernel": [
+         1.3594,
+         48.0
+        ],
+        "kernel": [
+         0.95,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.4809,
+         48.0
+        ],
+        "mul_mat_q_stream_k_fixup": [
+         0.2497,
+         20.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 20.259,
+       "top": {
+        "_combine": [
+         20.2593,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 6.638,
+       "top": {
+        "_scatter_gather_elementwise_kernel": [
+         3.3759,
+         1.0
+        ],
+        "Kernel2": [
+         1.4694,
+         2.0
+        ],
+        "_ple_conv": [
+         0.9362,
+         1.0
+        ],
+        "_ple_gate": [
+         0.7975,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0429,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0091,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 2.093,
+       "top": {
+        "k_get_rows_kq": [
+         1.7157,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.2973,
+         2.5
+        ],
+        "memcpy": [
+         0.0406,
+         28.5
+        ],
+        "index_elementwise_kernel": [
+         0.0196,
+         9.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0056,
+         4.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0038,
+         3.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.087,
+       "top": {
+        "mul_mat_vec_q": [
+         0.0869,
+         0.25
+        ],
+        "quantize_q8_1": [
+         0.0004,
+         0.25
+        ]
+       }
+      }
+     }
+    },
+    "prefill_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 2715.102,
+     "kernels_per_step": 5818.0,
+     "wall_ms_median": 929.553,
+     "components": {
+      "moe": {
+       "ms": 2219.227,
+       "top": {
+        "k_fetch": [
+         1927.052,
+         288.0
+        ],
+        "mul_mat_q": [
+         220.2516,
+         192.0
+        ],
+        "router_partials": [
+         14.6922,
+         96.0
+        ],
+        "k_resolve": [
+         13.8738,
+         96.0
+        ],
+        "tensor_kernel_scan_outer_dim": [
+         13.8165,
+         5.0
+        ],
+        "moe_weighted_reduction_f32": [
+         12.6962,
+         96.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 268.42,
+       "top": {
+        "Kernel2": [
+         213.9985,
+         192.0
+        ],
+        "_mix_out": [
+         26.3116,
+         96.0
+        ],
+        "_prep": [
+         22.7365,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         3.3769,
+         288.0
+        ],
+        "_act": [
+         1.1286,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.8496,
+         96.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 112.178,
+       "top": {
+        "mul_mat_q": [
+         69.9515,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         9.1872,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         5.7974,
+         36.0
+        ],
+        "elementwise_kernel": [
+         4.7968,
+         216.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         3.8911,
+         36.0
+        ],
+        "_conv": [
+         3.7794,
+         36.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 87.734,
+       "top": {
+        "_attend": [
+         59.185,
+         12.0
+        ],
+        "mul_mat_q": [
+         20.2075,
+         37.0
+        ],
+        "_score": [
+         3.5819,
+         96.0
+        ],
+        "_topk": [
+         1.6531,
+         96.0
+        ],
+        "Kernel2": [
+         1.0015,
+         12.0
+        ],
+        "quantize_mmq_q8_1": [
+         0.8126,
+         37.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 12.531,
+       "top": {
+        "mul_mat_q": [
+         8.8141,
+         128.0
+        ],
+        "quantize_mmq_q8_1": [
+         1.6108,
+         128.0
+        ],
+        "elementwise_kernel": [
+         0.8321,
+         48.0
+        ],
+        "kernel": [
+         0.5532,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.377,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.1905,
+         32.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 9.628,
+       "top": {
+        "_combine": [
+         9.628,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 3.598,
+       "top": {
+        "_scatter_gather_elementwise_kernel": [
+         1.8627,
+         1.0
+        ],
+        "Kernel2": [
+         0.7765,
+         2.0
+        ],
+        "_ple_conv": [
+         0.4981,
+         1.0
+        ],
+        "_ple_gate": [
+         0.4204,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0243,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0092,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.439,
+       "top": {
+        "k_get_rows_kq": [
+         1.0095,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.3366,
+         4.0
+        ],
+        "memcpy": [
+         0.0414,
+         37.0
+        ],
+        "index_elementwise_kernel": [
+         0.0284,
+         12.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0057,
+         4.0
+        ],
+        "reduce_kernel": [
+         0.0054,
+         1.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.347,
+       "top": {
+        "mul_mat_vec_q": [
+         0.345,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0018,
+         1.0
+        ]
+       }
+      }
+     }
+    },
+    "verify_4096": {
+     "commit": "57e7bb4",
+     "gpu_ms_per_step": 32.333,
+     "kernels_per_step": 2610.3333333333335,
+     "wall_ms_median": 68.921,
+     "components": {
+      "moe": {
+       "ms": 19.745,
+       "top": {
+        "k_fetch": [
+         16.1548,
+         96.0
+        ],
+        "mul_mat_vec_q_moe": [
+         2.3487,
+         96.0
+        ],
+        "k_resolve": [
+         0.5978,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.4019,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.1232,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0853,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 3.504,
+       "top": {
+        "mul_mat_vec_q": [
+         1.3586,
+         108.0
+        ],
+        "Kernel2": [
+         1.1006,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.3296,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1838,
+         108.0
+        ],
+        "_conv": [
+         0.1325,
+         36.0
+        ],
+        "memcpy": [
+         0.1232,
+         144.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.454,
+       "top": {
+        "_mix_rows": [
+         1.3998,
+         97.0
+        ],
+        "_down_gemv": [
+         0.81,
+         97.0
+        ],
+        "_down_sum": [
+         0.2446,
+         97.0
+        ]
+       }
+      },
+      "mtp.moe": {
+       "ms": 1.131,
+       "top": {
+        "k_fetch": [
+         0.9592,
+         8.0
+        ],
+        "k_resolve": [
+         0.0475,
+         4.0
+        ],
+        "mul_mat_vec_q": [
+         0.046,
+         6.0
+        ],
+        "mul_mat_vec_q_moe": [
+         0.0334,
+         2.0
+        ],
+        "holon_moe_router": [
+         0.0318,
+         4.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0065,
+         4.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.072,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4068,
+         37.0
+        ],
+        "_topk": [
+         0.2244,
+         12.0
+        ],
+        "_attend": [
+         0.126,
+         12.0
+        ],
+        "_score": [
+         0.0998,
+         12.0
+        ],
+        "Kernel2": [
+         0.0545,
+         12.0
+        ],
+        "_index": [
+         0.0274,
+         12.0
+        ]
+       }
+      },
+      "mtp.lm_head": {
+       "ms": 0.957,
+       "top": {
+        "mul_mat_vec_q": [
+         0.9532,
+         3.0
+        ],
+        "quantize_q8_1": [
+         0.0033,
+         3.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.899,
+       "top": {
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.3316,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.179,
+         113.0
+        ],
+        "_conv": [
+         0.1441,
+         36.0
+        ],
+        "index_elementwise_kernel": [
+         0.056,
+         34.333333333333336
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0456,
+         39.0
+        ],
+        "_conv_state": [
+         0.0431,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.896,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4251,
+         128.0
+        ],
+        "kernel": [
+         0.1439,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.1003,
+         96.0
+        ],
+        "elementwise_kernel": [
+         0.088,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0585,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.0485,
+         48.0
+        ]
+       }
+      },
+      "mtp.qsa": {
+       "ms": 0.475,
+       "top": {
+        "kernel": [
+         0.1985,
+         9.0
+        ],
+        "Kernel2": [
+         0.0931,
+         3.0
+        ],
+        "_topk": [
+         0.0769,
+         4.0
+        ],
+        "_attend": [
+         0.0403,
+         4.0
+        ],
+        "_score": [
+         0.0328,
+         4.0
+        ],
+        "_merge": [
+         0.0083,
+         4.0
+        ]
+       }
+      },
+      "mtp": {
+       "ms": 0.395,
+       "top": {
+        "Kernel2": [
+         0.0794,
+         5.0
+        ],
+        "index_elementwise_kernel": [
+         0.0706,
+         33.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0627,
+         54.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.041,
+         30.0
+        ],
+        "reduce_kernel": [
+         0.0369,
+         3.0
+        ],
+        "kernel": [
+         0.0311,
+         3.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.349,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3484,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0012,
+         1.0
+        ]
+       }
+      },
+      "mtp.hc.mix": {
+       "ms": 0.171,
+       "top": {
+        "_mix_gemv": [
+         0.0718,
+         9.0
+        ],
+        "_down_gemv": [
+         0.0665,
+         11.0
+        ],
+        "_mix_rows": [
+         0.0282,
+         2.0
+        ],
+        "_down_sum": [
+         0.0047,
+         2.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.127,
+       "top": {
+        "Kernel2": [
+         0.0551,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0257,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0129,
+         1.0
+        ],
+        "_ple_conv": [
+         0.008,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0076,
+         1.0
+        ],
+        "index_elementwise_kernel": [
+         0.0064,
+         2.0
+        ]
+       }
+      },
+      "mtp.shared": {
+       "ms": 0.101,
+       "top": {
+        "kernel": [
+         0.0403,
+         10.0
+        ],
+        "Kernel2": [
+         0.0223,
+         2.0
+        ],
+        "splitKreduce_kernel": [
+         0.0221,
+         3.0
+        ],
+        "elementwise_kernel": [
+         0.007,
+         4.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0049,
+         4.0
+        ],
+        "act_and_mul_kernel": [
+         0.004,
+         4.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.052,
+       "top": {
+        "_combine": [
+         0.0525,
+         48.0
+        ]
+       }
+      },
+      "mtp.hc.combine": {
+       "ms": 0.004,
+       "top": {
+        "_combine": [
+         0.0039,
+         4.0
+        ]
+       }
+      }
+     }
+    }
+   },
+   "breakdown_before_floors": {
+    "decode_31744": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 15.211,
+     "kernels_per_step": 1739.0,
+     "wall_ms_median": 43.745,
+     "components": {
+      "moe": {
+       "ms": 9.462,
+       "top": {
+        "k_fetch": [
+         7.418,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         0.9913,
+         96.0
+        ],
+        "k_resolve": [
+         0.4983,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.3932,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0764,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0539,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 1.881,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1835,
+         108.0
+        ],
+        "kernel": [
+         0.2132,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.1934,
+         36.0
+        ],
+        "_conv": [
+         0.1202,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.0747,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.05,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 1.435,
+       "top": {
+        "_mix_gemv": [
+         0.8548,
+         97.0
+        ],
+        "_down_gemv": [
+         0.5803,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 0.982,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3517,
+         37.0
+        ],
+        "_topk": [
+         0.211,
+         12.0
+        ],
+        "_attend": [
+         0.136,
+         12.0
+        ],
+        "_score": [
+         0.1157,
+         12.0
+        ],
+        "kernel": [
+         0.0532,
+         12.0
+        ],
+        "_merge": [
+         0.0248,
+         12.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.913,
+       "top": {
+        "mul_mat_vec_q": [
+         0.321,
+         128.0
+        ],
+        "splitKreduce_kernel": [
+         0.2006,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0972,
+         96.0
+        ],
+        "kernel": [
+         0.087,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0793,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0574,
+         48.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.316,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3149,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.102,
+       "top": {
+        "kernel": [
+         0.045,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0248,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0138,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0078,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0065,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.073,
+       "top": {
+        "memcpy": [
+         0.0289,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0143,
+         9.0
+        ],
+        "reduce_kernel": [
+         0.006,
+         1.0
+        ],
+        "k_get_rows_kq": [
+         0.0052,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0044,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0044,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0462,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "decode_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 11.416,
+     "kernels_per_step": 1739.0,
+     "wall_ms_median": 43.658,
+     "components": {
+      "moe": {
+       "ms": 5.769,
+       "top": {
+        "k_fetch": [
+         3.6558,
+         96.0
+        ],
+        "mul_mat_vec_q": [
+         1.1041,
+         96.0
+        ],
+        "k_resolve": [
+         0.457,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.3929,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0767,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0516,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 1.868,
+       "top": {
+        "mul_mat_vec_q": [
+         1.1743,
+         108.0
+        ],
+        "kernel": [
+         0.2113,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.1923,
+         36.0
+        ],
+        "_conv": [
+         0.1199,
+         36.0
+        ],
+        "quantize_q8_1": [
+         0.074,
+         72.0
+        ],
+        "_gated_rmsnorm": [
+         0.0499,
+         36.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 1.397,
+       "top": {
+        "_mix_gemv": [
+         0.8195,
+         97.0
+        ],
+        "_down_gemv": [
+         0.5779,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 0.932,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3449,
+         37.0
+        ],
+        "_topk": [
+         0.2076,
+         12.0
+        ],
+        "_attend": [
+         0.1167,
+         12.0
+        ],
+        "_score": [
+         0.1,
+         12.0
+        ],
+        "kernel": [
+         0.0504,
+         12.0
+        ],
+        "_merge": [
+         0.0248,
+         12.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.913,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3247,
+         128.0
+        ],
+        "splitKreduce_kernel": [
+         0.2004,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0968,
+         96.0
+        ],
+        "kernel": [
+         0.0871,
+         48.0
+        ],
+        "elementwise_kernel": [
+         0.0772,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0562,
+         48.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.313,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3122,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.001,
+         1.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.103,
+       "top": {
+        "kernel": [
+         0.0439,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0251,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.015,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0075,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0066,
+         1.0
+        ],
+        "_ple_state": [
+         0.002,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.074,
+       "top": {
+        "memcpy": [
+         0.0283,
+         15.0
+        ],
+        "index_elementwise_kernel": [
+         0.0142,
+         9.0
+        ],
+        "k_get_rows_kq": [
+         0.0068,
+         1.0
+        ],
+        "reduce_kernel": [
+         0.006,
+         1.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0044,
+         4.0
+        ],
+        "elementwise_kernel": [
+         0.0043,
+         2.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.046,
+       "top": {
+        "_combine": [
+         0.0464,
+         48.0
+        ]
+       }
+      }
+     }
+    },
+    "prefill_31744": {
+     "commit": "a319e0f",
+     "gpu_ms_per_step": 3320.978,
+     "kernels_per_step": 8610.75,
+     "wall_ms_median": 3409.31,
+     "components": {
+      "moe": {
+       "ms": 2374.237,
+       "top": {
+        "k_fetch": [
+         1904.9359,
+         288.0
+        ],
+        "mul_mat_q": [
+         371.011,
+         288.0
+        ],
+        "router_partials": [
+         26.6156,
+         144.0
+        ],
+        "moe_weighted_reduction_f32": [
+         24.3298,
+         144.0
+        ],
+        "k_resolve": [
+         23.9691,
+         144.0
+        ],
+        "quantize_mmq_q8_1": [
+         13.3822,
+         288.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 469.015,
+       "top": {
+        "Kernel2": [
+         373.2517,
+         384.0
+        ],
+        "_mix_out": [
+         49.2691,
+         192.0
+        ],
+        "_prep": [
+         41.7747,
+         192.0
+        ],
+        "unrolled_elementwise_kernel": [
+         2.7642,
+         288.0
+        ],
+        "_act": [
+         1.3073,
+         192.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.6442,
+         96.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 216.552,
+       "top": {
+        "_attend": [
+         146.1965,
+         12.0
+        ],
+        "mul_mat_q": [
+         37.068,
+         74.0
+        ],
+        "_score": [
+         23.8963,
+         186.0
+        ],
+        "_topk": [
+         4.7494,
+         186.0
+        ],
+        "_qk_rope_kv": [
+         1.583,
+         12.0
+        ],
+        "quantize_mmq_q8_1": [
+         1.3855,
+         74.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 210.6,
+       "top": {
+        "mul_mat_q": [
+         132.1879,
+         216.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         15.9015,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         12.9758,
+         36.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         9.9046,
+         36.0
+        ],
+        "elementwise_kernel": [
+         8.2075,
+         216.0
+        ],
+        "_conv": [
+         7.3575,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 21.407,
+       "top": {
+        "mul_mat_q": [
+         15.8689,
+         256.0
+        ],
+        "quantize_mmq_q8_1": [
+         2.6599,
+         256.0
+        ],
+        "elementwise_kernel": [
+         1.2662,
+         48.0
+        ],
+        "kernel": [
+         0.7635,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.4112,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.2077,
+         32.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 20.288,
+       "top": {
+        "_combine": [
+         20.2883,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 6.606,
+       "top": {
+        "_scatter_gather_elementwise_kernel": [
+         3.4256,
+         1.0
+        ],
+        "Kernel2": [
+         1.4448,
+         2.0
+        ],
+        "_ple_conv": [
+         0.8979,
+         1.0
+        ],
+        "_ple_gate": [
+         0.7837,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0413,
+         1.0
+        ],
+        "_ple_rows": [
+         0.008,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 2.186,
+       "top": {
+        "k_get_rows_kq": [
+         1.798,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.2968,
+         2.5
+        ],
+        "memcpy": [
+         0.0524,
+         28.5
+        ],
+        "index_elementwise_kernel": [
+         0.0191,
+         9.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0056,
+         4.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0038,
+         3.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.087,
+       "top": {
+        "mul_mat_vec_q": [
+         0.087,
+         0.25
+        ],
+        "quantize_q8_1": [
+         0.0004,
+         0.25
+        ]
+       }
+      }
+     }
+    },
+    "prefill_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 1833.966,
+     "kernels_per_step": 5226.0,
+     "wall_ms_median": 1840.517,
+     "components": {
+      "moe": {
+       "ms": 1379.241,
+       "top": {
+        "k_fetch": [
+         1111.8605,
+         192.0
+        ],
+        "mul_mat_q": [
+         214.9653,
+         192.0
+        ],
+        "router_partials": [
+         13.8932,
+         96.0
+        ],
+        "k_resolve": [
+         12.7781,
+         96.0
+        ],
+        "moe_weighted_reduction_f32": [
+         12.35,
+         96.0
+        ],
+        "quantize_mmq_q8_1": [
+         6.7145,
+         192.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 243.624,
+       "top": {
+        "Kernel2": [
+         192.3065,
+         192.0
+        ],
+        "_mix_out": [
+         25.6347,
+         96.0
+        ],
+        "_prep": [
+         21.5591,
+         96.0
+        ],
+        "unrolled_elementwise_kernel": [
+         2.7509,
+         288.0
+        ],
+        "_act": [
+         0.6933,
+         96.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.6624,
+         96.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 104.676,
+       "top": {
+        "mul_mat_q": [
+         69.1061,
+         108.0
+        ],
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": [
+         7.8099,
+         36.0
+        ],
+        "chunk_fwd_kernel_o": [
+         5.3073,
+         36.0
+        ],
+        "elementwise_kernel": [
+         4.1517,
+         216.0
+        ],
+        "recompute_w_u_fwd_kernel": [
+         3.5742,
+         36.0
+        ],
+        "_conv": [
+         3.3644,
+         36.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 80.151,
+       "top": {
+        "_attend": [
+         54.9183,
+         12.0
+        ],
+        "mul_mat_q": [
+         19.3543,
+         37.0
+        ],
+        "_score": [
+         2.3993,
+         96.0
+        ],
+        "_topk": [
+         1.3584,
+         96.0
+        ],
+        "_qk_rope_kv": [
+         0.6546,
+         12.0
+        ],
+        "quantize_mmq_q8_1": [
+         0.6265,
+         37.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 11.433,
+       "top": {
+        "mul_mat_q": [
+         8.5337,
+         128.0
+        ],
+        "quantize_mmq_q8_1": [
+         1.3152,
+         128.0
+        ],
+        "elementwise_kernel": [
+         0.6922,
+         48.0
+        ],
+        "kernel": [
+         0.4441,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.2395,
+         48.0
+        ],
+        "CatArrayBatchedCopy_vectorized": [
+         0.1417,
+         32.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 9.434,
+       "top": {
+        "_combine": [
+         9.4344,
+         48.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 3.564,
+       "top": {
+        "_scatter_gather_elementwise_kernel": [
+         1.8958,
+         1.0
+        ],
+        "Kernel2": [
+         0.7628,
+         2.0
+        ],
+        "_ple_conv": [
+         0.4782,
+         1.0
+        ],
+        "_ple_gate": [
+         0.3927,
+         1.0
+        ],
+        "dequantize_block_iq4_nl": [
+         0.0225,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0076,
+         1.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 1.496,
+       "top": {
+        "k_get_rows_kq": [
+         1.0576,
+         1.0
+        ],
+        "elementwise_kernel": [
+         0.3362,
+         4.0
+        ],
+        "memcpy": [
+         0.0514,
+         37.0
+        ],
+        "index_elementwise_kernel": [
+         0.0282,
+         12.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0056,
+         4.0
+        ],
+        "reduce_kernel": [
+         0.0054,
+         1.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.346,
+       "top": {
+        "mul_mat_vec_q": [
+         0.3444,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.002,
+         1.0
+        ]
+       }
+      }
+     }
+    },
+    "verify_4096": {
+     "commit": "037232e",
+     "gpu_ms_per_step": 31.003,
+     "kernels_per_step": 2610.3333333333335,
+     "wall_ms_median": 65.543,
+     "components": {
+      "moe": {
+       "ms": 17.155,
+       "top": {
+        "k_fetch": [
+         13.5545,
+         96.0
+        ],
+        "mul_mat_vec_q_moe": [
+         2.3645,
+         96.0
+        ],
+        "k_resolve": [
+         0.5658,
+         48.0
+        ],
+        "holon_moe_router": [
+         0.3983,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.1482,
+         48.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0928,
+         48.0
+        ]
+       }
+      },
+      "gdn": {
+       "ms": 3.458,
+       "top": {
+        "mul_mat_vec_q": [
+         1.3365,
+         108.0
+        ],
+        "Kernel2": [
+         1.0983,
+         72.0
+        ],
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.3296,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.183,
+         108.0
+        ],
+        "_conv": [
+         0.1325,
+         36.0
+        ],
+        "memcpy": [
+         0.1197,
+         144.0
+        ]
+       }
+      },
+      "mtp.moe": {
+       "ms": 2.477,
+       "top": {
+        "k_fetch": [
+         2.3223,
+         8.0
+        ],
+        "k_resolve": [
+         0.0485,
+         4.0
+        ],
+        "mul_mat_vec_q": [
+         0.0378,
+         6.0
+        ],
+        "holon_moe_router": [
+         0.0314,
+         4.0
+        ],
+        "mul_mat_vec_q_moe": [
+         0.0252,
+         2.0
+        ],
+        "moe_weighted_reduction_f32": [
+         0.0065,
+         4.0
+        ]
+       }
+      },
+      "hc.mix": {
+       "ms": 2.467,
+       "top": {
+        "_mix_rows": [
+         1.397,
+         97.0
+        ],
+        "_down_gemv": [
+         0.8214,
+         97.0
+        ],
+        "_down_sum": [
+         0.2484,
+         97.0
+        ]
+       }
+      },
+      "qsa": {
+       "ms": 1.06,
+       "top": {
+        "mul_mat_vec_q": [
+         0.4017,
+         37.0
+        ],
+        "_topk": [
+         0.2213,
+         12.0
+        ],
+        "_attend": [
+         0.125,
+         12.0
+        ],
+        "_score": [
+         0.1001,
+         12.0
+        ],
+        "Kernel2": [
+         0.0533,
+         12.0
+        ],
+        "_index": [
+         0.0271,
+         12.0
+        ]
+       }
+      },
+      "mtp.lm_head": {
+       "ms": 0.964,
+       "top": {
+        "mul_mat_vec_q": [
+         0.9602,
+         3.0
+        ],
+        "quantize_q8_1": [
+         0.0033,
+         3.0
+        ]
+       }
+      },
+      "other": {
+       "ms": 0.886,
+       "top": {
+        "fused_sigmoid_gating_delta_rule_update_kernel": [
+         0.3301,
+         36.0
+        ],
+        "elementwise_kernel": [
+         0.1781,
+         113.0
+        ],
+        "_conv": [
+         0.1436,
+         36.0
+        ],
+        "index_elementwise_kernel": [
+         0.055,
+         34.333333333333336
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0427,
+         39.0
+        ],
+        "_conv_state": [
+         0.0421,
+         36.0
+        ]
+       }
+      },
+      "shared": {
+       "ms": 0.877,
+       "top": {
+        "mul_mat_vec_q": [
+         0.412,
+         128.0
+        ],
+        "kernel": [
+         0.1428,
+         48.0
+        ],
+        "quantize_q8_1": [
+         0.0983,
+         96.0
+        ],
+        "elementwise_kernel": [
+         0.0876,
+         48.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0569,
+         48.0
+        ],
+        "act_and_mul_kernel": [
+         0.0478,
+         48.0
+        ]
+       }
+      },
+      "mtp.qsa": {
+       "ms": 0.477,
+       "top": {
+        "kernel": [
+         0.2012,
+         9.0
+        ],
+        "Kernel2": [
+         0.0929,
+         3.0
+        ],
+        "_topk": [
+         0.0772,
+         4.0
+        ],
+        "_attend": [
+         0.0407,
+         4.0
+        ],
+        "_score": [
+         0.0329,
+         4.0
+        ],
+        "_merge": [
+         0.0082,
+         4.0
+        ]
+       }
+      },
+      "mtp": {
+       "ms": 0.378,
+       "top": {
+        "Kernel2": [
+         0.0796,
+         5.0
+        ],
+        "index_elementwise_kernel": [
+         0.07,
+         33.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0599,
+         54.0
+        ],
+        "unrolled_elementwise_kernel": [
+         0.0397,
+         30.0
+        ],
+        "kernel": [
+         0.0328,
+         3.0
+        ],
+        "k_get_rows_kq": [
+         0.027,
+         4.0
+        ]
+       }
+      },
+      "lm_head": {
+       "ms": 0.336,
+       "top": {
+        "mul_mat_vec_q": [
+         0.335,
+         1.0
+        ],
+        "quantize_q8_1": [
+         0.0012,
+         1.0
+        ]
+       }
+      },
+      "mtp.hc.mix": {
+       "ms": 0.172,
+       "top": {
+        "_mix_gemv": [
+         0.0724,
+         9.0
+        ],
+        "_down_gemv": [
+         0.0672,
+         11.0
+        ],
+        "_mix_rows": [
+         0.0279,
+         2.0
+        ],
+        "_down_sum": [
+         0.0046,
+         2.0
+        ]
+       }
+      },
+      "ple": {
+       "ms": 0.134,
+       "top": {
+        "Kernel2": [
+         0.0544,
+         2.0
+        ],
+        "_ple_gate": [
+         0.0254,
+         1.0
+        ],
+        "_scatter_gather_elementwise_kernel": [
+         0.0196,
+         1.0
+        ],
+        "_ple_rows": [
+         0.0078,
+         1.0
+        ],
+        "_ple_conv": [
+         0.0078,
+         1.0
+        ],
+        "index_elementwise_kernel": [
+         0.007,
+         2.0
+        ]
+       }
+      },
+      "mtp.shared": {
+       "ms": 0.1,
+       "top": {
+        "kernel": [
+         0.0398,
+         10.0
+        ],
+        "Kernel2": [
+         0.0224,
+         2.0
+        ],
+        "splitKreduce_kernel": [
+         0.0219,
+         3.0
+        ],
+        "elementwise_kernel": [
+         0.0069,
+         4.0
+        ],
+        "vectorized_elementwise_kernel": [
+         0.0047,
+         4.0
+        ],
+        "act_and_mul_kernel": [
+         0.0039,
+         4.0
+        ]
+       }
+      },
+      "hc.combine": {
+       "ms": 0.057,
+       "top": {
+        "_combine": [
+         0.0572,
+         48.0
+        ]
+       }
+      },
+      "mtp.hc.combine": {
+       "ms": 0.004,
+       "top": {
+        "_combine": [
+         0.0039,
+         4.0
+        ]
+       }
+      }
+     }
+    }
+   },
+   "chat": {
+    "usage": {
+     "prompt_tokens": 69,
+     "completion_tokens": 333,
+     "total_tokens": 402,
+     "prompt_tokens_details": {
+      "cached_tokens": 0
+     }
+    },
+    "client_seconds": 3.81,
+    "content": "Stone finger of night  \nturning eye sweeps the black sea  \nships find home in light  \n\nThe lighthouse is imagined as a stone finger and a turning eye, giving it a watchful, almost living presence against the darkness. Its sweeping beam becomes a path of safety, turning the threatening sea into a route home for ships."
+   }
+  }
+ }
+}

@@ -2052,3 +2052,177 @@ per token stamped against ≈ 7.4 ms in its decode tok/s).
   decides how far float32 can go), GDN's conv and gates at decode and GDN at 4 rows, the verify "other"; the routed
   and shared experts wait for D.
 
+
+## 20. Step 6 record: Flash-Next end to end on limited VRAM (2026-10-21/22; the owner's priority)
+
+Scope (owner, 2026-10-21): the PLE table in pinned host RAM; expert offload for FN (the MTP experts in the store,
+lfu with F5a, lent prefill scratch with tail lending, the 5080's memory levers); first end-to-end runs on an RTX 5080
+(IQ2_XS) and an RTX 5090 (IQ3_S) — a chat, gates (c) and (d), decode / MTP decode / prefill against Strata on the
+same card; the 5080 decode step per component. Not yet: the PLE SSD tier (later, per the owner), tune's interleaved
+F5b benchmark (step 6 (b)), the plants and exactness checks of step 6's close. Records:
+`evidence/fn6_e2e_2026-10-22.json`, the task answers in `evidence/fn6_tasks_2026-10-22/`; the measuring scripts in
+`spikes/fn6/` (`ring_diag.py`, `ring_exact.py`, `cached.py`, `hitrate.py`, `f5b_split.py`).
+
+### 20.1 What was built
+
+- **`std.tiered.rows@1`** (eb917f0, D5): a row table the deployment places on the device or in pinned host RAM
+  (`rows.place`); a quantized table is read from its file extent into a mapped host pool and its `qembedding@1` kernel
+  gathers the step's rows across the bus. FN's PLE table (IQ4_NL, 26.8 GiB) and `token_embd` (IQ4_XS, 322 MiB) use
+  it; both on the host in every step-6 deployment. Bitwise the same logits host or device (an IQ2_XS slice). **Gather
+  cost** on the RTX 5080, full model (nsys): the PLE rows (an `index_select` of mapped host memory, then IQ4_NL
+  dequantization) 17 µs and `token_embd`'s `get_rows` 9 µs per decode token — 0.2% of the step; 2.0 and 1.0 ms per
+  4K prefill step (0.1%). On an RTX A5000 slice against the device table: +8 µs per decode token, +1.4 ms per 4K step.
+- **The MTP head's experts in the offload store** (6f90a1e, D12a): the auxiliary model's layer is the store's next
+  group, its fused gate/up stack an arena piece; its passes read the step's row kinds, then decode kinds in the
+  drafter's sub-steps; the lent slots' return leaves a marker record (`RETURN`) so the host mirror follows sub-step
+  admissions after it. A placement profile counted on the target alone serves the deployment with the MTP file
+  (21bb40f).
+- **F5b for FN** (31e5e0b): `cpu_experts@1` takes reductions of whole blocks of each matrix's type (32 for Q2_0 …),
+  so FN's inter 640 with Q2_0 down is served; L0 gains FN IQ2_XS's three expert classes.
+- **Lending, made to happen on the bar cards** (a319e0f, 57e7bb4). The first runs on both cards lent nothing: a layout
+  lends only when every class's cache can lend a prefill pass's staging (512 slots), and FN's small classes — the
+  IQ2_XS file's IQ1_M gate/up of 3 layers, the IQ3_S file's IQ4_XS gate/up of 1 layer — were seeded fewer; every
+  class then kept 512 staging slots, and every prefill pass staged its misses through zero-copy fetches (on the 5080
+  a 4K step was 1.06 s of `k_fetch` in 2.42 s). Two fixes in `std.tiered`: a ring step streams per class (a319e0f; a
+  class whose lent slots cannot hold both halves stages into them while the others stream, `ring_ok` 2), and a class
+  the seed leaves short is floored — its hottest items seeded first, up to the pass's staging — so the layout lends
+  (57e7bb4; a layout that lent unfloored is unchanged). On the 5080 an 8K prompt then takes 3.1–3.2 s against 5.3–5.5
+  s, a 4K step 1.49 s of wall against 2.43, and the staging slots (≈ 1.5 GB) became cache. A ring step scores bitwise
+  as a staged one on the card (`ring_exact.py`: target and top-k logprobs equal).
+- **The deployment** (both cards; one `holon serve`-style flag set, `spikes/fn7` takes it): `std.moe.offload@1` with
+  lfu (device-owned) and F5a, `moe.ring_lend=tail`, `ggml_cuda.pass_rows=4096`, `rows.place=ple:host,token_embd:host`,
+  a placement profile from 60 task prompts (`holon_tools profile`, 128 tokens each), `--host-memory` 70 GB (5080) /
+  86 GB (5090), `--max-step-tokens` 4,096 (5080) / 8,192 (5090), `--ctx 33792`. MTP: `--max-draft-tokens 3` with
+  the Strata-format pack (`mtp-q2_0.gguf`), `std.spec.fixed_k`, greedy verifier.
+
+### 20.2 The bar tables
+
+`bench/offload_ctx.py`, batch 1, `--corpus fn`, contexts 1K / 4K / 32K, 3 rounds, medians; Holon / Strata tok/s
+(ratio). Strata runs its step-0 calibration (`spikes/fn0/arms_strata_<card>.json`: the no-approximation arms,
+`--pcie-frac 0.55`, its adaptive cache; drafting off, or its MTP head at `--spec 4`). Bars: decode ≥ 1.0, prefill ≥
+0.9. Strata's rows are from the same allocation as Holon's (the 5080's from the first bench, the 5090's re-run with
+Holon's after 57e7bb4).
+
+**RTX 5080, IQ2_XS** (57e7bb4; the memory levers: 4K steps, `token_embd` on the host, a reserve — `memory_fraction`
+0.97 in place of 0.9):
+
+| Row | 1K | 4K | 32K |
+|---|---|---|---|
+| Decode, drafting off | 80.3 / 87.9 (0.91) | 79.5 / 87.3 (0.91) | 74.1 / 80.5 (0.92) |
+| Prefill, drafting off | 1,165 / 1,540 (0.76) | 2,746 / 2,733 (**1.00**) | 2,633 / 3,121 (0.84) |
+| Decode, MTP | 98.4 / 128.4 (0.77) | 88.5 / 102.5 (0.86) | 92.5 / 115.0 (0.80) |
+| Prefill, MTP | 1,088 / 1,496 (0.73) | 2,617 / 2,680 (**0.98**) | 2,516 / 3,093 (0.81) |
+
+The same at `memory_fraction` 0.9: decode 0.88 / 0.88 / 0.90, MTP decode 0.73 / 0.83 / 0.77, prefill 0.74 / 1.00 /
+0.84, MTP prefill 0.70 / 0.86 / 0.72. Before the lending fixes (037232e, staging every pass): decode 0.84 / 0.83 /
+0.86, prefill 0.79 / 0.62 / 0.52, MTP decode 0.64 / 0.71 / 0.68, MTP prefill 0.77 / 0.60 / 0.50.
+
+**RTX 5090, IQ3_S** (57e7bb4; 8K steps, `token_embd` on the host, `memory_fraction` 0.9):
+
+| Row | 1K | 4K | 32K |
+|---|---|---|---|
+| Decode, drafting off | 106.3 / 109.7 (0.97) | 108.8 / 106.0 (**1.03**) | 98.5 / 106.5 (0.93) |
+| Prefill, drafting off | 1,248 / 2,208 (0.57) | 4,244 / 4,779 (0.89) | 5,069 / 5,917 (0.86) |
+| Decode, MTP | 144.7 / 185.5 (0.78) | 113.5 / 149.6 (0.76) | 128.1 / 183.9 (0.70) |
+| Prefill, MTP | 1,171 / 2,174 (0.54) | 3,943 / 4,743 (0.83) | 4,831 / 5,883 (0.82) |
+
+Before the lending fixes: decode 0.92 / 0.98 / 0.88, prefill 0.67 / 0.46 / 0.41, MTP decode 0.66 / 0.70 / 0.63.
+
+- **Experts cached on the 5080** (`moe.cache` fill; C-M1's target ≥ 23% with the MTP pack): drafting off 23.2% (7.65
+  GiB) at 0.9, 25.5% (8.41 GiB) at 0.97; with the MTP pack 20.5% (6.91 GiB) and **22.7% (7.66 GiB)** — the pack's 512
+  gate/up experts all resident, floored (one layer's class). Strata: 31% drafting off, 28.5% with its MTP head (§13).
+- **Strata's cache hit rate** at decode: 0.85–0.91 (5080), 0.92–0.96 (5090); its accepted tokens per pass 2.2–3.4.
+  Holon's MTP accepts ≈ 3.0 tokens per pass (the 5080 smoke: 200 tokens in 66 passes).
+- **1K prefill regressed with lending** (5080 1,220 → 1,137 at 0.9; 5090 1,467 → 1,248): a 1K prompt is a ring
+  step (`moe.ring_tokens` 512), whose lend rounds and tail cost more than staging saves at that size. `ring_tokens`
+  is one of D12d's hand-set values that step 7 measures per card.
+
+### 20.3 Gates (c) and (d), and the chat
+
+- **Chat** through `holon serve` (OpenAI frontend, MTP on): a haiku and its explanation, 406 tokens in 5.8 s on the
+  5080, 333 in 3.8 s on the 5090 (wall, from the request; reasoning included).
+- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, 4 prompts, 49,596 positions; the deployment's
+  flags, its own step as the reference). Ran on 21bb40f, before the lending fixes: a ring step is bitwise a staged one
+  on the card, and placement changes no bits (the offload store is bitwise the resident store). **Both pass**:
+
+| Pair | 5080 KL mean / p50 / p99 | 5090 KL mean / p50 / p99 | worst 1K band (reported) |
+|---|---|---|---|
+| decode (1-token steps) vs prefill | 0.025 / 0.0018 / 0.35 | 0.032 / 0.0031 / 0.46 | −0.41 / +0.32 |
+| chunked (250) vs one-shot | 0.024 / 0.0019 / 0.36 | 0.033 / 0.0028 / 0.47 | +0.37 / +0.58 |
+| MTP vs plain (to each first difference) | 0.0009 / – / 0.0075 | 0.011 / – / 0.15 | – |
+
+- **(d) The task set** (72 items, greedy, thinking on, 8,192 new tokens; Holon on 21bb40f, Strata's no-approx arm
+  drafting off, same card):
+
+| Card | Holon | Strata | Degenerate: Holon | Degenerate: Strata |
+|---|---|---|---|---|
+| RTX 5080 (IQ2_XS) | **71** / 72 | 70 / 72 | `code-08` (loop), `code-12` (limit inside the reasoning) | none |
+| RTX 5090 (IQ3_S) | **71** / 72 | 70 / 72 | `code-08` | `code-08`, `code-12` |
+
+  The score clause passes on both cards. **The degenerate clause fails on the 5080**: `code-08` and `code-12` are
+  Holon-only there. They are the items where greedy reasoning at these bits loops or runs out: on the PRO 6000 both
+  engines' answers were degenerate on both (§19.4), on the 5090 Strata's on both. Every engine-and-card pair's answer
+  to them differs from the others' within the first 120–960 characters, so which run escapes is a matter of path;
+  the 5080's Strata run escaped on both. Reported to the owner as measured; the bar is unchanged.
+
+### 20.4 The RTX 5080 decode step per component
+
+`spikes/fn7/breakdown.py` (nsys, eager steps, GPU ms per step; 57e7bb4, the deployment at `memory_fraction` 0.9;
+graphed, a decode token takes ≈ 13.0 ms, Strata's 11.4):
+
+| Component | Decode 4K | Decode 32K | Verify 4K (1 + 3 rows) |
+|---|---|---|---|
+| **Miss transfers** (`k_fetch`: F5a's zero-copy gathers, 2 per layer) | **4.79** | **5.85** | **16.22** |
+| Routed experts (mmvq, its activation quantization, the weighted sum) | 1.74 | 1.72 | 3.66 |
+| Router + top-k (`holon_moe_router`) | 0.53 | 0.53 | 0.53 |
+| The store's resolve (`k_resolve`, 1 per layer) | 0.50 | 0.52 | 0.59 |
+| GDN (36 layers) | 2.22 | 2.22 | 4.07 |
+| HC mixes and combines | 2.08 | 2.09 | 3.23 |
+| Shared expert | 1.10 | 1.11 | 0.92 |
+| QSA (12 layers) | 1.04 | 1.12 | 1.29 |
+| lm_head, PLE (host rows), other | 0.60 | 0.60 | 1.65 |
+| MTP head (its sub-steps; its experts' fetches 0.91) | – | – | 3.77 |
+| **Step** | **14.62** | **15.78** | **35.93** |
+
+- **The miss transfers are a third of a decode step and 45% of a verify pass.** The cache hits 0.81 of decode
+  lookups (0.77 with MTP; `spikes/fn6/hitrate.py` on `v1-long` prompts the placement profile never saw), against
+  Strata's 0.85–0.91 on this card from a larger cache (31% of the experts against Holon's 23–25%). A decode token
+  misses 94 of its 480 routed experts (10 per layer), 128 MiB of gate/up and down: ≈ 28 GB/s against the breakdown's
+  4.79 ms. A verify pass routes 4 rows: its fetches take 3.4× a decode step's.
+- **The levers, ranked by the step's time they can reach:**
+  1. Fewer miss bytes — a larger cache (the reserve gave +2.3 points of cached experts and +2–4% decode, measured in
+     §20.2; C-M1's ≥ 23% with the pack is 22.7% at 0.97) and a hit rate nearer Strata's (lfu's admission against
+     Strata's adaptive swaps); verify gains most.
+  2. Routed experts, router and resolve: 2.8 ms (`kernels.ggml_cuda`'s mmvq and router fusions, held as D / E).
+  3. GDN 2.2 ms (its conv and gates, §19.6's item-4 candidates); HC 2.1 ms.
+  4. The shared expert 1.1 ms (held as D), QSA 1.0 ms.
+  5. F5b's CPU split: measured below (§20.5), it loses on this card.
+- The store's own work at decode (resolve 0.50, the PLE and `token_embd` host gathers 0.03) is ≈ 4% of the step.
+
+### 20.5 The 5080's MTP rows: F5b off and on (owner, 2026-10-21)
+
+- **Tune's split** (`tune.split` at batch 1 with MTP, the deployment's flags; the card's 8-core CPU): F5a 95.1 tok/s;
+  the CPU's share at 0.5 with 2 / 4 / 6 threads 26.5 / 46.5 / 63.7; at 6 threads, shares 0.25 / 0.4 / 0.5 / 0.6 / 0.75
+  / 1.0 give 87.7 / 76.1 / 63.7 / 56.4 / 43.7 / 20.4. Best: 0.25 at 6 threads, −7.7%: **not taken** by tune's ≥ 5%
+  rule. (Before the lending fixes: F5a 87.5, best 77.2, −11.7%.)
+- **The F5b-on arm** at that share and thread count, against F5b off (both `memory_fraction` 0.9, same allocation):
+  decode 70.3 / 72.7 / 67.9 against 77.6 / 77.0 / 72.4; MTP decode 81.1 / 74.5 / 85.0 against 93.5 / 84.7 / 88.0;
+  prefill unchanged. F5b costs 3–13% on every decode row.
+- **Its checks** (no fp32, §18): gate (c) passes (decode vs prefill KL mean 0.025, p50 0.0018, p99 0.37; chunked as
+  F5b off — a 250-token pass takes no CPU share; MTP vs plain KL mean 0.0026, p99 0.062); gate (d): 70 / 72 against
+  Strata's 70, the same two items degenerate as F5b off (`code-08`, `code-12`).
+- **So neither of the owner's two options holds as framed:** F5b does not raise the MTP rows on this card, and the
+  MTP rows are 0.77 / 0.86 / 0.80 with the reserve, not ≈ 0.95–1.0. The gap is §20.4's: verify passes spend 45% of
+  their GPU time fetching misses. The decision goes back to the owner with these numbers.
+
+### 20.6 Where step 6 stands
+
+- **Met:** FN serves end to end on both bar cards (chat, gates (c) on both, (d)'s score on both); the PLE table and
+  `token_embd` live in host RAM at ≈ 0.2% of a decode step; the MTP experts go through the store; lending and the
+  ring work on both cards; the 5080's three memory levers are applied. Rows at or above the bar: the 5080's 4K
+  prefill (1.00; 0.98 with MTP), the 5090's 4K decode (1.03).
+- **Below the bar:** decode 0.91–0.92 (5080) and 0.93–0.97 (5090) off the 4K row; MTP decode 0.77–0.86 and 0.70–0.78;
+  prefill at 32K 0.84 / 0.86, at 1K 0.76 / 0.57 (`ring_tokens`, §20.2).
+- **For the owner:** (d)'s degenerate clause on the 5080 (§20.3), and the 5080 MTP rows (§20.5).
+- **Not yet done in step 6:** the PLE SSD tier, tune's interleaved F5b benchmark (b), the plants and exactness checks,
+  the full suite.

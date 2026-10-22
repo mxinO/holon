@@ -1,0 +1,1044 @@
+{
+ "totals": {
+  "holon": {
+   "correct": 71,
+   "of": 72,
+   "degenerate": 1,
+   "code": 13,
+   "math": 24,
+   "multiturn": 6,
+   "reasoning": 16,
+   "recall": 12
+  },
+  "strata": {
+   "correct": 70,
+   "of": 72,
+   "degenerate": 2,
+   "code": 12,
+   "math": 24,
+   "multiturn": 6,
+   "reasoning": 16,
+   "recall": 12
+  }
+ },
+ "items": {
+  "holon": {
+   "math-00": {
+    "correct": true,
+    "value": "470",
+    "degenerate": false,
+    "tokens": 811,
+    "finish": "stop"
+   },
+   "math-01": {
+    "correct": true,
+    "value": "21",
+    "degenerate": false,
+    "tokens": 823,
+    "finish": "stop"
+   },
+   "math-02": {
+    "correct": true,
+    "value": "354",
+    "degenerate": false,
+    "tokens": 639,
+    "finish": "stop"
+   },
+   "math-03": {
+    "correct": true,
+    "value": "58",
+    "degenerate": false,
+    "tokens": 226,
+    "finish": "stop"
+   },
+   "math-04": {
+    "correct": true,
+    "value": "169",
+    "degenerate": false,
+    "tokens": 4276,
+    "finish": "stop"
+   },
+   "math-05": {
+    "correct": true,
+    "value": "85",
+    "degenerate": false,
+    "tokens": 604,
+    "finish": "stop"
+   },
+   "math-06": {
+    "correct": true,
+    "value": "1531",
+    "degenerate": false,
+    "tokens": 1200,
+    "finish": "stop"
+   },
+   "math-07": {
+    "correct": true,
+    "value": "1412",
+    "degenerate": false,
+    "tokens": 1300,
+    "finish": "stop"
+   },
+   "math-08": {
+    "correct": true,
+    "value": "566",
+    "degenerate": false,
+    "tokens": 598,
+    "finish": "stop"
+   },
+   "math-09": {
+    "correct": true,
+    "value": "45",
+    "degenerate": false,
+    "tokens": 1410,
+    "finish": "stop"
+   },
+   "math-10": {
+    "correct": true,
+    "value": "82",
+    "degenerate": false,
+    "tokens": 1225,
+    "finish": "stop"
+   },
+   "math-11": {
+    "correct": true,
+    "value": "16",
+    "degenerate": false,
+    "tokens": 1004,
+    "finish": "stop"
+   },
+   "math-12": {
+    "correct": true,
+    "value": "-4",
+    "degenerate": false,
+    "tokens": 724,
+    "finish": "stop"
+   },
+   "math-13": {
+    "correct": true,
+    "value": "14",
+    "degenerate": false,
+    "tokens": 708,
+    "finish": "stop"
+   },
+   "math-14": {
+    "correct": true,
+    "value": "43",
+    "degenerate": false,
+    "tokens": 870,
+    "finish": "stop"
+   },
+   "math-15": {
+    "correct": true,
+    "value": "1576",
+    "degenerate": false,
+    "tokens": 475,
+    "finish": "stop"
+   },
+   "math-16": {
+    "correct": true,
+    "value": "262",
+    "degenerate": false,
+    "tokens": 390,
+    "finish": "stop"
+   },
+   "math-17": {
+    "correct": true,
+    "value": "3003",
+    "degenerate": false,
+    "tokens": 500,
+    "finish": "stop"
+   },
+   "math-18": {
+    "correct": true,
+    "value": "22",
+    "degenerate": false,
+    "tokens": 458,
+    "finish": "stop"
+   },
+   "math-19": {
+    "correct": true,
+    "value": "468",
+    "degenerate": false,
+    "tokens": 476,
+    "finish": "stop"
+   },
+   "math-20": {
+    "correct": true,
+    "value": "442",
+    "degenerate": false,
+    "tokens": 405,
+    "finish": "stop"
+   },
+   "math-21": {
+    "correct": true,
+    "value": "12:24",
+    "degenerate": false,
+    "tokens": 411,
+    "finish": "stop"
+   },
+   "math-22": {
+    "correct": true,
+    "value": "09:55",
+    "degenerate": false,
+    "tokens": 356,
+    "finish": "stop"
+   },
+   "math-23": {
+    "correct": true,
+    "value": "11:30",
+    "degenerate": false,
+    "tokens": 489,
+    "finish": "stop"
+   },
+   "code-00": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 173,
+    "finish": "stop"
+   },
+   "code-01": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 171,
+    "finish": "stop"
+   },
+   "code-02": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 227,
+    "finish": "stop"
+   },
+   "code-03": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 373,
+    "finish": "stop"
+   },
+   "code-04": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 388,
+    "finish": "stop"
+   },
+   "code-05": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 801,
+    "finish": "stop"
+   },
+   "code-06": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 354,
+    "finish": "stop"
+   },
+   "code-07": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 479,
+    "finish": "stop"
+   },
+   "code-08": {
+    "correct": false,
+    "value": null,
+    "degenerate": true,
+    "tokens": 8192,
+    "finish": "length"
+   },
+   "code-09": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 201,
+    "finish": "stop"
+   },
+   "code-10": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 269,
+    "finish": "stop"
+   },
+   "code-11": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 529,
+    "finish": "stop"
+   },
+   "code-12": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 2121,
+    "finish": "stop"
+   },
+   "code-13": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 970,
+    "finish": "stop"
+   },
+   "reasoning-00": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 512,
+    "finish": "stop"
+   },
+   "reasoning-01": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 611,
+    "finish": "stop"
+   },
+   "reasoning-02": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 524,
+    "finish": "stop"
+   },
+   "reasoning-03": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 512,
+    "finish": "stop"
+   },
+   "reasoning-04": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 539,
+    "finish": "stop"
+   },
+   "reasoning-05": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 859,
+    "finish": "stop"
+   },
+   "reasoning-06": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 270,
+    "finish": "stop"
+   },
+   "reasoning-07": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 368,
+    "finish": "stop"
+   },
+   "reasoning-08": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 248,
+    "finish": "stop"
+   },
+   "reasoning-09": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 279,
+    "finish": "stop"
+   },
+   "reasoning-10": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 391,
+    "finish": "stop"
+   },
+   "reasoning-11": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 149,
+    "finish": "stop"
+   },
+   "reasoning-12": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 219,
+    "finish": "stop"
+   },
+   "reasoning-13": {
+    "correct": true,
+    "value": "E",
+    "degenerate": false,
+    "tokens": 415,
+    "finish": "stop"
+   },
+   "reasoning-14": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 305,
+    "finish": "stop"
+   },
+   "reasoning-15": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 534,
+    "finish": "stop"
+   },
+   "recall-00": {
+    "correct": true,
+    "value": "552813",
+    "degenerate": false,
+    "tokens": 222,
+    "finish": "stop"
+   },
+   "recall-01": {
+    "correct": true,
+    "value": "787",
+    "degenerate": false,
+    "tokens": 124,
+    "finish": "stop"
+   },
+   "recall-02": {
+    "correct": true,
+    "value": "626",
+    "degenerate": false,
+    "tokens": 107,
+    "finish": "stop"
+   },
+   "recall-03": {
+    "correct": true,
+    "value": "379146",
+    "degenerate": false,
+    "tokens": 170,
+    "finish": "stop"
+   },
+   "recall-04": {
+    "correct": true,
+    "value": "390",
+    "degenerate": false,
+    "tokens": 134,
+    "finish": "stop"
+   },
+   "recall-05": {
+    "correct": true,
+    "value": "828",
+    "degenerate": false,
+    "tokens": 97,
+    "finish": "stop"
+   },
+   "recall-06": {
+    "correct": true,
+    "value": "125824",
+    "degenerate": false,
+    "tokens": 221,
+    "finish": "stop"
+   },
+   "recall-07": {
+    "correct": true,
+    "value": "443",
+    "degenerate": false,
+    "tokens": 132,
+    "finish": "stop"
+   },
+   "recall-08": {
+    "correct": true,
+    "value": "354",
+    "degenerate": false,
+    "tokens": 144,
+    "finish": "stop"
+   },
+   "recall-09": {
+    "correct": true,
+    "value": "686161",
+    "degenerate": false,
+    "tokens": 285,
+    "finish": "stop"
+   },
+   "recall-10": {
+    "correct": true,
+    "value": "378",
+    "degenerate": false,
+    "tokens": 112,
+    "finish": "stop"
+   },
+   "recall-11": {
+    "correct": true,
+    "value": "595",
+    "degenerate": false,
+    "tokens": 153,
+    "finish": "stop"
+   },
+   "multiturn-00": {
+    "correct": true,
+    "value": "96",
+    "degenerate": false,
+    "tokens": 195,
+    "finish": "stop"
+   },
+   "multiturn-01": {
+    "correct": true,
+    "value": "87",
+    "degenerate": false,
+    "tokens": 175,
+    "finish": "stop"
+   },
+   "multiturn-02": {
+    "correct": true,
+    "value": "80",
+    "degenerate": false,
+    "tokens": 190,
+    "finish": "stop"
+   },
+   "multiturn-03": {
+    "correct": true,
+    "value": "11:55",
+    "degenerate": false,
+    "tokens": 204,
+    "finish": "stop"
+   },
+   "multiturn-04": {
+    "correct": true,
+    "value": "11:15",
+    "degenerate": false,
+    "tokens": 191,
+    "finish": "stop"
+   },
+   "multiturn-05": {
+    "correct": true,
+    "value": "11:15",
+    "degenerate": false,
+    "tokens": 258,
+    "finish": "stop"
+   }
+  },
+  "strata": {
+   "math-00": {
+    "correct": true,
+    "value": "470",
+    "degenerate": false,
+    "tokens": 807,
+    "finish": "stop"
+   },
+   "math-01": {
+    "correct": true,
+    "value": "21",
+    "degenerate": false,
+    "tokens": 826,
+    "finish": "stop"
+   },
+   "math-02": {
+    "correct": true,
+    "value": "354",
+    "degenerate": false,
+    "tokens": 638,
+    "finish": "stop"
+   },
+   "math-03": {
+    "correct": true,
+    "value": "58",
+    "degenerate": false,
+    "tokens": 226,
+    "finish": "stop"
+   },
+   "math-04": {
+    "correct": true,
+    "value": "169",
+    "degenerate": false,
+    "tokens": 3777,
+    "finish": "stop"
+   },
+   "math-05": {
+    "correct": true,
+    "value": "85",
+    "degenerate": false,
+    "tokens": 650,
+    "finish": "stop"
+   },
+   "math-06": {
+    "correct": true,
+    "value": "1531",
+    "degenerate": false,
+    "tokens": 1088,
+    "finish": "stop"
+   },
+   "math-07": {
+    "correct": true,
+    "value": "1412",
+    "degenerate": false,
+    "tokens": 1487,
+    "finish": "stop"
+   },
+   "math-08": {
+    "correct": true,
+    "value": "566",
+    "degenerate": false,
+    "tokens": 643,
+    "finish": "stop"
+   },
+   "math-09": {
+    "correct": true,
+    "value": "45",
+    "degenerate": false,
+    "tokens": 1189,
+    "finish": "stop"
+   },
+   "math-10": {
+    "correct": true,
+    "value": "82",
+    "degenerate": false,
+    "tokens": 1086,
+    "finish": "stop"
+   },
+   "math-11": {
+    "correct": true,
+    "value": "16",
+    "degenerate": false,
+    "tokens": 1670,
+    "finish": "stop"
+   },
+   "math-12": {
+    "correct": true,
+    "value": "-4",
+    "degenerate": false,
+    "tokens": 751,
+    "finish": "stop"
+   },
+   "math-13": {
+    "correct": true,
+    "value": "14",
+    "degenerate": false,
+    "tokens": 717,
+    "finish": "stop"
+   },
+   "math-14": {
+    "correct": true,
+    "value": "43",
+    "degenerate": false,
+    "tokens": 870,
+    "finish": "stop"
+   },
+   "math-15": {
+    "correct": true,
+    "value": "1576",
+    "degenerate": false,
+    "tokens": 457,
+    "finish": "stop"
+   },
+   "math-16": {
+    "correct": true,
+    "value": "262",
+    "degenerate": false,
+    "tokens": 412,
+    "finish": "stop"
+   },
+   "math-17": {
+    "correct": true,
+    "value": "3003",
+    "degenerate": false,
+    "tokens": 483,
+    "finish": "stop"
+   },
+   "math-18": {
+    "correct": true,
+    "value": "22",
+    "degenerate": false,
+    "tokens": 376,
+    "finish": "stop"
+   },
+   "math-19": {
+    "correct": true,
+    "value": "468",
+    "degenerate": false,
+    "tokens": 419,
+    "finish": "stop"
+   },
+   "math-20": {
+    "correct": true,
+    "value": "442",
+    "degenerate": false,
+    "tokens": 422,
+    "finish": "stop"
+   },
+   "math-21": {
+    "correct": true,
+    "value": "12:24",
+    "degenerate": false,
+    "tokens": 403,
+    "finish": "stop"
+   },
+   "math-22": {
+    "correct": true,
+    "value": "09:55",
+    "degenerate": false,
+    "tokens": 331,
+    "finish": "stop"
+   },
+   "math-23": {
+    "correct": true,
+    "value": "11:30",
+    "degenerate": false,
+    "tokens": 493,
+    "finish": "stop"
+   },
+   "code-00": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 173,
+    "finish": "stop"
+   },
+   "code-01": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 169,
+    "finish": "stop"
+   },
+   "code-02": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 228,
+    "finish": "stop"
+   },
+   "code-03": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 388,
+    "finish": "stop"
+   },
+   "code-04": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 388,
+    "finish": "stop"
+   },
+   "code-05": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 936,
+    "finish": "stop"
+   },
+   "code-06": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 320,
+    "finish": "stop"
+   },
+   "code-07": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 462,
+    "finish": "stop"
+   },
+   "code-08": {
+    "correct": false,
+    "value": null,
+    "degenerate": true,
+    "tokens": 8192,
+    "finish": "length"
+   },
+   "code-09": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 201,
+    "finish": "stop"
+   },
+   "code-10": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 228,
+    "finish": "stop"
+   },
+   "code-11": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 545,
+    "finish": "stop"
+   },
+   "code-12": {
+    "correct": false,
+    "value": null,
+    "degenerate": true,
+    "tokens": 8192,
+    "finish": "length"
+   },
+   "code-13": {
+    "correct": true,
+    "value": null,
+    "degenerate": false,
+    "tokens": 899,
+    "finish": "stop"
+   },
+   "reasoning-00": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 544,
+    "finish": "stop"
+   },
+   "reasoning-01": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 575,
+    "finish": "stop"
+   },
+   "reasoning-02": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 506,
+    "finish": "stop"
+   },
+   "reasoning-03": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 447,
+    "finish": "stop"
+   },
+   "reasoning-04": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 418,
+    "finish": "stop"
+   },
+   "reasoning-05": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 680,
+    "finish": "stop"
+   },
+   "reasoning-06": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 266,
+    "finish": "stop"
+   },
+   "reasoning-07": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 296,
+    "finish": "stop"
+   },
+   "reasoning-08": {
+    "correct": true,
+    "value": "B",
+    "degenerate": false,
+    "tokens": 252,
+    "finish": "stop"
+   },
+   "reasoning-09": {
+    "correct": true,
+    "value": "D",
+    "degenerate": false,
+    "tokens": 268,
+    "finish": "stop"
+   },
+   "reasoning-10": {
+    "correct": true,
+    "value": "C",
+    "degenerate": false,
+    "tokens": 291,
+    "finish": "stop"
+   },
+   "reasoning-11": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 149,
+    "finish": "stop"
+   },
+   "reasoning-12": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 219,
+    "finish": "stop"
+   },
+   "reasoning-13": {
+    "correct": true,
+    "value": "E",
+    "degenerate": false,
+    "tokens": 405,
+    "finish": "stop"
+   },
+   "reasoning-14": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 354,
+    "finish": "stop"
+   },
+   "reasoning-15": {
+    "correct": true,
+    "value": "A",
+    "degenerate": false,
+    "tokens": 528,
+    "finish": "stop"
+   },
+   "recall-00": {
+    "correct": true,
+    "value": "552813",
+    "degenerate": false,
+    "tokens": 134,
+    "finish": "stop"
+   },
+   "recall-01": {
+    "correct": true,
+    "value": "787",
+    "degenerate": false,
+    "tokens": 102,
+    "finish": "stop"
+   },
+   "recall-02": {
+    "correct": true,
+    "value": "626",
+    "degenerate": false,
+    "tokens": 128,
+    "finish": "stop"
+   },
+   "recall-03": {
+    "correct": true,
+    "value": "379146",
+    "degenerate": false,
+    "tokens": 151,
+    "finish": "stop"
+   },
+   "recall-04": {
+    "correct": true,
+    "value": "390",
+    "degenerate": false,
+    "tokens": 134,
+    "finish": "stop"
+   },
+   "recall-05": {
+    "correct": true,
+    "value": "828",
+    "degenerate": false,
+    "tokens": 137,
+    "finish": "stop"
+   },
+   "recall-06": {
+    "correct": true,
+    "value": "125824",
+    "degenerate": false,
+    "tokens": 226,
+    "finish": "stop"
+   },
+   "recall-07": {
+    "correct": true,
+    "value": "443",
+    "degenerate": false,
+    "tokens": 106,
+    "finish": "stop"
+   },
+   "recall-08": {
+    "correct": true,
+    "value": "354",
+    "degenerate": false,
+    "tokens": 145,
+    "finish": "stop"
+   },
+   "recall-09": {
+    "correct": true,
+    "value": "686161",
+    "degenerate": false,
+    "tokens": 256,
+    "finish": "stop"
+   },
+   "recall-10": {
+    "correct": true,
+    "value": "378",
+    "degenerate": false,
+    "tokens": 108,
+    "finish": "stop"
+   },
+   "recall-11": {
+    "correct": true,
+    "value": "595",
+    "degenerate": false,
+    "tokens": 152,
+    "finish": "stop"
+   },
+   "multiturn-00": {
+    "correct": true,
+    "value": "96",
+    "degenerate": false,
+    "tokens": 193,
+    "finish": "stop"
+   },
+   "multiturn-01": {
+    "correct": true,
+    "value": "87",
+    "degenerate": false,
+    "tokens": 175,
+    "finish": "stop"
+   },
+   "multiturn-02": {
+    "correct": true,
+    "value": "80",
+    "degenerate": false,
+    "tokens": 190,
+    "finish": "stop"
+   },
+   "multiturn-03": {
+    "correct": true,
+    "value": "11:55",
+    "degenerate": false,
+    "tokens": 205,
+    "finish": "stop"
+   },
+   "multiturn-04": {
+    "correct": true,
+    "value": "11:15",
+    "degenerate": false,
+    "tokens": 128,
+    "finish": "stop"
+   },
+   "multiturn-05": {
+    "correct": true,
+    "value": "11:15",
+    "degenerate": false,
+    "tokens": 387,
+    "finish": "stop"
+   }
+  }
+ },
+ "bar": {
+  "tolerance_items": 5,
+  "difference": 1,
+  "holon_only_degenerate": [],
+  "pass": true
+ }
+}

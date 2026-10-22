@@ -56,7 +56,11 @@ def flags(text: str) -> dict:
 
 
 def scored(a, prompts, step: int):
+    from holon_judge import engine as judge
     from holon_judge.engine import score
+    # An F5b deployment's split names the path-aware floor's CPU experts (one token per step, a frozen placement);
+    # (c) compares the engine with itself, with no floor (§18): its split is not recorded.
+    judge.cpu_split = lambda e: None
     e = engine(a, max_step_tokens=step)
     try:
         return score(e, prompts, K)
