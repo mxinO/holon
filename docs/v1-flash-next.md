@@ -2250,12 +2250,12 @@ a lever. Each item: L0, the GPU self-consistency gate, a 3-round A/B. Developmen
   count, St #588) and reports `hit_rate` (Strata's own) and `hit_rate_all` (hits over every routed expert, as Holon
   counts), with Strata's PCIe share; Holon's arms report `hit_rate_all` from the store's taps and the MTP tokens per
   pass.
-- **1 — the ring's copies and 1K prompts** (16440d1, 7159bcb): FN's deployment takes `moe.ring_copy=dma` and
+- **1 — the ring's copies and 1K prompts** (16440d1, 5ef6fd8): FN's deployment takes `moe.ring_copy=dma` and
   `moe.ring_tokens=1025` (a 1K prompt stages; a ring step's lend rounds and tail cost more than staging saves at that
   size). A ring step now lends the tail its own passes take (sized by the step's tokens), not the largest pass's.
   The first card run of that change found a bug: the rest of the tail's range still held residents the rounds could
   pick, counted as held but outside the pool, so a ring list fell short (DMA: a copy past dst; SM: a repeated
-  staging slot, mmq's column error). Fixed in 7159bcb: a tail step's lend end is its own tail's start.
+  staging slot, mmq's column error). Fixed in 5ef6fd8: a tail step's lend end is its own tail's start.
 - **2 — `k_fetch` toward link rate** (313c85f): `spikes/fn7/fetch_bw.py` on the RTX 5080 (8 GiB mapped pool, units
   of an IQ2_XS expert's 1.5 MB): the store's 8-CTA zero-copy gather alone reaches 43–45 GB/s over 4 KiB pages and
   45–48 GB/s over THP (`madvise(MADV_HUGEPAGE)`, page-locking 0.017 s/GiB there), Triton at 8–128 CTAs 44–51,
@@ -2272,7 +2272,7 @@ a lever. Each item: L0, the GPU self-consistency gate, a 3-round A/B. Developmen
   the offload store in prefill and graphed 1-token steps (`spikes/fn7/bitwise.py`), and the 5080's deployment with
   items 1 and 3 bitwise its base at a 4K prompt, prefill and decode. `ffn.fork=off` keeps one stream.
 
-**The 5080 A/B for items 1–3** (3 rounds each, same allocation as Strata's arms; base = 7159bcb's code with
+**The 5080 A/B for items 1–3** (3 rounds each, same allocation as Strata's arms; base = 5ef6fd8's code with
 `ffn.fork=off`, `expert_io.fetch_roles=off`, the SM ring at `ring_tokens` 512; "new" = the fork, the one-launch
 fetch and the DMA ring; all at `memory_fraction` 0.97; Holon / Strata tok/s, Holon's hit rate counted its own way and
 Strata's both ways):
@@ -2298,7 +2298,7 @@ Strata's both ways):
 
 ### 21.2 Item 5: where the 5080's VRAM goes, and what was cut
 
-`spikes/fn6/vram.py` on the 5080's MTP deployment (7159bcb's code, `memory_fraction` 0.97; MiB of 15,842): CUDA's
+`spikes/fn6/vram.py` on the 5080's MTP deployment (5ef6fd8's code, `memory_fraction` 0.97; MiB of 15,842): CUDA's
 context and modules **581** (the driver's used less torch's reserve); torch's reserve 13,960 — parameters 3,556
 (the HC weights 1,224 in bf16 as the file and Strata hold them; GDN's q/k/v, z and out 1,041 in the file's types; the
 lm_head 322; the routers 240, float32), pools 9,507 (the expert arena 8,156; QSA's KV 792 at 33,792 tokens in bf16,
@@ -2311,12 +2311,12 @@ Cut, each bitwise (scores or KV compared) unless said:
 - the large expert passes' buffers into the arena (8c2b81b: a staging layout's own tail at the pool's end; the
   minimum pool holds it, so the startup profile's worst step no longer counts them as activations): −75 of the peak;
 - the MTP drafter's predecessor hiddens in bf16 (8c2b81b): −80 of the peak;
-- the MTP head's front-only catch-up (87f4ef0, item 6): its prompt pass no longer runs the head's attention, FFN or HC
+- the MTP head's front-only catch-up (909ac48, item 6): its prompt pass no longer runs the head's attention, FFN or HC
   over 4,096 tokens: the MTP deployment's peak 1,089 → 827 MiB (the drafting-off one: 789);
-- the PLE verify buffer sized for verify rows (8f05872): −160 of statics;
-- ggml's mmq id workspaces from the pass scratch (0a698b1; the lent tail in a streaming step): −120 of statics;
-- the routers in bf16 (4acab45, `moe.router_dtype=bfloat16`; FN's are exactly bf16): −120 of parameters;
-- the MTP head's 512 experts in classes of their own (04b539f, item 6): all resident, its draft sub-steps never miss
+- the PLE verify buffer sized for verify rows (192ea34): −160 of statics;
+- ggml's mmq id workspaces from the pass scratch (708886c; the lent tail in a streaming step): −120 of statics;
+- the routers in bf16 (7ea3d79, `moe.router_dtype=bfloat16`; FN's are exactly bf16): −120 of parameters;
+- the MTP head's 512 experts in classes of their own (fd7f840, item 6): all resident, its draft sub-steps never miss
   (≈ 0.5 GB of the arena, as Strata keeps them).
 
 About 0.7 GB more for the cache on the MTP deployment (≈ +2 points of experts). **Lending the step peak from the cache
@@ -2332,7 +2332,7 @@ workspace (193, sized by SM count for any batch) are what else remains above Str
 ### 21.3 Items 4, 6, 7 and 8 so far
 
 - **4 — F5b's CPU path:** ggml-cpu has no x86 SIMD dot for Q2_0, FN's down type: its generic loop took most of an
-  expert's CPU time. Ours (bd50066, 8a94f86: AVX2 integer sums per 32-weight half, the generic's float steps in its
+  expert's CPU time. Ours (488d688, c9cdf3d: AVX2 integer sums per 32-weight half, the generic's float steps in its
   order: bitwise, L0 unchanged) takes an FN IQ2_XS expert on one core from 974 to 374 µs (an AVX2 development
   host). On the 5080's host (`spikes/fn7/cpu_expert.py`, AVX-512 build, 6 threads; each run spawns its threads, so a lone job's
   136 µs carries that): 64–77 µs per expert at 4–8 jobs — the lead's ≤ 80 µs target, Strata's 60–76. Tune's split on
@@ -2341,18 +2341,18 @@ workspace (193, sized by SM count for any batch) are what else remains above Str
   83.9; MTP 96.6 / 90.9 / 100.0 against 109.8 / 97.6 / 102.8). **Not shipped.** A token's CPU expert costs the same
   per token in a verify window (4 tokens: 4 × 57 µs): multi-token kernels that decode the weights once, as Strata's,
   are the next step for verify.
-- **The hits first** (7364b98, `moe.split=on`, off by default): the resolve returns the fetched entries' slots apart,
+- **The hits first** (79b5883, `moe.split=on`, off by default): the resolve returns the fetched entries' slots apart,
   the fetch lands on a side stream while the pass runs the resident entries, then the fetched ones; bitwise the
   resident store (GPU engine test). Measured on an RTX A5000: MTP decode 68 against 73 tok/s — the extra launches
   and the two passes' null-slot entries cost more than the overlap saves there. A 5080 A/B is next.
-- **6 — MTP:** the front-only catch-up (87f4ef0): the step's tokens through the head's state writes only — the same
+- **6 — MTP:** the front-only catch-up (909ac48): the step's tokens through the head's state writes only — the same
   KV and index keys bitwise (tiny model), the same accepted drafts (IQ2_XS); the head's experts in classes of their
-  own, all 512 resident (04b539f).
-- **7 — HC prefill as bf16x3** (0bc7dce, `hc.prefill=bf16x3`): a Triton GEMM of three bf16 tensor-core products of
+  own, all 512 resident (fd7f840).
+- **7 — HC prefill as bf16x3** (99b5ce5, `hc.prefill=bf16x3`): a Triton GEMM of three bf16 tensor-core products of
   the activation's exact split into one float32 accumulator, reading the bf16 weights as they are; within L0 as the
   SGEMMs are (w's usage 0.15 against 0.02). Per 4,096-row pass (`spikes/fn7/hc_bf16x3.py`): the down projection 1.02
   against 1.58 ms on the 5080 (0.52 against 0.86 on the 5090), the up 0.75 against 0.85 (0.38 against 0.46).
-- **8 — D/E so far:** GDN's a and b projections merged on CUDA (06c10c1; a verify pass's two ≈ 15 µs cuBLAS kernels
-  per layer become one split-K of ≈ 5; 1.1 ms of a 5080 verify pass); the routers in bf16 (4acab45).
-- **Experts cached on the 5080** (`spikes/fn6/cached.py`, b23786b): drafting off 26.2% (8.64 GiB), with the MTP pack
+- **8 — D/E so far:** GDN's a and b projections merged on CUDA (fa9a8de; a verify pass's two ≈ 15 µs cuBLAS kernels
+  per layer become one split-K of ≈ 5; 1.1 ms of a 5080 verify pass); the routers in bf16 (7ea3d79).
+- **Experts cached on the 5080** (`spikes/fn6/cached.py`, f99b028): drafting off 26.2% (8.64 GiB), with the MTP pack
   24.2% (8.16 GiB); with `moe.router_dtype=bfloat16` 26.5% and **24.5%** — C-M1's ≥ 23% with the pack met (was 22.7).
