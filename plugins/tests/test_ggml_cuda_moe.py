@@ -513,7 +513,7 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         h, out = torch.full((tokens, K, INTER), torch.nan, device="cuda"), torch.full_like(y, torch.nan)
         scratch = torch.full((max(gate_up.scratch_bytes(tokens), down.scratch_bytes(tokens)),), 0xFF,
                              dtype=torch.uint8, device="cuda")
-        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens and not gate_up.glu_store)
+        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             down(gate_up(x, pg, ids, out=h, scratch=scratch), pd, ids, out=out, scratch=scratch)
@@ -657,8 +657,9 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
-    tail) give the allocating call's bits; `scratch` is gate/up's f32 output only (the persistent workspace holds every
-    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short or misaligned buffer, or one
+    tail) give the allocating call's bits; `scratch` is gate/up's f32 output (none for D4's store), then the mmq
+    launches' id maps and q8_1 rows (the persistent workspace holds the mmvq calls'); mmvq calls do none of D10's
+    work; a short or misaligned buffer, or one
     overlapping another or `x`, is refused before anything is launched."""
     for glu, fused in (("none", True), ("swiglu", True), ("swiglu", False)):
         f = facts | {"glu": glu}
@@ -670,7 +671,8 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
         with (mock.patch.object(kernel, "_gate_up_out", side_effect=AssertionError),        # mmvq calls do none of
               mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
             assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
-        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4)
+        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4) + \
+            kernel._id_bytes(64)
         for tokens in (len(ids), len(ids) - CHUNK + 1):
             want = kernel(x[:tokens], parts, ids[:tokens])
             out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
