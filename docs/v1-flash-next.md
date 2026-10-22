@@ -2229,3 +2229,42 @@ graphed, a decode token takes ≈ 13.0 ms, Strata's 11.4):
 - **For the owner:** (d)'s degenerate clause on the 5080 (§20.3), and the 5080 MTP rows (§20.5).
 - **Not yet done in step 6:** the PLE SSD tier, tune's interleaved F5b benchmark (b), the plants and exactness checks,
   the full suite.
+
+## 21. Step 7 on limited VRAM (2026-10-22; the lead's order after the Strata source study)
+
+The owner delegated the step's decisions to the lead (2026-10-22), who re-ordered the work after a study of Strata's
+source: its 0.85–0.91 hit rate leaves out the misses its GPU reads over PCIe (≈ 0.83 counted Holon's way); its real
+difference is miss serving — ⌊n · pcie_frac⌋ of a layer's misses over PCIe, the rest on its CPU pool beside the GPU's
+hits —, a CPU path ≈ 5× ours per expert, its prompt buffers borrowed from the cache, and THP-backed host arenas.
+The items, in order: 0 the bench's hit rates both ways; 1 the ring's copies and 1K prompts; 2 `k_fetch` at link rate;
+3 the shared expert on a forked stream; 4 F5b's CPU speed, then a Strata-style split; 5 memory reclaim; 6 MTP
+(catch-up, the head's experts pinned); 7 the HC prefill as bf16x3; 8 D/E. F5b as it measured in §20.5 is dropped as
+a lever. Each item: L0, the GPU self-consistency gate, a 3-round A/B. Development rules as §19's. Records:
+`evidence/fn7_step7_2026-10-22.json`; the scripts in `spikes/fn6/` and `spikes/fn7/`.
+
+**Gate (d)'s degenerate clause** (§20.3): the lead's recommendation is recorded there, pending the owner.
+
+### 21.1 Items 0–3
+
+- **0 — hit rates both ways** (16440d1): `bench/offload_ctx.py` reads Strata's PCIe-miss field (`DONE`'s offloaded
+  count, St #588) and reports `hit_rate` (Strata's own) and `hit_rate_all` (hits over every routed expert, as Holon
+  counts), with Strata's PCIe share; Holon's arms report `hit_rate_all` from the store's taps and the MTP tokens per
+  pass.
+- **1 — the ring's copies and 1K prompts** (16440d1, 7159bcb): FN's deployment takes `moe.ring_copy=dma` and
+  `moe.ring_tokens=1025` (a 1K prompt stages; a ring step's lend rounds and tail cost more than staging saves at that
+  size). A ring step now lends the tail its own passes take (sized by the step's tokens), not the largest pass's.
+  The first card run of that change found a bug: the rest of the tail's range still held residents the rounds could
+  pick, counted as held but outside the pool, so a ring list fell short (DMA: a copy past dst; SM: a repeated
+  staging slot, mmq's column error). Fixed in 7159bcb: a tail step's lend end is its own tail's start.
+- **2 — `k_fetch` toward link rate** (313c85f): `spikes/fn7/fetch_bw.py` on the RTX 5080 (8 GiB mapped pool, units
+  of an IQ2_XS expert's 1.5 MB): the store's 8-CTA zero-copy gather alone reaches 43–45 GB/s over 4 KiB pages and
+  45–48 GB/s over THP (`madvise(MADV_HUGEPAGE)`, page-locking 0.017 s/GiB there), Triton at 8–128 CTAs 44–51,
+  copy-engine DMA 46–54. So the in-engine ≈ 27 GB/s is not the gather kernel's bandwidth: it is two small launches per
+  layer (2–4 MB). `expert_fetch@1` gains an optional `gather_roles` — a group's every role in one launch, chunks of
+  both roles dealt round-robin over `expert_io.fetch_ctas` CTAs per role — which the store's resolver uses
+  (`expert_io.fetch_roles=off` withholds it for A/Bs). THP host pools would add ≈ 5% more and need a core platform
+  option: not built yet.
+- **3 — the shared expert on a forked stream** (74bf2d3): `std.ffn.sum@1` runs its later parts on a side stream,
+  joined just before `std.moe@1`'s combine reads their sum (`add_residual`'s `join`); bitwise the same on IQ2_XS with
+  the offload store in prefill and graphed 1-token steps (`spikes/fn7/bitwise.py`), and the 5080's deployment with
+  items 1 and 3 bitwise its base at a 4K prompt, prefill and decode. `ffn.fork=off` keeps one stream.

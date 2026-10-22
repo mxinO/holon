@@ -97,6 +97,14 @@ class GRBlock(nn.Module):
         self.ffn_hc = _HC(ctx, n=n, hidden=hidden, rank=rank, eps=eps, inject=True, site=site)
         self.ffn = ctx.unit(ffn, layer=layer, hidden=hidden)
 
+    def write_kv(self, r: torch.Tensor, ctx: Any) -> None:
+        """The attention half's mix and its mixer's `write_kv` only (no attention, FFN or combine): the state a later
+        step reads of these tokens, where nothing reads this block's output (a draft head's last layer over the
+        step's tokens). R is left as it was."""
+        if self.pre is not None:
+            r = self.pre(r, ctx)
+        self.mixer.write_kv(self.attn_hc.mix(r)[0], ctx)
+
     def forward(self, r: torch.Tensor, ctx: Any) -> torch.Tensor:
         if self.pre is not None:
             r = self.pre(r, ctx)

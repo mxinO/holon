@@ -169,6 +169,15 @@ class QSA(nn.Module):
         o = self._attend(q, kv, blocks, ctx.meta("kv").pages.table, meta.seq, dev.positions, gate)
         return self.attn.o_proj(o.reshape(x.shape[0], -1))
 
+    def write_kv(self, x: torch.Tensor, ctx) -> None:
+        """The step's index keys and its attention's keys and values written at its positions, without attending
+        (gqa's `write_kv`): what a later step of this layer reads of these tokens."""
+        dev, meta = ctx.batch.dev, ctx.meta("idx")
+        _, ik = self._indexer(x, dev.positions)
+        raw, pooled = self._idx_layer()
+        self._index(ik, raw, pooled, meta.pages.table, meta.seq, dev.positions, self.index_k_norm, self.cos_sin)
+        self.attn.write_kv(x, ctx)
+
     def _whole_sequences(self, x: torch.Tensor, ctx) -> torch.Tensor:
         """A model-only build: dense through gqa when every sequence fits `dense_limit`, else sparse over pages made
         for this call (one table row per sequence)."""

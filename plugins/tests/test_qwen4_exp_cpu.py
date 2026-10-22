@@ -53,9 +53,10 @@ def tiny():
     return path, fixtures, meta, head
 
 
-def _engine(path, chunk: int, prefix: bool = False, mtp: pathlib.Path | None = None, drafter: str = "mtp") -> Engine:
+def _engine(path, chunk: int, prefix: bool = False, mtp: pathlib.Path | None = None, drafter: str = "mtp",
+            options: dict | None = None) -> Engine:
     spec = {} if mtp is None else {
-        "max_draft_tokens": 3, "plugin_options": {"spec.k": "3", f"{drafter}.path": str(mtp)},
+        "max_draft_tokens": 3, "plugin_options": {"spec.k": "3", f"{drafter}.path": str(mtp)} | (options or {}),
         "slots": {"drafter": f"drafters.{drafter}", "draft_policy": "std.spec.fixed_k",
                   "verifier": "std.spec.greedy"}}
     return Engine(EngineConfig(str(path), device="cpu", dtype=torch.float32, page_size=16, max_seqs=1,
@@ -159,7 +160,10 @@ def test_the_mtp_head_matches_the_pooled_reference(tiny, chunk):
     path, fixtures, _, _ = tiny
     pack = path.with_name(f"{q.NAME}-mtp-q2_0.gguf")
     assert hashlib.sha256(pack.read_bytes()).hexdigest() == q.MTP_PACK_SHA256
-    engine = _engine(path, chunk, mtp=pack)
+    engine = _engine(path, chunk, mtp=pack, options={"mtp.front": "off"})     # the head's output on the step's rows
+    kv = ("state.mtp.kv", "state.mtp.idx")
+    for name in kv:                                 # (pages no step writes compare equal too)
+        engine.ledger.pools[name].buffer.zero_()
     head, rows = engine.executor.drafter.head, []
     forward = head.forward
     head.forward = lambda e, r, ctx: rows.append(out := forward(e, r, ctx)) or out
@@ -167,6 +171,14 @@ def test_the_mtp_head_matches_the_pooled_reference(tiny, chunk):
     _ask(engine, ids, SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
     got = head.out(torch.cat([r for r in rows if len(r) > 1]))          # the step's rows, not its draft sub-steps
     assert got.shape[0] == len(ids) and (got - fixtures["p0.mtp_x"]).abs().max() <= 1e-4
+    front = _engine(path, chunk, mtp=pack)          # its state writes only (write_kv): the same KV and index keys
+    for name in kv:
+        front.ledger.pools[name].buffer.zero_()
+    _ask(front, ids, SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+    for name in kv:
+        assert torch.equal(front.ledger.pools[name].buffer, engine.ledger.pools[name].buffer), name
+    engine.close()
+    engine = front                                  # the drafts below: the default, front-only
     drafter, steps = engine.executor.drafter, [0]
     run = drafter.run
 

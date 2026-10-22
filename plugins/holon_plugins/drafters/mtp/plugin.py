@@ -49,6 +49,7 @@ class MTPDrafter:
                         else (target.spec.hidden, ctx.dtype))
         slots = ctx.options["max_seqs"] + 1
         self.dtype = ctx.dtype                      # what the head's predecessor hiddens are cast to
+        self.front = str(ctx.options.get("plugins", {}).get("mtp.front", "on")) != "off"
         self.carry = ctx.static("drafter.mtp.carry", (slots, width), dtype)          # per slot: a hidden ...
         self.carry_at = ctx.static("drafter.mtp.carry_at", (slots,), torch.int64)    # ... and its position
         self.carry_at.fill_(-1)
@@ -75,7 +76,10 @@ class MTPDrafter:
         start = dev.positions[first]                                     # a request's first token carries nothing
         carried = self.carry[slots] * ((self.carry_at[slots] == start - 1) & (start > 0))[:, None]
         prev[first] = carried.to(prev.dtype)                             # … or the slot's carried hidden
-        self.head(self.embed(dev.input_ids), prev, view)                 # the head's KV for the step's tokens
+        # the head's KV for the step's tokens: its state writes only where the head has them (nothing reads its output
+        # here), else its whole forward; `mtp.front=off` runs the whole forward
+        write = getattr(self.head, "write_kv", None) if self.front else None
+        (write or self.head)(self.embed(dev.input_ids), prev, view)
         verify = bool((plan.n_logits > 1).any())
         last = first + table.n_accept[slots] if verify else dev.query_start[1:] - 1
         self.carry[slots] = hn[last]

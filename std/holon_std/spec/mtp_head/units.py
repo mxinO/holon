@@ -72,13 +72,29 @@ class MTPHCHead(nn.Module):
     def forward(self, embedded: torch.Tensor, r: torch.Tensor, ctx) -> torch.Tensor:
         """`embedded` [T, H] (the target's token embedding), `r` [T, n·H] (R of each token's predecessor) → the head's
         R [T, n·H] float32, before its output mixer."""
-        t, h = r.shape[0], self.hidden
-        if embedded.shape[1] != h:
+        if embedded.shape[1] != self.hidden:
             raise ValueError(f"std.spec.mtp_hc_head: the token embedding is {embedded.shape[1]} wide, not the hidden "
-                             f"size {h} (a target embed that expands into streams: pass its inner embedding)")
-        e = self.fc_embedding(self.enorm(embedded.to(self.dtype)))
-        g = self.fc_hidden(self.hnorm(r.to(self.dtype)).view(t * self.n, h)).view(t, self.n, h)
-        x = (g.float() + e.float()[:, None]).view(t, self.n * h)
+                             f"size {self.hidden} (a target embed that expands into streams: pass its inner embedding)")
+        x = self._input(embedded, r)
         for layer in self.layers:
             x = layer(x, ctx)
         return x
+
+    def write_kv(self, embedded: torch.Tensor, r: torch.Tensor, ctx) -> None:
+        """`forward`'s state writes only, where its output is not read (the step's tokens, whose KV the draft
+        sub-steps attend to; Strata's front-only catch-up): the layers but the last in full, the last's
+        `write_kv`."""
+        last = self.layers[-1]
+        if not callable(getattr(getattr(last, "mixer", None), "write_kv", None)):
+            self.forward(embedded, r, ctx)                   # a mixer that writes only by attending
+            return
+        x = self._input(embedded, r)
+        for layer in self.layers[:-1]:
+            x = layer(x, ctx)
+        last.write_kv(x, ctx)
+
+    def _input(self, embedded: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
+        t, h = r.shape[0], self.hidden
+        e = self.fc_embedding(self.enorm(embedded.to(self.dtype)))
+        g = self.fc_hidden(self.hnorm(r.to(self.dtype)).view(t * self.n, h)).view(t, self.n, h)
+        return (g.float() + e.float()[:, None]).view(t, self.n * h)
