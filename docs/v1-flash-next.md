@@ -2549,3 +2549,51 @@ outputs stay bitwise the resident store's (the GPU bitwise test gains a `likely`
 prediction is a pure function of the profile table and the step's token count, so the step's lending, ring and stage
 tables are deterministic, and F11's replay sees the same `lends` records it models today (lending order and amounts
 come from the policy and the recorded needs; ring and stage copies never change residency).
+
+### 21.8 Why the CPU split loses (the lead's item 1), and the likely-routed measurement (item 2's gate)
+
+**The timeline** (`spikes/fn7/f5b_timeline.py`: the 5080's graphed MTP steps under nsys with `--cuda-graph-trace=node`,
+an NVTX range per CPU task in kernels.cpu_task; verify-only share 0.25 at 6 threads; 40 steps):
+- *Overlap:* the CPU's work is off the critical path. A layer's task starts 1.5 µs after the GPU's `k_signal` and
+  takes 86 µs (p50; 218 at p90) while the GPU's own work between the signal and its wait is 190 µs (fetch, the hits'
+  mmvq, the shared expert); the wait stalls 5 µs (0.36 ms a step). At 3 threads the task takes 137 µs and the stall
+  1.0 ms a step: 6 threads it is.
+- *Synchronisation:* four more graph nodes a layer whether or not the layer has a CPU job — `k_publish` 0.14 ms a
+  step, `k_signal` 0.05, `k_wait` 0.36, `k_patch` 0.30 — and the resolve's share phase 0.16: ≈ 1.0 ms of kernels, and
+  the step's wall grows ≈ 1.2 ms more than its kernels (25.1 → 27.2 ms against 25.4 → 26.3 of kernels). Waiting with
+  stream memory operations (`cpu_task.wait=memop`) changes nothing measurable.
+- *Sizing, and why the share saves little:* the CPU takes a layer's lowest-ranked misses, as Strata's does. A 25%
+  share (76 experts a verify step) cut the fetched pieces only 17% (279 → 230), because the CPU's experts are never
+  admitted and the cache learns less: a step missed 306 pieces instead of 279. Holon's F11 admits nearly every miss
+  (263 of 266 a verify step on the 16 GB emulation): every byte it fetches is an admission. Strata admits through a
+  separate budget (47–80 swaps a window, `STRATA_DECODE_TIMING` on the 5080), sends ≈ 3 of a layer's ≈ 5.7 misses to
+  the CPU and stages the rest over PCIe: per window ≈ 30% fewer bytes than Holon's at a similar hit rate (0.83 / 0.84).
+
+**What was tried.** `moe.cpu_admit` (e092c56): the CPU's experts admitted as any miss, their copies deferred to side
+streams after the layer (L0 against the oracle; the replay sees them as any miss; the GPU parity test): the misses
+come back to the base's (271 against 279), but the bytes do too, and the deferred copies share the link with the next
+layers' fetch (27 → 39 µs a piece on the critical path). Benched (5080, MTP, 3 rounds, same allocation; v3 109.3 /
+110.7 / 108.1):
+
+| Arm | 1K | 4K | 32K |
+|---|---|---|---|
+| admitted, share 0.25 / 0.40 / 0.50 | 108.0 / 105.9 / 111.1 | 99.5 / 98.2 / 94.9 | 101.6 / 98.5 / 106.4 |
+| not admitted, share 0.40 (with memop waits) | 108.2 (106.9) | 97.7 (96.4) | 105.3 (104.0) |
+
+None wins; not shipped (`moe.cpu_admit` stays off). The split only pays where it removes bytes, and in Holon removing
+a miss's bytes means not admitting it. The lever left is the admission policy, not the CPU path: a variant that admits
+through a per-step budget (Strata's swaps) would let the CPU take misses without starving the cache, and would cut
+the bytes of verify passes by itself. That is a placement-policy design (a new `moe_resolve.<policy>@1` with its own
+oracle and replay), for the lead's call.
+
+**Item 2's gate** (`spikes/fn7/likely.py`, the 5090 at 1K and 4K, three prompts each, the profile's shares):
+
+| τ | 1K streamed / routed | 1K staged after routing | 4K streamed / routed | 4K staged |
+|---|---|---|---|---|
+| 0.3 | 1.20 / 1.36 / 1.46 | 16 / 13 / 9% | 1.06 / 1.10 / 1.19 | 8 / 7 / 6% |
+| 0.5 | 1.05 / 1.23 / 1.34 | 25 / 20 / 14% | 1.01 / 1.05 / 1.15 | 13 / 11 / 8% |
+| 0.7 | 0.94 / 1.13 / 1.26 | 32 / 26 / 19% | 0.96 / 1.01 / 1.11 | 16 / 14 / 11% |
+
+At 1K a prompt routes 15–16 of the 24–25 GB missing. At τ = 0.5 the gate (≲ 1.15× streamed, ≲ 25% staged) holds for
+one prompt of three; the others stream 1.23–1.34×. Estimated anyway: ≈ 18.5 GB streamed overlapped (≈ 395 ms at 47
+GB/s) plus ≈ 3 GB staged (≈ 65 ms): ≈ 470 ms, about Strata's 1K (0.95–1.0, against 0.77 with `moe.stream_tokens`).
