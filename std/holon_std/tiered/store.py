@@ -111,7 +111,8 @@ class SlotClass:
 
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
-                 ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", policy: Ref | str = "",
+                 ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
+                 policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -121,6 +122,10 @@ class TieredStore:
         # `ring_copy`: the ring's copies on the device's SMs from its own tables ("sm"), or by copy engines from the
         # tables read back once per streaming step ("dma")
         self.staging, self.prefill, self.ring_tokens = staging, max(prefill, staging), ring_tokens
+        # `stream_tokens`: a step of large passes (at least `ring_tokens` prompt tokens) streams every missing piece
+        # from this many prompt tokens; below, it stages only its passes' routed misses into its lent slots (its tail
+        # lent too)
+        self.stream_tokens = stream_tokens
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
@@ -543,12 +548,13 @@ class TieredStore:
         if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
-            self._mode = "ring"
+            self._mode = "ring" if prompt >= self.stream_tokens else "stage"
         elif prompt and min(self.top_k * at, self.prefill) > self.stage.shape[1]:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
-        if self._mode == "ring" and self.tail:          # a ring step lends what its own passes take, not the most
+        self._step_tail = None
+        if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
             cls, n = self.tail
             need = max((f(at) for f in self.tail_bytes), default=0)
             self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
@@ -614,7 +620,7 @@ class TieredStore:
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
-            self.lent = Lent(self, self._mode, self._step_tail if self._mode == "ring" else None)
+            self.lent = Lent(self, self._mode, self._step_tail)
             self.lent.begin()
 
     def fetch_stream(self) -> torch.Stream:

@@ -17,7 +17,9 @@ default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the
 engines, one host sync per streaming step; default `sm`), `moe.ring_lend` (what a streaming step lends: `coldest`,
 the policy's coldest whole experts, X's; `tail`, first the experts holding the last slots of the largest class arena,
 a contiguous range its expert passes take their buffers from, then the coldest: docs/v1-moe-prefill.md D10, D11;
-default `coldest`), `moe.route_transform`
+default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
+below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
+`moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
 misses: `cpu.py`)."""
@@ -46,6 +48,7 @@ def _store(ctx, experts: int, top_k: int):
                         ring_tokens=int(opts.get("moe.ring_tokens", RING_TOKENS)),
                         ring_copy=str(opts.get("moe.ring_copy", "sm")),
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
+                        stream_tokens=int(opts.get("moe.stream_tokens", 0)),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,

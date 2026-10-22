@@ -521,7 +521,8 @@ def _tail_checked(store):
         yield steps
 
 
-def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys):
+@pytest.mark.parametrize("stream", [0, 20])
+def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream):
     """docs/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
     streaming step first lends the tail — call 0, the last slots of the largest class arena (gate/up's), enough for
     the passes' `out` and `scratch` —, then X's rounds (calls 1…), every step's terms as `_tail_checked` asserts them;
@@ -529,20 +530,25 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys):
     buffers are the range's (the reference provider stages each chunk through `scratch`, then `out`), so an expert
     left mapped there would read them as weights: the outputs are the resident store's, mixed steps included, and F11's
     residency, empty slots and their stacks are its replay's step by step (the replay models `lend_tail` from the
-    slots). The plant that leaves the tail's experts mapped fires and fails parity. A configuration whose tail class
-    cannot stage a pass outside the range, and every policy without `lend_tail`, are refused at bind."""
+    slots). With `moe.stream_tokens` 20, a step of 10 to 19 prompt tokens stages its routed misses in large passes
+    instead, under the same terms (its tail lent, its rounds' slots its staging). The plant that leaves the tail's
+    experts mapped fires and fails parity. A configuration whose tail class cannot stage a pass outside the range, and
+    every policy without `lend_tail`, are refused at bind."""
     from holon_judge.placement import parity, route_dump
     from holon_judge.planted import tail_unmap_undone
     from holon_plugins.placement.lfu.reference import replay
 
     file, prompts, want = wide_moe
-    tail = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "moe.ring_lend": "tail"}
+    tail = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "moe.ring_lend": "tail",
+            "moe.stream_tokens": stream}
     engine = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
     store = engine.ctx.shared_objects[KEY]
     assert store.tail == (0, 15) and list(store.classes)[0].startswith("gate_up") and store.prefill == 512
     with route_dump(engine) as trace, _tail_checked(store) as steps:
         assert _served(engine, prompts) == want
-    assert steps and steps[0][0] == 0 and all((s[1][0] > 0).sum() == 1 and s[1][1:].any() for s in steps), steps
+    # (a staging step lends no rounds where the empty slots it found hold its staging)
+    assert steps and steps[0][0] == 0 and all((s[1][0] > 0).sum() == 1 and (s[1][1:].any() or stream and s[0])
+                                              for s in steps), steps
     report = parity(trace)
     assert report["first_differing_step"] is None and trace.mirrored and report["admissions"], report
     # parity compared the empty slots' stacks step by step (the host's, in the delta log's order); the device's too
@@ -550,6 +556,9 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys):
     n_empty = store.n_empty.tolist()
     assert n_empty == stacks["empty"].tolist() and all(
         np.array_equal(store.empty[g, :, :n].t().numpy(), stacks["stacks"][g]) for g, n in enumerate(n_empty))
+    if stream:
+        assert store.borrowed["stage"] and not store.borrowed["ring"] and not any(s[2] for s in steps), store.borrowed
+        return
     with tail_unmap_undone():
         planted = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
         with route_dump(planted) as trace:
