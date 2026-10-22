@@ -36,6 +36,8 @@ struct State {
     int32_t * last;                                    // LRU: the logical step each expert was last routed [E] …
     int32_t * clock;                                   // … and the layer's step [1]
     int plant;
+    int budget = INT_MAX;                              // LFU: the most admissions a call makes (placement.budget's)
+    float gain = 0.0f;                                 // LFU: by how much a candidate's score must pass its victim's
 };
 
 __host__ __device__ inline int shared_words(int policy, int roles, int experts) {
@@ -257,8 +259,9 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             first[e] = P == LRU && is_cand ? first[e] : key;
         }
         __syncthreads();
-        const int empties = min(n_cand, spare);        // the first candidates take the empty slots, unconditionally
-        const int pairs = min(n_cand - empties, n_vict);
+        // the first candidates take the empty slots, unconditionally; then pairs; at most `budget` admissions in all
+        const int empties = min(min(n_cand, spare), st.budget);
+        const int pairs = min(min(n_cand - empties, n_vict), st.budget - empties);
         if (P == LRU && tid == 0) {
             st.clock[0] = now;
         }
@@ -284,7 +287,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             __syncthreads();
             if (P == LFU) {                            // admitted while strictly hotter; the first failing pair stops it
                 for (int i = tid; i < pairs; i += blockDim.x) {
-                    if (!(first[cand[empties + i]] > first[vict[i]])) {
+                    if (!(__int_as_float(first[cand[empties + i]]) > __int_as_float(first[vict[i]]) + st.gain)) {
                         atomicMin(&n_admit, i);
                     }
                 }
@@ -495,7 +498,7 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
              const std::vector<at::Tensor> & state, int64_t plant, const at::Tensor & plan, at::Tensor & jobs,
              at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging,
              const std::optional<at::Tensor> & miss_slots, const std::optional<at::Tensor> & later,
-             const std::optional<at::Tensor> & n_later) {
+             const std::optional<at::Tensor> & n_later, int64_t budget, double gain) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && stage.dim() == 2 && empty.dim() == 2 &&
                 delta.dim() == 2, "ids [T, k] on CUDA");
@@ -533,6 +536,9 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     }
     TORCH_CHECK(jobs.dim() == 2 && jobs.size(1) >= 4, "jobs [J + 1, 4 + T']");
     State st{nullptr, nullptr, nullptr, int(plant)};
+    st.budget = budget < 0 ? INT_MAX : int(budget);
+    st.gain = float(gain);
+    TORCH_CHECK(policy == LFU || (budget < 0 && gain == 0.0), "an admission budget or gain: the LFU code only");
     if (policy == LFU) {
         TORCH_CHECK(state.size() == 1, "lfu: score");
         check(state[0], ids, at::kFloat, {experts}, "score");

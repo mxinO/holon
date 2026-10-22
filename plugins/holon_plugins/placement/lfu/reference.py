@@ -35,13 +35,15 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                     limits: torch.Tensor, staging: int, score: torch.Tensor, group: int,
                     ring: torch.Tensor | None = None, stage: torch.Tensor | None = None,
                     empty: torch.Tensor | None = None, n_empty: int = 0, plan: torch.Tensor | None = None,
-                    defer: bool = False) -> dict:
+                    defer: bool = False, budget: int | None = None, gain: float = 0.0) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, F]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
     increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
     `score`, `n_empty`, the delta `records`. `ring` defaults to none, `stage` to the staging slots k + i, `empty` to
     none; and the CPU's share (`plan`, default none; `cpu_share`), its `cpu [T, k]` and job rows `jobs`. With `defer`,
     the CPU's experts are candidates too: an admitted one's pieces are listed apart, `later [R, 2, F]` and `n_later [R]`
-    (fetched after the call: the CPU serves its entries), never in `fetch`."""
+    (fetched after the call: the CPU serves its entries), never in `fetch`. `budget` caps the call's admissions (the
+    empty slots taken included; placement.budget's), and `gain` is the margin a candidate's score must pass its
+    victim's by (f32; 0: strictly greater)."""
     t, k = ids.shape
     experts, roles = residency.shape
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
@@ -69,13 +71,14 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
         cands = sorted((e for e in range(experts) if counts[e] and (before[e] < 0).all() and (defer or e not in taken)),
                        key=lambda e: (-score[e], e))
         victims = sorted((e for e in range(experts) if cache[e] and e not in needed), key=lambda e: (score[e], e))
-        spare = min(len(cands), n_empty)
+        cap = len(cands) if budget is None else budget
+        spare = min(len(cands), n_empty, cap)
         for i, a in enumerate(cands[:spare]):                          # the empty slots first, from the top
             after[a] = empty[:, n_empty - 1 - i]
             records.append((group, a, -2 - (n_empty - 1 - i)))
         n_empty -= spare
-        for a, b in zip(cands[spare:], victims, strict=False):
-            if not score[a] > score[b]:
+        for a, b in list(zip(cands[spare:], victims, strict=False))[:max(cap - spare, 0)]:
+            if not score[a] > score[b] + np.float32(gain):
                 break
             after[a], after[b] = before[b], -1
             records.append((group, a, b))
@@ -168,7 +171,7 @@ def _pick(order: list[tuple], need: np.ndarray, classes: torch.Tensor, shape: tu
 
 def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
            classes: np.ndarray | None = None, slots: np.ndarray | None = None, sizes: np.ndarray | None = None,
-           stacks: list | None = None) -> list[dict]:
+           stacks: list | None = None, budget: int | None = None, gain: float = 0.0) -> list[dict]:
     """The L1 parity oracle: F11's residency [G, E] (whole experts), empty slots per layer [G] and their stacks after
     each step of a trace, from the seeded residency (and scores, zero at a seed). A step holds its routing `counts`
     [G, E] of decode rows, the experts any of its rows routed (`needed` [G, E]; default: the counts'), those the CPU
@@ -214,14 +217,15 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
             for g in range(groups):
                 res = (at[g] >= 0).all(-1)
                 cands = sorted(np.flatnonzero((c[g] > 0) & ~res & ~cpu[g]), key=lambda e: (-u[g, e], e))
-                spare = min(len(cands), len(stack[g]))
+                cap = len(cands) if budget is None else budget              # (placement.budget's)
+                spare = min(len(cands), len(stack[g]), cap)
                 for i, a in enumerate(cands[:spare]):                  # from the top of the stack
                     at[g, a] = stack[g][-1 - i]
                 del stack[g][len(stack[g]) - spare:]
                 res = (at[g] >= 0).all(-1)
                 victims = sorted(np.flatnonzero(res & ~need[g]), key=lambda e: (u[g, e], e))   # not the new ones
-                for a, b in zip(cands[spare:], victims, strict=False):
-                    if not u[g, a] > u[g, b]:
+                for a, b in list(zip(cands[spare:], victims, strict=False))[:max(cap - spare, 0)]:
+                    if not u[g, a] > u[g, b] + np.float32(gain):
                         break
                     at[g, a], at[g, b] = at[g, b], -1
         if lends is not None:

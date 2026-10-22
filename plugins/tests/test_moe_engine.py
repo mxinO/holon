@@ -521,8 +521,8 @@ def _tail_checked(store):
         yield steps
 
 
-@pytest.mark.parametrize("stream", [0, 20])
-def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream):
+@pytest.mark.parametrize("stream, policy", [(0, ""), (20, ""), (0, "placement.budget@1")])
+def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream, policy):
     """docs/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
     streaming step first lends the tail — call 0, the last slots of the largest class arena (gate/up's), enough for
     the passes' `out` and `scratch` —, then X's rounds (calls 1…), every step's terms as `_tail_checked` asserts them;
@@ -540,7 +540,7 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
 
     file, prompts, want = wide_moe
     tail = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "moe.ring_lend": "tail",
-            "moe.stream_tokens": stream}
+            "moe.stream_tokens": stream, "moe.placement": policy}
     engine = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
     store = engine.ctx.shared_objects[KEY]
     assert store.tail == (0, 15) and list(store.classes)[0].startswith("gate_up") and store.prefill == 512
@@ -552,12 +552,15 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
     report = parity(trace)
     assert report["first_differing_step"] is None and trace.mirrored and report["admissions"], report
     # parity compared the empty slots' stacks step by step (the host's, in the delta log's order); the device's too
-    stacks = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks)[-1]
+    terms = {k: (None if k == "budget" and v < 0 else v) for k, v in trace.terms.items()}     # (placement.budget's)
+    stacks = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks,
+                    **terms)[-1]
     n_empty = store.n_empty.tolist()
     assert n_empty == stacks["empty"].tolist() and all(
         np.array_equal(store.empty[g, :, :n].t().numpy(), stacks["stacks"][g]) for g, n in enumerate(n_empty))
-    if stream:
-        assert store.borrowed["stage"] and not store.borrowed["ring"] and not any(s[2] for s in steps), store.borrowed
+    if stream or policy:
+        assert policy or (store.borrowed["stage"] and not store.borrowed["ring"] and not any(s[2] for s in steps)), \
+            store.borrowed
         return
     with tail_unmap_undone():
         planted = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
@@ -1016,7 +1019,7 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     runs = []
     admit = {"moe.cpu_admit": "on"}                           # the CPU's experts admitted, their copies deferred
     for policy, ram, more in (("std.tiered.static@1", {}, {}), ("std.tiered.static@1", {}, {}), ("", short, {}),
-                              ("", {}, admit), ("", {}, {})):
+                              ("", {}, admit), ("placement.budget@1", {}, {"budget.min_gain": 0.5}), ("", {}, {})):
         engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | more | {"moe.placement": policy},
                              **small)
         with route_dump(engine) as trace:
@@ -1024,11 +1027,10 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
         worker = engine.ctx.shared_objects["cpu_task.compute"].native
         assert worker.served() > 0 and worker.flag() == 0 and engine.stats()["graphs"] > 0
         assert (sum(s["cpu"].sum() for s in trace.steps) > 0) != bool(more)      # (admitted: replayed as any miss)
-        if not policy:
+        if policy in ("", "placement.budget@1"):  # F11's replay (placement.budget's: with its margin, CPU candidates)
             assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
         if more:
-            store = engine.ctx.shared_objects[KEY]
-            assert store.defer and not store._later
+            assert engine.ctx.shared_objects[KEY]._later is None
             engine.close()
         if ram:                                   # the I/O worker beside the compute one, both clean
             io = engine.ctx.shared_objects["cpu_task.io"].native

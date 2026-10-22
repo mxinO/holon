@@ -36,7 +36,7 @@ from holon_std.moe.kernels import (
 
 E, K, ROLES = 128, 8, 2
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
-VARIANTS = {"lfu": ("score",), "lru": ("last", "clock")}
+VARIANTS = {"lfu": ("score",), "lru": ("last", "clock"), "budget": ("score",)}
 
 
 @pytest.fixture(scope="module")
@@ -165,7 +165,7 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
 def _state(policy: str, seed: int) -> dict[str, torch.Tensor]:
     """Scores on a coarse grid (ties everywhere, and equal after a decay), or stamps with ties and a clock."""
     g = torch.Generator().manual_seed(seed)
-    if policy == "lfu":
+    if policy in ("lfu", "budget"):
         return {"score": (torch.randint(0, 6, (E,), generator=g) * 0.5).float()}
     return {"last": torch.randint(0, 6, (E,), generator=g).int(), "clock": torch.tensor([7], dtype=torch.int32)}
 
@@ -202,14 +202,15 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     routed[:3] = 3                                     # an earlier call's marks (scope included) stay
+    budget = policy == "budget"                             # (its contract: the CPU's experts admitted, `defer`)
     slots, fetch, n_fetch, cpu = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
                                          dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"],
                                          dev["n_empty"], misses, errors, delta, n_delta, 3, plan, jobs,
-                                         **{n: dev[n] for n in state})
+                                         **({"defer": True} if budget else {}), **{n: dev[n] for n in state})[:4]
     assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(n_fetch.cpu(), want["n_fetch"])
     assert torch.equal(cpu.cpu(), want["cpu"])
     _jobs(jobs, want["jobs"])
-    assert not {a for _, a, _ in want["records"]} & {row[0] for row in want["jobs"]}   # the CPU's are never admitted
+    assert budget or not {a for _, a, _ in want["records"]} & {row[0] for row in want["jobs"]}   # never admitted
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
@@ -232,11 +233,12 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
         source = case["empty"][:, -2 - b] if b < 0 else case["residency"][b]
         assert torch.equal(want["residency"][a], source) and (b < 0 or (want["residency"][b] == -1).all())
         assert b < 0 or not ((case["ids"] == b) & (case["kinds"][:, None] != PADDING)).any()   # b routed by no row
-        for r in range(ROLES):
-            row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
-            assert want["fetch"][r, 1, row].item() == source[r]                  # gathered straight into its slot
+        listed, n = ("later", "n_later") if a in {row[0] for row in want["jobs"]} else ("fetch", "n_fetch")
+        for r in range(ROLES):                # (the CPU's, admitted under `defer`: listed apart, gathered after)
+            row = (want[listed][r, 0, :int(want[n][r])] == case["host"][a, r]).nonzero()
+            assert want[listed][r, 1, row].item() == source[r]                  # gathered straight into its slot
     assert len(admitted) == len(records)
-    if getattr(resolve, "splits", False):     # `split`: the same call, the fetched entries' slots apart
+    if getattr(resolve, "splits", False) and not budget:     # `split`: the fetched entries' slots apart
         dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
         words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
         delta, n_delta = _log(capacity, 2, device)
@@ -255,7 +257,7 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     if getattr(resolve, "defers", False) and share:     # `defer`: the CPU's experts admitted, their copy listed apart
         want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
                       *state.values(), 3, case["ring"], stage, case["empty"], int(case["n_empty"][0]), plan.cpu(),
-                      True)
+                      **({} if budget else {"defer": True}))
         dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
         words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
         delta, n_delta = _log(capacity + E, 2, device)

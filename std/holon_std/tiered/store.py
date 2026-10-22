@@ -147,7 +147,7 @@ class TieredStore:
         self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
         # `cpu_admit` (F5b): the CPU's experts are admitted as any miss (a variant that `defers`), their pieces fetched
         # after the call on a side stream (the CPU serves the call), joined after the target's last layer
-        self.cpu_admit, self.defer, self._later = cpu_admit, {}, []
+        self.cpu_admit, self._later = cpu_admit, None
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_stream: torch.Stream | None = None
@@ -300,11 +300,6 @@ class TieredStore:
                 self.prefetch[c.name] = self.ctx.select_kernel(
                     EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
                 ).impl(self.ctx, **facts, copy=self.ring_copy)
-            self.defer = {}
-            for c in self.classes.values() if self.cpu_admit else ():
-                self.defer[c.name] = self.ctx.select_kernel(
-                    EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}.later", unit_bytes=c.unit_bytes, copy="sm"
-                ).impl(self.ctx, unit_bytes=c.unit_bytes, copy="sm")
             for errors in self._watched:
                 self.watch(errors)
         for r in self.resolvers:
@@ -610,7 +605,8 @@ class TieredStore:
         record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
                   "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
                   "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted,
-                  "cpu_admitted": self.cpu_admit,               # but with `cpu_admit`, as any miss)
+                  "cpu_admitted": self.cpu_admit or getattr(self.policy, "defer_cpu", False),   # (but as any miss
+                  #                                                with `cpu_admit` or a policy that admits them)
                   "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
@@ -705,21 +701,29 @@ class TieredStore:
         """Layer g's ring and stage tables for the step (at its first pass)."""
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
-    def fetch_later(self, g: int, classes: list, later: torch.Tensor, n_later: torch.Tensor) -> None:
-        """Group g's admitted CPU experts' pieces (`later` [R, 2, F], `n_later` [R]) into their slots, on side streams
-        after the work enqueued so far; joined after the target's last layer (`layer_done`)."""
-        for r, c in enumerate(classes):
-            copy = self.defer[c.name]
-            copy.start((g, r), later[r], n_later[r:r + 1], c.units(), c.slots())
-            later.record_stream(copy.stream)
-            n_later.record_stream(copy.stream)
-            self._later.append((c.name, (g, r)))
+    def fetch_later(self, gather, later: torch.Tensor, n_later: torch.Tensor) -> None:
+        """A call's admitted CPU experts' pieces (`later` [R, 2, F], `n_later` [R]) into their slots by `gather`, on the
+        fetch stream after the call's own fetch: at full rate while the layer computes, and the next call's fetch
+        waits for them (`wait_later`), so the two never share the link; joined after the target's last layer."""
+        main = torch.accelerator.current_stream(later.device)
+        side = self.fetch_stream()
+        side.wait_stream(main)
+        with side:
+            gather(later, n_later)
+        later.record_stream(side)
+        n_later.record_stream(side)
+        self._later = torch.Event(device=later.device)
+        self._later.record(side)
+
+    def wait_later(self) -> None:
+        """The current stream waits for the last call's deferred copies (none pending: nothing)."""
+        if self._later is not None:
+            torch.accelerator.current_stream(self._later.device).wait_event(self._later)
+            self._later = None
 
     def layer_done(self, g: int) -> None:
-        if self._later and g == self.borrowing_groups - 1:      # before any later step reads those slots
-            for name, key in self._later:
-                self.defer[name].wait(key)
-            self._later.clear()
+        if g == self.borrowing_groups - 1:                       # before any later step reads those slots
+            self.wait_later()
         if self.lent is not None:
             self.lent.done(g)
             if g == self.borrowing_groups - 1:

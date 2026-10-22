@@ -37,6 +37,7 @@ class Resolve:
     """The CPU provider: the oracle, writing what the contract writes in place."""
 
     defers = True                          # the CPU's experts admitted, their fetch apart (`defer`)
+    budget, gain = None, 0.0               # F11's terms (placement.budget's provider sets its own)
 
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
@@ -44,7 +45,7 @@ class Resolve:
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
                  errors, delta, n_delta, group, plan, jobs, score, defer: bool = False):
         out = reference.moe_resolve_lfu(ids, kinds, residency, host, limits, self.staging, score, group, ring, stage,
-                                        empty, int(n_empty[0]), plan, defer)
+                                        empty, int(n_empty[0]), plan, defer, self.budget, self.gain)
         counts += out["counts"]
         routed |= out["routed"]
         misses.clamp_(min=int(max(out["n_fetch"].max(), out["n_later"].max() if defer else 0)))

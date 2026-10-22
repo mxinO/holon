@@ -72,7 +72,8 @@ class DeviceResolver:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
         split = split and getattr(self.resolve, "splits", False) and not store.exclusive and before_fetch is None
         parts = parts if getattr(self._fetch[0], "parts", False) and not store.exclusive and before_fetch is None else 1
-        defer = store.cpu_admit and before_fetch is not None and getattr(self.resolve, "defers", False)
+        defer = (store.cpu_admit or getattr(store.policy, "defer_cpu", False)) and before_fetch is not None and \
+            getattr(self.resolve, "defers", False)
         out = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
             self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
@@ -102,9 +103,10 @@ class DeviceResolver:
                           store.n_moves)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
+        store.wait_later()                       # an earlier call's deferred copies off the link first
         self._gather(fetch, n)
         if defer:                                # the CPU's admitted experts: their pieces after the call
-            store.fetch_later(self.group, self.classes, out[4], out[5])
+            store.fetch_later(self._gather, out[4], out[5])
         if store.exclusive:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions

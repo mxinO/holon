@@ -22,7 +22,8 @@ from . import extension
 
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 LOAN = "activation_loan"
-POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
+POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2,    # the native module's policy codes (the
+            "moe_resolve.budget": 1}                                       # budget variant: LFU's, capped)
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
 
@@ -42,6 +43,7 @@ class Modules:
 class MoeResolve:
     plant = 0                              # judge-only: the calibration bugs' bits (judge/holon_judge/planted.py)
     splits = True                          # `split`: the fetched entries' slots apart (std.moe.kernels)
+    budget, gain = -1, 0.0                 # admissions per call (−1: no cap) and the score margin (LFU's code)
 
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
@@ -57,7 +59,8 @@ class MoeResolve:
         later, n_later = (torch.empty_like(fetch), torch.empty_like(n_fetch)) if defer else (None, None)
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
                          misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
-                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed, later, n_later)
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed, later, n_later, self.budget,
+                         self.gain)
         return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ()) + ((later, n_later) if defer else ())
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
@@ -89,6 +92,16 @@ class MoeResolveLfu(MoeResolve):
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   **state) -> torch.Tensor:
         return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
+
+
+class MoeResolveBudget(MoeResolveLfu):
+    """`moe_resolve.budget@1` (placement.budget): LFU's call with at most `budget.per_layer` admissions and a candidate
+    admitted only past its victim's score by `budget.min_gain` (plugin options; the oracle reads the same)."""
+
+    def __init__(self, modules: Modules, op: str, ctx, **facts) -> None:
+        super().__init__(modules, op, ctx, **facts)
+        opts = ctx.options.get("plugins", {})
+        self.budget, self.gain = int(opts.get("budget.per_layer", -1)), float(opts.get("budget.min_gain", 0.5))
 
 
 class ExpertFetch:
@@ -209,7 +222,8 @@ class Plugin:
                 return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.expert_io",
-                impl=functools.partial(MoeResolveLfu if op == "moe_resolve.lfu" else MoeResolve, modules, op),
+                impl=functools.partial({"moe_resolve.lfu": MoeResolveLfu, "moe_resolve.budget": MoeResolveBudget}.get(
+                    op, MoeResolve), modules, op),
                 requires=requires, props=props, priority=10, supports=supports))
         regs.kernels.add(PREFETCH, KernelSpec(
             op=PREFETCH, provider="kernels.expert_io", impl=functools.partial(ExpertPrefetch, modules),
