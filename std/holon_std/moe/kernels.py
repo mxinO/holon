@@ -141,7 +141,10 @@ then `staging` slots, then cache slots.
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. Optional member
   `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
-  instance's copy, role r's list), so a store issues one call for a group's roles.
+  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True`
+  also takes `part, parts` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a
+  pipelined pass's fetch, part by part). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as
+  they are in `out` (a pipelined pass computes each part's entries into one `out`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
   src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits
