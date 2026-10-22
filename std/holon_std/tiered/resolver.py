@@ -106,7 +106,7 @@ class DeviceResolver:
         store.wait_later()                       # an earlier call's deferred copies off the link first
         self._gather(fetch, n)
         if defer:                                # the CPU's admitted experts: their pieces after the call
-            store.fetch_later(self._gather, out[4], out[5])
+            store.fetch_later(self._fetch, self.classes, out[4], out[5])
         if store.exclusive:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions

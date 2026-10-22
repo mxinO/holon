@@ -147,7 +147,7 @@ class TieredStore:
         self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
         # `cpu_admit` (F5b): the CPU's experts are admitted as any miss (a variant that `defers`), their pieces fetched
         # after the call on a side stream (the CPU serves the call), joined after the target's last layer
-        self.cpu_admit, self._later = cpu_admit, None
+        self.cpu_admit, self._later, self._pending_later = cpu_admit, None, None
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_stream: torch.Stream | None = None
@@ -701,15 +701,21 @@ class TieredStore:
         """Layer g's ring and stage tables for the step (at its first pass)."""
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
-    def fetch_later(self, gather, later: torch.Tensor, n_later: torch.Tensor) -> None:
-        """A call's admitted CPU experts' pieces (`later` [R, 2, F], `n_later` [R]) into their slots by `gather`, on the
-        fetch stream after the call's own fetch: at full rate while the layer computes, and the next call's fetch
-        waits for them (`wait_later`), so the two never share the link; joined after the target's last layer."""
+    def fetch_later(self, fetches: list, classes: list, later: torch.Tensor, n_later: torch.Tensor) -> None:
+        """A call's admitted CPU experts' pieces (`later` [R, 2, F], `n_later` [R]) into their slots, copied after the
+        layer (`layer_done`): on one CTA a role on the fetch stream, beside the next layer's mixer, and the next call's
+        fetch waits for them (`wait_later`), so the two never share the link; joined after the target's last layer."""
+        self._pending_later = (fetches, classes, later, n_later)
+
+    def _start_later(self) -> None:
+        fetches, classes, later, n_later = self._pending_later
+        self._pending_later = None
         main = torch.accelerator.current_stream(later.device)
         side = self.fetch_stream()
         side.wait_stream(main)
         with side:
-            gather(later, n_later)
+            for r, (gather, c) in enumerate(zip(fetches, classes, strict=True)):
+                gather(later[r], n_later[r:r + 1], c.units(), c.slots(), beside=True)
         later.record_stream(side)
         n_later.record_stream(side)
         self._later = torch.Event(device=later.device)
@@ -722,6 +728,8 @@ class TieredStore:
             self._later = None
 
     def layer_done(self, g: int) -> None:
+        if self._pending_later is not None:                      # after the layer: its deferred copies
+            self._start_later()
         if g == self.borrowing_groups - 1:                       # before any later step reads those slots
             self.wait_later()
         if self.lent is not None:

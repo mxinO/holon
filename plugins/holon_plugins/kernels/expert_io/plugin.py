@@ -118,8 +118,8 @@ class ExpertFetch:
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    def __call__(self, fetch, n, src, dst) -> None:
-        self.lib.fetch(fetch, n, src, dst, False)
+    def __call__(self, fetch, n, src, dst, beside: bool = False) -> None:
+        self.lib.fetch(fetch, n, src, dst, beside)     # (`beside`: on one CTA, beside other work)
 
     def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
         """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
