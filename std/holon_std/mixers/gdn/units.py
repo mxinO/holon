@@ -137,8 +137,11 @@ class GDN(nn.Module):
 
     def __init__(self, ctx, *, layer: int, hidden: int, heads_k: int, heads_v: int, head_k_dim: int,
                  head_v_dim: int, conv_kernel: int = 4, v_head_order: str = "grouped", norm_eps: float = 1e-6,
-                 out_gate: str = "silu") -> None:
+                 out_gate: str = "silu", merge_ab: bool = False) -> None:
         super().__init__()
+        # a and b as one projection (finalize_weights): one GEMM of 2·HV rows, on CUDA (a CPU BLAS's bits for the
+        # merged shape depend on the call's rows, which a prefix hit's must not)
+        self._merge_ab = merge_ab and torch.device(ctx.device).type == "cuda"
         if v_head_order not in kernels.ORDERS or heads_v % heads_k or out_gate not in kernels.OUT_GATES:
             raise ValueError(f"v_head_order {v_head_order!r} / heads {heads_k}, {heads_v} / out_gate {out_gate!r}: "
                              "unsupported")
@@ -192,6 +195,16 @@ class GDN(nn.Module):
         n = len(self._state[0][0].layers)
         return pool.view(self.conv_weight.dtype, (n, pool.capacity, self.channels, self.kernel - 1))
 
+    def finalize_weights(self, ctx) -> None:
+        """`merge_ab`: a's and b's projections as one unit (a's rows then b's) where the linears allow — at a verify
+        pass's few rows cuBLAS runs each tiny GEMM in a kernel of its own of ≈ 15 µs (FN step 7 item 8: 1.1 ms of a
+        5080 verify pass), the merged one split-K in ≈ 5."""
+        merge = getattr(type(self.in_proj_a), "merge", None)
+        if self._merge_ab and not hasattr(self, "in_proj_ab") and merge is not None:
+            merged = merge(self.in_proj_a, self.in_proj_b)
+            if merged is not None:
+                self.in_proj_ab = merged
+
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         t = x.shape[0]
         if self._state is None:
@@ -208,7 +221,11 @@ class GDN(nn.Module):
             conv_state, ssm_state = self._states()
             qs, slots, has_init, rule, handle = meta.query_start, meta.slots, meta.has_init, meta.rule, meta.handle
         h = getattr(self.in_proj_qkv, "prepare_input", lambda x: x)(x)    # one input, four projections (m07 D6)
-        qkv, a, b = self.in_proj_qkv(h), self.in_proj_a(h), self.in_proj_b(h)
+        if hasattr(self, "in_proj_ab"):
+            a, b = (y.contiguous() for y in self.in_proj_ab(h).split(self.hv, dim=-1))
+        else:
+            a, b = self.in_proj_a(h), self.in_proj_b(h)
+        qkv = self.in_proj_qkv(h)
         out_slots = None
         if self._state is not None and meta.verify:      # keep S0: save what `rewind` reruns, write the state aside
             saved_x, saved_a, saved_b, window = self._replay

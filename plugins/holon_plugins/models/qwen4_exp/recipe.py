@@ -143,7 +143,7 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
     qsa, ffn = r["qsa"], r["ffn"]
     gdn = Ref("std.mixers.gdn@1", heads_k=f["heads_k"], heads_v=f["heads_v"], head_k_dim=f["head_k_dim"],
               head_v_dim=f["head_v_dim"], conv_kernel=f["conv_kernel"], v_head_order="tiled", norm_eps=eps,
-              out_gate="sigmoid")
+              out_gate="sigmoid", merge_ab=True)
     ple = Ref("qwen4_exp.ple@1", n=n, width=n * hidden, embed_dim=f["ple_heads"] * f["ple_dim"], ngram=f["ngram"],
               heads_per_ngram=f["heads_per_ngram"], eos=f["eos"], multipliers=f["multipliers"], sizes=f["sizes"],
               offsets=f["offsets"], table_rows=-(-sum(f["sizes"]) // PAD) * PAD, dilation=f["ngram"],
