@@ -11,7 +11,7 @@ provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tie
             "unit.std.tiered.static@1", "unit.std.tiered.rows@1"]
 
 [options]   # the EngineConfig.plugin_options keys this plugin reads
-"rows.place" = { help = "where std.tiered.rows@1 tables live: <name>:host or <name>:device, comma-separated, * for the rest (a table not named: its Ref's place)", default = "" }
+"rows.place" = { help = "where std.tiered.rows@1 tables live: <name>:host, <name>:device or <name>:ssd (read from the checkpoint in the graph by the I/O worker), comma-separated, * for the rest (a table not named: its Ref's place)", default = "" }
 
 [properties]
 numerics = "exact"

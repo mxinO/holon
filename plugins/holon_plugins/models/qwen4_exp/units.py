@@ -79,7 +79,7 @@ class PLE(nn.Module):
         if width != n * hidden:
             raise ValueError(f"qwen4_exp.ple: width {width} is not n · hidden ({n} · {hidden})")
         self.n, self.hidden, self.heads, self.window, self.eps = n, hidden, heads, (kernel - 1) * dilation, eps
-        self.table = ctx.unit(table, vocab=table_rows, hidden=embed_dim // heads)
+        self.table = ctx.unit(table, vocab=table_rows, hidden=embed_dim // heads, per_token=heads)
         self.key_proj = ctx.unit(Ref(LINEAR, in_features=embed_dim, out_features=width))
         self.value_proj = ctx.unit(Ref(LINEAR, in_features=embed_dim, out_features=hidden))
         self.norm_key, self.norm_query, self.norm_conv = (
