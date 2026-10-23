@@ -2597,3 +2597,63 @@ oracle and replay), for the lead's call.
 At 1K a prompt routes 15–16 of the 24–25 GB missing. At τ = 0.5 the gate (≲ 1.15× streamed, ≲ 25% staged) holds for
 one prompt of three; the others stream 1.23–1.34×. Estimated anyway: ≈ 18.5 GB streamed overlapped (≈ 395 ms at 47
 GB/s) plus ≈ 3 GB staged (≈ 65 ms): ≈ 470 ms, about Strata's 1K (0.95–1.0, against 0.77 with `moe.stream_tokens`).
+
+### 21.9 Budgeted admission (the lead's item 1) and intra-layer pipelining (item 2)
+
+**Predicted first** (`spikes/fn7/admit_trace.py`, `admit_sim.py`: 220 decode/verify steps of the 5080's MTP deployment
+on the 16 GB emulation, replayed on the CPU; critical-path pieces are the experts the GPU reads, link pieces add the
+admission copies of the CPU's experts; F11 today: 206 critical pieces a step, hit rate 0.8715):
+
+| Policy | CPU share | critical | link | hit, points |
+|---|---|---|---|---|
+| F11, the CPU's never admitted (today's F5b) | 0.30 / 0.45 / 0.55 | −17 / −30 / −40% | same | −0.55 / −1.17 / −1.83 |
+| budgeted, B = 128 a step, margin 0 | 0.45 / 0.55 | −23 / −37% | −9 / −15% | −2.84 |
+| margin 1.5 (Strata's `adapt_min_gain`), any B | 0.45 | −23% | −13% | −2.84 to −2.97 |
+| no cap, margin 0.5 | 0.45 | **−32%** | −8% | **−0.49** |
+| no cap, margin 0 (`moe.cpu_admit`) | 0.45 | −34% | −2% | 0 |
+
+A per-step budget costs the cache more than it saves (Holon's decayed counts move faster than Strata's usage, so a
+margin of 1.5 or a cap of 128 a step admits too few); the gate (≥ 25% fewer critical pieces at ≤ 1 point) passed at
+share 0.45, no cap, margin 0.5. Built as such: `placement.budget@1` (86f9200; its oracle and replay F11's with a cap
+and a margin, the CPU's experts candidates and their copies deferred; L0 on CPU and GPU, GPU parity, D11's tail).
+Deferred copies first ran at full rate right after the call: they slowed the layer's own mmvq (+2.3 ms a verify
+step); then after the layer on one CTA (98f8e10), the next call's fetch waiting for them.
+
+**Measured** (5080, MTP, 3 rounds, same allocations; tok/s and ratio to Strata):
+
+| Arm | 1K | 4K | 32K |
+|---|---|---|---|
+| v3 | 109.1–109.3 (0.84–0.85) | 110.5–110.7 (1.03–1.05) | 107.9–108.0 (0.90–0.92) |
+| policy only, no share | 108.1 | 109.2 | 106.1 |
+| share 0.40 / 0.45 / 0.50, copies at once | 108.9 / 107.6 / 101.3 | 93.5 / 92.7 / 90.4 | 98.1 / 94.9 / 98.6 |
+| share 0.45, copies after the layer (4 threads) | 110.5 (101.0) | 95.3 (88.8) | 97.6 (87.7) |
+
+The timeline: a verify step fetches 164 pieces against 279 (the CPU serves 108, the cache keeps learning: 230
+admissions a step), but the critical fetch takes 6.7 ms against 7.5, not 4.4: the fewer pieces each cost more, the
+deferred copies sharing the link between calls; the CPU tasks (140 µs, p50) stay overlapped. **Not shipped**: on
+this host the split does not pay in Holon whichever way admission goes, and the 4K and 32K rows lose 10–14%.
+
+**Intra-layer pipelining** (b3ab8bc, `moe.pipeline=N` in `moe.stream_tokens`' staging steps): the misses fetched
+in N parts on the fetch stream, the resident entries computed first, then each part's entries as it lands — every
+call writes its own entries into one `out` (a −1 id skipped: mmq's id helper and mmvq, vendor.patch), bitwise the one
+call (L0, the GPU engine test, the 5090's `bitwise.py`). The 5090 at 1K (3 rounds; Strata 2,212 tok/s): staging
+1,708 (0.77), 4 parts 1,502, **8 parts 1,825 (0.83)**, 16 parts 1,637; the 8-part step in nsys: 553 ms against 591,
+its fetch 424 ms at 45.6 GB/s for 18.4 GiB (Strata ≈ 12.5 GB), mmq 188 ms in 864 launches (77 ms in 96 unsplit),
+the rest overlapped. The bytes are what is left: Holon caches 47.3% of experts on the 5090 against Strata's 54%.
+
+The fallback the lead named for a 1K row still below 0.9, the cache share: `--max-step-tokens 4096` on the 5090 (a
+smaller step peak: 47.3% → 48.9% of experts cached) takes the 1K row to 1,870 (0.85) and 4K to 1.15, but 32K to
+0.91 (from 1.09): not taken. The capped high-τ prefetch was not built (`likely.py` at τ 0.9 at 1K: 10.8–15.8 GB
+streamed, 26–34% of it unrouted).
+
+**The table now** (each card's deployment: the 5080 v3 with `moe.split=on` under MTP; the 5090 v3 with
+`moe.stream_tokens=2048 moe.pipeline=8`, and `moe.split=on` under MTP; ratios to Strata in the same allocation):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.03 | 1.06 | 1.06 | 1.08 | 1.10 | 1.04 |
+| MTP decode | 0.84–0.85 | 1.03–1.05 | 0.90–0.92 | 0.87 | 0.88 | 0.82 |
+| Prefill | 1.02 | 1.20 | 1.01 | **0.82–0.83** | 1.11 | 1.09 |
+
+Gates: the shipped options are bitwise the v3 deployment's (`bitwise.py` on both cards), so (c) and (d) stand as in
+§21.4; `placement.budget@1` and the CPU split are not shipped and were not gated.
