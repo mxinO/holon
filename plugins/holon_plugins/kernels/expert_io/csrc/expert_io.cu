@@ -17,7 +17,7 @@ namespace {
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
 constexpr int RANGE = 1, OVERFLOW = 2, JOBS = 8;       // error bits: a corrupt slot; a delta record past the log;
                                                        // the CPU's share past its job table
-constexpr int RESOLVE_THREADS = 256;                   // 8 warps: one per role for the scans
+constexpr int RESOLVE_THREADS = 512;                   // 16 warps: the block scans the fetch lists
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
 // The ring's copies run beside a prefill pass's compute, so they hold as few SMs as still keep PCIe near full (one
 // small CTA per class, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
@@ -44,6 +44,32 @@ __host__ __device__ inline int shared_words(int policy, int roles, int experts) 
     return policy == STATIC ? (roles + 2) * experts : (roles + 11) * experts + 1;   // + 1: the pairs' 8-byte alignment
 }
 
+constexpr int64_t COUNT_MASK = (int64_t(1) << 21) - 1;
+
+// The block's exclusive prefix sum of `x` in thread order, and the block's total in `total` (every thread); the
+// block's threads a multiple of 32, at most 1024. Ends with the block synchronized.
+__device__ inline int64_t block_exclusive_sum(int64_t x, int64_t * total) {
+    __shared__ int64_t warps[32];
+    const int lane = threadIdx.x % 32, warp = threadIdx.x / 32, n = blockDim.x / 32;
+    int64_t in = x;
+    for (int d = 1; d < 32; d *= 2) {
+        const int64_t y = __shfl_up_sync(0xffffffffu, in, d);
+        in += lane >= d ? y : 0;
+    }
+    if (lane == 31) {
+        warps[warp] = in;
+    }
+    __syncthreads();
+    int64_t below = 0, all = 0;
+    for (int w = 0; w < n; ++w) {
+        below += w < warp ? warps[w] : 0;
+        all += warps[w];
+    }
+    __syncthreads();
+    *total = all;
+    return below + in - x;
+}
+
 // The layer's tables of one call (std.moe.kernels' terms).
 struct Layer {
     int32_t * residency;                               // [E, R]: the map, written by the variants' admissions
@@ -60,8 +86,8 @@ struct Layer {
 };
 
 // One CTA per call. need[r][e]: 1 if role r of expert e is routed and missing (not resident, not in the ring); an
-// admitted expert's entry becomes -2 - its new slot, a staged one's its staging rank. A warp per role ranks the misses
-// by id (ballot scans), so staging slots and fetch entries are deterministic; then every entry gets its slot. First
+// admitted expert's entry becomes -2 - its new slot, a staged one's its staging rank. The block ranks each role's misses
+// by id (a prefix sum), so staging slots and fetch entries are deterministic; then every entry gets its slot. First
 // the CPU takes its share of the misses (F5b: `plan`, by (best routing rank, expert id), the last ones), which are
 // neither fetched nor admitted and are written to the job table. A zero plan takes none, so a call without the CPU's
 // share (F5a) skips that phase (its barriers and global reads cost ≈ 1 µs a layer on the decode's critical path).
@@ -249,10 +275,21 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             // Candidates hottest (LFU: score descending; LRU: routed first) first, victims coldest (least recent) first,
             // ties by expert id: ascending in the packed order.
             const int ckey = P == LFU ? INT_MAX - key : first[e];
+            // appended a warp at a time (one atomic per warp and list): the lists' order is free, their ranks are not
+            const unsigned active = __activemask(), lanes = (1u << (tid % 32)) - 1;
+            const unsigned wc = __ballot_sync(active, is_cand), wv = __ballot_sync(active, is_vict);
+            const int leader = __ffs(active) - 1;
+            int at_c = 0, at_v = 0;
+            if (tid % 32 == leader) {
+                at_c = wc ? atomicAdd(&n_cand, __popc(wc)) : 0;
+                at_v = wv ? atomicAdd(&n_vict, __popc(wv)) : 0;
+            }
+            at_c = __shfl_sync(active, at_c, leader);
+            at_v = __shfl_sync(active, at_v, leader);
             if (is_cand) {
-                cands[atomicAdd(&n_cand, 1)] = (int64_t(ckey) << 32) | e;
+                cands[at_c + __popc(wc & lanes)] = (int64_t(ckey) << 32) | e;
             } else if (is_vict) {
-                victs[atomicAdd(&n_vict, 1)] = (int64_t(key) << 32) | e;
+                victs[at_v + __popc(wv & lanes)] = (int64_t(key) << 32) | e;
             }
             // The order's key, in `first`: LFU's score; LRU's first decode entry (a candidate) or last stamp (a
             // victim).
@@ -327,42 +364,52 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             __syncthreads();
         }
     }
-    const int warp = tid / 32, lane = tid % 32;
-    if (warp < roles) {
-        int32_t * row = need + warp * experts;
-        int32_t * units = fetch + warp * 2 * L.F, * dst = units + L.F;
-        const int32_t * stage = L.stage + warp * L.F;
-        int seen = 0, staged = 0, deferred = 0;
-        for (int base_e = 0; base_e < experts; base_e += 32) {
-            const int e = base_e + lane;
-            const int v = e < experts ? row[e] : 0;
-            const bool on_cpu = later != nullptr && share && e < experts && best[e] >= 0;   // admitted, the CPU's
-            const unsigned all = __ballot_sync(0xffffffffu, v != 0 && !on_cpu), mine = __ballot_sync(0xffffffffu, v == 1);
-            const unsigned defer = __ballot_sync(0xffffffffu, v != 0 && on_cpu);
-            const unsigned below = (1u << lane) - 1;
-            const int rank = seen + __popc(all & below), srank = staged + __popc(mine & below);
-            const int32_t unit = e < experts ? L.host[e * roles + warp] : 0;
-            if (v != 0 && !on_cpu && rank < L.F) {
-                units[rank] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
-                dst[rank] = v == 1 ? stage[min(srank, L.F - 1)] : -2 - v;
+    // Each role's fetch list: its missing pieces ranked by id — the whole block scans, each thread a run of `per`
+    // experts in id order (counts packed 21 bits apiece: fetched, staged, deferred to after the call).
+    const int per = (experts + blockDim.x - 1) / blockDim.x, e0 = tid * per;
+    for (int r = 0; r < roles; ++r) {
+        int32_t * row = need + r * experts;
+        int32_t * units = fetch + r * 2 * L.F, * dst = units + L.F;
+        const int32_t * stage = L.stage + r * L.F;
+        int64_t mine = 0;
+        for (int e = e0; e < min(e0 + per, experts); ++e) {
+            const int v = row[e];
+            const bool on_cpu = later != nullptr && share && best[e] >= 0;   // admitted, the CPU's
+            mine += int64_t(v != 0 && !on_cpu) | int64_t(v == 1) << 21 | int64_t(v != 0 && on_cpu) << 42;
+        }
+        int64_t total;
+        const int64_t before = block_exclusive_sum(mine, &total);
+        int seen = int(before & COUNT_MASK), staged = int(before >> 21 & COUNT_MASK), deferred = int(before >> 42);
+        for (int e = e0; e < min(e0 + per, experts); ++e) {
+            const int v = row[e];
+            const bool on_cpu = later != nullptr && share && best[e] >= 0;
+            if (v == 0) {
+                continue;
             }
-            const int drank = deferred + __popc(defer & below);
-            if (v != 0 && on_cpu && drank < L.F) {         // (an admitted piece: v = -2 - slot)
-                later[warp * 2 * L.F + drank] = unit >= 0 ? unit : -2 - e;
-                later[warp * 2 * L.F + L.F + drank] = -2 - v;
+            const int32_t unit = L.host[e * roles + r];
+            if (!on_cpu) {
+                if (seen < L.F) {
+                    units[seen] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
+                    dst[seen] = v == 1 ? stage[min(staged, L.F - 1)] : -2 - v;
+                }
+                ++seen;
+            } else {                                   // (an admitted piece: v = -2 - slot)
+                if (deferred < L.F) {
+                    later[r * 2 * L.F + deferred] = unit >= 0 ? unit : -2 - e;
+                    later[r * 2 * L.F + L.F + deferred] = -2 - v;
+                }
+                ++deferred;
             }
             if (v == 1) {
-                row[e] = srank;
+                row[e] = staged++;
             }
-            seen += __popc(all);
-            staged += __popc(mine);
-            deferred += __popc(defer);
         }
-        if (lane == 0) {
-            n_fetch[warp] = seen;
-            atomicMax(misses, max(seen, deferred));
+        if (tid == 0) {
+            const int fetched = int(total & COUNT_MASK), late = int(total >> 42);
+            n_fetch[r] = fetched;
+            atomicMax(misses, max(fetched, late));
             if (n_later != nullptr) {
-                n_later[warp] = deferred;
+                n_later[r] = late;
             }
         }
     }

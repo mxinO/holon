@@ -25,7 +25,7 @@ LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2,    # the native module's policy codes (the
             "moe_resolve.budget": 1}                                       # budget variant: LFU's, capped)
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
-STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
+STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
 
 class Modules:
