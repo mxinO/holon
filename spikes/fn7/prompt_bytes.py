@@ -23,6 +23,7 @@ def main() -> None:
     ap.add_argument("--requests", required=True)
     ap.add_argument("--share", type=float, default=0.54)
     ap.add_argument("--ctx", default="1024")
+    ap.add_argument("--tokens", type=int, default=8, help="decode tokens a request makes (the bench's: 256)")
     a = ap.parse_args()
     sys.path.insert(0, str(ROOT / "spikes/fn6"))
     from _engine import STORE, engine
@@ -97,7 +98,7 @@ def main() -> None:
         routed[:] = False
         pre = (s.residency.host >= 0).all(-1).copy()
         state.update(pre=pre, lent=None, fill_lfu=scored(capacity, pre))
-        e.generate([r["ids"]], SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True))
+        e.generate([r["ids"]], SamplingParams(temperature=0.0, max_tokens=a.tokens, ignore_eos=True))
         lent = state["lent"] if state["lent"] is not None else np.zeros_like(pre)
         fill_lfu = state["fill_lfu"]
         rt = routed[:target]
