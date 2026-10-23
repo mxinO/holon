@@ -2657,3 +2657,5 @@ streamed, 26–34% of it unrouted).
 
 Gates: the shipped options are bitwise the v3 deployment's (`bitwise.py` on both cards), so (c) and (d) stand as in
 §21.4; `placement.budget@1` and the CPU split are not shipped and were not gated.
+Not shipping `placement.budget@1` and the CPU split was the lead's call (2026-10-23), as was keeping
+`moe.pipeline=8` and `moe.stream_tokens=2048` on the 5090.
