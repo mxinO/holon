@@ -2948,3 +2948,5 @@ both engines faster than the earlier ones):
 Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows, the 5090's 1K prefill (0.86). What the
 replay names for the last: the holes a prompt's lending leaves in the cache the next one meets (filling them: −11 to
 −16% of a 1K prompt's bytes), then the share.
+The hole refill is to be built: the lead's call (2026-10-23), reopened from §21.10 for the next prompt's bytes (and
+the decode-time hit rate the holes lower).
