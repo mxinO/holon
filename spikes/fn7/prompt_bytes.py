@@ -73,6 +73,18 @@ def main() -> None:
                 left -= nbytes[g, i]
         return held
 
+    def scored(budget: float, held: np.ndarray) -> np.ndarray:
+        """F11's decayed counts (the device state, now), hottest first over every target layer, ties by (layer, id),
+        whole experts until `budget` bytes (past `held`'s, kept)."""
+        score = s.state["score"].float().cpu().numpy()[:target]
+        held, left = held.copy(), budget - float((nbytes * held).sum())
+        for flat in np.lexsort((np.arange(score.size), -score.ravel())):
+            g, i = divmod(int(flat), experts)
+            if not held[g, i] and nbytes[g, i] <= left:
+                held[g, i] = True
+                left -= nbytes[g, i]
+        return held
+
     warm = plan["warmup"]
     e.generate([warm["ids"]], SamplingParams(temperature=0.0, max_tokens=warm["output"], ignore_eos=True))
     total = float(nbytes[:target].sum())
@@ -84,9 +96,10 @@ def main() -> None:
             continue
         routed[:] = False
         pre = (s.residency.host >= 0).all(-1).copy()
-        state.update(pre=pre, lent=None)
+        state.update(pre=pre, lent=None, fill_lfu=scored(capacity, pre))
         e.generate([r["ids"]], SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True))
         lent = state["lent"] if state["lent"] is not None else np.zeros_like(pre)
+        fill_lfu = state["fill_lfu"]
         rt = routed[:target]
         gb = lambda held: float((nbytes[:target] * (rt & ~held[:target])).sum()) / 1e9   # noqa: E731
         met = float((nbytes[:target] * pre[:target]).sum())
@@ -95,6 +108,7 @@ def main() -> None:
                     "capacity_share": round(capacity / total, 4),
                     "missed_gb": {"met_less_lent": round(gb(pre & ~lent), 2), "met": round(gb(pre), 2),
                                   "met_filled": round(gb(seeded(capacity, pre)), 2),
+                                  "met_filled_lfu": round(gb(fill_lfu), 2),
                                   "met_filled_less_lent": round(gb(seeded(capacity, pre) & ~lent), 2),
                                   "profile_same_bytes": round(gb(seeded(met)), 2),
                                   f"profile_{a.share}": round(gb(seeded(a.share * total)), 2)}})
