@@ -177,8 +177,9 @@ class DeviceResolver:
             q = (n[r:r + 1].long().clamp(max=width) + parts - 1) // parts
             # an entry's part, the latest of its roles' (each role's list the same experts: residency is whole)
             part = torch.maximum(part, torch.where(at >= 0, at // q.clamp(min=1), -1))
-            if ring is not None:                 # two parts past the ring: never (a pass misses no more than it lacks)
-                store.errors.bitwise_or_((2 * q > ring[int(store.class_table[self.group, r])]).int() * SHORT)
+            if ring is not None:                 # two parts past a ring the list wraps: never (a pass misses no more
+                w = ring[int(store.class_table[self.group, r])]                # than it lacks)
+                store.errors.bitwise_or_(((2 * q > w) & (n[r:r + 1].clamp(max=width) > w)).int() * SHORT)
         return slots, part, [lambda i=i: landed(i) for i in range(parts)]
 
     def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:

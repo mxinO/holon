@@ -917,7 +917,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     def piping(self, *a):                            # (a pipelined pass's misses against its staging ring's width)
         lent = self.store.lent
         if lent is not None and lent.width is not None and self.group < self.store.borrowing_groups:
-            rings.append((int(a[3].max()), int(lent.width[torch.as_tensor(self.store.class_table[self.group])].min())))
+            rings.append((a[3].max(), lent.width[torch.as_tensor(self.store.class_table[self.group])].min()))
         piped.append(a[-1])
         return pipelined(self, *a)
     spy = mock.patch.object(DeviceResolver, "_pipelined", piping)
@@ -946,6 +946,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert not pipe or (store.borrowed["stage"] and piped)
         # "pipe": its prompt steps' staging a ring of two parts (FN §21.16), less than a pass's worth: a pass's misses
         # past its ring's slots (reused)
+        rings = [(int(n), int(w)) for n, w in rings]                 # (read after serving: no sync between passes)
         assert not pipe or (max(w for _, w in rings) < store.prefill and any(n > w for n, w in rings)), rings
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0
