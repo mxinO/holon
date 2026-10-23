@@ -6,9 +6,10 @@ Per prompt step that borrows (`Lent`): its mode (ring or stage), the empty slots
 `lend` call — call 0 the tail (D11: the large passes' contiguous scratch, then the step-peak loan past it, split by
 their bytes), calls 1… the ring's halves or the staging slots —, per class the slots it held against what the purpose
 needs: staging, a layer's most distinct misses, or (known when the step lends) its most absent pieces — with
-`moe.pipeline` parts, also the current part and the next of either —; the ring, twice a layer's most absent pieces (both halves). The rounds are replayed with the policy's own `lend`
-(F11's coldest whole experts, the score before the step) and checked against the experts the step lent; then the
-least need, iterated to its fixed point (lending makes misses), picks its experts the same way.
+`moe.pipeline` parts, also the current part and the next of either —; the ring, twice a layer's most absent pieces
+(both halves). The rounds are replayed with the policy's own `lend` (F11's coldest whole experts, the score before
+the step) and checked against the experts the step lent; then the least need, iterated to its fixed point (lending
+makes misses), picks its experts the same way.
 
 The saving: the prompt's missed bytes (its routes against the cache it met, less what it lent) with the lent set
 cut to the minimum (the tail kept whole), and the decode / verify rows' missed routes after it (the first `--window`
