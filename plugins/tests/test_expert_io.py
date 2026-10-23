@@ -308,17 +308,19 @@ def test_lfu_fills_the_empty_slots_its_admissions_leave(plugins, device):
     """The fill (`lfu.fill`, `lfu.fill_every`; FN §21.15): a due call — its layer's tick plus its group a multiple of
     fill_every — puts up to `fill` experts absent from the map it found and routed by none of its rows into the empty
     slots its admissions left, from the top, hottest first (ties by id: the scores' grid ties), logged as empty-slot
-    admissions and listed apart (`later`); a call not due fills none; the tick counts every call with decode rows."""
+    admissions and listed apart (`later`); a call not due, or with prompt rows, fills none; the tick counts the calls
+    of decode rows only."""
     provider = "placement.lfu" if device == "cpu" else "kernels.expert_io"
     resolve = kernel(plugins, device, "moe_resolve.lfu@1", provider, experts=E, top_k=K, roles=ROLES, staging=E)
     resolve.fill, resolve.fill_every = 3, 4
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
-    for tick0, due in ((1, True), (2, False)):                 # group 3: due at ticks 1, 5, …
-        case, state = routing(1, seed=11, whole=True), _state("lfu", 11)
+    for tick0, due, prompt in ((1, True, False), (2, False, False), (1, False, True)):   # group 3: due at ticks 1, 5, …
+        case, state = routing(2 if prompt else 1, seed=11, whole=True), _state("lfu", 11)
         case["kinds"][:] = DECODE
+        case["kinds"][1:] = PREFILL if prompt else DECODE       # a call with prompt rows: no fill, no tick
         case["empty"] = (K + 1600 + torch.arange(8)).expand(ROLES, 8).int().clone()
         case["n_empty"] = torch.tensor([8], dtype=torch.int32)
-        plan, jobs = _share(1, device, False)
+        plan, jobs = _share(2 if prompt else 1, device, False)
         want = moe_resolve_lfu(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
                                state["score"], 3, case["ring"], _stage(case, E, False), case["empty"], 8, plan.cpu(),
                                True, None, 0.0, tick0, 3, 4)
@@ -331,7 +333,7 @@ def test_lfu_fills_the_empty_slots_its_admissions_leave(plugins, device):
             torch.zeros(E, dtype=torch.int32, device=device), dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
             *words, delta, n_delta, 3, plan, jobs, defer=True, score=dev["score"], tick=tick)
         assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(dev["residency"].cpu(), want["residency"])
-        assert torch.equal(n_later.cpu(), want["n_later"]) and int(tick[0]) == want["tick"] == tick0 + 1
+        assert torch.equal(n_later.cpu(), want["n_later"]) and int(tick[0]) == want["tick"] == tick0 + (not prompt)
         assert int(dev["n_empty"][0]) == want["n_empty"]
         for r in range(ROLES):
             assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])

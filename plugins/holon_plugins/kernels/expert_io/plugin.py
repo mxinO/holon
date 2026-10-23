@@ -98,6 +98,8 @@ class MoeResolveLfu(MoeResolve):
         opts = ctx.options.get("plugins", {})
         self.fill_every, self.fill = int(opts.get("lfu.fill_every", 0)), int(opts.get("lfu.fill", 1))
         self.fills = self.fill_every > 0 and self.fill > 0
+        if self.fills and self.fill > self.staging:          # the later list's width (a decode step's staging)
+            raise ValueError(f"lfu.fill {self.fill}: more than the {self.staging} pieces a call lists apart")
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   **state) -> torch.Tensor:

@@ -11,14 +11,15 @@ first ones take the layer's empty slots, unconditionally, from the top of its st
 victim, below every resident); the rest pair with its victims — experts resident in every role (in cache slots) routed
 by no live entry of the call — by score ascending, ties by expert id, and are admitted while the candidate's score is
 strictly greater than its victim's (the first failing pair stops the pairing: the layer keeps its slots). The fill (FN
-§21.15; `fill_every` > 0, with the layer's `tick [1]` — its calls with a decode row so far): on a call with a decode row
-whose tick plus `group` is a multiple of `fill_every`, up to `fill` experts missing in every role of the map as the call
-found it and routed by none of its live entries take the empty slots the admissions left, from the top, score
-descending, ties by expert id; each is logged as an empty-slot admission and its pieces listed apart (`later`, as the
-CPU's under `defer`): nothing reads them before the next step. The tick then counts the call. An admitted expert takes
-its victim's (or empty) slot in every role (a victim's entries become −1: the RAM tier holds every expert under this
-policy, D10), is logged in that order, and is gathered straight into its slots; the call's other misses are fetched as
-@1's. A call without such an entry (a prefill chunk) changes nothing but what @1 does.
+§21.15; `fill_every` > 0, with the layer's `tick [1]` — its calls of decode rows only so far): on a call of decode rows
+only (a step's one call of the layer) whose tick plus `group` is a multiple of `fill_every`, up to `fill` experts
+missing in every role of the map as the call found it and routed by none of its live entries take the empty slots the
+admissions left, from the top, score descending, ties by expert id; each is logged as an empty-slot admission and its
+pieces listed apart (`later`, as the CPU's under `defer`): nothing reads them before the next step. The tick then counts
+the call. An admitted expert takes its victim's (or empty) slot in every role (a victim's entries become −1: the RAM
+tier holds every expert under this policy, D10), is logged in that order, and is gathered straight into its slots; the
+call's other misses are fetched as @1's. A call without such an entry (a prefill chunk) changes nothing but what @1
+does.
 
 `lend(need, residency, classes, score)` picks whole resident experts in their order — coldest by score first, ties by
 expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's role slots go
@@ -30,7 +31,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 
-PADDING, DECODE = 0, 1           # row kinds (`moe_resolve@1`)
+PADDING, DECODE, PREFILL = 0, 1, 2   # row kinds (`moe_resolve@1`)
 RANGE, OVERFLOW = 1, 2           # error bits (`moe_resolve@1` and its variants)
 DECAY = np.float32(0.915)
 
@@ -88,7 +89,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 break
             after[a], after[b] = before[b], -1
             records.append((group, a, b))
-        if tick is not None:
+        if tick is not None and not ((kinds[:, None] == PREFILL) & live).any():
             if fill_every > 0 and defer and (tick + group) % fill_every == 0:
                 absent = sorted((e for e in range(experts) if (before[e] < 0).all() and e not in needed),
                                 key=lambda e: (-score[e], e))
@@ -110,6 +111,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     for r in range(roles):
         deferred = sorted((taken & admitted) | set(filled))
         n_later[r] = len(deferred)
+        if len(deferred) > width:                                       # mapped, never copied: refused
+            errors |= OVERFLOW
         for i, e in enumerate(deferred[:width]):
             later[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e, after[e, r]])
         missing = sorted({e for e in routed[live].tolist()
@@ -201,8 +204,8 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
     ([R] each, bottom first; default none).
     The M6 replay's `lfu` (`simulate`, `_pick_swap` with gain 0), with the scores in f32 (× 0.915, then + 1.0 per
     entry), decayed only on steps with decode rows, empty slots filled first (from the top of the stack); with
-    `fill_every`, the fill after each layer's admissions (its tick: the trace's steps with decode rows so far, zero at
-    the trace's start)."""
+    `fill_every`, the fill after each layer's admissions on a step of decode rows only (`decode_only`, default true;
+    the tick: the trace's such steps so far, zero at the trace's start)."""
     groups, experts = seed.shape
     roles = 1 if classes is None else classes.shape[1]
     at = np.where(seed[..., None], np.arange(experts)[:, None], -1).repeat(roles, -1) if slots is None else \
@@ -228,6 +231,7 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
             for g, e in np.argwhere(picked):
                 lent[g].append((call, e, at[g, e].copy()))
             at[picked] = -1
+        alone = step.get("decode_only", True)
         if c.any():
             u = u * DECAY
             for n in range(int(c.max())):
@@ -247,13 +251,13 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
                     if not u[g, a] > u[g, b] + np.float32(gain):
                         break
                     at[g, a], at[g, b] = at[g, b], -1
-                if fill_every > 0 and (tick + g) % fill_every == 0:
+                if fill_every > 0 and alone and (tick + g) % fill_every == 0:
                     absent = sorted(np.flatnonzero(~was & ~need[g]), key=lambda e: (-u[g, e], e))
                     n = min(fill, len(stack[g]), len(absent))
                     for i, a in enumerate(absent[:n]):
                         at[g, a] = stack[g][-1 - i]
                     del stack[g][len(stack[g]) - n:]
-            tick += 1
+            tick += alone
         if lends is not None:
             stack = [f + [s for *_, s in sorted(back, key=lambda x: x[:2])]
                      for f, back in zip(found, lent, strict=True)]

@@ -1,6 +1,7 @@
 """Qwen3-MoE end to end on the CPU (test-only reference kernels) against an independent oracle: a tiny random HF
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
+import collections
 import contextlib
 import json
 import pathlib
@@ -953,6 +954,54 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
     assert held - torch.cuda.memory_allocated() >= nbytes > 0
     engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_the_fill_maps_nothing_a_later_call_of_its_step_reads(gpu_moe):
+    """F11's fill (FN §21.15) on a step whose layers make two resolve calls — a 900-token prompt arriving while two
+    sequences decode, chunked beside their decode rows past an expert pass (512 tokens) — fills nothing there (its
+    calls carry prompt rows: a fill mapped by the first call would be read by the second before its copy lands); the
+    decode steps around it fill. The streams are the resident store's bit for bit, F11's residency its replay's."""
+    from holon_judge.placement import parity, route_dump
+    from holon_std.tiered.resolver import DeviceResolver
+
+    file, _, _ = gpu_moe
+    g = torch.Generator().manual_seed(5)
+    short, long = [torch.randint(0, 512, (n,), generator=g).tolist() for n in (40, 7)], \
+        torch.randint(0, 512, (900,), generator=g).tolist()
+    kw = dict(max_step_tokens=1024, chunk_with_decode=1000, max_model_len=1024)
+
+    def run(engine) -> list:
+        params = SamplingParams(temperature=0.0, max_tokens=24, ignore_eos=True)
+        rids = [engine.add(p, params) for p in short]
+        out = {}
+        for _ in range(4):
+            for d in engine.step():
+                out.setdefault(d.rid, []).extend(d.token_ids)
+        rids.append(engine.add(long, params))
+        while engine.has_work():
+            for d in engine.step():
+                out.setdefault(d.rid, []).extend(d.token_ids)
+        return [out[r] for r in rids]
+    want = run(_gpu_engine(file, **kw))
+    engine = _gpu_engine(file, host_memory=1 << 27, **kw, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "lfu.fill_every": 1, "lfu.fill": 2,
+        "moe.later_copy": "fetch"})
+    store, calls = engine.ctx.shared_objects[KEY], []
+    real = DeviceResolver.__call__
+    spy = mock.patch.object(DeviceResolver, "__call__", lambda self, *a, **k: (
+        calls.append((store.step, self.group)), real(self, *a, **k))[1])
+    with spy, route_dump(engine) as trace:
+        assert run(engine) == want
+    per = collections.Counter(calls)
+    assert max(n for (_, grp), n in per.items() if grp == 0) >= 2                # a step with two calls of a layer
+    report = parity(trace)
+    assert report["first_differing_step"] is None and trace.mirrored, report
+    fills = sum(int(((s["records"][:, 2] < -1) & ~s["needed"][s["records"][:, 0], s["records"][:, 1]]).sum())
+                for s in trace.steps if s["decode_only"] and len(s["records"]))
+    assert fills > 0
+    assert all(not len(s["records"]) or not ((s["records"][:, 2] < -1) & ~s["needed"][s["records"][:, 0],
+               s["records"][:, 1]]).any() for s in trace.steps if not s["decode_only"])   # none in prompt steps
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

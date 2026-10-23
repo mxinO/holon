@@ -53,6 +53,8 @@ class Resolve:
         terms = fill_terms(ctx)
         self.fill, self.fill_every = terms["fill"], terms["fill_every"]
         self.fills = self.fill_every > 0 and self.fill > 0
+        if self.fills and self.fill > staging:               # the later list's width (a decode step's staging)
+            raise ValueError(f"lfu.fill {self.fill}: more than the {staging} pieces a call lists apart")
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
                  errors, delta, n_delta, group, plan, jobs, score, tick=None, defer: bool = False,

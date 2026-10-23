@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterator
 from unittest import mock
 
 import numpy as np
+from holon.api import RowKind
 
 
 @contextlib.contextmanager
@@ -92,6 +93,8 @@ def route_dump(engine) -> Iterator[Trace]:
         trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["scope"].copy(),
                             "cpu": record["cpu"] & (not record.get("cpu_admitted", False)),   # (admitted: any miss)
                             "records": record["records"].copy(), "lends": record["lends"],
+                            "decode_only": step.row_kind is not None and bool(np.isin(
+                                step.row_kind, (RowKind.DECODE, RowKind.VERIFY)).all()),
                             "resident": resident(store, step.step),
                             "empty": np.array([len(e) for e in store.residency.empty]),
                             "stacks": [np.array(e).reshape(-1, store.roles) for e in store.residency.empty]})

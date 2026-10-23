@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
+constexpr int PADDING = 0, DECODE = 1, PREFILL = 2;    // row kinds (std.moe.kernels)
 constexpr int RANGE = 1, OVERFLOW = 2, JOBS = 8;       // error bits: a corrupt slot; a delta record past the log;
                                                        // the CPU's share past its job table
 constexpr int RESOLVE_THREADS = 512;                   // 16 warps: the block scans the fetch lists
@@ -119,7 +119,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     // (8-byte aligned: a word skipped when the tables before them hold an odd number).
     int64_t * cands = reinterpret_cast<int64_t *>(vict + experts + ((roles + 7) * experts & 1));
     int64_t * victs = cands + experts;
-    __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare, n_cpu, take, n_fill;
+    __shared__ int has_decode, has_prefill, n_cand, n_vict, n_admit, base, spare, n_cpu, take, n_fill;
     const int entries = tokens * k, tid = threadIdx.x;
     const int32_t plan = tid <= experts ? L.plan[tid] : 0;   // loaded now, read after the entries: its latency hides
     for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `best`, `first` past every entry
@@ -128,7 +128,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         shared[i] = high ? INT_MAX : 0;
     }
     if (tid == 0) {
-        has_decode = n_cand = n_vict = n_cpu = n_admit = n_fill = 0;
+        has_decode = has_prefill = n_cand = n_vict = n_cpu = n_admit = n_fill = 0;
         if (P != STATIC) {
             base = *n_delta;                           // the layer's log: only this call appends to it now
             spare = *L.n_empty;
@@ -139,6 +139,9 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         const int e = ids[i], kd = kinds[i / k];
         if (kd == PADDING || e < 0) {
             continue;
+        }
+        if (kd == PREFILL) {
+            has_prefill = 1;
         }
         if (kd == DECODE) {
             atomicAdd(&counts[e], 1);
@@ -367,13 +370,14 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             __syncthreads();
         }
-        // The fill (FN §21.15): every fill_every-th call with decode rows (by the layer's tick, phased by its group),
-        // up to `fill` experts absent from the map as the call found it and routed by none of its rows take the empty
-        // slots the admissions left, hottest by score first, ties by id; mapped now, their pieces listed apart
-        // (`later`: copied after the call, nothing reads them before the next step).
+        // The fill (FN §21.15): on a call of decode rows only — a step's one call of the layer (decode and verify
+        // steps never pass one expert pass) — every fill_every-th one (the layer's tick, phased by its group), up to
+        // `fill` experts absent from the map as the call found it and routed by none of its rows take the empty slots
+        // the admissions left, hottest by score first, ties by id; mapped now, their pieces listed apart (`later`:
+        // copied after the call; no call reads them before the next step).
         const int left = spare - empties;
-        const bool due = P == LFU && st.tick != nullptr && st.fill_every > 0 && later != nullptr &&
-                         (st.tick[0] + group) % st.fill_every == 0;
+        const bool alone = P == LFU && st.tick != nullptr && !has_prefill;
+        const bool due = alone && st.fill_every > 0 && later != nullptr && (st.tick[0] + group) % st.fill_every == 0;
         if (due && left > 0) {
             if (tid == 0) {
                 n_cand = 0;
@@ -423,7 +427,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             __syncthreads();
         }
-        if (tid == 0 && P == LFU && st.tick != nullptr) {
+        if (tid == 0 && alone) {
             st.tick[0] += 1;
         }
     }
@@ -469,6 +473,9 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         }
         if (tid == 0) {
             const int fetched = int(total & COUNT_MASK), late = int(total >> 42);
+            if (late > L.F) {                          // pieces past the list: mapped, never copied (refused)
+                atomicOr(errors, OVERFLOW);
+            }
             n_fetch[r] = fetched;
             atomicMax(misses, max(fetched, late));
             if (n_later != nullptr) {
