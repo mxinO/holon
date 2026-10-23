@@ -97,7 +97,7 @@ struct Layer {
 // map, not the CPU's) and victims (resident in every role, routed by no live entry of the call) in their policy's
 // order; the first candidates take the layer's empty slots, the rest pair with the victims, and the admissions enter
 // the map.
-template <int P>
+template <int P, bool FILL>                            // FILL: a filling call's (LFU, `fill_every` > 0; FN §21.15)
 __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ counts, int32_t * __restrict__ routed, int32_t * __restrict__ misses,
                           int32_t * __restrict__ errors, int32_t * __restrict__ delta, int32_t * __restrict__ n_delta,
@@ -140,7 +140,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         if (kd == PADDING || e < 0) {
             continue;
         }
-        if (kd == PREFILL) {
+        if (FILL && kd == PREFILL) {
             has_prefill = 1;
         }
         if (kd == DECODE) {
@@ -273,7 +273,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             if (live[e]) {                             // routed by the call that picks victims: the victims' scope
                 routed[e] |= 2;
-            } else if (missing) {                      // the fill's candidates: absent, not routed (`live` past use)
+            } else if (FILL && missing) {              // the fill's candidates: absent, not routed (`live` past use)
                 live[e] = -1;
             }
             // not the CPU's — but with `later`, the CPU's too (their fetch deferred: they serve the call from the CPU)
@@ -376,8 +376,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         // the admissions left, hottest by score first, ties by id; mapped now, their pieces listed apart (`later`:
         // copied after the call; no call reads them before the next step).
         const int left = spare - empties;
-        const bool alone = P == LFU && st.tick != nullptr && !has_prefill;
-        const bool due = alone && st.fill_every > 0 && later != nullptr && (st.tick[0] + group) % st.fill_every == 0;
+        const bool alone = FILL && !has_prefill;
+        const bool due = alone && later != nullptr && (st.tick[0] + group) % st.fill_every == 0;
         if (due && left > 0) {
             if (tid == 0) {
                 n_cand = 0;
@@ -441,7 +441,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         int64_t mine = 0;
         for (int e = e0; e < min(e0 + per, experts); ++e) {
             const int v = row[e];
-            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || dec[e] < 0);   // the CPU's, the fill's
+            // the CPU's, the fill's
+            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || (FILL && dec[e] < 0));
             mine += int64_t(v != 0 && !on_cpu) | int64_t(v == 1) << 21 | int64_t(v != 0 && on_cpu) << 42;
         }
         int64_t total;
@@ -449,7 +450,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         int seen = int(before & COUNT_MASK), staged = int(before >> 21 & COUNT_MASK), deferred = int(before >> 42);
         for (int e = e0; e < min(e0 + per, experts); ++e) {
             const int v = row[e];
-            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || dec[e] < 0);
+            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || (FILL && dec[e] < 0));
             if (v == 0) {
                 continue;
             }
@@ -681,7 +682,9 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
             int(empty.size(1)), plan.data_ptr<int32_t>(), jobs.data_ptr<int32_t>(), int(jobs.size(0) - 1),
             int(jobs.size(1))};
     const size_t smem = shared_words(int(policy), int(roles), int(experts)) * sizeof(int32_t);
-    auto kernel = policy == LFU ? k_resolve<LFU> : policy == LRU ? k_resolve<LRU> : k_resolve<STATIC>;
+    const bool fills = policy == LFU && st.tick != nullptr && st.fill_every > 0;   // the fill's tick counts with it
+    auto kernel = policy == LFU ? (fills ? k_resolve<LFU, true> : k_resolve<LFU, false>)
+                                : policy == LRU ? k_resolve<LRU, false> : k_resolve<STATIC, false>;
     kernel<<<1, RESOLVE_THREADS, smem, stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), L, counts.data_ptr<int32_t>(), routed.data_ptr<int32_t>(),
         misses.data_ptr<int32_t>(), errors.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(),

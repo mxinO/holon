@@ -89,8 +89,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 break
             after[a], after[b] = before[b], -1
             records.append((group, a, b))
-        if tick is not None and not ((kinds[:, None] == PREFILL) & live).any():
-            if fill_every > 0 and defer and (tick + group) % fill_every == 0:
+        if tick is not None and fill_every > 0 and not ((kinds[:, None] == PREFILL) & live).any():
+            if defer and (tick + group) % fill_every == 0:
                 absent = sorted((e for e in range(experts) if (before[e] < 0).all() and e not in needed),
                                 key=lambda e: (-score[e], e))
                 for i, a in enumerate(absent[:min(fill, n_empty)]):
