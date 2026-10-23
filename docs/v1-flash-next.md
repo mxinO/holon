@@ -2728,3 +2728,29 @@ rest are the new request's working set, which no refill can know.
 Fix 2 not built: the lead's call (2026-10-23), on that measurement — a blocking or first-in refill moves the same bytes
 the misses would (the first decode step's fetch queued behind it, the graphed steps unable to wait per layer), and one
 in the link's idle windows lands too late for most of the first steps' misses: a ceiling of ≈ 0.1–0.3 ms a pass.
+
+### 21.11 The head's projections in Q8_0, the FlashInfer workspace, item B on the 5090
+
+**The MTP head's dense projections in Q8_0** (the lead's item; `spikes/fn7/mtp_q8.py`): the pack rewritten with
+fc_embedding, fc_hidden, q / k / v / o, the indexer's fused q / k and the shared expert in Q8_0 by ggml's reference
+rounding — bytes identical to Strata's draft head (`tools/mtp_rt.py`'s `dense.bin`, all ten tensors) —, the
+hyper-connection and router weights BF16, the experts Q2_0; Holon reads them as any GGUF's Q8_0 (`mtp.path`, mmvq).
+Only the drafts change: on the A5000 (1K, 256 tokens, two prompts) MTP with either pack emits the same tokens (both
+first differ from plain decode where MTP did before, at 245 and 83: §18's consistency gate, unchanged); the drafter's
+graphed time 4.03 → 3.67 ms (its bf16 GEMMs 0.69 ms become mmvq). The 5080 (3 rounds, the deployment with
+`aux.*=0.3`, same allocation as Strata):
+
+| Row | BF16 head | Q8_0 head | Strata |
+|---|---|---|---|
+| MTP tok/s 1K / 4K / 32K | 114.0 / 115.7 / 112.5 | **116.3 / 116.2 / 113.6 (0.90 / 1.09 / 0.95)** | 129.4 / 106.9 / 118.9 |
+| ms per pass | 23.84 / 23.63 / 26.24 | 23.52 / 23.23 / 25.98 | 22.31 / 22.85 / 25.99 |
+| acceptance d1 / d2 / d3 (pooled) | 0.759 / 0.763 / 0.759 | 0.756 / 0.764 / 0.762 | 0.762 / 0.768 / 0.744 |
+
+Tokens per pass pooled 2.795 against 2.788 (Strata 2.798 in this allocation): acceptance holds. Taken on the 5080
+(`mtp.path` = the Q8_0 pack).
+
+**The FlashInfer workspace** (8cfc143): sized for a 128-row query tile, but FlashInfer's FA2 plans take 64 rows at
+head_dim 256 (`FA2DetermineCtaTileQ`): Flash-Next's split-KV partials need 256 MiB on the 5090, not 512, and the
+5080's 253 MiB fall to the 128 MiB floor. The plans, and so the outputs, are unchanged; the workspace test runs at
+head_dim 256 too (a split prefill past 64 packed queries). The decode rows with it, same allocation: 5080 1.04 / 1.07 /
+1.07, prefill 1.02 / 1.21 / 1.01.
