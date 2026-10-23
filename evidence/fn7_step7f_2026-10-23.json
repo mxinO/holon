@@ -1,0 +1,510 @@
+{
+ "date": "2026-10-23",
+ "doc": "docs/v1-flash-next.md \u00a721.12",
+ "benches": {
+  "s7_lp_rtx-5080": {
+   "commit": "b46b1c00cad27f411c473d335da758d73d93c8c4",
+   "rounds": 3,
+   "table": {
+    "cur_off": {
+     "1024": {
+      "decode_tps": 92.131,
+      "prefill_tps": 1580.918
+     },
+     "4096": {
+      "decode_tps": 92.004,
+      "prefill_tps": 3283.567
+     },
+     "32768": {
+      "decode_tps": 85.879,
+      "prefill_tps": 3126.05
+     }
+    },
+    "lp_off": {
+     "1024": {
+      "decode_tps": 93.016,
+      "prefill_tps": 1556.205
+     },
+     "4096": {
+      "decode_tps": 92.341,
+      "prefill_tps": 3264.195
+     },
+     "32768": {
+      "decode_tps": 85.887,
+      "prefill_tps": 3112.248
+     }
+    },
+    "cur_mtp": {
+     "1024": {
+      "decode_tps": 114.978,
+      "prefill_tps": 1529.451,
+      "tokens_per_pass": 2.738,
+      "ms_per_pass": 23.802
+     },
+     "4096": {
+      "decode_tps": 114.722,
+      "prefill_tps": 3227.427,
+      "tokens_per_pass": 2.707,
+      "ms_per_pass": 23.527
+     },
+     "32768": {
+      "decode_tps": 112.219,
+      "prefill_tps": 3082.241,
+      "tokens_per_pass": 2.92,
+      "ms_per_pass": 26.294
+     }
+    },
+    "lp_mtp": {
+     "1024": {
+      "decode_tps": 117.356,
+      "prefill_tps": 1509.602,
+      "tokens_per_pass": 2.738,
+      "ms_per_pass": 23.32
+     },
+     "4096": {
+      "decode_tps": 116.352,
+      "prefill_tps": 3185.491,
+      "tokens_per_pass": 2.707,
+      "ms_per_pass": 23.195
+     },
+     "32768": {
+      "decode_tps": 113.305,
+      "prefill_tps": 3046.489,
+      "tokens_per_pass": 2.92,
+      "ms_per_pass": 25.999
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "decode_tps": 90.707,
+      "prefill_tps": 1610.007,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 11.033,
+      "strata_verify_ms": 10.526,
+      "strata_draft_ms": 0.0
+     },
+     "4096": {
+      "decode_tps": 89.942,
+      "prefill_tps": 2728.841,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 11.125,
+      "strata_verify_ms": 10.642,
+      "strata_draft_ms": 0.0
+     },
+     "32768": {
+      "decode_tps": 83.67,
+      "prefill_tps": 3081.77,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 11.955,
+      "strata_verify_ms": 11.299,
+      "strata_draft_ms": 0.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "decode_tps": 125.143,
+      "prefill_tps": 1571.227,
+      "tokens_per_pass": 2.738,
+      "ms_per_pass": 21.89,
+      "strata_verify_ms": 18.757,
+      "strata_draft_ms": 2.373
+     },
+     "4096": {
+      "decode_tps": 115.39,
+      "prefill_tps": 2706.194,
+      "tokens_per_pass": 2.545,
+      "ms_per_pass": 22.074,
+      "strata_verify_ms": 18.884,
+      "strata_draft_ms": 2.427
+     },
+     "32768": {
+      "decode_tps": 111.087,
+      "prefill_tps": 3058.642,
+      "tokens_per_pass": 2.936,
+      "ms_per_pass": 26.421,
+      "strata_verify_ms": 22.434,
+      "strata_draft_ms": 3.081
+     }
+    }
+   }
+  },
+  "s7_lp_rtx-5090": {
+   "commit": "b46b1c00cad27f411c473d335da758d73d93c8c4",
+   "rounds": 3,
+   "table": {
+    "cur_off": {
+     "1024": {
+      "decode_tps": 124.001,
+      "prefill_tps": 1765.24
+     },
+     "4096": {
+      "decode_tps": 120.441,
+      "prefill_tps": 5185.131
+     },
+     "32768": {
+      "decode_tps": 110.453,
+      "prefill_tps": 6184.756
+     }
+    },
+    "cur_mtp": {
+     "1024": {
+      "decode_tps": 158.225,
+      "prefill_tps": 1851.782,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 17.565
+     },
+     "4096": {
+      "decode_tps": 151.882,
+      "prefill_tps": 4978.317,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 18.037
+     },
+     "32768": {
+      "decode_tps": 157.017,
+      "prefill_tps": 6096.954,
+      "tokens_per_pass": 3.074,
+      "ms_per_pass": 19.564
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "decode_tps": 112.196,
+      "prefill_tps": 2194.747,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 8.928,
+      "strata_verify_ms": 8.614,
+      "strata_draft_ms": 0.0
+     },
+     "4096": {
+      "decode_tps": 109.9,
+      "prefill_tps": 4557.044,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 9.108,
+      "strata_verify_ms": 8.791,
+      "strata_draft_ms": 0.0
+     },
+     "32768": {
+      "decode_tps": 105.716,
+      "prefill_tps": 5581.625,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 9.473,
+      "strata_verify_ms": 9.076,
+      "strata_draft_ms": 0.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "decode_tps": 177.997,
+      "prefill_tps": 2130.899,
+      "tokens_per_pass": 2.873,
+      "ms_per_pass": 16.13,
+      "strata_verify_ms": 13.894,
+      "strata_draft_ms": 1.86
+     },
+     "4096": {
+      "decode_tps": 158.71,
+      "prefill_tps": 4533.597,
+      "tokens_per_pass": 2.597,
+      "ms_per_pass": 16.475,
+      "strata_verify_ms": 14.111,
+      "strata_draft_ms": 1.881
+     },
+     "32768": {
+      "decode_tps": 175.109,
+      "prefill_tps": 5544.158,
+      "tokens_per_pass": 3.174,
+      "ms_per_pass": 18.187,
+      "strata_verify_ms": 15.324,
+      "strata_draft_ms": 2.286
+     }
+    }
+   }
+  }
+ },
+ "cached": {
+  "rtx-5080": {
+   "cur_off": 0.27,
+   "lp_off": 0.2841,
+   "cur_mtp": 0.2524,
+   "lp_mtp": 0.2664
+  },
+  "rtx-5090": {
+   "cur_off": 0.4781,
+   "lp_off": 0.4262,
+   "cur_mtp": 0.4608,
+   "lp_mtp": 0.4006
+  }
+ },
+ "after_prompt": {
+  "rtx-5080": {
+   "cur_1024": [
+    {
+     "lent_experts": 2544,
+     "missed_routes": 8138,
+     "distinct": 6285,
+     "repeat_routes": 69,
+     "lent_share": 0.177,
+     "prompt_top1000_share": 0.164,
+     "prompt_top2000_share": 0.264,
+     "prompt_top3000_share": 0.352
+    },
+    {
+     "lent_experts": 2570,
+     "missed_routes": 7345,
+     "distinct": 5272,
+     "repeat_routes": 541,
+     "lent_share": 0.179,
+     "prompt_top1000_share": 0.177,
+     "prompt_top2000_share": 0.302,
+     "prompt_top3000_share": 0.403
+    }
+   ],
+   "cur_4096": [
+    {
+     "lent_experts": 2868,
+     "missed_routes": 7618,
+     "distinct": 5983,
+     "repeat_routes": 75,
+     "lent_share": 0.212,
+     "prompt_top1000_share": 0.097,
+     "prompt_top2000_share": 0.186,
+     "prompt_top3000_share": 0.271
+    },
+    {
+     "lent_experts": 2808,
+     "missed_routes": 8782,
+     "distinct": 6410,
+     "repeat_routes": 761,
+     "lent_share": 0.217,
+     "prompt_top1000_share": 0.142,
+     "prompt_top2000_share": 0.251,
+     "prompt_top3000_share": 0.348
+    }
+   ],
+   "lp_1024": [
+    {
+     "lent_experts": 2848,
+     "missed_routes": 8147,
+     "distinct": 6303,
+     "repeat_routes": 61,
+     "lent_share": 0.197,
+     "prompt_top1000_share": 0.164,
+     "prompt_top2000_share": 0.264,
+     "prompt_top3000_share": 0.353
+    },
+    {
+     "lent_experts": 2874,
+     "missed_routes": 7298,
+     "distinct": 5302,
+     "repeat_routes": 460,
+     "lent_share": 0.198,
+     "prompt_top1000_share": 0.176,
+     "prompt_top2000_share": 0.3,
+     "prompt_top3000_share": 0.402
+    }
+   ],
+   "lp_4096": [
+    {
+     "lent_experts": 5407,
+     "missed_routes": 8375,
+     "distinct": 6559,
+     "repeat_routes": 51,
+     "lent_share": 0.358,
+     "prompt_top1000_share": 0.088,
+     "prompt_top2000_share": 0.174,
+     "prompt_top3000_share": 0.255
+    },
+    {
+     "lent_experts": 5315,
+     "missed_routes": 9300,
+     "distinct": 7258,
+     "repeat_routes": 270,
+     "lent_share": 0.378,
+     "prompt_top1000_share": 0.135,
+     "prompt_top2000_share": 0.237,
+     "prompt_top3000_share": 0.326
+    }
+   ]
+  },
+  "rtx-5090": {
+   "cur_1024": [
+    {
+     "lent_experts": 2394,
+     "missed_routes": 5137,
+     "distinct": 3912,
+     "repeat_routes": 0,
+     "lent_share": 0.23,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    },
+    {
+     "lent_experts": 2154,
+     "missed_routes": 4440,
+     "distinct": 3402,
+     "repeat_routes": 0,
+     "lent_share": 0.25,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    }
+   ],
+   "cur_4096": [
+    {
+     "lent_experts": 3663,
+     "missed_routes": 5032,
+     "distinct": 3873,
+     "repeat_routes": 0,
+     "lent_share": 0.368,
+     "prompt_top1000_share": 0.155,
+     "prompt_top2000_share": 0.283,
+     "prompt_top3000_share": 0.389
+    },
+    {
+     "lent_experts": 3753,
+     "missed_routes": 5983,
+     "distinct": 4631,
+     "repeat_routes": 10,
+     "lent_share": 0.393,
+     "prompt_top1000_share": 0.184,
+     "prompt_top2000_share": 0.3,
+     "prompt_top3000_share": 0.405
+    }
+   ],
+   "lp_1024": [
+    {
+     "lent_experts": 2517,
+     "missed_routes": 5149,
+     "distinct": 3922,
+     "repeat_routes": 0,
+     "lent_share": 0.241,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    },
+    {
+     "lent_experts": 2273,
+     "missed_routes": 4532,
+     "distinct": 3472,
+     "repeat_routes": 0,
+     "lent_share": 0.271,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    }
+   ],
+   "lp_4096": [
+    {
+     "lent_experts": 4391,
+     "missed_routes": 5250,
+     "distinct": 4027,
+     "repeat_routes": 0,
+     "lent_share": 0.419,
+     "prompt_top1000_share": 0.148,
+     "prompt_top2000_share": 0.274,
+     "prompt_top3000_share": 0.376
+    },
+    {
+     "lent_experts": 4451,
+     "missed_routes": 6134,
+     "distinct": 4743,
+     "repeat_routes": 9,
+     "lent_share": 0.454,
+     "prompt_top1000_share": 0.184,
+     "prompt_top2000_share": 0.303,
+     "prompt_top3000_share": 0.405
+    }
+   ]
+  }
+ },
+ "loan_probe": {
+  "rtx-a5000_staging_8k": [
+   "measured {'peak_alloc': 1555, 'reserved_peak': 8730, 'reserved_now': 6828, 'growth': 1902}",
+   "profile peaks MiB [1555, 323] loan MiB 4298 tail (0, 4755) free MiB 926",
+   "{'alloc_peak_mib': 391, 'range_mib': 1089, 'reserved_mib': 920, 'segments': 62, 'biggest': [80, 80, 80, 48, 24, 24], 'overflow_mib': 0, 'tokens': 2048, 'by_stream': {'0': 418, '256526704': 502}, 'block_sizes_mib': [(80, 3), (48, 1), (24, 4), (20, 2), (10, 49), (2, 2), (0, 11)]}",
+   "{'alloc_peak_mib': 197, 'range_mib': 554, 'reserved_mib': 470, 'segments': 23, 'biggest': [40, 40, 40, 24, 20, 20], 'overflow_mib': 0, 'tokens': 1024, 'by_stream': {'0': 208, '256526704': 262}, 'block_sizes_mib': [(40, 3), (24, 1), (20, 3), (10, 1), (5, 49), (3, 1), (2, 2), (1, 1), (0, 107)]}",
+   "done 1024/0",
+   "{'alloc_peak_mib': 773, 'range_mib': 2159, 'reserved_mib': 1816, 'segments': 63, 'biggest': [160, 160, 160, 96, 48, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 834, '256526704': 982}, 'block_sizes_mib': [(160, 3), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (0, 10)]}",
+   "done 4096/0",
+   "{'alloc_peak_mib': 1540, 'range_mib': 4298, 'reserved_mib': 4226, 'segments': 71, 'biggest': [320, 320, 320, 192, 160, 160], 'overflow_mib': 0, 'tokens': 8192, 'by_stream': {'0': 2224, '256526704': 2002}, 'block_sizes_mib': [(320, 3), (192, 1), (160, 4), (96, 3), (48, 1), (40, 50), (22, 1), (20, 2), (10, 3), (2, 2), (1, 1), (0, 7)]}",
+   "{'alloc_peak_mib': 1540, 'range_mib': 4298, 'reserved_mib': 4226, 'segments': 71, 'biggest': [320, 320, 320, 192, 160, 160], 'overflow_mib': 0, 'tokens': 8192, 'by_stream': {'0': 2224, '256526704': 2002}, 'block_sizes_mib': [(320, 3), (192, 1), (160, 4), (96, 3), (48, 1), (40, 50), (22, 1), (20, 2), (10, 3), (2, 2), (1, 1), (0, 7)]}",
+   "{'alloc_peak_mib': 1540, 'range_mib': 4298, 'reserved_mib': 4226, 'segments': 71, 'biggest': [320, 320, 320, 192, 160, 160], 'overflow_mib': 0, 'tokens': 8192, 'by_stream': {'0': 2224, '256526704': 2002}, 'block_sizes_mib': [(320, 3), (192, 1), (160, 4), (96, 3), (48, 1), (40, 50), (22, 1), (20, 2), (10, 3), (2, 2), (1, 1), (0, 7)]}",
+   "{'alloc_peak_mib': 1540, 'range_mib': 4298, 'reserved_mib': 4226, 'segments': 71, 'biggest': [320, 320, 320, 192, 160, 160], 'overflow_mib': 0, 'tokens': 8192, 'by_stream': {'0': 2224, '256526704': 2002}, 'block_sizes_mib': [(320, 3), (192, 1), (160, 4), (96, 3), (48, 1), (40, 50), (22, 1), (20, 2), (10, 3), (2, 2), (0, 10)]}",
+   "done 32768/0"
+  ],
+  "rtx-5080_mtp": [
+   "measured {'peak_alloc': 808, 'reserved_peak': 8930, 'reserved_now': 7728, 'growth': 1202}",
+   "profile peaks MiB [808, 323] loan MiB 2444 tail (0, 2903) free MiB 679",
+   "{'alloc_peak_mib': 400, 'range_mib': 1232, 'reserved_mib': 1000, 'segments': 63, 'biggest': [80, 80, 80, 80, 48, 24], 'overflow_mib': 0, 'tokens': 2048, 'by_stream': {'0': 498, '817039232': 502}, 'block_sizes_mib': [(80, 4), (48, 1), (24, 4), (20, 2), (10, 49), (2, 1), (1, 1), (0, 40)]}",
+   "{'alloc_peak_mib': 203, 'range_mib': 626, 'reserved_mib': 510, 'segments': 24, 'biggest': [40, 40, 40, 40, 24, 20], 'overflow_mib': 0, 'tokens': 1024, 'by_stream': {'0': 248, '817039232': 262}, 'block_sizes_mib': [(40, 4), (24, 1), (20, 3), (10, 1), (5, 49), (3, 1), (2, 1), (1, 2), (0, 41)]}",
+   "done 1024",
+   "{'alloc_peak_mib': 792, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 1), (1, 1), (0, 39)]}",
+   "done 4096",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 400, 'range_mib': 1232, 'reserved_mib': 1000, 'segments': 63, 'biggest': [80, 80, 80, 80, 48, 24], 'overflow_mib': 0, 'tokens': 2048, 'by_stream': {'0': 498, '817039232': 502}, 'block_sizes_mib': [(80, 4), (48, 1), (24, 4), (20, 2), (10, 49), (2, 1), (1, 1), (0, 40)]}",
+   "done 6144",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 791, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 2), (1, 1), (0, 11)]}",
+   "{'alloc_peak_mib': 792, 'range_mib': 2444, 'reserved_mib': 1976, 'segments': 64, 'biggest': [160, 160, 160, 160, 96, 48], 'overflow_mib': 0, 'tokens': 4096, 'by_stream': {'0': 994, '817039232': 982}, 'block_sizes_mib': [(160, 4), (96, 1), (48, 4), (22, 1), (20, 51), (2, 1), (1, 1), (0, 39)]}",
+   "done 32768"
+  ],
+  "rtx-5090_mtp": [
+   "measured {'peak_alloc': 1555, 'reserved_peak': 12376, 'reserved_now': 10454, 'growth': 1922}",
+   "profile peaks MiB [1555, 323] loan MiB 4687 tail (4, 5144) free MiB 1129",
+   "RuntimeError: moe: the engine reserved activations for a lent tail (moe.lend_peak), but this layout stages: its large steps could not lend them"
+  ]
+ },
+ "k_resolve": {
+  "rtx-5080": [
+   "fn-run tokens 1: k_resolve device p50 10.2 us, p10 9.8, n 250, admitted 3",
+   "fn-run tokens 4: k_resolve device p50 10.9 us, p10 10.7, n 250, admitted 20",
+   "fn-core tokens 1: k_resolve device p50 8.1 us, p10 8.0, n 250, admitted 3",
+   "fn-core tokens 4: k_resolve device p50 8.1 us, p10 8.0, n 250, admitted 20"
+  ],
+  "rtx-5090": [
+   "fn-run tokens 1: k_resolve device p50 9.6 us, p10 9.3, n 250, admitted 3",
+   "fn-run tokens 4: k_resolve device p50 10.3 us, p10 10.0, n 250, admitted 20",
+   "fn-core tokens 1: k_resolve device p50 7.6 us, p10 7.5, n 250, admitted 3",
+   "fn-core tokens 4: k_resolve device p50 7.6 us, p10 7.5, n 250, admitted 20"
+  ]
+ },
+ "hc_gate": {
+  "rtx-5080": [
+   "T=1: mix 11.9 us {'_down_gemv': 4.2, '_mix_gemv': 7.7}; read of 13.2 MB 6.5 us (2020 GB/s); mix/read 1.82",
+   "T=4: mix 25.2 us {'_down_gemv': 8.0, '_down_sum': 2.3, '_mix_rows': 14.9}; read of 13.2 MB 6.5 us (2020 GB/s); mix/read 3.86",
+   "T=1 bj=64 bkc=64 w=4: old 4.9 us, split-K 2.7 + 2.1 = 4.8 us (1.02x); |x - ref| old 3.8e-03 new 3.8e-03; R same True",
+   "T=2 bj=64 bkc=64 w=4: old 8.7 us, split-K 4.0 + 2.2 = 6.2 us (1.40x); |x - ref| old 3.1e-03 new 3.1e-03; R same True",
+   "T=4 bj=64 bkc=64 w=4: old 14.8 us, split-K 5.7 + 2.3 = 7.9 us (1.86x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=64 bkc=64 w=4: old 27.1 us, split-K 8.6 + 2.3 = 10.9 us (2.48x); |x - ref| old 3.8e-03 new 3.8e-03; R same True",
+   "T=1 bj=32 bkc=64 w=4: old 4.9 us, split-K 2.7 + 2.1 = 4.8 us (1.03x); |x - ref| old 3.8e-03 new 3.8e-03; R same True",
+   "T=2 bj=32 bkc=64 w=4: old 8.7 us, split-K 4.2 + 2.2 = 6.4 us (1.36x); |x - ref| old 3.1e-03 new 3.1e-03; R same True",
+   "T=4 bj=32 bkc=64 w=4: old 14.8 us, split-K 6.1 + 2.3 = 8.4 us (1.76x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=32 bkc=64 w=4: old 27.1 us, split-K 10.0 + 2.3 = 12.3 us (2.21x); |x - ref| old 3.8e-03 new 3.8e-03; R same True",
+   "T=1 bj=128 bkc=64 w=8: old 5.0 us, split-K 2.7 + 2.1 = 4.8 us (1.03x); |x - ref| old 3.8e-03 new 3.8e-03; R same True",
+   "T=2 bj=128 bkc=64 w=8: old 8.7 us, split-K 4.2 + 2.2 = 6.4 us (1.36x); |x - ref| old 3.1e-03 new 3.1e-03; R same True",
+   "T=4 bj=128 bkc=64 w=8: old 14.8 us, split-K 6.0 + 2.3 = 8.3 us (1.78x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=128 bkc=64 w=8: old 26.9 us, split-K 9.6 + 2.4 = 12.0 us (2.25x); |x - ref| old 3.8e-03 new 3.8e-03; R same True"
+  ],
+  "rtx-5090": [
+   "T=1: mix 16.2 us {'_down_gemv': 5.7, '_mix_gemv': 10.5}; read of 13.2 MB 10.9 us (1205 GB/s); mix/read 1.48",
+   "T=4: mix 24.1 us {'_down_gemv': 8.2, '_down_sum': 2.2, '_mix_rows': 13.7}; read of 13.2 MB 11.0 us (1202 GB/s); mix/read 2.20",
+   "T=1 bj=64 bkc=64 w=4: old 4.3 us, split-K 2.4 + 2.0 = 4.4 us (0.97x); |x - ref| old 2.2e-03 new 2.2e-03; R same True",
+   "T=2 bj=64 bkc=64 w=4: old 7.4 us, split-K 2.8 + 2.2 = 5.0 us (1.46x); |x - ref| old 2.6e-03 new 2.6e-03; R same True",
+   "T=4 bj=64 bkc=64 w=4: old 12.3 us, split-K 3.6 + 2.3 = 5.9 us (2.09x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=64 bkc=64 w=4: old 22.1 us, split-K 5.2 + 2.3 = 7.4 us (2.98x); |x - ref| old 3.9e-03 new 3.9e-03; R same True",
+   "T=1 bj=32 bkc=64 w=4: old 4.3 us, split-K 2.4 + 2.0 = 4.4 us (0.97x); |x - ref| old 2.2e-03 new 2.2e-03; R same True",
+   "T=2 bj=32 bkc=64 w=4: old 7.4 us, split-K 3.0 + 2.2 = 5.2 us (1.41x); |x - ref| old 2.6e-03 new 2.6e-03; R same True",
+   "T=4 bj=32 bkc=64 w=4: old 12.3 us, split-K 4.0 + 2.2 = 6.2 us (1.98x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=32 bkc=64 w=4: old 22.1 us, split-K 6.0 + 2.3 = 8.3 us (2.66x); |x - ref| old 3.9e-03 new 3.9e-03; R same True",
+   "T=1 bj=128 bkc=64 w=8: old 4.3 us, split-K 2.2 + 2.0 = 4.2 us (1.02x); |x - ref| old 2.2e-03 new 2.2e-03; R same True",
+   "T=2 bj=128 bkc=64 w=8: old 7.4 us, split-K 2.9 + 2.2 = 5.1 us (1.44x); |x - ref| old 2.6e-03 new 2.6e-03; R same True",
+   "T=4 bj=128 bkc=64 w=8: old 12.3 us, split-K 3.8 + 2.2 = 6.0 us (2.05x); |x - ref| old 3.7e-03 new 3.7e-03; R same True",
+   "T=8 bj=128 bkc=64 w=8: old 22.1 us, split-K 5.7 + 2.3 = 8.0 us (2.78x); |x - ref| old 3.9e-03 new 3.9e-03; R same True"
+  ]
+ }
+}

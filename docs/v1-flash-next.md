@@ -2798,3 +2798,54 @@ from an allocation of its own against Strata's in the Q8_0 bench):
 | Decode | 1.04 | 1.07 | 1.07 | 1.12 | 1.11 | 1.02 |
 | MTP decode | 0.90 | 1.09 | 0.96 | 0.90 | 0.96 | 0.89 |
 | Prefill | 1.02 | 1.21 | 1.01 | 0.85 | 1.13 | 1.10 |
+
+### 21.12 The step-peak loan made to fit, `k_resolve`, the HC mix's gate
+
+**What the 40 MiB was** (`spikes/fn7/loan_probe.py`, the A5000 emulating the 5090's staging path, then each card): not one buffer.
+A lending step's live bytes are its share of the profile's peak (0.19 MiB a prompt token: 197 / 391 / 773 / 1,540 MiB
+at 1K / 2K / 4K / 8K), but the loan's MemPool keeps every segment its step frees — torch hands a private pool's cache
+back only when no one is using the pool, and the pool is in use for the whole step — so its segments reach 2.35–2.74×
+the live peak (470 / 920 / 1,816 / 4,226 MiB, two streams' worth). At 8K the 3.1 GiB loan (2× the peak) overflowed
+by 880 MiB into the device and the next 40 MiB block found nothing. Now (b46b1c0) the loan is 3× the peak and each
+lending step is lent its prompt tokens' share of it (1K steps 0.55 GiB, not 3 GiB); the toy test checks each range.
+
+**Measured** (3 rounds, the deployments of §21.11 against the same with `moe.lend_peak=on`, same allocation):
+- 5080 (the ring path): no overflow at any step (1K 510 / 626 MiB of segments / range, 4K 1,976 / 2,444). Experts
+  cached 27.0% → 28.4% without the head, 25.2% → 26.6% with it. MTP +2.1% / +1.4% / +1.0% (ms per pass −0.48 /
+  −0.34 / −0.29), decode +1.0% / +0.4% / 0; prefill −1.6% / −0.6% / −0.4% (the MTP deployment's −1.3% / −1.3% /
+  −1.2%). After a prompt (`after_prompt.py`, 20 steps, two prompts): at 1K it lends 2,848 / 2,874 experts against
+  2,544 / 2,570 and the steps miss as many routes (8,147 / 7,298 against 8,138 / 7,345); at 4K it lends 5,407 / 5,315
+  against 2,868 / 2,808 and they miss 8,375 / 9,300 against 7,618 / 8,782 (+10% / +6%). Not shipped: the prefill
+  rows lose (the lead's rule); for the lead's call, both sides are above.
+- 5090 (the staging path, 8K steps): the 8K step's loan (4.7 GiB) is more than its tail class's cache slots: the
+  layout stages, which the store refuses at the first launch (its guard). Not viable at `--max-step-tokens 8192`;
+  a 4K step would fit but cost the 32K prefill (§21.9: 1.09 → 0.91).
+
+**`k_resolve`** (a8c7864): its time went to latency-bound phases (by early returns on the A5000: init and the routes
+3.5 µs, the decay and the lists 2.2, the ranking and admissions 3.7, the fetch lists 4.7 — one warp a role, 16 serial
+ballot steps at 512 experts). Each role's fetch list now comes from a block-wide prefix sum, the candidates and
+victims are appended a warp at a time, and the block is 512 threads (1,024 was slower): per call at 4 verify rows
+15.4 → 12.1 µs on the A5000, 10.9 → 8.1 on the 5080, 10.3 → 7.6 on the 5090 (≈ −0.13 ms a verify pass); the same
+outputs (L0 against the oracles, CPU and GPU). In the 5090's graphed verify only the shared expert (another stream)
+runs beside it: the call is on the critical path whole.
+
+**The HC mix's gate** (item 3, the reviewer's; `spikes/fn7/hc_mix_bench.py`, `hc_mix_splitk.py`, 12 copies of the weights so every call reads past
+the L2): on the 5090 a mix takes 16.2 µs at 1 row and 24.1 at 4, against 10.9 µs to read its 13.2 MB once (1.2 TB/s
+with `torch.sum`). A split-K up projection (partial sums per 64-wide K chunk, then the chunks and streams summed in a
+fixed order: not today's bits, the same error against a float64 reference) takes `_mix_rows`' 12.3 µs to 5.9 at 4
+rows (2.1×; 0.97× at 1 row); the whole mix 22.7 → 16.3 µs (1.39×), below the 1.6× gate until the down projection
+moves too (its GEMV and `_down_sum` 10.4 µs for 6.6 MB). The 5080's gate run read warm weights (its 64 MB L2): rerun.
+
+**The table** (each from one allocation, the deployments of §21.11 before a8c7864; ratios to Strata; the last row
+the reviewer's statistic, per-pass rate × pooled acceptance: (pooled tokens per pass / ms per pass) against Strata's):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.02 | 1.02 | 1.03 | 1.11 | 1.10 | 1.04 |
+| MTP decode | 0.92 | 0.99 | 1.01 | 0.89 | 0.96 | 0.90 |
+| MTP, per-pass rate × pooled acceptance | 0.94 | 0.96 | 1.02 | 0.91 | 0.91 | 0.92 |
+| Prefill | 0.98 | 1.20 | 1.01 | 0.87 | 1.14 | 1.11 |
+
+(The 5090's 1K prefill is 0.80 with the run-order outlier of §21.11's rule: 631 tok/s, round 1's first arm; the 5080
+row ran on another desktop than §21.11's, where its MTP 4K and 32K cells read 1.09 / 0.96. With the loan the 5080's
+MTP rows read 0.94 / 1.01 / 1.02, per pass × pooled 0.96 / 0.97 / 1.04, its prefill 0.97 / 1.20 / 1.01.)
