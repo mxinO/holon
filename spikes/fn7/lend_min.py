@@ -5,8 +5,8 @@ and 4K prompts in order, 256 decode tokens each).
 Per prompt step that borrows (`Lent`): its mode (ring or stage), the empty slots it found, the experts it lent per
 `lend` call — call 0 the tail (D11: the large passes' contiguous scratch, then the step-peak loan past it, split by
 their bytes), calls 1… the ring's halves or the staging slots —, per class the slots it held against what the purpose
-needs: staging, a layer's most distinct misses (with `moe.pipeline` parts, also the current part and the next);
-the ring, twice a layer's most absent pieces (both halves). The rounds are replayed with the policy's own `lend`
+needs: staging, a layer's most distinct misses, or (known when the step lends) its most absent pieces — with
+`moe.pipeline` parts, also the current part and the next of either —; the ring, twice a layer's most absent pieces (both halves). The rounds are replayed with the policy's own `lend`
 (F11's coldest whole experts, the score before the step) and checked against the experts the step lent; then the
 least need, iterated to its fixed point (lending makes misses), picks its experts the same way.
 
@@ -126,8 +126,10 @@ def main() -> None:
             absent = ~(pre & ~tail_set & ~sel)
             if kind == "ring":                               # both halves: every absent piece streams
                 return 2 * most(absent.sum(1))
-            misses = most((routed & absent).sum(1))
-            return misses if kind == "stage" else 2 * -(-misses // pipeline)
+            # staging: a layer's most distinct misses (its routes, known only as it runs), or its absent pieces (known
+            # at the step's first resolve, where the lend is made); `parts`: the current part and the next
+            misses = most((absent if kind.endswith("absent") else routed & absent).sum(1))
+            return misses if kind.startswith("stage") else 2 * -(-misses // pipeline)
         out = {"mode": mode, "tail_class": None if tail is None else int(tail[0]), "tail_slots": int(tail_slots.sum()),
                "tail_unit_bytes": None if tail is None else int(unit[tail[0]]),
                "step_loan_bytes": loan, "empties": empties.tolist(),
@@ -136,11 +138,12 @@ def main() -> None:
                "replay_matches": bool((replayed == lent_rounds).all()),
                "needs": [record["lends"][k].tolist() for k in range(len(record["lends"]))],
                "held": held(lent_rounds).tolist(), "lending_classes": lending.tolist(),
-               "want_now": {k: want(lent_rounds, k).tolist() for k in ("ring", "stage", "parts")}}
+               "want_now": {k: want(lent_rounds, k).tolist() for k in ("ring", "stage", "stage_absent", "parts")}}
         if tail is not None and loan:
             out["tail_split"] = {"loan_share": round(loan / (tail[1] * unit[tail[0]]), 3)}
         sets = {"lent": lent}
-        for kind in (["ring"] if mode == "ring" else []) + ["stage"] + (["parts"] if pipeline > 1 else []):
+        kinds = ["stage", "stage_absent"] + (["parts", "parts_absent"] if pipeline > 1 else [])
+        for kind in (["ring"] if mode == "ring" else []) + kinds:
             sel = np.zeros((groups, experts), dtype=bool)
             for _ in range(8):                               # the least lend: its misses, then its picks, to a fix
                 need = np.where(lending, np.maximum(want(sel, kind) - held(np.zeros_like(sel)), 0), 0)
