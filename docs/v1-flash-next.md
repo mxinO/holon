@@ -2782,7 +2782,10 @@ is the next piece on the critical path.
   → 1,839 (+2.7%, another node).
 - The bench's first 1K prompt in the first arm of a round ran at ≈ 640 tok/s three times in six rounds (two benches,
   the arm right after Strata's): six fresh engines on the same node ran it at 1,674–1,682 every time. A run-order
-  effect on that node, not the engine; the 5090's 1K prefill below is without those three.
+  effect on that node, not the engine. The rule: a 1K prompt that ran below half its arm's other rounds is left out
+  of the table; the three left out ran at 643 and 645 tok/s (the item B bench, rounds 0 and 1) and 634 (the Q8_0
+  bench, round 2), the same prompt's other rounds at 1,632–1,728. The 5090's 1K prefill is 0.85 without them, 0.79
+  with them.
 
 **The table now** (each card's deployment: v3; the 5080 MTP with `moe.split=on`, `aux.*=0.3`, the Q8_0 head,
 `expert_io.fetch_ctas=4`; the 5090 with `moe.stream_tokens=2048 moe.pipeline=8`, MTP with `moe.split=on`,
