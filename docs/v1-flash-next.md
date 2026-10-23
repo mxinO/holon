@@ -2950,3 +2950,96 @@ replay names for the last: the holes a prompt's lending leaves in the cache the 
 −16% of a 1K prompt's bytes), then the share.
 The hole refill is to be built: the lead's call (2026-10-23), reopened from §21.10 for the next prompt's bytes (and
 the decode-time hit rate the holes lower).
+
+### 21.15 The hole fill (`lfu.fill`): built, measured, not shipped
+
+**What was built** (56fbfc1, 4c80411; std and the LFU placement plugin, no core lines). Every `lfu.fill_every`-th
+call of a layer whose rows are all decode rows (its tick, phased by its group) puts up to `lfu.fill` experts that are
+absent from the map it found and routed by none of its rows into the empty slots its admissions left, hottest first,
+ties by id. They are logged as empty-slot admissions and copied after the layer through the later lists
+(`moe.later_copy`: `fetch` at full rate or `beside` on one CTA, a stream of their own, joined into main at the target's
+last layer). The kernel, the CPU oracle and the L1 replay agree (L0 on CPU and GPU, the engine's parity and bitwise
+cases); `bitwise.py` with the fill on the 5090: `step_4096 [True, True]`, `step_1 [True, True]`.
+
+The perf reviewer's three findings on 56fbfc1, fixed in 4c80411:
+1. A stale read with two calls of a layer in one step: a call with prompt rows fills nothing, so no later call of its
+   step reads a slot before its copy lands. A GPU test runs two calls of a layer in a step.
+2. A fill wider than the later list: refused at build; pieces past the list raise OVERFLOW.
+3. The tick: counted per call with decode rows only in the kernel and the oracle, per decode-only step in the replay
+   (the same thing there). Materialize zeroes it with the rest of the device state.
+
+The open item, confirmed: `ExpertPrefetch.start` makes its DMA stream wait on the current (main) stream before any
+ring copy, in both copy modes, so a lent slot is never written while a step still reads it. The fill copies wait on
+main too and are joined into main before the step ends.
+
+**Bench** (both cards, one allocation each, 3 rounds; the deployment with the fill off against `lfu.fill=1` every
+16 / 8 / 4 calls on the 5080 and 24 / 12 / 6 on the 5090, ≈ 4 / 8 / 16 MB a step). On the 5080, round 0 of four
+arms hit the unbuilt kernel module, so those arms have 2 rounds:
+
+| Row (tok/s, fill against off) | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| MTP, ≈ 4 MB a step | −0.1% | −0.2% | −0.2% | −0.4% | −0.4% | −0.3% |
+| MTP, ≈ 8 MB | −0.5% | −0.6% | −0.5% | −0.5% | −0.5% | −0.5% |
+| MTP, ≈ 16 MB | −0.7% | −0.8% | −0.7% | −0.6% | −0.6% | −0.5% |
+| Plain decode, ≈ 8 MB | −0.4% | −0.4% | −0.4% | −0.7% | −0.5% | −0.4% |
+| 1K prefill, plain / MTP deployment | −0.1% / −0.1% | | | +0.0% / −0.0% | | |
+
+The decode hit rate does not move: 0.9405 → 0.9406 on the 5090 at 1K, and within ±0.0007 in every cell on both
+cards. The 5090's 1K prefill per prompt (plain deployment, fill off → on) is 1723 → 1726, 2011 → 2010 and
+1990 → 1989 tok/s.
+
+**Why: the holes are not there.** `prompt_bytes.py --tokens 256` is the bench's decode between prompts; §21.14's
+replay decoded 8 tokens. With 256 tokens, decode's own admissions refill the lent slots before the next prompt. The
+cache a 1K prompt meets:
+- 5090: **41.0% / 47.5% / 47.0%** of 48.6% (fill off) and 41.8% / 47.6% / 47.1% (fill on). §21.14 had 39.6–42%.
+- 5080: full, 28.4% of 28.4%, from the second prompt on, with the fill on or off.
+
+On the 5090, with every hole filled, the second and third prompts would miss 18.29 / 18.31 GB against the measured
+18.62 / 18.74 (−1.8% / −2.3%), not §21.14's 11–16%. Only the first prompt after the warm-up meets a holed cache
+(−14% with the holes filled). The fill at ≤ 16 MB a step cannot refill ≈ 3 GB in the warm-up's few steps; a warm-up
+artifact is not worth a larger fill.
+
+The replay's decomposition of the 5090's 1K prompt bytes at 256 tokens (second / third prompt, GB missed):
+- **Its own lending: 3.7 / 3.9 GB.** The prompt lends 2,226 / 2,140 experts and misses them, 14.88 → 18.62 and
+  14.89 → 18.74.
+- **The share: 1.2 / 1.9 GB.** The met cache against the profile's at Strata's 54%: 14.88 → 13.73 and 14.89 → 13.04.
+- **The holes: 0.3–0.4 GB.**
+
+The 5080's MTP 1K cell is not the holes either: its cache is full when a prompt arrives. Its prompts lend
+3,139–3,191 experts (15.5 → 19.3 GB missed at 1K), which is §21.10's after-prompt transient.
+
+**Link cost** (nsys, the graphed MTP verify steps, 40 steps, fill every 8 / 12 calls; per call of `k_fetch_roles`,
+the critical fetch of one layer side. The trace does not carry the pieces per call; the calls are the same 2,040 per
+arm):
+
+| | 5080 off | fetch | beside | 5090 off | fetch | beside |
+|---|---|---|---|---|---|---|
+| critical fetch, median / mean µs a call | 103.6 / 132.6 | 102.5 / 132.5 | 104.0 / 132.5 | 57.3 / 90.9 | 57.5 / 90.7 | 57.9 / 90.9 |
+| fill copies issued (> 5 µs), per 40 steps | 0 | 158 | 20 | 0 | 28 | 28 |
+| critical fetches overlapped by a fill copy | – | 0 | 0 | – | 0 | 0 |
+| step-end join stall, µs a step | 0 | 0 | 0.1 | 0 | 2.1 | 4.2 |
+| step / verify, median ms | 24.31 / 19.59 | 24.33 / 19.58 | 24.30 / 19.61 | 18.17 / 14.38 | 18.42 / 14.44 | 18.34 / 14.37 |
+
+The join stall is the main stream's idle time that ends within 5 µs of a fill copy's end. Neither the critical fetch
+nor the join stall rises by 5%, so neither switch, (a) or (b), was needed. What the bench's −0.3% to −0.8% costs sits
+outside the trunk: the 5090's verify is flat and its step grows 0.17–0.25 ms. That growth comes from the later lists'
+gathers, launched for every layer and class every step (96 a step, almost all empty).
+
+**The ship rule.** The fill costs every gated MTP row 0.1–0.8% and gains no row below its bar. The 5090's 1K
+prefill stays at 0.87 and the 5080's MTP 1K at 0.95. **Not shipped**: `lfu.fill` stays 0 (off, its default). With the
+fill off, `k_resolve` costs 11.7 µs a call, against 12.0 µs with the fill on; the off path's benches match the earlier
+allocations' (the 5080's plain / MTP 1K 94.6 / 118.7 tok/s against §21.13's 93.7 / 118.0).
+
+**The table** (this allocation, both cards, fill off. The 5090's desktop ran Holon 1–9% slower than §21.14's and
+Strata's prefill 4–5% slower, its decode the same):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.05 | 1.05 | 1.05 | 1.14 | 1.14 | 1.09 |
+| MTP decode | 0.95 | 1.03 | 1.04 | 0.93 | 0.95 | 0.89 |
+| MTP, per-pass rate × pooled acceptance | 0.96 | 0.97 | 1.03 | 0.93 | 0.95 | 0.91 |
+| Prefill | 0.97 | 1.20 | 1.02 | 0.87 | 1.16 | 1.04 |
+
+Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows, and the 5090's 1K prefill. For the last,
+the replay now names the prompt's own lending first (3.7–3.9 GB of its ≈ 18.7), then the share (1.2–1.9 GB).
+Evidence: `evidence/fn7_step7i_2026-10-23.json`.
