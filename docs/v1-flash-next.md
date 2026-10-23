@@ -3230,9 +3230,10 @@ the 1K prefill row, already below that, may not fall.
   - 5K → 4K buys +2.3% per pass for another −7%;
   - 0.985 is free;
   - `aux.*=0.3` and `lend_peak` lose.
-- The drafting-off deployment: no knob obviously helps its rows (decode 1.10–1.14), so it keeps its 6K step at 0.97.
-  If the lock allows only one step size per card (acceptance 6), it takes the 5K step too, which costs its 32K
-  prefill ≈ 5% (1.03 → ≈ 0.98, above 0.945). That is the lead's call.
+- The drafting-off deployment: no knob obviously helps its rows (decode 1.10–1.14). **The lead's call (2026-10-23):
+  one step size per card, so the 5090 takes 5K steps at 0.985 for both deployments.** That costs the drafting-off
+  32K prefill ≈ 5% (1.03 → ≈ 0.98, above 0.945), and the below-bar MTP rows gain. The close's comparison run
+  confirms the drafting-off rows at 5K; a 32K prefill below 0.945 goes back to the lead before the lock is written.
 
 **The 5080: its 1K prompts staged in the ring of parts, the `k_resolve` fix, a fresh row.** One allocation, 3
 rounds, Strata's two arms beside them:
@@ -3256,7 +3257,8 @@ rounds, Strata's two arms beside them:
   deployment with `moe.split=on` and `aux.*=0.3`. Its rows are from the allocation above.
 - **The 5090:**
   - The MTP deployment now runs 5K steps at 0.985, `aux.*=0.5`; its rows are from the sweep's allocation.
-  - The drafting-off deployment keeps 6K steps at 0.97; its rows are from §21.16's allocation.
+  - The drafting-off deployment takes the same 5K steps at 0.985 (the lead's call, above); its rows here are still
+    §21.16's, at 6K and 0.97, until the close's comparison run.
   - Both have staging in the ring of parts.
 
 | Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
