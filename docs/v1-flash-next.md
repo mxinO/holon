@@ -2659,3 +2659,58 @@ Gates: the shipped options are bitwise the v3 deployment's (`bitwise.py` on both
 §21.4; `placement.budget@1` and the CPU split are not shipped and were not gated.
 Not shipping `placement.budget@1` and the CPU split was the lead's call (2026-10-23), as was keeping
 `moe.pipeline=8` and `moe.stream_tokens=2048` on the 5090.
+
+### 21.10 The MTP decomposition (the lead's item A) and fix 1: the head's experts kept resident
+
+**MTP tok/s = accepted tokens per pass × passes per second** (`s7_decomp`, 2 rounds, the bench's prompts; Strata
+`--spec 4 --spec-min-p 0 --suffix-draft 0`, full head, its `STRATA_SPEC_DEPTH` and `STRATA_DECODE_TIMING`):
+
+| Card, row | tokens / pass H / S | ms / pass H / S | Strata verify + draft | tok/s ratio |
+|---|---|---|---|---|
+| 5080 1K / 4K / 32K | −5.5% / +12.8% / −5.3% | +10.7% / +7.1% / +4.3% | 19.4 + 2.36 / 19.7 + 2.41 / 22.4 + 3.06 | 0.85 / 1.04 / 0.92 |
+| 5090 1K / 4K / 32K | +1.9% / −1.4% / −5.3% | +19.3% / +14.5% / +18.0% | 13.4 + 1.84 / 14.1 + 1.86 / 14.7 + 2.25 | 0.85 / 0.86 / 0.80 |
+
+Pooled, Holon accepts 4% fewer tokens a pass on the 5080 and 1.8% on the 5090; depth 1 is close (0.72–0.84 against
+0.67–0.87); single prompts differ by up to ±35% both ways, greedy texts diverging. The draft-quality check (drafts
+position by position on one context) was not run: the lead's call (2026-10-23), to be revisited only if a row is still
+more than 5% short on acceptance after the pass-time fixes. The gap is ms per pass.
+
+**Where a pass goes** (the 5080 at 1K, graphed steps in nsys). A first split charged the drafter 5.24 ms: it counted
+the time between graphed steps, which the timeline spike's per-step sync and per-node tracing make (1.3 ms of host
+and launch). Without the sync and traced per graph (`tl_nosync.py`), the GPU idles 0.03 ms between steps (the next
+step launches while one runs). The drafter is 3.9 ms against Strata's 2.36: the head's experts were fetched every
+sub-step (0.83 ms, its mmvq waiting on it) — the profile never counted the head's group, so F2 seeded 4 of its 512
+experts — while Strata keeps its draft layer resident (871 MiB, 675 of them experts). The output head is 1.15 ms of
+the drafter (3 × 0.385), its bf16 projections 0.63 (Strata's are Q8_0), the small kernels 0.24.
+
+**Fix 1** (2239262): `moe.cache` names a class or a pattern (`aux.*` the head's classes, `*` last), and a pinned class
+beside fill ones is seeded first (the store floors it at its pins); L0 on the tiny auxiliary model (pinned whole, half
+and the fill's split, streams the plain engine's). The head's classes then hold 512 / 256 of 512 experts (5080: the
+trunk's cache 24.9% → 22.9% / 23.9%; 5090: 46.0% → 44.6% / 45.3%).
+
+**Measured** (3 rounds each; tok/s, ratio to Strata in the same allocation; the 5080's 0.3 and 0.2 in a second bench
+of the same allocation, its deployment arm within 0.1% of the first's):
+
+| Arm | 5080 MTP 1K / 4K / 32K | 5080 prefill 1K | 5090 MTP 1K / 4K / 32K | 5090 prefill 1K |
+|---|---|---|---|---|
+| deployment | 111.5 / 112.9 / 110.2 (0.86 / 1.05 / 0.92) | 1,529 | 152.0 / 141.8 / 150.6 (0.87 / 0.89 / 0.84) | 1,791 |
+| `aux.*=1.0` | 111.2 / 113.2 / 110.1 | 1,496 | 156.7 / 146.6 / 154.5 | 1,756 |
+| `aux.*=0.5` | 113.2 / 114.8 / 111.5 | 1,513 | **156.4 / 146.4 / 154.4 (0.89 / 0.91 / 0.86)** | 1,767 |
+| `aux.*=0.3` | **113.2 / 115.1 / 111.8 (0.87 / 1.07 / 0.94)** | 1,520 | — | — |
+| `aux.*=0.2` | 113.1 / 114.8 / 111.9 | 1,523 | — | — |
+
+On the 5090 the whole head pays (graphed pass 17.64 → 16.76 ms); on the 5080 the 675 MiB comes out of a cache a third
+the size, and the trunk's misses take back most of it (the drafter 3.90 → 3.03 ms, the verify 19.57 → 20.07 ms; the
+pass 22.69 → 22.42). A fraction of the head pinned keeps most of the gain at less cache (F11 admits within the head's
+classes). Taken: `moe.cache=aux.*=0.3` on the 5080, `aux.*=0.5` on the 5090 (the drafts are unchanged: tokens per
+pass identical in every arm). The decode rows (no head) are unchanged: 1.03 / 1.06 / 1.07 and 1.10 / 1.10 / 1.03.
+
+**What is left of the MTP gap.** The bench's ms per pass sits above the graphed pass at steady state: 5080 24.4
+against 22.7, 5090 18.0 against 16.8 (Strata's bench and its window timing agree within 0.3 ms). The difference is
+the steps after each prompt: a streaming or staging step's lent slots come back empty (D11) and admission refills
+them a miss at a time. On the A5000 at 1K the cache holds 13,073 experts before a prompt and 10,561 after it; the
+first 10 steps hit 0.42–0.84 (a second prompt: 0.55–0.95) of the routes against 0.95 at steady state, and it takes about 40 steps to refill (the
+5090's first graphed steps take 26 → 19 ms before settling at 16). Strata refills its borrowed slots after the
+prompt (`refill_one`). The drafter's small kernels are 0.24 ms a pass: of the 232 ops of an eager drafter run, about
+90 are the core's sub-step preparation (positions, page writes, the planners' device half), the rest the head's casts,
+gates, argmax and table writes; fusing all of the drafter's would save ≈ 0.25 ms a pass (1%).
