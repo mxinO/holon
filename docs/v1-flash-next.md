@@ -2815,8 +2815,10 @@ lending step is lent its prompt tokens' share of it (1K steps 0.55 GiB, not 3 Gi
   −0.34 / −0.29), decode +1.0% / +0.4% / 0; prefill −1.6% / −0.6% / −0.4% (the MTP deployment's −1.3% / −1.3% /
   −1.2%). After a prompt (`after_prompt.py`, 20 steps, two prompts): at 1K it lends 2,848 / 2,874 experts against
   2,544 / 2,570 and the steps miss as many routes (8,147 / 7,298 against 8,138 / 7,345); at 4K it lends 5,407 / 5,315
-  against 2,868 / 2,808 and they miss 8,375 / 9,300 against 7,618 / 8,782 (+10% / +6%). Not shipped: the prefill
-  rows lose (the lead's rule); for the lead's call, both sides are above.
+  against 2,868 / 2,808 and they miss 8,375 / 9,300 against 7,618 / 8,782 (+10% / +6%). **Shipped on the 5080**:
+  the lead's call (2026-10-23) — the prefill rows it costs stay far above their 0.9 bar (0.97 / 1.20 / 1.01) while
+  the MTP rows below theirs gain. The rule from here on (the lead's): a change ships when every gated row it costs
+  stays above its bar by at least 5% and the rows below their bars gain.
 - 5090 (the staging path, 8K steps): the 8K step's loan (4.7 GiB) is more than its tail class's cache slots: the
   layout stages, which the store refuses at the first launch (its guard). Not viable at `--max-step-tokens 8192`;
   a 4K step would fit but cost the 32K prefill (§21.9: 1.09 → 0.91).
@@ -2827,7 +2829,7 @@ ballot steps at 512 experts). Each role's fetch list now comes from a block-wide
 victims are appended a warp at a time, and the block is 512 threads (1,024 was slower): per call at 4 verify rows
 15.4 → 12.1 µs on the A5000, 10.9 → 8.1 on the 5080, 10.3 → 7.6 on the 5090 (≈ −0.13 ms a verify pass); the same
 outputs (L0 against the oracles, CPU and GPU). In the 5090's graphed verify only the shared expert (another stream)
-runs beside it: the call is on the critical path whole.
+runs beside it: the call is on the critical path whole. Kept: the lead's call (small, and free).
 
 **The HC mix's gate** (item 3, the reviewer's; `spikes/fn7/hc_mix_bench.py`, `hc_mix_splitk.py`, 12 copies of the weights so every call reads past
 the L2): on the 5090 a mix takes 16.2 µs at 1 row and 24.1 at 4, against 10.9 µs to read its 13.2 MB once (1.2 TB/s
@@ -2835,6 +2837,9 @@ with `torch.sum`). A split-K up projection (partial sums per 64-wide K chunk, th
 fixed order: not today's bits, the same error against a float64 reference) takes `_mix_rows`' 12.3 µs to 5.9 at 4
 rows (2.1×; 0.97× at 1 row); the whole mix 22.7 → 16.3 µs (1.39×), below the 1.6× gate until the down projection
 moves too (its GEMV and `_down_sum` 10.4 µs for 6.6 MB). The 5080's gate run read warm weights (its 64 MB L2): rerun.
+The lead's call: go on with the down projection; a reduction order other than today's is acceptable inside the HC
+contract's bound (a float64 reference at kernel scale), gate (c) re-run on one card if it ships; the 1.6× gate on the
+whole mix at 4 rows, the 1-row case looked at (its grid and read width): ≈ 1.3× there is decode's gain.
 
 **The table** (each from one allocation, the deployments of §21.11 before a8c7864; ratios to Strata; the last row
 the reviewer's statistic, per-pass rate × pooled acceptance: (pooled tokens per pass / ms per pass) against Strata's):
