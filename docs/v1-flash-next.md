@@ -2670,10 +2670,11 @@ Not shipping `placement.budget@1` and the CPU split was the lead's call (2026-10
 | 5080 1K / 4K / 32K | −5.5% / +12.8% / −5.3% | +10.7% / +7.1% / +4.3% | 19.4 + 2.36 / 19.7 + 2.41 / 22.4 + 3.06 | 0.85 / 1.04 / 0.92 |
 | 5090 1K / 4K / 32K | +1.9% / −1.4% / −5.3% | +19.3% / +14.5% / +18.0% | 13.4 + 1.84 / 14.1 + 1.86 / 14.7 + 2.25 | 0.85 / 0.86 / 0.80 |
 
-Pooled, Holon accepts 4% fewer tokens a pass on the 5080 and 1.8% on the 5090; depth 1 is close (0.72–0.84 against
-0.67–0.87); single prompts differ by up to ±35% both ways, greedy texts diverging. The draft-quality check (drafts
-position by position on one context) was not run: the lead's call (2026-10-23), to be revisited only if a row is still
-more than 5% short on acceptance after the pass-time fixes. The gap is ms per pass.
+Pooled over the nine prompts, Holon and Strata accept alike on the 5080 (2.795 against 2.798 tokens a pass; an earlier
+draft of this section said 4% fewer, a miscount) and Holon 1.8% fewer on the 5090 (2.866 against 2.919); depth 1 is
+close (0.72–0.84 against 0.67–0.87); single prompts differ by up to ±35% both ways, greedy texts diverging. The
+draft-quality check (drafts position by position on one context) was not run: the lead's call (2026-10-23), to be
+revisited only if a row is still more than 5% short on acceptance after the pass-time fixes. The gap is ms per pass.
 
 **Where a pass goes** (the 5080 at 1K, graphed steps in nsys). A first split charged the drafter 5.24 ms: it counted
 the time between graphed steps, which the timeline spike's per-step sync and per-node tracing make (1.3 ms of host
