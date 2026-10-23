@@ -38,6 +38,8 @@ struct State {
     int plant;
     int budget = INT_MAX;                              // LFU: the most admissions a call makes (placement.budget's)
     float gain = 0.0f;                                 // LFU: by how much a candidate's score must pass its victim's
+    int32_t * tick = nullptr;                          // LFU: the layer's calls with decode rows [1] (the fill's turn)
+    int fill = 0, fill_every = 0;                      // LFU: experts filled into empty slots every fill_every-th call
 };
 
 __host__ __device__ inline int shared_words(int policy, int roles, int experts) {
@@ -117,7 +119,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
     // (8-byte aligned: a word skipped when the tables before them hold an odd number).
     int64_t * cands = reinterpret_cast<int64_t *>(vict + experts + ((roles + 7) * experts & 1));
     int64_t * victs = cands + experts;
-    __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare, n_cpu, take;
+    __shared__ int has_decode, n_cand, n_vict, n_admit, base, spare, n_cpu, take, n_fill;
     const int entries = tokens * k, tid = threadIdx.x;
     const int32_t plan = tid <= experts ? L.plan[tid] : 0;   // loaded now, read after the entries: its latency hides
     for (int i = tid; i < shared_words(P, roles, experts); i += blockDim.x) {   // `best`, `first` past every entry
@@ -126,7 +128,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         shared[i] = high ? INT_MAX : 0;
     }
     if (tid == 0) {
-        has_decode = n_cand = n_vict = n_cpu = 0;
+        has_decode = n_cand = n_vict = n_cpu = n_admit = n_fill = 0;
         if (P != STATIC) {
             base = *n_delta;                           // the layer's log: only this call appends to it now
             spare = *L.n_empty;
@@ -268,6 +270,8 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             if (live[e]) {                             // routed by the call that picks victims: the victims' scope
                 routed[e] |= 2;
+            } else if (missing) {                      // the fill's candidates: absent, not routed (`live` past use)
+                live[e] = -1;
             }
             // not the CPU's — but with `later`, the CPU's too (their fetch deferred: they serve the call from the CPU)
             const bool is_cand = dec[e] && missing && !(share && best[e] >= 0 && later == nullptr);
@@ -363,6 +367,65 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             __syncthreads();
         }
+        // The fill (FN §21.15): every fill_every-th call with decode rows (by the layer's tick, phased by its group),
+        // up to `fill` experts absent from the map as the call found it and routed by none of its rows take the empty
+        // slots the admissions left, hottest by score first, ties by id; mapped now, their pieces listed apart
+        // (`later`: copied after the call, nothing reads them before the next step).
+        const int left = spare - empties;
+        const bool due = P == LFU && st.tick != nullptr && st.fill_every > 0 && later != nullptr &&
+                         (st.tick[0] + group) % st.fill_every == 0;
+        if (due && left > 0) {
+            if (tid == 0) {
+                n_cand = 0;
+            }
+            __syncthreads();
+            for (int e = tid; e < experts; e += blockDim.x) {
+                if (live[e] == -1) {
+                    cands[atomicAdd(&n_cand, 1)] = (int64_t(INT_MAX - first[e]) << 32) | e;
+                }
+            }
+            __syncthreads();
+            const int want = min(min(st.fill, left), n_cand);
+            for (int j = tid; j < n_cand; j += blockDim.x) {
+                const int64_t mine = cands[j];
+                int rank = 0;
+                for (int y = 0; y < n_cand; ++y) {
+                    rank += cands[y] < mine;
+                }
+                if (rank < want) {
+                    cand[rank] = int(mine & 0xffffffff);
+                }
+            }
+            if (tid == 0) {
+                n_fill = want;
+            }
+            __syncthreads();
+            const int at = base + empties + n_admit;
+            for (int i = tid; i < n_fill; i += blockDim.x) {
+                const int a = cand[i], j = left - 1 - i;
+                for (int r = 0; r < roles; ++r) {
+                    const int slot = L.empty[r * L.P + j];
+                    L.residency[a * roles + r] = slot;
+                    need[r * experts + a] = -2 - slot;
+                }
+                dec[a] = -1;                           // listed apart (`later`)
+                if (at + i < cap) {
+                    delta[(at + i) * 3] = group;
+                    delta[(at + i) * 3 + 1] = a;
+                    delta[(at + i) * 3 + 2] = -2 - j;
+                } else {
+                    atomicOr(errors, OVERFLOW);
+                }
+            }
+            if (tid == 0) {
+                *n_delta = at + n_fill;
+                *L.n_empty = left - n_fill;
+            }
+            __syncthreads();
+        }
+        if (tid == 0 && P == LFU && st.tick != nullptr) {
+            st.tick[0] += 1;
+        }
     }
     // Each role's fetch list: its missing pieces ranked by id — the whole block scans, each thread a run of `per`
     // experts in id order (counts packed 21 bits apiece: fetched, staged, deferred to after the call).
@@ -374,7 +437,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         int64_t mine = 0;
         for (int e = e0; e < min(e0 + per, experts); ++e) {
             const int v = row[e];
-            const bool on_cpu = later != nullptr && share && best[e] >= 0;   // admitted, the CPU's
+            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || dec[e] < 0);   // the CPU's, the fill's
             mine += int64_t(v != 0 && !on_cpu) | int64_t(v == 1) << 21 | int64_t(v != 0 && on_cpu) << 42;
         }
         int64_t total;
@@ -382,7 +445,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
         int seen = int(before & COUNT_MASK), staged = int(before >> 21 & COUNT_MASK), deferred = int(before >> 42);
         for (int e = e0; e < min(e0 + per, experts); ++e) {
             const int v = row[e];
-            const bool on_cpu = later != nullptr && share && best[e] >= 0;
+            const bool on_cpu = later != nullptr && ((share && best[e] >= 0) || dec[e] < 0);
             if (v == 0) {
                 continue;
             }
@@ -545,7 +608,8 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
              const std::vector<at::Tensor> & state, int64_t plant, const at::Tensor & plan, at::Tensor & jobs,
              at::Tensor & slots, at::Tensor & fetch, at::Tensor & n_fetch, at::Tensor & cpu, int64_t staging,
              const std::optional<at::Tensor> & miss_slots, const std::optional<at::Tensor> & later,
-             const std::optional<at::Tensor> & n_later, int64_t budget, double gain) {
+             const std::optional<at::Tensor> & n_later, int64_t budget, double gain, int64_t fill,
+             int64_t fill_every) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && residency.dim() == 2 && stage.dim() == 2 && empty.dim() == 2 &&
                 delta.dim() == 2, "ids [T, k] on CUDA");
@@ -587,9 +651,15 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     st.gain = float(gain);
     TORCH_CHECK(policy == LFU || (budget < 0 && gain == 0.0), "an admission budget or gain: the LFU code only");
     if (policy == LFU) {
-        TORCH_CHECK(state.size() == 1, "lfu: score");
+        TORCH_CHECK(state.size() == 1 || state.size() == 2, "lfu: score (and tick)");
         check(state[0], ids, at::kFloat, {experts}, "score");
         st.score = state[0].data_ptr<float>();
+        if (state.size() == 2) {
+            check(state[1], ids, at::kInt, {1}, "tick");
+            st.tick = state[1].data_ptr<int32_t>();
+        }
+        st.fill = int(fill);
+        st.fill_every = int(fill_every);
     } else if (policy == LRU) {
         TORCH_CHECK(state.size() == 2, "lru: last, clock");
         check(state[0], ids, at::kInt, {experts}, "last");

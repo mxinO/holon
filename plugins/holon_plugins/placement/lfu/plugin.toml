@@ -14,3 +14,7 @@ numerics = "exact"
 
 [reference]
 module = "reference"
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads (kernels.expert_io's provider reads them too)
+"lfu.fill_every" = { help = "FN §21.15's fill: a layer's every n-th call with decode rows fills empty slots (0: off)", default = "0" }
+"lfu.fill" = { help = "the fill: the absent, unrouted experts (hottest first) a due call puts into empty slots", default = "1" }

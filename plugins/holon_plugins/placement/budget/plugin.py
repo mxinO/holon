@@ -25,7 +25,7 @@ class Budget(Lfu):
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         super().__init__(ctx, items=items, roles=roles, **site)
-        self.replay_terms = _terms(ctx)       # what the L1 replay needs (judge.placement)
+        self.replay_terms = {**getattr(self, "replay_terms", {}), **_terms(ctx)}   # the L1 replay's (judge.placement)
 
 
 class Resolve(LfuResolve):

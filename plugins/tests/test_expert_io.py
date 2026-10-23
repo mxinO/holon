@@ -304,6 +304,49 @@ def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score:
 
 
 @pytest.mark.parametrize("device", DEVICES)
+def test_lfu_fills_the_empty_slots_its_admissions_leave(plugins, device):
+    """The fill (`lfu.fill`, `lfu.fill_every`; FN §21.15): a due call — its layer's tick plus its group a multiple of
+    fill_every — puts up to `fill` experts absent from the map it found and routed by none of its rows into the empty
+    slots its admissions left, from the top, hottest first (ties by id: the scores' grid ties), logged as empty-slot
+    admissions and listed apart (`later`); a call not due fills none; the tick counts every call with decode rows."""
+    provider = "placement.lfu" if device == "cpu" else "kernels.expert_io"
+    resolve = kernel(plugins, device, "moe_resolve.lfu@1", provider, experts=E, top_k=K, roles=ROLES, staging=E)
+    resolve.fill, resolve.fill_every = 3, 4
+    from holon_plugins.placement.lfu.reference import moe_resolve_lfu
+    for tick0, due in ((1, True), (2, False)):                 # group 3: due at ticks 1, 5, …
+        case, state = routing(1, seed=11, whole=True), _state("lfu", 11)
+        case["kinds"][:] = DECODE
+        case["empty"] = (K + 1600 + torch.arange(8)).expand(ROLES, 8).int().clone()
+        case["n_empty"] = torch.tensor([8], dtype=torch.int32)
+        plan, jobs = _share(1, device, False)
+        want = moe_resolve_lfu(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
+                               state["score"], 3, case["ring"], _stage(case, E, False), case["empty"], 8, plan.cpu(),
+                               True, None, 0.0, tick0, 3, 4)
+        delta, n_delta = _log(4 * E, 0, device)
+        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": _stage(case, E, False)}).items()}
+        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
+        tick = torch.tensor([tick0], dtype=torch.int32, device=device)
+        slots, fetch, n_fetch, _, later, n_later = resolve(
+            dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"],
+            torch.zeros(E, dtype=torch.int32, device=device), dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
+            *words, delta, n_delta, 3, plan, jobs, defer=True, score=dev["score"], tick=tick)
+        assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(dev["residency"].cpu(), want["residency"])
+        assert torch.equal(n_later.cpu(), want["n_later"]) and int(tick[0]) == want["tick"] == tick0 + 1
+        assert int(dev["n_empty"][0]) == want["n_empty"]
+        for r in range(ROLES):
+            assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
+            assert torch.equal(later[r, :, :int(n_later[r])].cpu(), want["later"][r, :, :int(n_later[r])])
+        records = torch.tensor(want["records"], dtype=torch.int32).view(-1, 3)
+        assert int(n_delta[0]) == len(records) and torch.equal(delta[:len(records)].cpu(), records)
+        routed = set(case["ids"][case["ids"] >= 0].tolist())
+        filled = [a for _, a, b in want["records"] if b < -1 and a not in routed]
+        assert len(filled) == (3 if due else 0) and int(want["n_later"][0]) == len(filled)
+        absent = [e for e in range(E) if (case["residency"][e] < 0).all() and e not in routed]
+        order = sorted(absent, key=lambda e: (-float(want["score"][e]), e))
+        assert filled == order[:len(filled)]                    # hottest first, ties by id
+
+
+@pytest.mark.parametrize("device", DEVICES)
 def test_lfu_decays_then_counts_in_f32(plugins, device):
     """D4's order, through both providers: × 0.915, then + 1.0 per decode entry, each rounded in f32 (an expert at 1.5
     with 7 decode entries ends at 8.372499, where one add of 7 would give 8.3725); a prefill row's entry neither decays

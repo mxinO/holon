@@ -22,15 +22,24 @@ class Lfu:
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         self.items = items
+        fill = fill_terms(ctx)
+        if fill["fill_every"] > 0:
+            self.replay_terms = fill          # what the L1 replay needs (judge.placement)
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
-        return {"score": ((self.items,), "float32")}
+        return {"score": ((self.items,), "float32"), "tick": ((1,), "int32")}
 
     def seed(self, profile: np.ndarray, budget) -> list[tuple[int, int]]:
         return [(g, i) for g, i in budget.warm_start(profile) if budget.take(g, i)]
 
     def after_commit(self, counts: np.ndarray, view: np.ndarray) -> list:
         return []
+
+
+def fill_terms(ctx) -> dict:
+    """The fill's options (FN §21.15): `lfu.fill_every` (0: off), `lfu.fill` (experts a due call fills)."""
+    opts = ctx.options.get("plugins", {})
+    return {"fill_every": int(opts.get("lfu.fill_every", 0)), "fill": int(opts.get("lfu.fill", 1))}
 
 
 class Resolve:
@@ -41,11 +50,19 @@ class Resolve:
 
     def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.staging = staging
+        terms = fill_terms(ctx)
+        self.fill, self.fill_every = terms["fill"], terms["fill_every"]
+        self.fills = self.fill_every > 0 and self.fill > 0
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, score, defer: bool = False):
+                 errors, delta, n_delta, group, plan, jobs, score, tick=None, defer: bool = False,
+                 fill: bool = True):
         out = reference.moe_resolve_lfu(ids, kinds, residency, host, limits, self.staging, score, group, ring, stage,
-                                        empty, int(n_empty[0]), plan, defer, self.budget, self.gain)
+                                        empty, int(n_empty[0]), plan, defer, self.budget, self.gain,
+                                        None if tick is None else int(tick[0]), self.fill,
+                                        self.fill_every if fill else 0)
+        if tick is not None:
+            tick.fill_(out["tick"])
         counts += out["counts"]
         routed |= out["routed"]
         misses.clamp_(min=int(max(out["n_fetch"].max(), out["n_later"].max() if defer else 0)))
@@ -66,10 +83,10 @@ class Resolve:
         return (out["slots"], out["fetch"], out["n_fetch"], out["cpu"]) + (
             (out["later"], out["n_later"]) if defer else ())
 
-    def lend(self, need, residency, classes, score) -> torch.Tensor:
+    def lend(self, need, residency, classes, score, tick=None) -> torch.Tensor:
         return reference.lend(need.cpu().numpy(), residency, classes, score)
 
-    def lend_tail(self, cls, n, residency, classes, limits, score) -> torch.Tensor:
+    def lend_tail(self, cls, n, residency, classes, limits, score, tick=None) -> torch.Tensor:
         return reference.lend_tail(cls, n, residency, classes, limits)
 
 

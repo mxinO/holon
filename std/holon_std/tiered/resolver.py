@@ -74,13 +74,19 @@ class DeviceResolver:
         parts = parts if getattr(self._fetch[0], "parts", False) and not store.exclusive and before_fetch is None else 1
         defer = (store.cpu_admit or getattr(store.policy, "defer_cpu", False)) and before_fetch is not None and \
             getattr(self.resolve, "defers", False)
+        # the policy's fill of empty slots (FN §21.15): the target's layers, their pieces listed apart (`later`)
+        fill = getattr(self.resolve, "fills", False) and self.group < store.borrowing_groups and not store.exclusive
+        fills = {"fill": fill} if getattr(self.resolve, "fills", False) else {}
         out = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
             self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
             store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
             store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs,
-            **({"split": True} if split else {}), **({"defer": True} if defer else {}), **self.state)
+            **({"split": True} if split else {}), **({"defer": True} if defer or fill else {}), **fills,
+            **self.state)
         slots, fetch, n, cpu = out[:4]
+        if fill and not defer:                   # the fill's pieces: copied after the layer (`fetch_later`)
+            store.fetch_later(self._fetch, self.classes, out[-2], out[-1])
         self._prepared = False
         if split:                                # the fetch on a side stream; the hits' passes run meanwhile
             main = torch.accelerator.current_stream(ids.device)
@@ -103,7 +109,9 @@ class DeviceResolver:
                           store.n_moves)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
-        store.wait_later()                       # an earlier call's deferred copies off the link first
+        if store.cpu_admit or getattr(store.policy, "defer_cpu", False):
+            store.wait_later()                   # an earlier call's admitted CPU experts off the link first (a fill's
+                                                 # share it: joined at the target's last layer only)
         self._gather(fetch, n)
         if defer:                                # the CPU's admitted experts: their pieces after the call
             store.fetch_later(self._fetch, self.classes, out[4], out[5])

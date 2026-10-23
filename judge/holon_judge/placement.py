@@ -132,7 +132,7 @@ def parity(trace: Trace) -> dict:
     from holon_plugins.placement.lfu.reference import replay
 
     terms = dict(trace.terms)
-    if terms:                                          # placement.budget's: F11's replay with its cap and margin
+    if "budget" in terms:                              # placement.budget's: F11's replay with its cap and margin
         terms["budget"] = None if terms["budget"] < 0 else terms["budget"]
     want = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks, **terms)
     differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True)

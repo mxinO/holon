@@ -384,23 +384,28 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
                                       np.ones(1, np.int32), np.zeros(1, np.int64)))
 
 
-@pytest.mark.parametrize("policy, copy", [("", "sm"), ("placement.lru@1", "sm"), ("", "dma")])
+@pytest.mark.parametrize("policy, copy", [("", "sm"), ("placement.lru@1", "sm"), ("", "dma"), ("", "fill")])
 def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, policy, copy):
     """D4's device lending and D8 on the CPU: a step of 10 prompt tokens (its whole budget) streams every layer's
     missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
     (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
     victim: the outputs are the resident store's, the cache never shrinks (per class, resident pieces + empty slots
     stay the seed's), and F11's residency, empty slots included, is its replay oracle's at every step — mixed steps
-    (decode rows and a prompt chunk, `chunk_with_decode`) included."""
+    (decode rows and a prompt chunk, `chunk_with_decode`) included; with the fill (`lfu.fill_every`, FN §21.15), its
+    decode steps put absent experts into the empty slots the lending left, under the same parity."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, prompts = tiny_moe_deep
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
+    fill = copy == "fill"
     engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10,
-        "moe.ring_copy": copy})
+        "moe.ring_copy": "sm" if fill else copy} | ({"lfu.fill_every": 2, "lfu.fill": 2} if fill else {}))
     store, mixed = engine.ctx.shared_objects[KEY], []
+    empties = []                      # after each step: the empty slots, and whether it lent
+    store.taps.append(lambda step, record: empties.append((sum(map(len, store.residency.empty)),
+                                                           record["lends"] is not None)))
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     offload = engine.executor.model.layers[0].ffn._store
     assert store.staging == 6 and store.prefill == 8 and store.lending
@@ -425,6 +430,9 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
+    # a decode step after a lending one: the fill takes empty slots (none left without it but by admissions)
+    after = [b[0] for a, b in zip(empties, empties[1:], strict=False) if a[1] and not b[1]]
+    assert not fill or min(after) < max(e for e, _ in empties), empties
 
 
 @pytest.fixture(scope="module")
@@ -866,7 +874,7 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
-                                           ("", "*=0.25 split"), ("", "*=0.75 pipe"),
+                                           ("", "*=0.25 split"), ("", "*=0.75 pipe"), ("", "*=0.75 fill"),
                                            ("", "*=0.25 ssd"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -887,14 +895,16 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
     ssd, split = ring == "ssd", ring == "split"      # their copies on SMs / copy engines, "tail" lending a tail (D11)
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
-    pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
-                                                     # "pipe": prompt steps stage, their misses in 4 fetched parts
+    pipe, fill = ring == "pipe", ring == "fill"      # resident entries first, the misses' fetch on a side stream;
+    ring = "tail" if fill else ring                  # "pipe": prompt steps stage, their misses in 4 fetched parts;
+                                                     # "fill": the tail's, and F11's fill of empty slots (FN §21.15)
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
         "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"} | (
         {"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {}) | (
-        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
+        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}) | (
+        {"lfu.fill_every": 2, "lfu.fill": 2, "moe.later_copy": "fetch"} if fill else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(

@@ -3,18 +3,22 @@
 (spikes/x0_offload/m6/replay.py) extended to the device's terms — f32, decay on steps with decode rows, the device's
 tie-breaks, row kinds, lending and the lent slots' return.
 
-`moe_resolve.lfu@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's decayed counts `score [E] f32` (state, zero
-at a seed). A call with a routed (not dropped) entry of a `DECODE` row first decays every score (× 0.915 in f32), then
-adds 1.0 (in f32, one add per entry) per entry of a `DECODE` row; then it ranks the call's candidates — experts routed
-by a `DECODE` row and missing in every role of the map (a ring piece included) — by score descending, ties by expert
-id. The first ones take the layer's empty slots, unconditionally, from the top of its stack (an empty slot is the
-layer's first victim, below every resident); the rest pair with its victims — experts resident in every role (in cache
-slots) routed by no live entry of the call — by score ascending, ties by expert id, and are admitted while the
-candidate's score is strictly greater than its victim's (the first failing pair stops the pairing: the layer keeps its
-slots). An admitted expert takes its victim's (or empty) slot in every role (a victim's entries become −1: the RAM tier
-holds every expert under this policy, D10), is logged in that order, and is gathered straight into its slots; the
-call's other misses are fetched as @1's. A call without such an entry (a prefill chunk) changes nothing but what @1
-does.
+`moe_resolve.lfu@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's decayed counts `score [E] f32` (state, zero at
+a seed). A call with a routed (not dropped) entry of a `DECODE` row first decays every score (× 0.915 in f32), then adds
+1.0 (in f32, one add per entry) per entry of a `DECODE` row; then it ranks the call's candidates — experts routed by a
+`DECODE` row and missing in every role of the map (a ring piece included) — by score descending, ties by expert id. The
+first ones take the layer's empty slots, unconditionally, from the top of its stack (an empty slot is the layer's first
+victim, below every resident); the rest pair with its victims — experts resident in every role (in cache slots) routed
+by no live entry of the call — by score ascending, ties by expert id, and are admitted while the candidate's score is
+strictly greater than its victim's (the first failing pair stops the pairing: the layer keeps its slots). The fill (FN
+§21.15; `fill_every` > 0, with the layer's `tick [1]` — its calls with a decode row so far): on a call with a decode row
+whose tick plus `group` is a multiple of `fill_every`, up to `fill` experts missing in every role of the map as the call
+found it and routed by none of its live entries take the empty slots the admissions left, from the top, score
+descending, ties by expert id; each is logged as an empty-slot admission and its pieces listed apart (`later`, as the
+CPU's under `defer`): nothing reads them before the next step. The tick then counts the call. An admitted expert takes
+its victim's (or empty) slot in every role (a victim's entries become −1: the RAM tier holds every expert under this
+policy, D10), is logged in that order, and is gathered straight into its slots; the call's other misses are fetched as
+@1's. A call without such an entry (a prefill chunk) changes nothing but what @1 does.
 
 `lend(need, residency, classes, score)` picks whole resident experts in their order — coldest by score first, ties by
 expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's role slots go
@@ -35,7 +39,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                     limits: torch.Tensor, staging: int, score: torch.Tensor, group: int,
                     ring: torch.Tensor | None = None, stage: torch.Tensor | None = None,
                     empty: torch.Tensor | None = None, n_empty: int = 0, plan: torch.Tensor | None = None,
-                    defer: bool = False, budget: int | None = None, gain: float = 0.0) -> dict:
+                    defer: bool = False, budget: int | None = None, gain: float = 0.0, tick: int | None = None,
+                    fill: int = 0, fill_every: int = 0) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, F]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
     increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
     `score`, `n_empty`, the delta `records`. `ring` defaults to none, `stage` to the staging slots k + i, `empty` to
@@ -43,7 +48,8 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     the CPU's experts are candidates too: an admitted one's pieces are listed apart, `later [R, 2, F]` and `n_later [R]`
     (fetched after the call: the CPU serves its entries), never in `fetch`. `budget` caps the call's admissions (the
     empty slots taken included; placement.budget's), and `gain` is the margin a candidate's score must pass its
-    victim's by (f32; 0: strictly greater)."""
+    victim's by (f32; 0: strictly greater). `tick` (the layer's, None: no fill), `fill`, `fill_every`: the fill; its
+    `tick` returned."""
     t, k = ids.shape
     experts, roles = residency.shape
     ids, kinds = ids.long().cpu(), kinds.long().cpu()
@@ -59,7 +65,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     needed = set(routed[live].tolist())
     seen = torch.zeros(experts, dtype=torch.int32)
     seen[sorted(needed)] = 1
-    records = []
+    records, filled = [], []
     if (counts > 0).any():
         seen[sorted(needed)] |= 2                                       # the victims' scope
         for e in range(experts):
@@ -82,6 +88,16 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 break
             after[a], after[b] = before[b], -1
             records.append((group, a, b))
+        if tick is not None:
+            if fill_every > 0 and defer and (tick + group) % fill_every == 0:
+                absent = sorted((e for e in range(experts) if (before[e] < 0).all() and e not in needed),
+                                key=lambda e: (-score[e], e))
+                for i, a in enumerate(absent[:min(fill, n_empty)]):
+                    after[a] = empty[:, n_empty - 1 - i]
+                    records.append((group, a, -2 - (n_empty - 1 - i)))
+                    filled.append(a)
+                n_empty -= min(fill, n_empty, len(absent))
+            tick += 1
     seen[sorted(taken)] |= 4                                            # the CPU's
     admitted = {a for _, a, _ in records}
     slots = torch.arange(k).expand(roles, t, k).clone()                 # null slot j by default
@@ -92,7 +108,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
     later = torch.full((roles, 2, width), -1, dtype=torch.int64)
     n_later = torch.zeros(roles, dtype=torch.int64)
     for r in range(roles):
-        deferred = sorted(taken & admitted)
+        deferred = sorted((taken & admitted) | set(filled))
         n_later[r] = len(deferred)
         for i, e in enumerate(deferred[:width]):
             later[r, :, i] = torch.tensor([host[e, r] if host[e, r] >= 0 else -2 - e, after[e, r]])
@@ -117,7 +133,7 @@ def moe_resolve_lfu(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Ten
                 errors |= RANGE
     return {"slots": slots.int(), "fetch": fetch.int(), "n_fetch": n_fetch.int(), "counts": counts.int(),
             "routed": seen, "errors": errors, "residency": after.int(), "score": torch.from_numpy(score),
-            "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs} | (
+            "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs, "tick": tick} | (
         {"later": later.int(), "n_later": n_later.int()} if defer else {})
 
 
@@ -171,7 +187,8 @@ def _pick(order: list[tuple], need: np.ndarray, classes: torch.Tensor, shape: tu
 
 def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
            classes: np.ndarray | None = None, slots: np.ndarray | None = None, sizes: np.ndarray | None = None,
-           stacks: list | None = None, budget: int | None = None, gain: float = 0.0) -> list[dict]:
+           stacks: list | None = None, budget: int | None = None, gain: float = 0.0, fill: int = 0,
+           fill_every: int = 0) -> list[dict]:
     """The L1 parity oracle: F11's residency [G, E] (whole experts), empty slots per layer [G] and their stacks after
     each step of a trace, from the seeded residency (and scores, zero at a seed). A step holds its routing `counts`
     [G, E] of decode rows, the experts any of its rows routed (`needed` [G, E]; default: the counts'), those the CPU
@@ -183,14 +200,16 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
     (default: a stand-in slot per expert), `sizes` [C] the classes' arena slots, `stacks` each layer's empty slots then
     ([R] each, bottom first; default none).
     The M6 replay's `lfu` (`simulate`, `_pick_swap` with gain 0), with the scores in f32 (× 0.915, then + 1.0 per
-    entry), decayed only on steps with decode rows, empty slots filled first (from the top of the stack)."""
+    entry), decayed only on steps with decode rows, empty slots filled first (from the top of the stack); with
+    `fill_every`, the fill after each layer's admissions (its tick: the trace's steps with decode rows so far, zero at
+    the trace's start)."""
     groups, experts = seed.shape
     roles = 1 if classes is None else classes.shape[1]
     at = np.where(seed[..., None], np.arange(experts)[:, None], -1).repeat(roles, -1) if slots is None else \
         np.asarray(slots, dtype=np.int64).copy()                       # [G, E, R]: each piece's slot, −1 none
     u = np.zeros(seed.shape, dtype=np.float32) if score is None else score.astype(np.float32).copy()
     stack = [[np.asarray(e) for e in s] for s in stacks] if stacks is not None else [[] for _ in range(groups)]
-    out = []
+    out, tick = [], 0
     for step in steps:
         c, lends = step["counts"], step.get("lends")
         lent: list[list] = [[] for _ in range(groups)]                 # per layer: (call, expert, its slots)
@@ -215,7 +234,7 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
                 u = np.where(c > n, u + np.float32(1.0), u)
             need, cpu = step.get("needed", c > 0), step.get("cpu", np.zeros(seed.shape, dtype=bool))
             for g in range(groups):
-                res = (at[g] >= 0).all(-1)
+                res = was = (at[g] >= 0).all(-1)
                 cands = sorted(np.flatnonzero((c[g] > 0) & ~res & ~cpu[g]), key=lambda e: (-u[g, e], e))
                 cap = len(cands) if budget is None else budget              # (placement.budget's)
                 spare = min(len(cands), len(stack[g]), cap)
@@ -228,6 +247,13 @@ def replay(seed: np.ndarray, steps: list[dict], score: np.ndarray | None = None,
                     if not u[g, a] > u[g, b] + np.float32(gain):
                         break
                     at[g, a], at[g, b] = at[g, b], -1
+                if fill_every > 0 and (tick + g) % fill_every == 0:
+                    absent = sorted(np.flatnonzero(~was & ~need[g]), key=lambda e: (-u[g, e], e))
+                    n = min(fill, len(stack[g]), len(absent))
+                    for i, a in enumerate(absent[:n]):
+                        at[g, a] = stack[g][-1 - i]
+                    del stack[g][len(stack[g]) - n:]
+            tick += 1
         if lends is not None:
             stack = [f + [s for *_, s in sorted(back, key=lambda x: x[:2])]
                      for f, back in zip(found, lent, strict=True)]
