@@ -2891,3 +2891,60 @@ catch-up would save one read of the mix and q / k / v, ≈ 0.04 ms a pass. Not b
 
 (Pooled tokens per pass: 5080 2.79 against Strata's 2.74, 5090 2.86 against 2.92; Strata's 5090 32K MTP row read
 184 tok/s here against 175–179 in the earlier allocations.)
+
+### 21.14 The 5090's 1K prefill bytes (item 6), its cache share, lending tail or coldest (item 5)
+
+**What a 1K prompt fetches** (`spikes/fn7/prompt_bytes.py` on the 5090's deployment, the bench's warm-up then its
+three 1K prompts; each layer's routed experts counted at the stores' `route`, the bytes they miss replayed): the
+prompts route to 34–37 GB of experts and miss 21.3 / 19.7 / 18.7 GB of them (the cache they met, less what they lent:
+the measured fetch). The cache they meet holds **39.6% / 39.5% / 42.0%** of the experts' bytes, not its 47.8%:
+a prompt's lent slots come back empty and decode admits only what it routes, which is less than the room. Against
+the same routes:
+
+| Cache | 1024/0 | /1 | /2 |
+|---|---|---|---|
+| the one met, less what the prompt lent (measured) | 21.34 | 19.66 | 18.71 |
+| the one met | 20.79 | 19.24 | 17.10 |
+| the profile's (F2's order), the met cache's bytes | 20.81 | 19.35 | 17.53 |
+| the one met, its empty slots filled in the profile's order | 17.59 | 16.16 | 15.08 |
+| the same, less what the prompt lent | 18.14 | 16.58 | 16.69 |
+| the profile's at Strata's 54% | 15.10 | 13.73 | 13.04 |
+
+(GB missed.) Profile seeding at the same bytes is no better than F11's cache: the gap to Strata's ≈ 12.5 GB is the
+share, and 8 points of it are the holes. Filling them before the prompt cuts its bytes 11–16% (a 1K prefill bound by
+its fetch: ≈ 0.86 → ≈ 0.96 against Strata); the rest is the share (47.8% against 54%). Strata refills the slots its
+prompt borrowed right after the prompt (in its prefill time).
+
+**Lending tail or coldest** (item 5, the 5080's MTP deployment, `after_prompt.py`): with `moe.ring_lend=coldest`
+(the step-peak loan needs the tail: off) the experts the prompt lent are 16.8% / 16.6% of the 20 steps' misses after
+a 1K prompt (17.8% / 17.9% after 4K), against 19.7% / 19.8% (35.8% / 37.8%) with the tail and its loan; the misses
+8,114 / 7,303 against 8,145 / 7,290 at 1K, 7,506 / 8,675 against 8,375 / 9,300 at 4K. Not below the 5% the item
+asked for: no change (the 5080 keeps the tail and its loan, §21.12).
+
+**The 5090's cache share** (3 rounds, the MTP and plain deployments, same allocation as Strata; this desktop ran
+both engines faster than the earlier ones):
+- (a) `--max-step-tokens 6144`: experts cached 47.8% → 48.6% (46.1% → 46.8% with the head). MTP +0.8% / +0.8% /
+  +2.9% (per-pass rate × pooled acceptance 0.92 → 0.94, 0.94 → 0.96, 0.92 → 0.92), decode +0.5% / +0.4% / +2.5%,
+  prefill +1.1% / +1.6% / −5.0% (the 32K guard 1.09 → 1.04, the MTP deployment's −5.3%). **Shipped** under the
+  lead's rule: the 32K prefill it costs stays above its 0.9 bar by more than 5%, every row below its bar gains. (The
+  32K texts differ from the 8K step's — its prompts chunk elsewhere —: gates (c) and (d) at FN close run on it.)
+- (b) The step-peak loan where it fits — at 6K steps its largest loan does, at 8K it outgrows its class (§21.12): 50.4%
+  cached (48.6% with the head), but prefill −6.7% at 4K and −8.5% at 32K (the MTP deployment's 32K −33%), MTP +1.2% /
+  −0.6% / −0.4%; after a 1K prompt it lends 2,552 / 2,309 experts against 2,393 / 2,153 and the 20 steps miss 5,151 /
+  4,565 routes against 5,137 / 4,440. Not shipped. A loan capped at what the class can give at 8K would lend the same
+  experts at its prompts for less of the peak; the measured pattern (each prompt's lending costs its prefill more than
+  the share gives decode) says it would not pay, and partial lending needs the core's reservation to know the lent
+  part: not built.
+
+**The table** (the 5080 as in §21.13, unchanged; the 5090 from this allocation, its deployment now with 6K steps):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.04 | 1.04 | 1.04 | 1.16 | 1.16 | 1.13 |
+| MTP decode | 0.95 | 1.02 | 1.03 | 0.95 | 0.97 | 0.91 |
+| MTP, per-pass rate × pooled acceptance | 0.97 | 0.98 | 1.05 | 0.94 | 0.96 | 0.92 |
+| Prefill | 0.97 | 1.19 | 1.00 | 0.86 | 1.21 | 1.04 |
+
+Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows, the 5090's 1K prefill (0.86). What the
+replay names for the last: the holes a prompt's lending leaves in the cache the next one meets (filling them: −11 to
+−16% of a 1K prompt's bytes), then the share.
