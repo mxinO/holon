@@ -2714,3 +2714,14 @@ first 10 steps hit 0.42–0.84 (a second prompt: 0.55–0.95) of the routes agai
 prompt (`refill_one`). The drafter's small kernels are 0.24 ms a pass: of the 232 ops of an eager drafter run, about
 90 are the core's sub-step preparation (positions, page writes, the planners' device half), the rest the head's casts,
 gates, argmax and table writes; fusing all of the drafter's would save ≈ 0.25 ms a pass (1%).
+
+Fix 2 retargeted to refilling the lent slots after the prompt (Strata's refill; deterministic placement, the output
+bitwise; three copy arms: blocking, first on the fetch stream, rate-limited into the link's idle windows), the glue
+fusion and Q8_0 projections dropped: the lead's call (2026-10-23). **Measured before building** (`holes4.py`, the A5000
+at 1K, the 5080's MTP deployment with `aux.*=0.3`; a second prompt after 240 decode tokens of a first): the prompt lends
+2,986 experts (2,512 for the first); the first 20 steps miss 3,590 routes (5,915), every one an expert's first miss
+since the prompt (F11 admits each at once: no repeat misses), 2,854 distinct experts (4,599). Of those routes the lent
+experts are 28% (17%); the prompt's own routing ranks no better (its 3,000 most-routed absent experts: 13%, 4%). The
+rest are the new request's working set, absent before the prompt too. A refill of the pre-prompt contents copies
+2,986 experts (≈ 4 GB) to spare ≈ 1,000 of those routes (≈ 1 GB of fetches): a blocking or first-in refill costs the
+link more than it saves; one in idle windows saves at most ≈ 28% of the transient (≈ 0.3 ms a pass on the 5090).
