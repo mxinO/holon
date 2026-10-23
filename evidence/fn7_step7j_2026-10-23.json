@@ -1,0 +1,8293 @@
+{
+ "date": "2026-10-23",
+ "doc": "docs/v1-flash-next.md \u00a721.16",
+ "abba_rtx-5090": {
+  "old": "4e3d8e7",
+  "new": "60fd5b7",
+  "commit": "60fd5b7a348da4d804da15870017f0cbc043ef11",
+  "rounds": 3,
+  "table": {
+   "a_s6_off": {
+    "1024": {
+     "decode_tps": 127.618,
+     "prefill_tps": 1908.635
+    },
+    "4096": {
+     "decode_tps": 123.93,
+     "prefill_tps": 5244.689
+    },
+    "32768": {
+     "decode_tps": 116.011,
+     "prefill_tps": 5788.108
+    }
+   },
+   "b_s6_off": {
+    "1024": {
+     "decode_tps": 128.152,
+     "prefill_tps": 1913.34
+    },
+    "4096": {
+     "decode_tps": 124.493,
+     "prefill_tps": 5272.266
+    },
+    "32768": {
+     "decode_tps": 116.433,
+     "prefill_tps": 5813.675
+    }
+   },
+   "b_s6_mtp": {
+    "1024": {
+     "decode_tps": 161.501,
+     "prefill_tps": 1877.723,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 17.208
+    },
+    "4096": {
+     "decode_tps": 154.959,
+     "prefill_tps": 5030.183,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.676
+    },
+    "32768": {
+     "decode_tps": 163.413,
+     "prefill_tps": 5735.406,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.618
+    }
+   },
+   "a_s6_mtp": {
+    "1024": {
+     "decode_tps": 161.989,
+     "prefill_tps": 1879.94,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 17.157
+    },
+    "4096": {
+     "decode_tps": 155.424,
+     "prefill_tps": 5025.24,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.624
+    },
+    "32768": {
+     "decode_tps": 163.874,
+     "prefill_tps": 5735.02,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.562
+    }
+   }
+  }
+ },
+ "k_resolve_rtx-a5000": [
+  "rtx-a5000 spikes/fn7/resolve_bench.py (tick passed where the commit has it), p50 / p10 us per call, 2 runs each alike",
+  "4e3d8e7 tokens 1: 11.9 / 11.8; tokens 4: 12.1 / 12.0",
+  "60fd5b7 no tick tokens 1: 12.3 / 12.1; tokens 4: 12.4 / 12.3",
+  "60fd5b7 tick tokens 1: 12.3 / 12.2; tokens 4: 12.5 / 12.4",
+  "0c9bb57 tick tokens 1: 12.0 / 11.8; tokens 4: 12.2 / 12.0"
+ ],
+ "lend_min": {
+  "rtx-5080": {
+   "mtp": [
+    {
+     "key": "1024/0",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 779,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 656588800,
+     "empties": [
+      0,
+      54,
+      54,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 779,
+      "call1": 2106,
+      "call2": 198,
+      "call3": 16,
+      "call4": 74
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       779,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       856,
+       23,
+       682,
+       792,
+       0,
+       0
+      ],
+      [
+       56,
+       0,
+       512,
+       142,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       16,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       74,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      912,
+      3227,
+      512,
+      1024,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       912,
+       1024,
+       1024,
+       970,
+       0,
+       0
+      ],
+      "stage": [
+       325,
+       403,
+       403,
+       400,
+       0,
+       0
+      ],
+      "stage_absent": [
+       456,
+       512,
+       512,
+       485,
+       0,
+       0
+      ],
+      "parts": [
+       650,
+       806,
+       806,
+       800,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.803
+     },
+     "min_ring": {
+      "lent_experts": 3101,
+      "need": [
+       912,
+       191,
+       970,
+       952,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1714,
+      "need": [
+       313,
+       0,
+       299,
+       323,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2138,
+      "need": [
+       453,
+       0,
+       458,
+       448,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 17.39,
+      "lent": 21.3,
+      "min_ring": 21.22,
+      "min_stage": 19.52,
+      "min_stage_absent": 19.99
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 6867,
+        "spared_routes": 80,
+        "share": 0.012
+       },
+       "all": {
+        "missed_routes": 24314,
+        "spared_routes": 87,
+        "share": 0.004
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 6867,
+        "spared_routes": 1224,
+        "share": 0.178
+       },
+       "all": {
+        "missed_routes": 24314,
+        "spared_routes": 1633,
+        "share": 0.067
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 6867,
+        "spared_routes": 862,
+        "share": 0.126
+       },
+       "all": {
+        "missed_routes": 24314,
+        "spared_routes": 1156,
+        "share": 0.048
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 779,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 656588800,
+     "empties": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 779,
+      "call1": 2160,
+      "call2": 204,
+      "call3": 22,
+      "call4": 68
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       779,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       856,
+       77,
+       706,
+       792,
+       0,
+       0
+      ],
+      [
+       60,
+       0,
+       512,
+       144,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       512,
+       20,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       68,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      918,
+      3233,
+      512,
+      1024,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       918,
+       1024,
+       1024,
+       966,
+       0,
+       0
+      ],
+      "stage": [
+       351,
+       398,
+       398,
+       395,
+       0,
+       0
+      ],
+      "stage_absent": [
+       459,
+       512,
+       512,
+       483,
+       0,
+       0
+      ],
+      "parts": [
+       702,
+       796,
+       796,
+       790,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.803
+     },
+     "min_ring": {
+      "lent_experts": 3169,
+      "need": [
+       918,
+       245,
+       1024,
+       960,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1794,
+      "need": [
+       333,
+       0,
+       357,
+       325,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2187,
+      "need": [
+       451,
+       0,
+       512,
+       445,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 16.17,
+      "lent": 20.04,
+      "min_ring": 19.97,
+      "min_stage": 18.32,
+      "min_stage_absent": 18.77
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 8400,
+        "spared_routes": 50,
+        "share": 0.006
+       },
+       "all": {
+        "missed_routes": 27308,
+        "spared_routes": 68,
+        "share": 0.002
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 8400,
+        "spared_routes": 1031,
+        "share": 0.123
+       },
+       "all": {
+        "missed_routes": 27308,
+        "spared_routes": 1431,
+        "share": 0.052
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 8400,
+        "spared_routes": 734,
+        "share": 0.087
+       },
+       "all": {
+        "missed_routes": 27308,
+        "spared_routes": 1011,
+        "share": 0.037
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 779,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 656588800,
+     "empties": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 779,
+      "call1": 2160,
+      "call2": 210,
+      "call3": 20,
+      "call4": 72
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       779,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       856,
+       77,
+       706,
+       792,
+       0,
+       0
+      ],
+      [
+       70,
+       0,
+       512,
+       140,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       20,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       72,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      926,
+      3241,
+      512,
+      1024,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       926,
+       1024,
+       1024,
+       972,
+       0,
+       0
+      ],
+      "stage": [
+       320,
+       413,
+       413,
+       404,
+       0,
+       0
+      ],
+      "stage_absent": [
+       463,
+       512,
+       512,
+       486,
+       0,
+       0
+      ],
+      "parts": [
+       640,
+       826,
+       826,
+       808,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.803
+     },
+     "min_ring": {
+      "lent_experts": 3175,
+      "need": [
+       926,
+       245,
+       1024,
+       958,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1765,
+      "need": [
+       317,
+       0,
+       368,
+       301,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2181,
+      "need": [
+       448,
+       0,
+       512,
+       442,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 15.32,
+      "lent": 19.23,
+      "min_ring": 19.15,
+      "min_stage": 17.42,
+      "min_stage_absent": 17.92
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 7646,
+        "spared_routes": 50,
+        "share": 0.007
+       },
+       "all": {
+        "missed_routes": 21781,
+        "spared_routes": 64,
+        "share": 0.003
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 7646,
+        "spared_routes": 876,
+        "share": 0.115
+       },
+       "all": {
+        "missed_routes": 21781,
+        "spared_routes": 1250,
+        "share": 0.057
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 7646,
+        "spared_routes": 622,
+        "share": 0.081
+       },
+       "all": {
+        "missed_routes": 21781,
+        "spared_routes": 901,
+        "share": 0.041
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2903,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2563481600,
+     "empties": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2903,
+      "call1": 2272,
+      "call2": 174,
+      "call3": 24,
+      "call4": 72
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2903,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       968,
+       0,
+       706,
+       792,
+       0,
+       0
+      ],
+      [
+       38,
+       0,
+       512,
+       136,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       24,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       72,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      1006,
+      5445,
+      512,
+      1024,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1006,
+       1024,
+       1024,
+       968,
+       0,
+       0
+      ],
+      "stage": [
+       475,
+       492,
+       492,
+       458,
+       0,
+       0
+      ],
+      "stage_absent": [
+       503,
+       512,
+       512,
+       484,
+       0,
+       0
+      ],
+      "parts": [
+       950,
+       984,
+       984,
+       916,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.841
+     },
+     "min_ring": {
+      "lent_experts": 5375,
+      "need": [
+       1006,
+       0,
+       1024,
+       954,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4267,
+      "need": [
+       464,
+       0,
+       482,
+       418,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4352,
+      "need": [
+       496,
+       0,
+       512,
+       441,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.77,
+      "lent": 28.15,
+      "min_ring": 28.07,
+      "min_stage": 26.61,
+      "min_stage_absent": 26.71
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 8382,
+        "spared_routes": 35,
+        "share": 0.004
+       },
+       "all": {
+        "missed_routes": 22973,
+        "spared_routes": 59,
+        "share": 0.003
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 8382,
+        "spared_routes": 550,
+        "share": 0.066
+       },
+       "all": {
+        "missed_routes": 22973,
+        "spared_routes": 928,
+        "share": 0.04
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 8382,
+        "spared_routes": 515,
+        "share": 0.061
+       },
+       "all": {
+        "missed_routes": 22973,
+        "spared_routes": 876,
+        "share": 0.038
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2903,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2563481600,
+     "empties": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2903,
+      "call1": 2272,
+      "call2": 176,
+      "call3": 28,
+      "call4": 66
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2903,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       968,
+       0,
+       706,
+       792,
+       0,
+       0
+      ],
+      [
+       36,
+       0,
+       512,
+       140,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       512,
+       26,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       66,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      1006,
+      5445,
+      512,
+      1024,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1006,
+       1024,
+       1024,
+       968,
+       0,
+       0
+      ],
+      "stage": [
+       479,
+       495,
+       495,
+       452,
+       0,
+       0
+      ],
+      "stage_absent": [
+       503,
+       512,
+       512,
+       484,
+       0,
+       0
+      ],
+      "parts": [
+       958,
+       990,
+       990,
+       904,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.841
+     },
+     "min_ring": {
+      "lent_experts": 5383,
+      "need": [
+       1006,
+       0,
+       1024,
+       962,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4260,
+      "need": [
+       467,
+       0,
+       488,
+       402,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4344,
+      "need": [
+       492,
+       0,
+       512,
+       437,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.7,
+      "lent": 29.27,
+      "min_ring": 29.19,
+      "min_stage": 27.67,
+      "min_stage_absent": 27.78
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 7814,
+        "spared_routes": 29,
+        "share": 0.004
+       },
+       "all": {
+        "missed_routes": 22458,
+        "spared_routes": 44,
+        "share": 0.002
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 7814,
+        "spared_routes": 460,
+        "share": 0.059
+       },
+       "all": {
+        "missed_routes": 22458,
+        "spared_routes": 759,
+        "share": 0.034
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 7814,
+        "spared_routes": 429,
+        "share": 0.055
+       },
+       "all": {
+        "missed_routes": 22458,
+        "spared_routes": 708,
+        "share": 0.032
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2903,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2563481600,
+     "empties": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2903,
+      "call1": 2272,
+      "call2": 196,
+      "call3": 14
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2903,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       968,
+       0,
+       706,
+       792,
+       0,
+       0
+      ],
+      [
+       40,
+       0,
+       512,
+       156,
+       0,
+       0
+      ],
+      [
+       2,
+       0,
+       512,
+       12,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       512,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      1010,
+      5385,
+      512,
+      960,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1010,
+       1024,
+       1024,
+       960,
+       0,
+       0
+      ],
+      "stage": [
+       470,
+       488,
+       488,
+       444,
+       0,
+       0
+      ],
+      "stage_absent": [
+       505,
+       512,
+       512,
+       480,
+       0,
+       0
+      ],
+      "parts": [
+       940,
+       976,
+       976,
+       888,
+       0,
+       0
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.841
+     },
+     "min_ring": {
+      "lent_experts": 5385,
+      "need": [
+       1010,
+       0,
+       1024,
+       960,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4236,
+      "need": [
+       452,
+       0,
+       477,
+       404,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4363,
+      "need": [
+       489,
+       0,
+       512,
+       459,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 22.05,
+      "lent": 29.33,
+      "min_ring": 29.33,
+      "min_stage": 27.82,
+      "min_stage_absent": 27.97
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 12234,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 22481,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 12234,
+        "spared_routes": 638,
+        "share": 0.052
+       },
+       "all": {
+        "missed_routes": 22481,
+        "spared_routes": 819,
+        "share": 0.036
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 12234,
+        "spared_routes": 583,
+        "share": 0.048
+       },
+       "all": {
+        "missed_routes": 22481,
+        "spared_routes": 746,
+        "share": 0.033
+       }
+      }
+     }
+    }
+   ],
+   "off": [
+    {
+     "key": "1024/0",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 765,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 641536000,
+     "empties": [
+      0,
+      53,
+      53,
+      0
+     ],
+     "lent_experts": {
+      "tail": 765,
+      "call1": 2083,
+      "call2": 212,
+      "call3": 20,
+      "call4": 94
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       765,
+       0,
+       0,
+       0
+      ],
+      [
+       844,
+       26,
+       681,
+       780
+      ],
+      [
+       78,
+       0,
+       512,
+       134
+      ],
+      [
+       4,
+       0,
+       512,
+       16
+      ],
+      [
+       0,
+       0,
+       512,
+       94
+      ]
+     ],
+     "held": [
+      926,
+      3227,
+      512,
+      1024
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       926,
+       1024,
+       1024,
+       948
+      ],
+      "stage": [
+       330,
+       403,
+       403,
+       386
+      ],
+      "stage_absent": [
+       463,
+       512,
+       512,
+       474
+      ],
+      "parts": [
+       660,
+       806,
+       806,
+       772
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.799
+     },
+     "min_ring": {
+      "lent_experts": 3082,
+      "need": [
+       926,
+       206,
+       971,
+       932
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1715,
+      "need": [
+       311,
+       0,
+       307,
+       332
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2106,
+      "need": [
+       446,
+       0,
+       459,
+       436
+      ]
+     },
+     "missed_gb": {
+      "met": 16.89,
+      "lent": 20.82,
+      "min_ring": 20.71,
+      "min_stage": 19.04,
+      "min_stage_absent": 19.49
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2532,
+        "spared_routes": 33,
+        "share": 0.013
+       },
+       "all": {
+        "missed_routes": 16204,
+        "spared_routes": 86,
+        "share": 0.005
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2532,
+        "spared_routes": 557,
+        "share": 0.22
+       },
+       "all": {
+        "missed_routes": 16204,
+        "spared_routes": 1213,
+        "share": 0.075
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2532,
+        "spared_routes": 396,
+        "share": 0.156
+       },
+       "all": {
+        "missed_routes": 16204,
+        "spared_routes": 889,
+        "share": 0.055
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 765,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 641536000,
+     "empties": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 765,
+      "call1": 2136,
+      "call2": 228,
+      "call3": 14
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       765,
+       0,
+       0,
+       0
+      ],
+      [
+       844,
+       79,
+       706,
+       780
+      ],
+      [
+       64,
+       0,
+       512,
+       164
+      ],
+      [
+       0,
+       0,
+       512,
+       14
+      ],
+      [
+       0,
+       0,
+       512,
+       0
+      ]
+     ],
+     "held": [
+      908,
+      3143,
+      512,
+      958
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       908,
+       1024,
+       1024,
+       958
+      ],
+      "stage": [
+       340,
+       398,
+       398,
+       358
+      ],
+      "stage_absent": [
+       454,
+       512,
+       512,
+       479
+      ],
+      "parts": [
+       680,
+       796,
+       796,
+       716
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.799
+     },
+     "min_ring": {
+      "lent_experts": 3143,
+      "need": [
+       908,
+       259,
+       1024,
+       958
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1738,
+      "need": [
+       317,
+       0,
+       352,
+       304
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2161,
+      "need": [
+       449,
+       0,
+       512,
+       435
+      ]
+     },
+     "missed_gb": {
+      "met": 15.58,
+      "lent": 19.33,
+      "min_ring": 19.33,
+      "min_stage": 17.64,
+      "min_stage_absent": 18.14
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2328,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 15994,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2328,
+        "spared_routes": 317,
+        "share": 0.136
+       },
+       "all": {
+        "missed_routes": 15994,
+        "spared_routes": 1061,
+        "share": 0.066
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2328,
+        "spared_routes": 202,
+        "share": 0.087
+       },
+       "all": {
+        "missed_routes": 15994,
+        "spared_routes": 736,
+        "share": 0.046
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 765,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 641536000,
+     "empties": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 765,
+      "call1": 2136,
+      "call2": 178,
+      "call3": 24,
+      "call4": 88
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       765,
+       0,
+       0,
+       0
+      ],
+      [
+       844,
+       79,
+       706,
+       780
+      ],
+      [
+       44,
+       0,
+       512,
+       134
+      ],
+      [
+       2,
+       0,
+       512,
+       22
+      ],
+      [
+       0,
+       0,
+       512,
+       88
+      ]
+     ],
+     "held": [
+      890,
+      3191,
+      512,
+      1024
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       890,
+       1024,
+       1024,
+       950
+      ],
+      "stage": [
+       337,
+       413,
+       413,
+       385
+      ],
+      "stage_absent": [
+       445,
+       512,
+       512,
+       475
+      ],
+      "parts": [
+       674,
+       826,
+       826,
+       770
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.799
+     },
+     "min_ring": {
+      "lent_experts": 3105,
+      "need": [
+       890,
+       259,
+       1024,
+       938
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1752,
+      "need": [
+       308,
+       0,
+       369,
+       310
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 2152,
+      "need": [
+       439,
+       0,
+       512,
+       436
+      ]
+     },
+     "missed_gb": {
+      "met": 15.02,
+      "lent": 18.78,
+      "min_ring": 18.69,
+      "min_stage": 17.1,
+      "min_stage_absent": 17.56
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2300,
+        "spared_routes": 31,
+        "share": 0.013
+       },
+       "all": {
+        "missed_routes": 18370,
+        "spared_routes": 67,
+        "share": 0.004
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2300,
+        "spared_routes": 187,
+        "share": 0.081
+       },
+       "all": {
+        "missed_routes": 18370,
+        "spared_routes": 959,
+        "share": 0.052
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2300,
+        "spared_routes": 133,
+        "share": 0.058
+       },
+       "all": {
+        "missed_routes": 18370,
+        "spared_routes": 685,
+        "share": 0.037
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2845,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2503065600,
+     "empties": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2845,
+      "call1": 2232,
+      "call2": 160,
+      "call3": 32,
+      "call4": 136
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2845,
+       0,
+       0,
+       0
+      ],
+      [
+       940,
+       0,
+       706,
+       780
+      ],
+      [
+       42,
+       0,
+       512,
+       118
+      ],
+      [
+       2,
+       0,
+       512,
+       30
+      ],
+      [
+       40,
+       0,
+       512,
+       96
+      ]
+     ],
+     "held": [
+      1024,
+      5405,
+      512,
+      1024
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       988,
+       1024,
+       1024,
+       956
+      ],
+      "stage": [
+       458,
+       492,
+       492,
+       446
+      ],
+      "stage_absent": [
+       494,
+       512,
+       512,
+       478
+      ],
+      "parts": [
+       916,
+       984,
+       984,
+       892
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.838
+     },
+     "min_ring": {
+      "lent_experts": 5279,
+      "need": [
+       986,
+       0,
+       1024,
+       936
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4166,
+      "need": [
+       443,
+       0,
+       483,
+       395
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4273,
+      "need": [
+       484,
+       0,
+       512,
+       432
+      ]
+     },
+     "missed_gb": {
+      "met": 19.98,
+      "lent": 27.43,
+      "min_ring": 27.26,
+      "min_stage": 25.77,
+      "min_stage_absent": 25.91
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2855,
+        "spared_routes": 29,
+        "share": 0.01
+       },
+       "all": {
+        "missed_routes": 13161,
+        "spared_routes": 86,
+        "share": 0.007
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2855,
+        "spared_routes": 239,
+        "share": 0.084
+       },
+       "all": {
+        "missed_routes": 13161,
+        "spared_routes": 736,
+        "share": 0.056
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2855,
+        "spared_routes": 219,
+        "share": 0.077
+       },
+       "all": {
+        "missed_routes": 13161,
+        "spared_routes": 657,
+        "share": 0.05
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2845,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2503065600,
+     "empties": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2845,
+      "call1": 2232,
+      "call2": 164,
+      "call3": 24,
+      "call4": 96
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2845,
+       0,
+       0,
+       0
+      ],
+      [
+       940,
+       0,
+       706,
+       780
+      ],
+      [
+       36,
+       0,
+       512,
+       128
+      ],
+      [
+       4,
+       0,
+       512,
+       20
+      ],
+      [
+       0,
+       0,
+       512,
+       96
+      ]
+     ],
+     "held": [
+      980,
+      5361,
+      512,
+      1024
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       980,
+       1024,
+       1024,
+       954
+      ],
+      "stage": [
+       467,
+       495,
+       495,
+       439
+      ],
+      "stage_absent": [
+       490,
+       512,
+       512,
+       477
+      ],
+      "parts": [
+       934,
+       990,
+       990,
+       878
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.838
+     },
+     "min_ring": {
+      "lent_experts": 5267,
+      "need": [
+       980,
+       0,
+       1024,
+       930
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4181,
+      "need": [
+       457,
+       0,
+       492,
+       387
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4278,
+      "need": [
+       481,
+       0,
+       512,
+       440
+      ]
+     },
+     "missed_gb": {
+      "met": 21.05,
+      "lent": 28.52,
+      "min_ring": 28.4,
+      "min_stage": 26.93,
+      "min_stage_absent": 27.06
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 3135,
+        "spared_routes": 35,
+        "share": 0.011
+       },
+       "all": {
+        "missed_routes": 13763,
+        "spared_routes": 57,
+        "share": 0.004
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 3135,
+        "spared_routes": 187,
+        "share": 0.06
+       },
+       "all": {
+        "missed_routes": 13763,
+        "spared_routes": 526,
+        "share": 0.038
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 3135,
+        "spared_routes": 177,
+        "share": 0.056
+       },
+       "all": {
+        "missed_routes": 13763,
+        "spared_routes": 482,
+        "share": 0.035
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 0,
+     "tail_slots": 2845,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 2503065600,
+     "empties": [
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 2845,
+      "call1": 2232,
+      "call2": 180,
+      "call3": 22
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       2845,
+       0,
+       0,
+       0
+      ],
+      [
+       940,
+       0,
+       706,
+       780
+      ],
+      [
+       46,
+       0,
+       512,
+       134
+      ],
+      [
+       4,
+       0,
+       512,
+       18
+      ],
+      [
+       0,
+       0,
+       512,
+       0
+      ]
+     ],
+     "held": [
+      990,
+      5279,
+      512,
+      932
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       990,
+       1024,
+       1024,
+       932
+      ],
+      "stage": [
+       455,
+       488,
+       488,
+       428
+      ],
+      "stage_absent": [
+       495,
+       512,
+       512,
+       466
+      ],
+      "parts": [
+       910,
+       976,
+       976,
+       856
+      ]
+     },
+     "tail_split": {
+      "loan_share": 0.838
+     },
+     "min_ring": {
+      "lent_experts": 5279,
+      "need": [
+       990,
+       0,
+       1024,
+       932
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 4144,
+      "need": [
+       437,
+       0,
+       471,
+       391
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 4278,
+      "need": [
+       479,
+       0,
+       512,
+       442
+      ]
+     },
+     "missed_gb": {
+      "met": 21.33,
+      "lent": 28.54,
+      "min_ring": 28.54,
+      "min_stage": 27.05,
+      "min_stage_absent": 27.22
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 3825,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 18448,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 3825,
+        "spared_routes": 233,
+        "share": 0.061
+       },
+       "all": {
+        "missed_routes": 18448,
+        "spared_routes": 825,
+        "share": 0.045
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 3825,
+        "spared_routes": 203,
+        "share": 0.053
+       },
+       "all": {
+        "missed_routes": 18448,
+        "spared_routes": 730,
+        "share": 0.04
+       }
+      }
+     }
+    }
+   ],
+   "mtp_ring": null,
+   "off_ring": null
+  },
+  "rtx-5090": {
+   "mtp": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      430,
+      1038,
+      119,
+      456,
+      352,
+      319,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 45,
+      "call1": 981
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       82,
+       0,
+       393,
+       56,
+       269,
+       193,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1863,
+      566,
+      512,
+      639,
+      520,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       740,
+       732,
+       764,
+       710,
+       0,
+       0
+      ],
+      "stage": [
+       371,
+       371,
+       242,
+       263,
+       262,
+       262,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       370,
+       366,
+       382,
+       355,
+       0,
+       0
+      ],
+      "parts": [
+       94,
+       94,
+       62,
+       66,
+       66,
+       66,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 162,
+      "need": [
+       0,
+       0,
+       113,
+       0,
+       4,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 454,
+      "need": [
+       0,
+       0,
+       251,
+       0,
+       139,
+       19,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 45,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 45,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.23,
+      "lent": 21.84,
+      "min_stage": 20.47,
+      "min_stage_absent": 20.94,
+      "min_parts": 20.27,
+      "min_parts_absent": 20.27
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 3644,
+        "spared_routes": 401,
+        "share": 0.11
+       },
+       "all": {
+        "missed_routes": 11494,
+        "spared_routes": 717,
+        "share": 0.062
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 3644,
+        "spared_routes": 284,
+        "share": 0.078
+       },
+       "all": {
+        "missed_routes": 11494,
+        "spared_routes": 488,
+        "share": 0.042
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 3644,
+        "spared_routes": 455,
+        "share": 0.125
+       },
+       "all": {
+        "missed_routes": 11494,
+        "spared_routes": 819,
+        "share": 0.071
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 3644,
+        "spared_routes": 455,
+        "share": 0.125
+       },
+       "all": {
+        "missed_routes": 11494,
+        "spared_routes": 819,
+        "share": 0.071
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      187,
+      187,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 2061
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       325,
+       218,
+       512,
+       512,
+       512,
+       465,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1885,
+      581,
+      512,
+      643,
+      517,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       740,
+       744,
+       764,
+       730,
+       0,
+       0
+      ],
+      "stage": [
+       306,
+       306,
+       247,
+       244,
+       245,
+       247,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       370,
+       372,
+       382,
+       365,
+       0,
+       0
+      ],
+      "parts": [
+       78,
+       78,
+       62,
+       62,
+       62,
+       62,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 880,
+      "need": [
+       0,
+       0,
+       219,
+       215,
+       232,
+       173,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1393,
+      "need": [
+       32,
+       88,
+       370,
+       356,
+       382,
+       300,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 320,
+      "need": [
+       0,
+       0,
+       56,
+       52,
+       58,
+       9,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 431,
+      "need": [
+       0,
+       0,
+       94,
+       84,
+       96,
+       31,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 15.51,
+      "lent": 19.26,
+      "min_stage": 16.95,
+      "min_stage_absent": 17.79,
+      "min_parts": 16.02,
+      "min_parts_absent": 16.21
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 4503,
+        "spared_routes": 685,
+        "share": 0.152
+       },
+       "all": {
+        "missed_routes": 10352,
+        "spared_routes": 1030,
+        "share": 0.099
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 4503,
+        "spared_routes": 422,
+        "share": 0.094
+       },
+       "all": {
+        "missed_routes": 10352,
+        "spared_routes": 628,
+        "share": 0.061
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 4503,
+        "spared_routes": 986,
+        "share": 0.219
+       },
+       "all": {
+        "missed_routes": 10352,
+        "spared_routes": 1461,
+        "share": 0.141
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 4503,
+        "spared_routes": 934,
+        "share": 0.207
+       },
+       "all": {
+        "missed_routes": 10352,
+        "spared_routes": 1380,
+        "share": 0.133
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      291,
+      291,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 1971
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       221,
+       114,
+       512,
+       512,
+       512,
+       465,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1879,
+      555,
+      512,
+      683,
+      537,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       740,
+       746,
+       764,
+       686,
+       0,
+       0
+      ],
+      "stage": [
+       308,
+       308,
+       221,
+       238,
+       268,
+       268,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       370,
+       373,
+       382,
+       343,
+       0,
+       0
+      ],
+      "parts": [
+       78,
+       78,
+       56,
+       60,
+       68,
+       68,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 861,
+      "need": [
+       0,
+       0,
+       203,
+       203,
+       230,
+       183,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1380,
+      "need": [
+       0,
+       0,
+       370,
+       362,
+       382,
+       276,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 312,
+      "need": [
+       0,
+       0,
+       52,
+       50,
+       56,
+       9,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 426,
+      "need": [
+       0,
+       0,
+       94,
+       82,
+       96,
+       31,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 15.3,
+      "lent": 19.05,
+      "min_stage": 16.76,
+      "min_stage_absent": 17.68,
+      "min_parts": 15.8,
+      "min_parts_absent": 16.0
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 4686,
+        "spared_routes": 632,
+        "share": 0.135
+       },
+       "all": {
+        "missed_routes": 8938,
+        "spared_routes": 957,
+        "share": 0.107
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 4686,
+        "spared_routes": 352,
+        "share": 0.075
+       },
+       "all": {
+        "missed_routes": 8938,
+        "spared_routes": 563,
+        "share": 0.063
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 4686,
+        "spared_routes": 955,
+        "share": 0.204
+       },
+       "all": {
+        "missed_routes": 8938,
+        "spared_routes": 1384,
+        "share": 0.155
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 4686,
+        "spared_routes": 889,
+        "share": 0.19
+       },
+       "all": {
+        "missed_routes": 8938,
+        "spared_routes": 1297,
+        "share": 0.145
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      271,
+      271,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2512,
+      "call2": 226,
+      "call3": 45,
+      "call4": 460
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       271,
+       170,
+       740,
+       642,
+       774,
+       507,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       148,
+       0,
+       78,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       38,
+       0,
+       7,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       196,
+       0,
+       264,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2927,
+      886,
+      1024,
+      1092,
+      1047,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       758,
+       870,
+       808,
+       812,
+       0,
+       0
+      ],
+      "stage": [
+       371,
+       371,
+       329,
+       366,
+       387,
+       387,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       379,
+       435,
+       404,
+       406,
+       0,
+       0
+      ],
+      "parts": [
+       94,
+       94,
+       84,
+       92,
+       98,
+       98,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3319,
+      "need": [
+       753,
+       420,
+       758,
+       832,
+       796,
+       641,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1390,
+      "need": [
+       0,
+       0,
+       288,
+       287,
+       311,
+       176,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1623,
+      "need": [
+       0,
+       0,
+       370,
+       365,
+       389,
+       210,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 676,
+      "need": [
+       0,
+       0,
+       72,
+       66,
+       78,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 734,
+      "need": [
+       0,
+       0,
+       94,
+       82,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.59,
+      "lent": 27.71,
+      "min_ring": 27.02,
+      "min_stage": 23.2,
+      "min_stage_absent": 23.65,
+      "min_parts": 21.83,
+      "min_parts_absent": 21.94
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5181,
+        "spared_routes": 179,
+        "share": 0.035
+       },
+       "all": {
+        "missed_routes": 8169,
+        "spared_routes": 267,
+        "share": 0.033
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5181,
+        "spared_routes": 1184,
+        "share": 0.229
+       },
+       "all": {
+        "missed_routes": 8169,
+        "spared_routes": 1591,
+        "share": 0.195
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5181,
+        "spared_routes": 1064,
+        "share": 0.205
+       },
+       "all": {
+        "missed_routes": 8169,
+        "spared_routes": 1422,
+        "share": 0.174
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5181,
+        "spared_routes": 1545,
+        "share": 0.298
+       },
+       "all": {
+        "missed_routes": 8169,
+        "spared_routes": 2103,
+        "share": 0.257
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5181,
+        "spared_routes": 1507,
+        "share": 0.291
+       },
+       "all": {
+        "missed_routes": 8169,
+        "spared_routes": 2054,
+        "share": 0.251
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      323,
+      340,
+      0,
+      22,
+      23,
+      28,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 437,
+      "call1": 2431,
+      "call2": 327,
+      "call3": 14,
+      "call4": 192
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       323,
+       101,
+       740,
+       620,
+       774,
+       502,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       176,
+       0,
+       151,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       14,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       192,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2920,
+      842,
+      1024,
+      931,
+      849,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       786,
+       866,
+       822,
+       822,
+       0,
+       0
+      ],
+      "stage": [
+       408,
+       408,
+       312,
+       343,
+       349,
+       347,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       393,
+       433,
+       411,
+       411,
+       0,
+       0
+      ],
+      "parts": [
+       102,
+       102,
+       78,
+       86,
+       88,
+       88,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3331,
+      "need": [
+       701,
+       351,
+       796,
+       812,
+       834,
+       702,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1316,
+      "need": [
+       0,
+       0,
+       285,
+       264,
+       322,
+       165,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1617,
+      "need": [
+       0,
+       0,
+       370,
+       365,
+       387,
+       248,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 629,
+      "need": [
+       0,
+       0,
+       72,
+       42,
+       78,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 689,
+      "need": [
+       0,
+       0,
+       94,
+       60,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.84,
+      "lent": 28.51,
+      "min_ring": 28.32,
+      "min_stage": 24.33,
+      "min_stage_absent": 24.92,
+      "min_parts": 23.0,
+      "min_parts_absent": 23.12
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5231,
+        "spared_routes": 68,
+        "share": 0.013
+       },
+       "all": {
+        "missed_routes": 10662,
+        "spared_routes": 113,
+        "share": 0.011
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5231,
+        "spared_routes": 885,
+        "share": 0.169
+       },
+       "all": {
+        "missed_routes": 10662,
+        "spared_routes": 1395,
+        "share": 0.131
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5231,
+        "spared_routes": 783,
+        "share": 0.15
+       },
+       "all": {
+        "missed_routes": 10662,
+        "spared_routes": 1207,
+        "share": 0.113
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5231,
+        "spared_routes": 1122,
+        "share": 0.214
+       },
+       "all": {
+        "missed_routes": 10662,
+        "spared_routes": 1813,
+        "share": 0.17
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5231,
+        "spared_routes": 1094,
+        "share": 0.209
+       },
+       "all": {
+        "missed_routes": 10662,
+        "spared_routes": 1764,
+        "share": 0.165
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      297,
+      297,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2511,
+      "call2": 299,
+      "call3": 43,
+      "call4": 184
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       297,
+       144,
+       740,
+       642,
+       774,
+       507,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       173,
+       8,
+       134,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       24,
+       0,
+       19,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       184,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2975,
+      867,
+      1024,
+      931,
+      819,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       796,
+       860,
+       832,
+       796,
+       0,
+       0
+      ],
+      "stage": [
+       453,
+       453,
+       358,
+       357,
+       351,
+       358,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       398,
+       430,
+       416,
+       398,
+       0,
+       0
+      ],
+      "parts": [
+       114,
+       114,
+       90,
+       90,
+       88,
+       90,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3401,
+      "need": [
+       727,
+       394,
+       796,
+       842,
+       834,
+       669,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1408,
+      "need": [
+       0,
+       0,
+       291,
+       308,
+       316,
+       164,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1685,
+      "need": [
+       0,
+       0,
+       370,
+       392,
+       400,
+       244,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 680,
+      "need": [
+       0,
+       0,
+       72,
+       70,
+       78,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 742,
+      "need": [
+       0,
+       0,
+       94,
+       90,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 22.63,
+      "lent": 29.51,
+      "min_ring": 29.28,
+      "min_stage": 25.29,
+      "min_stage_absent": 25.84,
+      "min_parts": 23.85,
+      "min_parts_absent": 23.97
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5801,
+        "spared_routes": 94,
+        "share": 0.016
+       },
+       "all": {
+        "missed_routes": 16404,
+        "spared_routes": 169,
+        "share": 0.01
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5801,
+        "spared_routes": 1105,
+        "share": 0.19
+       },
+       "all": {
+        "missed_routes": 16404,
+        "spared_routes": 1864,
+        "share": 0.114
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5801,
+        "spared_routes": 946,
+        "share": 0.163
+       },
+       "all": {
+        "missed_routes": 16404,
+        "spared_routes": 1614,
+        "share": 0.098
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5801,
+        "spared_routes": 1614,
+        "share": 0.278
+       },
+       "all": {
+        "missed_routes": 16404,
+        "spared_routes": 2604,
+        "share": 0.159
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5801,
+        "spared_routes": 1574,
+        "share": 0.271
+       },
+       "all": {
+        "missed_routes": 16404,
+        "spared_routes": 2548,
+        "share": 0.155
+       }
+      }
+     }
+    }
+   ],
+   "off": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      464,
+      1353,
+      252,
+      569,
+      446,
+      378
+     ],
+     "lent_experts": {
+      "tail": 39,
+      "call1": 623
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       48,
+       0,
+       260,
+       0,
+       181,
+       134
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1881,
+      560,
+      569,
+      598,
+      512
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       730,
+       738,
+       758,
+       684
+      ],
+      "stage": [
+       371,
+       371,
+       238,
+       263,
+       249,
+       245
+      ],
+      "stage_absent": [
+       512,
+       512,
+       365,
+       369,
+       379,
+       342
+      ],
+      "parts": [
+       94,
+       94,
+       60,
+       66,
+       64,
+       62
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 39,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 200,
+      "need": [
+       0,
+       0,
+       113,
+       0,
+       48,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 39,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 39,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.25,
+      "lent": 21.3,
+      "min_stage": 20.29,
+      "min_stage_absent": 20.55,
+      "min_parts": 20.29,
+      "min_parts_absent": 20.29
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1580,
+        "spared_routes": 132,
+        "share": 0.084
+       },
+       "all": {
+        "missed_routes": 8645,
+        "spared_routes": 436,
+        "share": 0.05
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1580,
+        "spared_routes": 97,
+        "share": 0.061
+       },
+       "all": {
+        "missed_routes": 8645,
+        "spared_routes": 325,
+        "share": 0.038
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1580,
+        "spared_routes": 132,
+        "share": 0.084
+       },
+       "all": {
+        "missed_routes": 8645,
+        "spared_routes": 436,
+        "share": 0.05
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1580,
+        "spared_routes": 132,
+        "share": 0.084
+       },
+       "all": {
+        "missed_routes": 8645,
+        "spared_routes": 436,
+        "share": 0.05
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      208,
+      208,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 2069
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       304,
+       193,
+       512,
+       512,
+       512,
+       469
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1915,
+      596,
+      512,
+      657,
+      516
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       730,
+       722,
+       758,
+       708
+      ],
+      "stage": [
+       306,
+       306,
+       239,
+       239,
+       243,
+       239
+      ],
+      "stage_absent": [
+       512,
+       512,
+       365,
+       361,
+       379,
+       354
+      ],
+      "parts": [
+       78,
+       78,
+       60,
+       60,
+       62,
+       60
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 848,
+      "need": [
+       0,
+       0,
+       205,
+       206,
+       232,
+       170
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1378,
+      "need": [
+       6,
+       60,
+       365,
+       353,
+       379,
+       295
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 314,
+      "need": [
+       0,
+       0,
+       52,
+       52,
+       56,
+       11
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 434,
+      "need": [
+       0,
+       0,
+       92,
+       82,
+       96,
+       33
+      ]
+     },
+     "missed_gb": {
+      "met": 14.87,
+      "lent": 18.59,
+      "min_stage": 16.22,
+      "min_stage_absent": 17.09,
+      "min_parts": 15.35,
+      "min_parts_absent": 15.55
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1336,
+        "spared_routes": 284,
+        "share": 0.213
+       },
+       "all": {
+        "missed_routes": 7951,
+        "spared_routes": 864,
+        "share": 0.109
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1336,
+        "spared_routes": 191,
+        "share": 0.143
+       },
+       "all": {
+        "missed_routes": 7951,
+        "spared_routes": 517,
+        "share": 0.065
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1336,
+        "spared_routes": 406,
+        "share": 0.304
+       },
+       "all": {
+        "missed_routes": 7951,
+        "spared_routes": 1182,
+        "share": 0.149
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1336,
+        "spared_routes": 375,
+        "share": 0.281
+       },
+       "all": {
+        "missed_routes": 7951,
+        "spared_routes": 1105,
+        "share": 0.139
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      290,
+      290,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 1984
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       222,
+       111,
+       512,
+       512,
+       512,
+       469
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      1863,
+      548,
+      512,
+      702,
+      565
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       730,
+       712,
+       758,
+       676
+      ],
+      "stage": [
+       308,
+       308,
+       219,
+       244,
+       271,
+       271
+      ],
+      "stage_absent": [
+       512,
+       512,
+       365,
+       356,
+       379,
+       338
+      ],
+      "parts": [
+       78,
+       78,
+       56,
+       62,
+       68,
+       68
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 878,
+      "need": [
+       0,
+       0,
+       200,
+       206,
+       221,
+       178
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1382,
+      "need": [
+       0,
+       0,
+       365,
+       349,
+       379,
+       273
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 308,
+      "need": [
+       0,
+       0,
+       50,
+       52,
+       52,
+       9
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 429,
+      "need": [
+       0,
+       0,
+       92,
+       80,
+       96,
+       33
+      ]
+     },
+     "missed_gb": {
+      "met": 14.87,
+      "lent": 18.72,
+      "min_stage": 16.34,
+      "min_stage_absent": 17.28,
+      "min_parts": 15.35,
+      "min_parts_absent": 15.57
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1443,
+        "spared_routes": 232,
+        "share": 0.161
+       },
+       "all": {
+        "missed_routes": 6543,
+        "spared_routes": 814,
+        "share": 0.124
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1443,
+        "spared_routes": 112,
+        "share": 0.078
+       },
+       "all": {
+        "missed_routes": 6543,
+        "spared_routes": 467,
+        "share": 0.071
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1443,
+        "spared_routes": 331,
+        "share": 0.229
+       },
+       "all": {
+        "missed_routes": 6543,
+        "spared_routes": 1181,
+        "share": 0.18
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1443,
+        "spared_routes": 312,
+        "share": 0.216
+       },
+       "all": {
+        "missed_routes": 6543,
+        "spared_routes": 1100,
+        "share": 0.168
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      291,
+      291,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2460,
+      "call2": 241,
+      "call3": 2
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       291,
+       158,
+       730,
+       636,
+       768,
+       481
+      ],
+      [
+       512,
+       0,
+       15,
+       124,
+       0,
+       102
+      ],
+      [
+       512,
+       0,
+       0,
+       2,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2695,
+      813,
+      762,
+      907,
+      759
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       782,
+       762,
+       770,
+       750
+      ],
+      "stage": [
+       371,
+       371,
+       298,
+       336,
+       344,
+       344
+      ],
+      "stage_absent": [
+       512,
+       512,
+       391,
+       381,
+       385,
+       375
+      ],
+      "parts": [
+       94,
+       94,
+       76,
+       84,
+       86,
+       86
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3221,
+      "need": [
+       733,
+       414,
+       790,
+       762,
+       770,
+       609
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1344,
+      "need": [
+       0,
+       0,
+       277,
+       281,
+       299,
+       146
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1629,
+      "need": [
+       0,
+       0,
+       385,
+       367,
+       384,
+       201
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 670,
+      "need": [
+       0,
+       0,
+       70,
+       64,
+       76,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 732,
+      "need": [
+       0,
+       0,
+       92,
+       84,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 19.91,
+      "lent": 26.0,
+      "min_ring": 26.1,
+      "min_stage": 22.4,
+      "min_stage_absent": 22.95,
+      "min_parts": 21.1,
+      "min_parts_absent": 21.23
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 1944,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 5904,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 1944,
+        "spared_routes": 377,
+        "share": 0.194
+       },
+       "all": {
+        "missed_routes": 5904,
+        "spared_routes": 977,
+        "share": 0.165
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1944,
+        "spared_routes": 320,
+        "share": 0.165
+       },
+       "all": {
+        "missed_routes": 5904,
+        "spared_routes": 807,
+        "share": 0.137
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1944,
+        "spared_routes": 509,
+        "share": 0.262
+       },
+       "all": {
+        "missed_routes": 5904,
+        "spared_routes": 1315,
+        "share": 0.223
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1944,
+        "spared_routes": 497,
+        "share": 0.256
+       },
+       "all": {
+        "missed_routes": 5904,
+        "spared_routes": 1289,
+        "share": 0.218
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      338,
+      348,
+      0,
+      5,
+      26,
+      21
+     ],
+     "lent_experts": {
+      "tail": 434,
+      "call1": 2429,
+      "call2": 324,
+      "call3": 12
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       338,
+       106,
+       730,
+       631,
+       768,
+       481
+      ],
+      [
+       512,
+       0,
+       0,
+       172,
+       0,
+       152
+      ],
+      [
+       512,
+       0,
+       0,
+       12,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2740,
+      835,
+      820,
+      941,
+      828
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       774,
+       820,
+       818,
+       818
+      ],
+      "stage": [
+       408,
+       408,
+       304,
+       318,
+       335,
+       334
+      ],
+      "stage_absent": [
+       512,
+       512,
+       387,
+       410,
+       409,
+       409
+      ],
+      "parts": [
+       102,
+       102,
+       76,
+       80,
+       84,
+       84
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3289,
+      "need": [
+       686,
+       362,
+       776,
+       815,
+       820,
+       679
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1294,
+      "need": [
+       0,
+       0,
+       272,
+       271,
+       297,
+       151
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1640,
+      "need": [
+       0,
+       0,
+       372,
+       383,
+       384,
+       237
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 635,
+      "need": [
+       0,
+       0,
+       68,
+       57,
+       76,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 701,
+      "need": [
+       0,
+       0,
+       92,
+       79,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.02,
+      "lent": 27.2,
+      "min_ring": 27.37,
+      "min_stage": 23.41,
+      "min_stage_absent": 24.1,
+      "min_parts": 22.17,
+      "min_parts_absent": 22.28
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 1878,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 7202,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 1878,
+        "spared_routes": 340,
+        "share": 0.181
+       },
+       "all": {
+        "missed_routes": 7202,
+        "spared_routes": 991,
+        "share": 0.138
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1878,
+        "spared_routes": 274,
+        "share": 0.146
+       },
+       "all": {
+        "missed_routes": 7202,
+        "spared_routes": 815,
+        "share": 0.113
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1878,
+        "spared_routes": 467,
+        "share": 0.249
+       },
+       "all": {
+        "missed_routes": 7202,
+        "spared_routes": 1327,
+        "share": 0.184
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1878,
+        "spared_routes": 459,
+        "share": 0.244
+       },
+       "all": {
+        "missed_routes": 7202,
+        "spared_routes": 1300,
+        "share": 0.181
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      299,
+      299,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2474,
+      "call2": 340,
+      "call3": 39
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       299,
+       150,
+       730,
+       636,
+       768,
+       481
+      ],
+      [
+       512,
+       0,
+       0,
+       184,
+       17,
+       156
+      ],
+      [
+       512,
+       0,
+       0,
+       12,
+       0,
+       27
+      ],
+      [
+       512,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2794,
+      856,
+      832,
+      952,
+      818
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       768,
+       832,
+       826,
+       816
+      ],
+      "stage": [
+       453,
+       453,
+       328,
+       336,
+       347,
+       347
+      ],
+      "stage_absent": [
+       512,
+       512,
+       384,
+       416,
+       413,
+       408
+      ],
+      "parts": [
+       114,
+       114,
+       82,
+       84,
+       88,
+       88
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3385,
+      "need": [
+       725,
+       406,
+       772,
+       832,
+       826,
+       679
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1400,
+      "need": [
+       0,
+       0,
+       278,
+       302,
+       323,
+       137
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1678,
+      "need": [
+       0,
+       0,
+       369,
+       385,
+       403,
+       221
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 668,
+      "need": [
+       0,
+       0,
+       68,
+       66,
+       74,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 734,
+      "need": [
+       0,
+       0,
+       92,
+       86,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.54,
+      "lent": 28.02,
+      "min_ring": 28.16,
+      "min_stage": 24.21,
+      "min_stage_absent": 24.75,
+      "min_parts": 22.73,
+      "min_parts_absent": 22.86
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2361,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 10196,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2361,
+        "spared_routes": 450,
+        "share": 0.191
+       },
+       "all": {
+        "missed_routes": 10196,
+        "spared_routes": 1307,
+        "share": 0.128
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2361,
+        "spared_routes": 365,
+        "share": 0.155
+       },
+       "all": {
+        "missed_routes": 10196,
+        "spared_routes": 1109,
+        "share": 0.109
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 2361,
+        "spared_routes": 724,
+        "share": 0.307
+       },
+       "all": {
+        "missed_routes": 10196,
+        "spared_routes": 1870,
+        "share": 0.183
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 2361,
+        "spared_routes": 703,
+        "share": 0.298
+       },
+       "all": {
+        "missed_routes": 10196,
+        "spared_routes": 1820,
+        "share": 0.179
+       }
+      }
+     }
+    }
+   ],
+   "mtp_ring": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      430,
+      1035,
+      119,
+      455,
+      350,
+      319,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 45
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      430,
+      1080,
+      119,
+      455,
+      241,
+      319,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       860,
+       860,
+       740,
+       724,
+       764,
+       674,
+       0,
+       0
+      ],
+      "stage": [
+       295,
+       295,
+       232,
+       261,
+       247,
+       244,
+       0,
+       0
+      ],
+      "stage_absent": [
+       430,
+       430,
+       370,
+       362,
+       382,
+       337,
+       0,
+       0
+      ],
+      "parts": [
+       74,
+       74,
+       58,
+       66,
+       62,
+       62,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 164,
+      "need": [
+       0,
+       0,
+       113,
+       0,
+       6,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 456,
+      "need": [
+       0,
+       0,
+       251,
+       0,
+       141,
+       19,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 45,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 45,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.24,
+      "lent": 20.29,
+      "min_stage": 20.48,
+      "min_stage_absent": 20.95,
+      "min_parts": 20.29,
+      "min_parts_absent": 20.29
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 3329,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 11175,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 3329,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 11175,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 3329,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 11175,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 3329,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 11175,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      169,
+      169,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 274,
+      "call2": 2
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       94,
+       82,
+       96,
+       30,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       2,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      169,
+      490,
+      94,
+      84,
+      98,
+      109,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       338,
+       764,
+       740,
+       666,
+       764,
+       612,
+       0,
+       0
+      ],
+      "stage": [
+       54,
+       227,
+       219,
+       206,
+       227,
+       219,
+       0,
+       0
+      ],
+      "stage_absent": [
+       169,
+       382,
+       370,
+       333,
+       382,
+       306,
+       0,
+       0
+      ],
+      "parts": [
+       14,
+       58,
+       56,
+       52,
+       58,
+       56,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 876,
+      "need": [
+       0,
+       0,
+       219,
+       216,
+       227,
+       171,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1413,
+      "need": [
+       51,
+       107,
+       370,
+       356,
+       382,
+       299,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 320,
+      "need": [
+       0,
+       0,
+       56,
+       52,
+       58,
+       8,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 430,
+      "need": [
+       0,
+       0,
+       94,
+       84,
+       96,
+       30,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 15.51,
+      "lent": 16.17,
+      "min_stage": 16.9,
+      "min_stage_absent": 17.77,
+      "min_parts": 15.98,
+      "min_parts_absent": 16.17
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 3851,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 9622,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 3851,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 9622,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 3851,
+        "spared_routes": 50,
+        "share": 0.013
+       },
+       "all": {
+        "missed_routes": 9622,
+        "spared_routes": 79,
+        "share": 0.008
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 3851,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 9622,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      144,
+      144,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 272
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       94,
+       82,
+       96,
+       30,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      144,
+      451,
+      94,
+      82,
+      96,
+      119,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       288,
+       764,
+       740,
+       642,
+       764,
+       612,
+       0,
+       0
+      ],
+      "stage": [
+       31,
+       214,
+       203,
+       195,
+       222,
+       222,
+       0,
+       0
+      ],
+      "stage_absent": [
+       144,
+       382,
+       370,
+       321,
+       382,
+       306,
+       0,
+       0
+      ],
+      "parts": [
+       8,
+       54,
+       52,
+       50,
+       56,
+       56,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 861,
+      "need": [
+       0,
+       0,
+       203,
+       203,
+       230,
+       182,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1511,
+      "need": [
+       130,
+       132,
+       370,
+       362,
+       382,
+       275,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 312,
+      "need": [
+       0,
+       0,
+       52,
+       50,
+       56,
+       8,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 426,
+      "need": [
+       0,
+       0,
+       94,
+       82,
+       96,
+       30,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 15.08,
+      "lent": 15.81,
+      "min_stage": 16.56,
+      "min_stage_absent": 17.67,
+      "min_parts": 15.6,
+      "min_parts_absent": 15.81
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 4061,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 4061,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 4061,
+        "spared_routes": 64,
+        "share": 0.016
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 87,
+        "share": 0.011
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 4061,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      127,
+      127,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2416,
+      "call2": 480,
+      "call3": 40,
+      "call4": 455
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       127,
+       314,
+       740,
+       642,
+       774,
+       507,
+       0,
+       0
+      ],
+      [
+       269,
+       0,
+       0,
+       148,
+       0,
+       89,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       38,
+       0,
+       2,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       196,
+       0,
+       259,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2931,
+      886,
+      1024,
+      1096,
+      1047,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       758,
+       872,
+       816,
+       816,
+       0,
+       0
+      ],
+      "stage": [
+       371,
+       371,
+       330,
+       366,
+       387,
+       387,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       379,
+       436,
+       408,
+       408,
+       0,
+       0
+      ],
+      "parts": [
+       94,
+       94,
+       84,
+       92,
+       98,
+       98,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3468,
+      "need": [
+       897,
+       564,
+       758,
+       832,
+       796,
+       643,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1391,
+      "need": [
+       0,
+       0,
+       288,
+       287,
+       308,
+       178,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1623,
+      "need": [
+       0,
+       0,
+       370,
+       365,
+       389,
+       211,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 676,
+      "need": [
+       0,
+       0,
+       72,
+       66,
+       78,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 734,
+      "need": [
+       0,
+       0,
+       94,
+       82,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.32,
+      "lent": 27.72,
+      "min_ring": 27.02,
+      "min_stage": 22.9,
+      "min_stage_absent": 23.36,
+      "min_parts": 21.53,
+      "min_parts_absent": 21.64
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5239,
+        "spared_routes": 186,
+        "share": 0.036
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 273,
+        "share": 0.033
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5239,
+        "spared_routes": 1221,
+        "share": 0.233
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 1646,
+        "share": 0.2
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5239,
+        "spared_routes": 1101,
+        "share": 0.21
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 1479,
+        "share": 0.18
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5239,
+        "spared_routes": 1565,
+        "share": 0.299
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 2140,
+        "share": 0.26
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5239,
+        "spared_routes": 1528,
+        "share": 0.292
+       },
+       "all": {
+        "missed_routes": 8230,
+        "spared_routes": 2091,
+        "share": 0.254
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      323,
+      339,
+      0,
+      21,
+      22,
+      27,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 438,
+      "call1": 2429,
+      "call2": 333,
+      "call3": 14,
+      "call4": 192
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       323,
+       102,
+       740,
+       621,
+       774,
+       502,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       2,
+       176,
+       0,
+       155,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       14,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       192,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2918,
+      847,
+      1024,
+      929,
+      854,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       790,
+       866,
+       820,
+       820,
+       0,
+       0
+      ],
+      "stage": [
+       408,
+       408,
+       314,
+       344,
+       348,
+       347,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       395,
+       433,
+       410,
+       410,
+       0,
+       0
+      ],
+      "parts": [
+       102,
+       102,
+       80,
+       86,
+       88,
+       88,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3326,
+      "need": [
+       701,
+       352,
+       796,
+       813,
+       832,
+       700,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1323,
+      "need": [
+       0,
+       0,
+       285,
+       266,
+       326,
+       165,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1620,
+      "need": [
+       0,
+       0,
+       370,
+       366,
+       387,
+       251,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 631,
+      "need": [
+       0,
+       0,
+       72,
+       43,
+       78,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 691,
+      "need": [
+       0,
+       0,
+       94,
+       61,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.86,
+      "lent": 28.54,
+      "min_ring": 28.32,
+      "min_stage": 24.36,
+      "min_stage_absent": 24.95,
+      "min_parts": 23.02,
+      "min_parts_absent": 23.14
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5234,
+        "spared_routes": 70,
+        "share": 0.013
+       },
+       "all": {
+        "missed_routes": 10663,
+        "spared_routes": 115,
+        "share": 0.011
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5234,
+        "spared_routes": 898,
+        "share": 0.172
+       },
+       "all": {
+        "missed_routes": 10663,
+        "spared_routes": 1398,
+        "share": 0.131
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5234,
+        "spared_routes": 799,
+        "share": 0.153
+       },
+       "all": {
+        "missed_routes": 10663,
+        "spared_routes": 1215,
+        "share": 0.114
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5234,
+        "spared_routes": 1142,
+        "share": 0.218
+       },
+       "all": {
+        "missed_routes": 10663,
+        "spared_routes": 1826,
+        "share": 0.171
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5234,
+        "spared_routes": 1112,
+        "share": 0.212
+       },
+       "all": {
+        "missed_routes": 10663,
+        "spared_routes": 1775,
+        "share": 0.166
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      297,
+      297,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2509,
+      "call2": 304,
+      "call3": 38,
+      "call4": 393
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0,
+       0,
+       0
+      ],
+      [
+       297,
+       144,
+       740,
+       642,
+       774,
+       507,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       175,
+       9,
+       136,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       22,
+       0,
+       16,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       184,
+       0,
+       229,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2973,
+      936,
+      1024,
+      1069,
+      1028,
+      0,
+      0
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       830,
+       860,
+       832,
+       830,
+       0,
+       0
+      ],
+      "stage": [
+       453,
+       453,
+       374,
+       358,
+       374,
+       374,
+       0,
+       0
+      ],
+      "stage_absent": [
+       512,
+       512,
+       415,
+       430,
+       416,
+       415,
+       0,
+       0
+      ],
+      "parts": [
+       114,
+       114,
+       94,
+       90,
+       94,
+       94,
+       0,
+       0
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3404,
+      "need": [
+       727,
+       394,
+       798,
+       842,
+       834,
+       671,
+       0,
+       0
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1407,
+      "need": [
+       0,
+       0,
+       291,
+       308,
+       315,
+       164,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1687,
+      "need": [
+       0,
+       0,
+       370,
+       393,
+       400,
+       244,
+       0,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 682,
+      "need": [
+       0,
+       0,
+       72,
+       70,
+       80,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 742,
+      "need": [
+       0,
+       0,
+       94,
+       90,
+       98,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 22.65,
+      "lent": 29.85,
+      "min_ring": 29.3,
+      "min_stage": 25.32,
+      "min_stage_absent": 25.87,
+      "min_parts": 23.87,
+      "min_parts_absent": 23.99
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 5901,
+        "spared_routes": 192,
+        "share": 0.033
+       },
+       "all": {
+        "missed_routes": 16526,
+        "spared_routes": 332,
+        "share": 0.02
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 5901,
+        "spared_routes": 1201,
+        "share": 0.204
+       },
+       "all": {
+        "missed_routes": 16526,
+        "spared_routes": 2032,
+        "share": 0.123
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 5901,
+        "spared_routes": 1045,
+        "share": 0.177
+       },
+       "all": {
+        "missed_routes": 16526,
+        "spared_routes": 1787,
+        "share": 0.108
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 5901,
+        "spared_routes": 1707,
+        "share": 0.289
+       },
+       "all": {
+        "missed_routes": 16526,
+        "spared_routes": 2771,
+        "share": 0.168
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 5901,
+        "spared_routes": 1669,
+        "share": 0.283
+       },
+       "all": {
+        "missed_routes": 16526,
+        "spared_routes": 2718,
+        "share": 0.164
+       }
+      }
+     }
+    }
+   ],
+   "off_ring": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      464,
+      1354,
+      252,
+      569,
+      446,
+      377
+     ],
+     "lent_experts": {
+      "tail": 40
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      464,
+      1394,
+      252,
+      569,
+      332,
+      377
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       928,
+       928,
+       730,
+       740,
+       758,
+       664
+      ],
+      "stage": [
+       327,
+       327,
+       225,
+       263,
+       239,
+       238
+      ],
+      "stage_absent": [
+       464,
+       464,
+       365,
+       370,
+       379,
+       332
+      ],
+      "parts": [
+       82,
+       82,
+       58,
+       66,
+       60,
+       60
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 40,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 200,
+      "need": [
+       0,
+       0,
+       113,
+       0,
+       47,
+       0
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 40,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 40,
+      "need": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 20.26,
+      "lent": 20.3,
+      "min_stage": 20.3,
+      "min_stage_absent": 20.55,
+      "min_parts": 20.3,
+      "min_parts_absent": 20.3
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1462,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8489,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1462,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8489,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1462,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8489,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1462,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 8489,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      195,
+      195,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 280,
+      "call2": 2
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       0,
+       0,
+       92,
+       80,
+       96,
+       34
+      ],
+      [
+       0,
+       0,
+       0,
+       2,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      195,
+      534,
+      92,
+      82,
+      108,
+      97
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       390,
+       758,
+       730,
+       654,
+       758,
+       598
+      ],
+      "stage": [
+       64,
+       222,
+       205,
+       202,
+       222,
+       213
+      ],
+      "stage_absent": [
+       195,
+       379,
+       365,
+       327,
+       379,
+       299
+      ],
+      "parts": [
+       16,
+       56,
+       52,
+       52,
+       56,
+       54
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 853,
+      "need": [
+       0,
+       0,
+       205,
+       206,
+       235,
+       171
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1395,
+      "need": [
+       18,
+       72,
+       365,
+       353,
+       379,
+       296
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 314,
+      "need": [
+       0,
+       0,
+       52,
+       52,
+       56,
+       12
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 436,
+      "need": [
+       0,
+       0,
+       92,
+       82,
+       96,
+       34
+      ]
+     },
+     "missed_gb": {
+      "met": 14.86,
+      "lent": 15.56,
+      "min_stage": 16.23,
+      "min_stage_absent": 17.12,
+      "min_parts": 15.35,
+      "min_parts_absent": 15.56
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1007,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 7431,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1007,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 7431,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1007,
+        "spared_routes": 32,
+        "share": 0.032
+       },
+       "all": {
+        "missed_routes": 7431,
+        "spared_routes": 79,
+        "share": 0.011
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1007,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 7431,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "tail_class": 4,
+     "tail_slots": 154,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      160,
+      160,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 154,
+      "call1": 277
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       154,
+       0
+      ],
+      [
+       0,
+       0,
+       92,
+       80,
+       96,
+       34
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      160,
+      477,
+      92,
+      80,
+      105,
+      114
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       320,
+       758,
+       730,
+       636,
+       758,
+       598
+      ],
+      "stage": [
+       36,
+       206,
+       200,
+       203,
+       208,
+       208
+      ],
+      "stage_absent": [
+       160,
+       379,
+       365,
+       318,
+       379,
+       299
+      ],
+      "parts": [
+       10,
+       52,
+       50,
+       52,
+       52,
+       52
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 879,
+      "need": [
+       0,
+       0,
+       200,
+       206,
+       220,
+       178
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1480,
+      "need": [
+       93,
+       107,
+       365,
+       349,
+       379,
+       274
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 308,
+      "need": [
+       0,
+       0,
+       50,
+       52,
+       52,
+       10
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 431,
+      "need": [
+       0,
+       0,
+       92,
+       80,
+       96,
+       34
+      ]
+     },
+     "missed_gb": {
+      "met": 14.67,
+      "lent": 15.39,
+      "min_stage": 16.16,
+      "min_stage_absent": 17.25,
+      "min_parts": 15.17,
+      "min_parts_absent": 15.39
+     },
+     "after": {
+      "min_stage": {
+       "window": {
+        "missed_routes": 1138,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 5942,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1138,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 5942,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1138,
+        "spared_routes": 18,
+        "share": 0.016
+       },
+       "all": {
+        "missed_routes": 5942,
+        "spared_routes": 84,
+        "share": 0.014
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1138,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 5942,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      138,
+      138,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2388,
+      "call2": 473,
+      "call3": 2
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       138,
+       310,
+       730,
+       636,
+       768,
+       482
+      ],
+      [
+       276,
+       0,
+       14,
+       124,
+       0,
+       99
+      ],
+      [
+       512,
+       0,
+       0,
+       2,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       0,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2703,
+      812,
+      762,
+      915,
+      758
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       782,
+       762,
+       768,
+       746
+      ],
+      "stage": [
+       371,
+       371,
+       298,
+       336,
+       342,
+       342
+      ],
+      "stage_absent": [
+       512,
+       512,
+       391,
+       381,
+       384,
+       373
+      ],
+      "parts": [
+       94,
+       94,
+       76,
+       84,
+       86,
+       86
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3379,
+      "need": [
+       886,
+       566,
+       790,
+       762,
+       768,
+       606
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1347,
+      "need": [
+       0,
+       0,
+       277,
+       282,
+       299,
+       146
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1632,
+      "need": [
+       0,
+       0,
+       385,
+       367,
+       384,
+       201
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 670,
+      "need": [
+       0,
+       0,
+       70,
+       64,
+       76,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 732,
+      "need": [
+       0,
+       0,
+       92,
+       84,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 19.6,
+      "lent": 26.01,
+      "min_ring": 26.11,
+      "min_stage": 22.08,
+      "min_stage_absent": 22.62,
+      "min_parts": 20.77,
+      "min_parts_absent": 20.89
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 1950,
+        "spared_routes": 0,
+        "share": 0.0
+       },
+       "all": {
+        "missed_routes": 5925,
+        "spared_routes": 0,
+        "share": 0.0
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 1950,
+        "spared_routes": 388,
+        "share": 0.199
+       },
+       "all": {
+        "missed_routes": 5925,
+        "spared_routes": 1016,
+        "share": 0.171
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1950,
+        "spared_routes": 335,
+        "share": 0.172
+       },
+       "all": {
+        "missed_routes": 5925,
+        "spared_routes": 849,
+        "share": 0.143
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1950,
+        "spared_routes": 521,
+        "share": 0.267
+       },
+       "all": {
+        "missed_routes": 5925,
+        "spared_routes": 1356,
+        "share": 0.229
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1950,
+        "spared_routes": 506,
+        "share": 0.259
+       },
+       "all": {
+        "missed_routes": 5925,
+        "spared_routes": 1328,
+        "share": 0.224
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      338,
+      349,
+      0,
+      5,
+      28,
+      22
+     ],
+     "lent_experts": {
+      "tail": 432,
+      "call1": 2431,
+      "call2": 330,
+      "call3": 10,
+      "call4": 204
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       338,
+       105,
+       730,
+       631,
+       768,
+       482
+      ],
+      [
+       512,
+       0,
+       0,
+       174,
+       0,
+       156
+      ],
+      [
+       512,
+       0,
+       0,
+       10,
+       0,
+       0
+      ],
+      [
+       512,
+       0,
+       0,
+       204,
+       0,
+       0
+      ]
+     ],
+     "held": [
+      512,
+      2922,
+      839,
+      1024,
+      943,
+      856
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       774,
+       840,
+       822,
+       822
+      ],
+      "stage": [
+       408,
+       408,
+       305,
+       336,
+       335,
+       336
+      ],
+      "stage_absent": [
+       512,
+       512,
+       387,
+       420,
+       411,
+       411
+      ],
+      "parts": [
+       102,
+       102,
+       78,
+       84,
+       84,
+       84
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3302,
+      "need": [
+       686,
+       361,
+       776,
+       817,
+       826,
+       686
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1298,
+      "need": [
+       0,
+       0,
+       272,
+       271,
+       297,
+       152
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1645,
+      "need": [
+       0,
+       0,
+       372,
+       383,
+       384,
+       241
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 633,
+      "need": [
+       0,
+       0,
+       68,
+       57,
+       76,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 699,
+      "need": [
+       0,
+       0,
+       92,
+       79,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.02,
+      "lent": 27.66,
+      "min_ring": 27.41,
+      "min_stage": 23.43,
+      "min_stage_absent": 24.12,
+      "min_parts": 22.17,
+      "min_parts_absent": 22.28
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 1904,
+        "spared_routes": 31,
+        "share": 0.016
+       },
+       "all": {
+        "missed_routes": 7257,
+        "spared_routes": 111,
+        "share": 0.015
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 1904,
+        "spared_routes": 372,
+        "share": 0.195
+       },
+       "all": {
+        "missed_routes": 7257,
+        "spared_routes": 1108,
+        "share": 0.153
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 1904,
+        "spared_routes": 309,
+        "share": 0.162
+       },
+       "all": {
+        "missed_routes": 7257,
+        "spared_routes": 930,
+        "share": 0.128
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 1904,
+        "spared_routes": 497,
+        "share": 0.261
+       },
+       "all": {
+        "missed_routes": 7257,
+        "spared_routes": 1443,
+        "share": 0.199
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 1904,
+        "spared_routes": 489,
+        "share": 0.257
+       },
+       "all": {
+        "missed_routes": 7257,
+        "spared_routes": 1415,
+        "share": 0.195
+       }
+      }
+     }
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "tail_class": 4,
+     "tail_slots": 460,
+     "tail_unit_bytes": 1049600,
+     "step_loan_bytes": 0,
+     "empties": [
+      299,
+      299,
+      0,
+      0,
+      0,
+      0
+     ],
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2476,
+      "call2": 340,
+      "call3": 37,
+      "call4": 205
+     },
+     "replay_matches": true,
+     "needs": [
+      [
+       0,
+       0,
+       0,
+       0,
+       460,
+       0
+      ],
+      [
+       299,
+       149,
+       730,
+       636,
+       768,
+       482
+      ],
+      [
+       512,
+       0,
+       0,
+       184,
+       14,
+       158
+      ],
+      [
+       512,
+       0,
+       0,
+       12,
+       0,
+       25
+      ],
+      [
+       512,
+       0,
+       0,
+       0,
+       0,
+       205
+      ]
+     ],
+     "held": [
+      512,
+      2793,
+      942,
+      849,
+      1054,
+      1024
+     ],
+     "lending_classes": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+     ],
+     "want_now": {
+      "ring": [
+       1024,
+       1024,
+       800,
+       832,
+       832,
+       832
+      ],
+      "stage": [
+       453,
+       453,
+       359,
+       336,
+       371,
+       371
+      ],
+      "stage_absent": [
+       512,
+       512,
+       400,
+       416,
+       416,
+       416
+      ],
+      "parts": [
+       114,
+       114,
+       90,
+       84,
+       94,
+       94
+      ]
+     },
+     "min_ring": {
+      "lent_experts": 3385,
+      "need": [
+       725,
+       405,
+       772,
+       832,
+       826,
+       680
+      ]
+     },
+     "min_stage": {
+      "lent_experts": 1399,
+      "need": [
+       0,
+       0,
+       278,
+       302,
+       322,
+       138
+      ]
+     },
+     "min_stage_absent": {
+      "lent_experts": 1680,
+      "need": [
+       0,
+       0,
+       369,
+       385,
+       403,
+       222
+      ]
+     },
+     "min_parts": {
+      "lent_experts": 670,
+      "need": [
+       0,
+       0,
+       68,
+       68,
+       74,
+       0
+      ]
+     },
+     "min_parts_absent": {
+      "lent_experts": 736,
+      "need": [
+       0,
+       0,
+       92,
+       88,
+       96,
+       0
+      ]
+     },
+     "missed_gb": {
+      "met": 21.55,
+      "lent": 28.35,
+      "min_ring": 28.16,
+      "min_stage": 24.21,
+      "min_stage_absent": 24.76,
+      "min_parts": 22.74,
+      "min_parts_absent": 22.88
+     },
+     "after": {
+      "min_ring": {
+       "window": {
+        "missed_routes": 2413,
+        "spared_routes": 54,
+        "share": 0.022
+       },
+       "all": {
+        "missed_routes": 10288,
+        "spared_routes": 138,
+        "share": 0.013
+       }
+      },
+      "min_stage": {
+       "window": {
+        "missed_routes": 2413,
+        "spared_routes": 504,
+        "share": 0.209
+       },
+       "all": {
+        "missed_routes": 10288,
+        "spared_routes": 1451,
+        "share": 0.141
+       }
+      },
+      "min_stage_absent": {
+       "window": {
+        "missed_routes": 2413,
+        "spared_routes": 419,
+        "share": 0.174
+       },
+       "all": {
+        "missed_routes": 10288,
+        "spared_routes": 1253,
+        "share": 0.122
+       }
+      },
+      "min_parts": {
+       "window": {
+        "missed_routes": 2413,
+        "spared_routes": 774,
+        "share": 0.321
+       },
+       "all": {
+        "missed_routes": 10288,
+        "spared_routes": 2013,
+        "share": 0.196
+       }
+      },
+      "min_parts_absent": {
+       "window": {
+        "missed_routes": 2413,
+        "spared_routes": 754,
+        "share": 0.312
+       },
+       "all": {
+        "missed_routes": 10288,
+        "spared_routes": 1962,
+        "share": 0.191
+       }
+      }
+     }
+    }
+   ]
+  }
+ },
+ "ring_of_parts_ab_rtx-5090": {
+  "old": "0c9bb57",
+  "new": "be77e8a",
+  "commit": "be77e8a486ec3cdd5b9a0713f5175e0781bbec51",
+  "rounds": 3,
+  "table": {
+   "a_dep2_off": {
+    "1024": {
+     "decode_tps": 128.685,
+     "prefill_tps": 1781.813
+    },
+    "4096": {
+     "decode_tps": 125.05,
+     "prefill_tps": 5251.991
+    },
+    "32768": {
+     "decode_tps": 117.052,
+     "prefill_tps": 5827.317
+    }
+   },
+   "b_dep2_off": {
+    "1024": {
+     "decode_tps": 130.956,
+     "prefill_tps": 2024.196
+    },
+    "4096": {
+     "decode_tps": 126.018,
+     "prefill_tps": 5259.454
+    },
+    "32768": {
+     "decode_tps": 117.81,
+     "prefill_tps": 5856.089
+    }
+   },
+   "b_dep2_mtp": {
+    "1024": {
+     "decode_tps": 165.532,
+     "prefill_tps": 1976.631,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.789
+    },
+    "4096": {
+     "decode_tps": 156.822,
+     "prefill_tps": 5027.878,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.469
+    },
+    "32768": {
+     "decode_tps": 165.168,
+     "prefill_tps": 5749.283,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.41
+    }
+   },
+   "a_dep2_mtp": {
+    "1024": {
+     "decode_tps": 163.058,
+     "prefill_tps": 1874.889,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 17.045
+    },
+    "4096": {
+     "decode_tps": 156.538,
+     "prefill_tps": 5038.056,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.501
+    },
+    "32768": {
+     "decode_tps": 164.883,
+     "prefill_tps": 5721.495,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.444
+    }
+   },
+   "strata_na_off": {
+    "1024": {
+     "decode_tps": 115.553,
+     "prefill_tps": 2205.086,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 8.67,
+     "strata_verify_ms": 8.357,
+     "strata_draft_ms": 0.0
+    },
+    "4096": {
+     "decode_tps": 110.089,
+     "prefill_tps": 4622.082,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 9.085,
+     "strata_verify_ms": 8.734,
+     "strata_draft_ms": 0.0
+    },
+    "32768": {
+     "decode_tps": 106.626,
+     "prefill_tps": 5669.529,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 9.393,
+     "strata_verify_ms": 8.963,
+     "strata_draft_ms": 0.0
+    }
+   },
+   "strata_na_mtp": {
+    "1024": {
+     "decode_tps": 177.446,
+     "prefill_tps": 2145.233,
+     "tokens_per_pass": 2.777,
+     "ms_per_pass": 15.621,
+     "strata_verify_ms": 13.423,
+     "strata_draft_ms": 1.84
+    },
+    "4096": {
+     "decode_tps": 166.0,
+     "prefill_tps": 4592.611,
+     "tokens_per_pass": 2.71,
+     "ms_per_pass": 16.505,
+     "strata_verify_ms": 14.063,
+     "strata_draft_ms": 1.867
+    },
+    "32768": {
+     "decode_tps": 187.949,
+     "prefill_tps": 5636.434,
+     "tokens_per_pass": 3.271,
+     "ms_per_pass": 17.403,
+     "strata_verify_ms": 14.658,
+     "strata_draft_ms": 2.257
+    }
+   }
+  }
+ },
+ "note": "a_dep2_off round 1's 1024/0 prefill (645 tok/s) is an outlier, left out of the doc's means"
+}

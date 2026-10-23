@@ -3048,3 +3048,127 @@ Evidence: `evidence/fn7_step7i_2026-10-23.json`.
 against the bench's 256, and so predicted holes that the bench's own decode refills. Every prediction now replays the
 bench's exact workload: its prompts, its decode length, its order (warm-up included). The fill stays off; 4c80411's
 fixes stay (correct with the fill off too).
+
+### 21.16 The regression check (ABBA), lending the minimum
+
+**ABBA on the 5090.** §21.14's commit (4e3d8e7) was run against HEAD with the fill off (60fd5b7), in one allocation,
+arms interleaved a b b a, 3 rounds. The only code between them is the fill, 56fbfc1 and 4c80411.
+
+- HEAD was slower by **0.3%** in every MTP cell:
+  - 1K: 161.93–162.04 against 161.49–161.52 tok/s;
+  - 4K: 155.37–155.46 against 154.93–154.97;
+  - 32K: 163.84–163.90 against 163.36–163.45.
+- Plain decode was 0.3% slower as well, 128.5 against 128.1 at 1K. That comparison leaves out the first arm of the
+  job, which ran 2% low.
+- Prefill moved by less than ±0.5%. Rounds agreed within 0.1 tok/s, so the 0.3% is real.
+- The 1–9% of §21.15 was the allocation: HEAD ran here as fast as in §21.15's (MTP 1K 161.5 against 161.4).
+- The cause is the fill's code in `k_resolve`, which costs about 0.35 µs a call even with the fill off. On an RTX A5000
+  (spikes/fn7/resolve_bench.py) the call took 11.9 → 12.3 µs at 1 row and 12.1 → 12.4 µs at 4 rows, and the tick
+  made no difference. At ≈ 51 calls a pass that is ≈ 18 µs of a 17.2 ms pass.
+- Fixed in 0c9bb57: the fill's code is compiled in only for a filling call, where `fill_every` > 0, and its tick
+  counts only there, the oracle alike. The call is back to 12.0 / 12.2 µs. No bisection between the two fill commits
+  was needed.
+
+**What a prompt step lends, per purpose** (`spikes/fn7/lend_min.py`). The replay serves the bench's exact workload:
+its warm-up, then its 1K and 4K prompts in order, 256 decode tokens each, on both deployments of each card. Each
+prompt step's lent experts are split by `lend` call:
+- call 0 is the tail: the large passes' contiguous scratch, then the step-peak loan past it, split by their bytes;
+- calls 1… are the ring's halves or the staging slots.
+
+Each purpose's need is set against that. The rounds are replayed with the policy's own `lend` (F11's coldest whole
+experts), and the replay reproduces the experts the step lent in every prompt. The least need is iterated to its
+fixed point, since lending makes misses, and picks its experts the same way. The tail is kept whole. MTP deployment
+below; the plain one agrees within a few percent.
+
+| | 5080 1K | 5080 4K | 5090 1K (/1, /2) | 5090 4K |
+|---|---|---|---|---|
+| mode | ring | ring | stage, 8 parts | ring |
+| tail: scratch + loan | 779 (80% loan, 0.66 GB) | 2,903 (84% loan, 2.56 GB) | 154 (no loan) | 437–460 |
+| ring / staging rounds | 2,394–2,462 | 2,482–2,542 | 2,061 / 1,971 (512 a class: a pass's worth) | 2,964–3,243 |
+| the ring's need: 2 × a layer's most absent pieces | at it (3,101–3,175 in all) | at it | – | at it |
+| staging, a layer's most routed misses (not known when it lends) | – | – | 880 / 861 in all | – |
+| staging, its most absent pieces (known) | – | – | 1,393 / 1,380 | – |
+| staging, a ring of two parts of those | – | – | 431 / 426 | – |
+
+(Lent experts.) The ring is already at its minimum on both cards, where lending it less spares 0–1.3% of the 20
+steps' misses after a prompt. The loan is sized at 3.0× the live peak, against the 2.35–2.74× its segments measured
+(§21.12): trimming it would spare 60–140 of the 5080's 3,200 experts at 1K. That is too small to matter, so it was
+not built.
+
+Staging is where the 5090's 1K prompts over-lend: a pass's worth, 512 slots a class, against a layer's 354–512
+absent pieces, or two parts of them, 90–128. The bytes the bench's 1K prompts would miss (GB, plain deployment, the
+cache they met less what they lent):
+
+| 1K prompt | lent now | staging at most-absent | a ring of two parts | after-prompt misses spared (20 steps; two parts) |
+|---|---|---|---|---|
+| /0 (after the warm-up) | 21.30 | 20.55 | 20.29 (−4.7%) | 8% |
+| /1 | 18.59 | 17.09 (−8.1%) | 15.55 (**−16.4%**) | 28% (MTP 21%) |
+| /2 | 18.72 | 17.28 (−7.7%) | 15.57 (**−16.8%**) | 22% (MTP 19%) |
+
+The gate was the 5090's 1K bytes down by at least 8%: the ring of two parts passes it. The 5080's gate was its
+after-prompt misses down by at least 15%: lending the minimum does not get there, because its ring is already at
+its minimum. Only staging the 5080's 1K prompts instead of streaming them would, and the oracle bound for that is
+−11.5% to −17.8% on the MTP deployment, −8.1% to −12.6% for what it can know when it lends. That is a mode change, not
+a smaller lend: not built.
+
+**Built: a pipelined staging step lends a ring of two parts** (std; e095d8f, 35a26a1 and be77e8a after one
+reviewer's two rounds).
+- **Where it applies:** a staging step of large passes, where every client pipelines its passes (no F5b share,
+  stacks that take buffers) and every resolver's fetch fetches in parts.
+- **What it lends:** its lend rounds ask, per class, twice a part of a layer's most absent pieces. They are rounds,
+  like the ring's, because lending makes misses; the last asks the worst case, capped at a pass's worth.
+- **How the slots are reused:**
+  - The stage list repeats those slots over and over.
+  - Every pass of the step pipelines; none splits, and a target layer's pass that would not pipeline stops the
+    engine.
+  - Each part's fetch starts after the part two before it ran.
+  - A part wider than half the ring, where the list wraps, is flagged (SHORT).
+- **Why that is safe:** a pass misses no more of a layer than the layer lacks when the step lends, and nothing admits
+  into empty slots in it. Pieces that share a slot are therefore at least two parts apart in the fetch list.
+- **A latent bug fixed on the way:** a pipelined pass's entries are now ranked by their pieces' places in the fetch
+  list, staged or admitted. Before, an admitted piece got part −1 and was read before its fetch landed, in a step
+  that mixes decode rows into a pipelined pass.
+- **Checks:**
+  - The GPU bitwise case "pipe" stages prompt steps in 4 parts, with a pass's misses past its ring's slots.
+    Its outputs are the resident store's, bit for bit.
+  - L1 parity holds, with the lends replayed.
+  - The D11 tail check holds.
+  - 246 affected tests pass.
+  - On an RTX A5000, the same replay with the build ran the 5090's deployment flags on IQ2_XS:
+    - the 1K prompts lent 269–378 experts, against 1,355–1,690;
+    - they missed 12.33 / 10.37 / 9.82 GB, against 13.34 / 11.56 / 11.13 (−7.6% / −10.3% / −11.8%);
+    - that is what the replay predicted there: 12.3 / 10.29 / 9.74.
+
+**The 5090's A/B.** 0c9bb57 against the ring of parts (be77e8a), in one allocation, arms a b b a, 3 rounds, with Strata's two arms. One outlier is left out of the means: the
+old arm's 1024/0 prefill in round 1, 645 tok/s against 1,634 / 1,724.
+
+| Row | old | ring of parts | Δ |
+|---|---|---|---|
+| 1K prefill, plain deployment (/0, /1, /2) | 1,679 / 2,014 / 1,997 | 1,764 / 2,144 / 2,164 | +5.1% / +6.4% / +8.4% |
+| 1K prefill, MTP deployment | 1,730 / 1,943 / 1,952 | 1,784 / 2,056 / 2,089 | +3.1% / +5.8% / +7.0% |
+| 1K decode, plain (rounds 1–2) / MTP | 129.6 / 163.1 | 131.0 / 165.5 | +1.1% / +1.5% |
+| 4K, 32K: decode, MTP, prefill | | | −0.2% to +0.8% |
+
+That is the 1K prefill against Strata's: **0.87 → 0.92** on the plain deployment, 0.87 → 0.92 on the MTP one. With
+the build, the 1K prompts on the 5090's plain deployment lent 40 / 436 / 431 experts, against 662 / 2,223 / 2,138
+(the second and third: tail 154, staging 280 / 277). They missed 20.30 / 15.56 / 15.39 GB, against 21.30 / 18.59 /
+18.72: −4.7% / −16.3% / −17.8%, the replay's −4.7% / −16.4% / −16.8%. The 20 steps after them missed 1,462 / 1,007 /
+1,138 routes, against 1,580 / 1,336 / 1,443. The 4K prompts stream, unchanged.
+
+**The ship rule:** the ring of parts costs no gated row, and the rows below their bars gain: the 1K prefill
+0.87 → 0.92, now above its 0.9 bar, and MTP decode at 1K +1.5%. **Shipped** (it applies wherever a staging step
+pipelines: the 5090's deployment).
+
+**The table.** The 5090 is from this allocation, with the ring of parts. The 5080 is as in §21.15: nothing here
+changes its deployment, which streams its prompts, but for 0c9bb57's ≈ +0.3%. Its A/B, 60fd5b7 against HEAD, was
+queued but did not get a node and was cancelled.
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.05 | 1.05 | 1.05 | 1.13 | 1.14 | 1.10 |
+| MTP decode | 0.95 | 1.03 | 1.04 | 0.93 | 0.94 | 0.88 |
+| MTP, per-pass rate × pooled acceptance | 0.96 | 0.97 | 1.03 | 0.93 | 0.94 | 0.90 |
+| Prefill | 0.97 | 1.20 | 1.02 | **0.92** | 1.14 | 1.03 |
+
+Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows. The 5090's 1K prefill is now above its
+0.9 bar. Evidence: `evidence/fn7_step7j_2026-10-23.json`.
