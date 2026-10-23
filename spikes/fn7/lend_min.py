@@ -14,6 +14,8 @@ makes misses), picks its experts the same way.
 The saving: the prompt's missed bytes (its routes against the cache it met, less what it lent) with the lent set
 cut to the minimum (the tail kept whole), and the decode / verify rows' missed routes after it (the first `--window`
 steps, and every step to the next prompt) that hit an expert lent now but not at the minimum, until it is back.
+Also each request's decode hit rate (its decode / verify rows' routes found resident) and the cache's share of the
+target's expert bytes (and the auxiliary model's, against the same).
 Usage: lend_min.py <model> '<engine flags>' --requests <requests.json> [--ctx 1024 4096] [--window 20]"""
 from __future__ import annotations
 
@@ -68,7 +70,8 @@ def main() -> None:
             np.maximum.at(out, table[:target, r], per_layer[:target])
         return out
 
-    state = {"map": s.residency.host.copy(), "score": s.state["score"].cpu().clone(), "prompt": None}
+    state = {"map": s.residency.host.copy(), "score": s.state["score"].cpu().clone(), "prompt": None,
+             "routes": 0}
     steps: list[tuple[np.ndarray, np.ndarray]] = []           # after the prompt: (missed routes [G, E], absent)
     found: dict = {}
 
@@ -78,6 +81,7 @@ def main() -> None:
             found.update(analyse(record, held, state["score"]))
         elif found and record["counts"].sum():
             steps.append((record["counts"] * ~held, (s.residency.host < 0).any(-1)))
+            state["routes"] += int(record["counts"].sum())
         state["map"] = s.residency.host.copy()
         state["score"] = s.state["score"].cpu().clone()
     s.taps.append(tap)
@@ -186,17 +190,23 @@ def main() -> None:
     for r in plan["requests"][:last + 1]:
         found.clear()
         steps.clear()
+        state["routes"] = 0
         state["prompt"] = r["key"]
         e.generate([r["ids"]], SamplingParams(temperature=0.0, max_tokens=OUTPUT, ignore_eos=True))
         if not found:
             rows.append({"key": r["key"], "borrowed": False})
             continue
-        row = {"key": r["key"], **{k: v for k, v in found.items() if k != "_sets"}, "after": after(found)}
+        routes = sum(int(m.sum()) for m, _ in steps)              # (the decode rows' missed routes: below)
+        row = {"key": r["key"], **{k: v for k, v in found.items() if k != "_sets"}, "after": after(found),
+               "decode_hit": round(1 - routes / max(state["routes"], 1), 4)}
         rows.append(row)
         print(json.dumps(row), flush=True)
     e.close()
+    total = float(nbytes[:target].sum())
+    cached = {aux: round(sum((c.size - c.null - c.staging) * c.unit_bytes for c in classes
+                             if c.name.startswith("aux.") == aux) / total, 4) for aux in (False, True)}
     print(json.dumps({"pipeline": pipeline, "classes": [[c.name, int(c.unit_bytes)] for c in classes],
-                      "prompts": rows}))
+                      "cache_share": cached[False], "aux_share": cached[True], "prompts": rows}))
 
 
 if __name__ == "__main__":
