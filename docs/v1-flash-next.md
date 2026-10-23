@@ -3043,3 +3043,8 @@ Strata's prefill 4–5% slower, its decode the same):
 Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows, and the 5090's 1K prefill. For the last,
 the replay now names the prompt's own lending first (3.7–3.9 GB of its ≈ 18.7), then the share (1.2–1.9 GB).
 Evidence: `evidence/fn7_step7i_2026-10-23.json`.
+
+**The lesson, and the rule from here on** (the lead's call, 2026-10-23): §21.14's replay decoded 8 tokens a request
+against the bench's 256, and so predicted holes that the bench's own decode refills. Every prediction now replays the
+bench's exact workload: its prompts, its decode length, its order (warm-up included). The fill stays off; 4c80411's
+fixes stay (correct with the fill off too).
