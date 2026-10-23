@@ -56,8 +56,9 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
-LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments
-                                             # (1–10 MiB blocks come from 20 MiB ones): lent only in its steps
+LOAN_MARGIN, LOAN_SLACK = 3.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
+# a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
+# step's segments are 2.35-2.74x its allocated peak (FN §21.12); lent in proportion to the step's prompt tokens
 
 
 @dataclasses.dataclass(eq=False)
@@ -147,6 +148,7 @@ class TieredStore:
         # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
         # ActivationLender), so the engine reserves only the worst step that streams nothing
         self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
+        self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         # `cpu_admit` (F5b): the CPU's experts are admitted as any miss (a variant that `defers`), their pieces fetched
         # after the call on a side stream (the CPU serves the call), joined after the target's last layer
         self.cpu_admit, self._later, self._pending_later = cpu_admit, None, None
@@ -581,9 +583,13 @@ class TieredStore:
         if self._loaned:
             self._loan.release()
         self._loaned = False
+        self._step_loan = 0
         if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
             cls, n = self.tail
-            need = max((f(at) for f in self.tail_bytes), default=0) + self._loan_bytes
+            if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
+                loan = -(-(int(self._loan_per_token * at) + LOAN_SLACK) // self._align) * self._align
+                self._step_loan = min(self._loan_bytes, loan)
+            need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
             self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         self.step, self.step_tokens = step.step, at
@@ -656,28 +662,29 @@ class TieredStore:
 
     def lend_activations(self, peak: int) -> int:
         """The core's ActivationLender, at the startup profile: a tail store (`lend_peak`) lends its tail steps — from
-        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's rounding (`LOAN_MARGIN`,
-        `LOAN_SLACK`) past their passes' buffers at the tail's end, where its device has `activation_loan@1`; 0 where
-        it lends none."""
+        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`,
+        `LOAN_SLACK`) past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak`
+        is the worst step's, of `max_step_tokens`), where its device has `activation_loan@1`; 0 where it lends none."""
         if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned
                 and self.ctx.candidates(ACTIVATION_LOAN, {})):
             return 0
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
         self._loan_bytes = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
+        self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
         self.tail = self._tail(lambda c: c.cap)        # the tail grows by the loan (for the final materialize)
         return self.ring_tokens
 
     def activations(self, step):
         """The core's ActivationLender, at an eager step's launch: a tail step's forward allocates from the tail's
-        last `_loan_bytes` (lent with the tail at its first resolve: nothing reads the tail's experts before, they are
-        never read after); None for any other step."""
+        last bytes, its loan's (lent with the tail at its first resolve: nothing reads the tail's experts before, they
+        are never read after); None for any other step."""
         if self._loan is None or self._step_tail is None:
             return None
         cls, n = self._step_tail
         c = list(self.classes.values())[cls]
         self._loaned = True
-        loan = c.slots()[c.size - n:].view(-1)[-self._loan_bytes:]
+        loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     def pipelines(self, tokens: int) -> int:
@@ -701,7 +708,7 @@ class TieredStore:
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
         view = c.slots()[c.size - n:].view(-1)
-        return view[:len(view) - self._loan_bytes]          # (the activation loan's bytes past the passes')
+        return view[:len(view) - self._step_loan]           # (the activation loan's bytes past the passes')
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""

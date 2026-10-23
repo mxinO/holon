@@ -949,9 +949,9 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     """The core's ActivationLender under `moe.lend_peak` (FN step 7, the toy proof): the startup profile measures the
     worst step, then reserves only the worst one below `ring_tokens` (smaller); a streaming step's forward allocates
-    from the tail's last bytes (`activation_loan@1`: kernels.expert_io's MemPool), the same range every time, past the
-    passes' buffers; the outputs are the resident store's bit for bit (CUDA graphs on, overlap on). A buffer kept from
-    inside a lending step stops the engine at the next launch."""
+    from the tail's last bytes (`activation_loan@1`: kernels.expert_io's MemPool), a range in proportion to its prompt
+    tokens, past the passes' buffers; the outputs are the resident store's bit for bit (CUDA graphs on, overlap on).
+    A buffer kept from inside a lending step stops the engine at the next launch."""
     from holon.core import platform
 
     file, prompts, want = gpu_moe
@@ -966,13 +966,15 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     store = engine.ctx.shared_objects[KEY]
     assert len(peaks) == 2 and 0 < peaks[1] < peaks[0] and store._loan_bytes >= peaks[0]
     ranges, use = [], store._loan.use
-    store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel())), use(r))[1]
+    store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel(), store.step_tokens)), use(r))[1]
     assert _served(engine, prompts) == want
     cls, n = store.tail
     c = list(store.classes.values())[cls]
     end = c.slots()[c.size - 1].data_ptr() + c.unit_bytes
-    (at, nbytes), = set(ranges)                      # one range, the tail's last bytes (512-byte aligned)
-    assert store.borrowed["ring"] and at + nbytes == end and at % 512 == 0 and nbytes > store._loan_bytes - 512
+    assert store.borrowed["ring"] and ranges                 # each the tail's last bytes (512-byte aligned), its
+    for at, nbytes, tokens in ranges:                        # step's share of the worst step's loan
+        share = store._loan_per_token * tokens
+        assert at + nbytes == end and at % 512 == 0 and share < nbytes + 512 and nbytes <= store._loan_bytes
     assert store._loan.held() == 0 and store._loan.lib.loan_overflow() == 0     # the range held every segment
     kept, real = [], store.activations
 
