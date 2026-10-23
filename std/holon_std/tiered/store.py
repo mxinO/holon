@@ -12,9 +12,10 @@ binds kernels. Then, through the engine's hooks:
   the tail (docs/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
   (`tail_bytes`);
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
-  class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
-  weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
-  the tier and the seed copied in, the policy's device state zeroed;
+  class's pinned slots: beside fill classes, a pinned class's hottest items first, so it gets them); then each
+  class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero weights, one per routing rank),
+  `staging` slots, then the cache slots its seeded pieces fill —, the map reset to the tier and the seed copied in,
+  the policy's device state zeroed;
 - `before_launch`: the step's row kinds per token (decode and verify rows by the plan's `row_kind`, which the
   scheduler fills on every step it launches — a plan without it is refused; prefill rows the others, so a step's
   decode rows lie in its first expert pass; graph padding past them), written as far as this step's or the last
@@ -32,6 +33,7 @@ there. Every host edit carries the value it expects (a failed precondition stops
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import functools
 import json
 import math
@@ -197,7 +199,7 @@ class TieredStore:
         if self.residency is not None:
             raise RuntimeError(f"{self.name}: pieces added after the device tables were made (at materialize)")
         c = self.classes.setdefault(cls, SlotClass(cls, unit_bytes, self.top_k, self.staging,
-                                                   cache=self._cache.get(cls, self._cache.get("*"))))
+                                                   cache=_cache_of(self._cache, cls)))
         if c.unit_bytes != unit_bytes or sum(e.nbytes for e in extents) != unit_bytes:
             raise ValueError(f"{self.name}: class {cls} has {c.unit_bytes}-byte units, not {unit_bytes} "
                              f"({sum(e.nbytes for e in extents)} in the extents)")
@@ -425,7 +427,11 @@ class TieredStore:
         # that many of its hottest items first (`floors`), if its cap allows: a few cache slots more for it, where
         # staging slots of a pass's size in every class would hold more and cache nothing.
         # A staging layout keeps its own tail at the pool's end (`own_tail`): the large passes' buffers.
-        can_lend, floors = self.policy.device_owned and not self.exclusive, {}
+        can_lend = self.policy.device_owned and not self.exclusive
+        # Beside fill classes, a pinned class (`cache`: an MTP head's experts, kept whole) is floored at its pins: a
+        # profile that never counted its group would otherwise seed it last, F2's few of it only.
+        pinned = {c.name: c.cap for c in classes if c.cache is not None} if self._pinned is None else {}
+        floors = dict(pinned)
         # the classes a borrowing step lends from: the target's (an auxiliary model's layers never borrow)
         lenders = {c.name for g in list(self._order)[:self.borrowing_groups] for c in self.groups[g].values()}
         for staging in sorted({self.staging, self.prefill}):
@@ -448,7 +454,7 @@ class TieredStore:
                 self.lending = budget.taken[c.name] - n >= self.prefill
             if self.lending or staging == self.prefill:
                 break
-            floors = {}
+            floors = dict(pinned)
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
@@ -956,7 +962,8 @@ class _Reads:
 
 def _parse_cache(text: str) -> dict[str, int | float]:
     """`cache`: `<class>=<slots>` items, comma-separated, a slot count or (with a point) a fraction of the class's
-    pieces; class `*` for the classes not named. Empty: every class fills free VRAM up to all its pieces."""
+    pieces; a class a name or a pattern (`aux.*`: an MTP head's classes; `*` the classes nothing else names, see
+    `_cache_of`). Empty: every class fills free VRAM up to all its pieces."""
     out = {}
     for item in filter(None, (s.strip() for s in text.split(","))):
         name, sep, value = item.partition("=")
@@ -964,3 +971,11 @@ def _parse_cache(text: str) -> dict[str, int | float]:
             raise ValueError(f"cache item {item!r}: expected <class>=<slots or fraction>")
         out[name.strip()] = float(value) if "." in value else int(value)
     return out
+
+
+def _cache_of(cache: dict[str, int | float], cls: str) -> int | float | None:
+    """Class `cls`'s pinned cache: its own item, else the first pattern (fnmatch) naming it, `*` last; None: fill."""
+    if cls in cache:
+        return cache[cls]
+    return next((v for k, v in sorted(cache.items(), key=lambda kv: kv[0] == "*") if fnmatch.fnmatchcase(cls, k)),
+                None)

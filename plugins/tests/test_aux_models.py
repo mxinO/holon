@@ -190,3 +190,40 @@ def test_an_aux_layer_that_runs_no_prompt_rows_never_holds_a_loan(tmp_path_facto
             out[d.rid] += d.token_ids
     assert [out[r] for r in rids] == want and store.borrowed["ring"] > 0 and all(lent)
 
+
+def test_pinned_aux_classes_are_seeded_first_beside_a_fill_target(tmp_path_factory, tmp_path):
+    """`moe.cache` by pattern: `aux.*=1.0` pins an auxiliary model's classes (an MTP head's experts, FN D12a) whole
+    beside the target's fill classes, and a pinned class beside fill ones is seeded first — a fill pool short of
+    every expert (a paged floor) caches all of the head's, the target what is left, where the fill alone shares it
+    out by F2; `aux.*=0.5` half of them. An exact name wins over a pattern, `*` last. The streams are the plain
+    engine's."""
+    from holon_std.tiered.store import _cache_of
+
+    from .test_moe_engine import KEY, Q, _gguf_and_dense, _tiny_moe
+
+    assert [_cache_of({"*": 2, "aux.*": 1.0, "aux.b": 3}, c) for c in ("aux.a", "aux.b", "a")] == [1.0, 3, 2]
+    assert _cache_of({"aux.*": 1.0}, "a") is None
+    checkpoint, prompts = _tiny_moe(tmp_path_factory, 2)
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
+    plain, want = _engine(file, drafting=False), []
+    for p in prompts:
+        rid, out = plain.add(p, GREEDY), []
+        while plain.has_work():
+            out += [t for d in plain.step() if d.rid == rid for t in d.token_ids]
+        want.append(out)
+    cached = {}
+    for cache in ("", "aux.*=1.0", "aux.*=0.5"):
+        _oracle(prompts, want, ahead=True)
+        engine = _engine(file, host_memory=1 << 24, paged_min_tokens=700, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.cache": cache, "aux.write_kv": True})
+        store = engine.ctx.shared_objects[KEY]
+        cached[cache] = [c.size - c.null - c.staging for c in store.classes.values()]
+        rids = [engine.add(p, GREEDY) for p in prompts]
+        out = {r: [] for r in rids}
+        while engine.has_work():
+            for d in engine.step():
+                out[d.rid] += d.token_ids
+        assert [out[r] for r in rids] == want, cache
+    assert list(store.classes) == ["gate_up.q8_0.64x64", "down.q8_0.64x32", "aux.gate_up.q8_0.64x64",
+                                   "aux.down.q8_0.64x32"]
+    assert cached == {"": [10, 10, 5, 5], "aux.*=1.0": [7, 7, 8, 8], "aux.*=0.5": [11, 11, 4, 4]}
