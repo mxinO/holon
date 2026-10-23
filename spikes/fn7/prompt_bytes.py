@@ -63,11 +63,12 @@ def main() -> None:
     profile = s._profile_counts()
     order = _Budget.f2(profile)
 
-    def seeded(budget: float) -> np.ndarray:
-        """F2's order of the profile, whole experts, until `budget` bytes."""
-        held, left = np.zeros((groups, experts), dtype=bool), budget
+    def seeded(budget: float, held: np.ndarray | None = None) -> np.ndarray:
+        """F2's order of the profile, whole experts, until `budget` bytes (past `held`'s, kept)."""
+        held = np.zeros((groups, experts), dtype=bool) if held is None else held.copy()
+        left = budget - float((nbytes * held).sum())
         for g, i in order:
-            if g < target and nbytes[g, i] <= left:
+            if g < target and not held[g, i] and nbytes[g, i] <= left:
                 held[g, i] = True
                 left -= nbytes[g, i]
         return held
@@ -75,6 +76,8 @@ def main() -> None:
     warm = plan["warmup"]
     e.generate([warm["ids"]], SamplingParams(temperature=0.0, max_tokens=warm["output"], ignore_eos=True))
     total = float(nbytes[:target].sum())
+    capacity = float(sum((c.size - c.null - c.staging) * c.unit_bytes for c in s.classes.values()
+                         if not c.name.startswith("aux.")))           # the target's cache slots, bytes
     out = []
     for r in plan["requests"]:
         if r["key"].split("/")[0] != a.ctx:
@@ -89,7 +92,10 @@ def main() -> None:
         met = float((nbytes[:target] * pre[:target]).sum())
         out.append({"key": r["key"], "routed_gb": float((nbytes[:target] * rt).sum()) / 1e9,
                     "cache_met_share": round(met / total, 4), "lent_experts": int(lent.sum()),
+                    "capacity_share": round(capacity / total, 4),
                     "missed_gb": {"met_less_lent": round(gb(pre & ~lent), 2), "met": round(gb(pre), 2),
+                                  "met_filled": round(gb(seeded(capacity, pre)), 2),
+                                  "met_filled_less_lent": round(gb(seeded(capacity, pre) & ~lent), 2),
                                   "profile_same_bytes": round(gb(seeded(met)), 2),
                                   f"profile_{a.share}": round(gb(seeded(a.share * total)), 2)}})
         print(json.dumps(out[-1]), flush=True)
