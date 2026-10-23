@@ -3172,3 +3172,148 @@ queued but did not get a node and was cancelled.
 
 Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows. The 5090's 1K prefill is now above its
 0.9 bar. Evidence: `evidence/fn7_step7j_2026-10-23.json`.
+
+### 21.17 Where FN's speed stands (for the owner)
+
+The last speed round was config only: the 5090's MTP deployment swept along its cache-share against prefill curve,
+and the 5080's 1K prompts staged in the ring of parts. Speed work for FN stops here.
+
+**The 5090's MTP sweep.** Four knobs: `--max-step-tokens` 4K / 5K / 6K, `moe.lend_peak` off / on, `moe.cache` with
+`aux.*` 0.3 / 0.5, and `--memory-fraction` 0.97 / 0.985.
+
+The replay came first (`spikes/fn7/lend_min.py`, the bench's exact workload): 13 configurations, the deployment and
+the 12 at 0.985.
+
+| Step, `lend_peak`, `aux.*` (at 0.985) | Experts cached | Decode hit 1K / 4K / 32K | 4K prompt missed GB |
+|---|---|---|---|
+| 6K, off, 0.5 (the deployment, at 0.97) | 46.8% | 0.944 / 0.936 / 0.917 | 28.7 |
+| 6K, off, 0.5 | 47.6% | 0.945 / 0.938 / 0.920 | 28.0 |
+| 6K, off, 0.3 | 47.9% | 0.944 / 0.937 / 0.918 | 27.7 |
+| 6K, on, 0.5 / 0.3 | 49.4% / 49.7% | 0.948 / 0.936 / 0.910 | 30.4 / 30.0 |
+| 5K, off, 0.5 / 0.3 | 48.1% / 48.3% | 0.946 / 0.939 / 0.921 | 27.8 / 27.7 |
+| 5K, on, 0.5 / 0.3 | 49.4% / 49.7% | 0.948 / 0.936 / 0.914 | 30.4 / 30.1 |
+| 4K, off, 0.5 / 0.3 | 48.4% / 48.7% | 0.947 / 0.940 / 0.929 | 27.8 / 27.6 |
+| 4K, on, 0.5 / 0.3 | 49.4% / 49.7% | 0.948 / 0.936 / 0.924 | 30.5 / 30.2 |
+
+What the replay showed:
+- `lend_peak` buys 1–1.8 points of cache. But each 4K prompt then lends ≈ 2,000 more experts (+2.4 GB), and the decode
+  after a 32K prompt hits less, so its configurations are dominated; one was kept to confirm.
+- `aux.*=0.3` adds 0.3 points to the target's cache and takes 0.3 points from the head's.
+- 0.985 adds 0.9 points and costs no prefill bytes.
+- A smaller step adds cache (+0.4 points per 1K tokens) and helps the decode after long prompts most.
+
+Seven arms were benched (3 rounds, one allocation, beside Strata's MTP arm; 0.985 unless the arm says 0.97). The
+ratios are MTP decode tok/s, per-pass rate × pooled acceptance, and the MTP deployment's prefill, at 1K / 4K / 32K:
+
+| Arm | MTP decode | per-pass × pooled | prefill (MTP) | min MTP |
+|---|---|---|---|---|
+| 6K, off, 0.5, 0.97 (the deployment) | 0.938 / 0.972 / 0.917 | 0.952 / 0.950 / 0.924 | 0.927 / 1.108 / 1.036 | 0.917 |
+| 6K, off, 0.5 | 0.944 / 0.979 / 0.926 | 0.958 / 0.956 / 0.932 | 0.935 / 1.102 / 1.036 | 0.926 |
+| 6K, off, 0.3 | 0.939 / 0.973 / 0.920 | 0.954 / 0.951 / 0.927 | 0.940 / 1.111 / 1.035 | 0.920 |
+| **5K, off, 0.5** | **0.944 / 0.980 / 0.938** | 0.958 / 0.958 / 0.939 | 0.941 / 1.109 / **0.982** | **0.938** |
+| 4K, off, 0.5 | 0.949 / 0.983 / 0.914 | 0.964 / 0.961 / 0.961 | 0.949 / 1.131 / **0.911** | 0.914 |
+| 4K, off, 0.3 | 0.945 / 0.978 / 0.910 | 0.959 / 0.956 / 0.956 | 0.952 / 1.134 / 0.913 | 0.910 |
+| 4K, on, 0.5 | 0.953 / 0.971 / 0.901 | 0.967 / 0.950 / 0.947 | 0.930 / 1.061 / 0.870 | 0.901 |
+
+(The 4K step's 32K texts chunk elsewhere, and draft at 3.07 tokens a pass against 3.20. Its per-pass rate is the
+best, its tok/s the worst at 32K.)
+
+**The objective:** the least MTP-decode ratio, highest, with every other gated row at its bar × 1.05 or above. Only
+the 1K prefill row, already below that, may not fall.
+- The 4K step fails it: its 32K prefill drops to 0.91.
+- The **5K step at 0.985 with `aux.*=0.5`** is the pick:
+  - the least MTP ratio 0.917 → 0.938 (per-pass 0.924 → 0.939);
+  - the MTP 1K prefill 0.927 → 0.941;
+  - the 32K prefill 1.036 → 0.982, above 0.945.
+- The curve, step by step:
+  - 6K → 5K buys the 32K MTP row +1.3% (tok/s) for −5% of its prefill;
+  - 5K → 4K buys +2.3% per pass for another −7%;
+  - 0.985 is free;
+  - `aux.*=0.3` and `lend_peak` lose.
+- The drafting-off deployment: no knob obviously helps its rows (decode 1.10–1.14), so it keeps its 6K step at 0.97.
+  If the lock allows only one step size per card (acceptance 6), it takes the 5K step too, which costs its 32K
+  prefill ≈ 5% (1.03 → ≈ 0.98, above 0.945). That is the lead's call.
+
+**The 5080: its 1K prompts staged in the ring of parts, the `k_resolve` fix, a fresh row.** One allocation, 3
+rounds, Strata's two arms beside them:
+- 60fd5b7 against HEAD, the deployment, arms a b b a: HEAD is **+0.2% on every row**, both deployments. That is
+  0c9bb57's `k_resolve`.
+- Staging was added on HEAD: `moe.stream_tokens=2048 moe.pipeline=8`. The 1K prompts stage in 8 parts in the ring
+  of two parts; 4K and 32K still stream.
+  - **1K prefill +5.4%** (plain) / **+6.4%** (MTP), and **1K decode +0.7%** on both deployments.
+  - 4K and 32K within ±0.1%.
+- The replay of the bench's workload (`lend_min.py`) measured the staged 1K prompts:
+  - they lend 1,036–1,091 experts, against 3,173–3,241;
+  - they miss 12–13% fewer bytes;
+  - the 20 steps after them miss **8–16% fewer routes** under MTP (5,744 / 7,710 / 6,923 against 6,867 / 8,400 /
+    7,646), and 13–29% fewer drafting off.
+  - The replay had put it at 11.5–17.8% on the MTP deployment.
+- **Shipped** under the ship rule: no row loses, and the rows below the bar gain (MTP 1K 0.937 → 0.943; per pass
+  0.988 → 0.995).
+
+**The final table** (ratios to Strata, no approximation; each card's deployment now):
+- **The 5080:** v3, `moe.lend_peak=on`, its 1K prompts staged (`moe.stream_tokens=2048 moe.pipeline=8`), the MTP
+  deployment with `moe.split=on` and `aux.*=0.3`. Its rows are from the allocation above.
+- **The 5090:**
+  - The MTP deployment now runs 5K steps at 0.985, `aux.*=0.5`; its rows are from the sweep's allocation.
+  - The drafting-off deployment keeps 6K steps at 0.97; its rows are from §21.16's allocation.
+  - Both have staging in the ring of parts.
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.08 | 1.09 | 1.10 | 1.13 | 1.14 | 1.10 |
+| MTP decode (tok/s) | **0.94** | 1.12 | **0.98** | **0.94** | **0.98** | **0.94** |
+| MTP, per-pass rate × pooled acceptance | **0.99** | 1.02 | 1.03 | **0.96** | **0.96** | **0.94** |
+| Prefill | 1.06 | 1.20 | 1.01 | 0.92 | 1.14 | 1.03 |
+| Prefill, MTP deployment | 1.07 | 1.20 | 1.01 | 0.94 | 1.11 | 0.98 |
+
+Strata's tokens per pass move between allocations: the 5080's 4K was 2.43 here against 2.54 in §21.15, and its 32K
+3.09 against Holon's 2.92. That moves the tok/s row by several percent either way; the per-pass row takes it out.
+
+**Still below the bar** (MTP-matched decode, 1.0×):
+- The 5080 at 1K: 0.94 tok/s, 0.99 per pass.
+- The 5080 at 32K: 0.98 tok/s, but 1.03 per pass (Strata's acceptance).
+- The 5090's three rows: 0.94–0.98 tok/s, 0.94–0.96 per pass.
+
+Every drafting-off decode row and every prefill row is above its bar.
+
+**What each remaining lever costs** (the curve is cache share against prefill; Strata caches ≈ 54% of the 5090's
+experts against Holon's 48.1%):
+- **A smaller step** (the 5090): 5K → 4K buys the 32K MTP row +2.3% per pass. It costs that row's prefill 7%
+  (0.98 → 0.91), under its bar × 1.05.
+- **The step-peak loan** (`moe.lend_peak`):
+  - On the 5090 it buys 1–1.8 points of cache. But every 4K prompt lends ≈ 2,000 more experts (+2.4 GB), the decode
+    after a 32K prompt hits less, and the MTP prefill falls 5–13% (4K step: 32K 0.87). It is dominated.
+  - On the 5080 it is shipped. Trimming its 3.0× margin to the measured 2.35–2.74× spares 60–140 of ≈ 3,200 lent
+    experts at 1K.
+- **Memory margin:** 0.985 is taken on the 5090's MTP deployment. 0.99 adds 0.3 points and costs the 32K prefill
+  4.6% (§21.11).
+- **The head's share:** `aux.*=0.3` instead of 0.5 on the 5090 adds 0.3 points to the target's cache and loses
+  0.3–0.6% (the head misses). The 5080 keeps 0.3.
+- **What is left is structural, not a knob:**
+  - **Partial lending** (a loan capped at what a class can give, which needs the core's reservation to know the lent
+    part): not built, §21.14.
+  - **Strata's miss serving:** some misses on its CPU pool beside the GPU's hits. Holon's CPU path is ≈ 5× slower
+    per expert, and the split lost 2–14% (§21.5, §21.9).
+  - **mmvq skipping null slots,** so the hits-first split stops doubling the expert work (§21.5).
+  - **The draft-quality check:** not run (the lead's call, §21.10).
+
+**Tried and dropped** (measured, not shipped):
+- F5b's CPU share and the Strata-style split (−2% to −14%).
+- The hits-first split (−8% to −10%).
+- THP host pools (a core option).
+- `placement.budget@1`.
+- `moe.cpu_admit`.
+- The layer-ahead likely-routed prefetch (more bytes than it hides).
+- The capped high-τ prefetch (not built).
+- A refill of the lent slots right after a prompt (fix 2: the same bytes in the bus-bound prefill).
+- `k_resolve`'s early exit and 1,024 threads (slower).
+- The HC mix's split-K (1.18–1.31× at 4 rows, under its 1.6× gate).
+- The front-only MTP catch-up's further trims (≈ 0.04 ms a pass).
+- Lending coldest instead of the tail (no change).
+- The capped loan at 8K (not built).
+- `--memory-fraction` 0.99 and a 4K step on the 5090 (the 32K prefill guard).
+- The hole fill `lfu.fill` (the holes refill themselves within 256 decode tokens).
+- `moe.lend_peak` on the 5090.
+
+Speed work for FN stops here. Evidence: `evidence/fn7_step7k_2026-10-23.json`.
