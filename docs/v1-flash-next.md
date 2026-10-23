@@ -2725,3 +2725,6 @@ once: no repeat misses). The lent experts are 28% (17%) of those routes: a refil
 ≈ 3,000 experts to spare ≈ 1,000 fetches. The prompt's own routes rank better: its 1,000 / 2,000 / 3,000 most-routed
 absent experts are 25 / 39 / 50% (14 / 26 / 38%) of them — at 1,000, eight or nine in ten copied are routed in the window. The
 rest are the new request's working set, which no refill can know.
+Fix 2 not built: the lead's call (2026-10-23), on that measurement — a blocking or first-in refill moves the same bytes
+the misses would (the first decode step's fetch queued behind it, the graphed steps unable to wait per layer), and one
+in the link's idle windows lands too late for most of the first steps' misses: a ceiling of ≈ 0.1–0.3 ms a pass.
