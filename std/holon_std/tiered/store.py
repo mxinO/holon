@@ -133,8 +133,13 @@ class TieredStore:
         # lent too)
         self.stream_tokens = stream_tokens
         # `pipeline` (FN step 7): a staging step's large passes fetch their misses in this many parts on a side stream,
-        # each layer's resident entries computed first, then each part's as it lands (1: one fetch, then one pass)
-        self.pipeline = pipeline
+        # each layer's resident entries computed first, then each part's as it lands (1: one fetch, then one pass).
+        # Where every client pipelines its passes (`pipelining`), such a step lends its staging as a ring of parts
+        # (`Lent`: twice a part of a layer's most absent pieces, each part's fetch after the part two before it ran)
+        # and every pass of it pipelines (`pipelines`).
+        self.pipeline, self._parts = pipeline, 1
+        self.pipelining: list[Callable[[], bool]] = []       # per client: whether its passes always pipeline
+        self._pipelining = False
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
@@ -561,6 +566,7 @@ class TieredStore:
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
+            self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining)
             if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
                 raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail (moe.lend_peak), but "
                                    "this layout stages: its large steps could not lend them")
@@ -581,6 +587,9 @@ class TieredStore:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
+        # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
+        self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
+            self.large_passes(at) and not self.exclusive else 1
         self._step_tail = None
         if self._loaned and (held := self._loan.held()):
             raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
@@ -663,7 +672,7 @@ class TieredStore:
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
-            self.lent = Lent(self, self._mode, self._step_tail)
+            self.lent = Lent(self, self._mode, self._step_tail, self._parts)
             self.lent.begin()
 
     def lend_activations(self, peak: int) -> int:
@@ -694,7 +703,11 @@ class TieredStore:
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     def pipelines(self, tokens: int) -> int:
-        """The fetch parts of a pass of `tokens` in this step: `pipeline` in a staging step's large passes, else 1."""
+        """The fetch parts of a pass of `tokens` in this step: `pipeline` in a staging step's large passes — in every
+        pass of a step whose staging is a ring of parts (its slots hold two parts of a layer's misses at a time) —,
+        else 1."""
+        if self._parts > 1:
+            return self._parts
         return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
     def fetch_stream(self) -> torch.Stream:

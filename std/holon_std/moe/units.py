@@ -391,7 +391,8 @@ class MoE(nn.Module):
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
             misses = landed = part = None
-            if self._split and b - a <= SPLIT_ROWS:   # the resident entries first, while the misses' fetch lands
+            if self._split and b - a <= SPLIT_ROWS and self._store.pipelines(b - a) <= 1:   # the resident entries
+                # first, while the misses' fetch lands (not in a step whose staging is a ring of parts: it pipelines)
                 (gate_up, down), misses, landed = self._store.route_split(ids, a, xc)
             elif self._pipelined:                     # a staging step's large pass: its misses part by part
                 (gate_up, down), part, landed = self._store.route_pipelined(ids, a, xc)

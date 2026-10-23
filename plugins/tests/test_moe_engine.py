@@ -912,9 +912,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
     mode = "warn" if ring == "dma" else "error"                   # "dma": one sync per streaming step, counted
     from holon_std.tiered.resolver import DeviceResolver
-    piped, pipelined = [], DeviceResolver._pipelined
+    piped, pipelined, begin, rings = [], DeviceResolver._pipelined, Lent.begin, []
     spy = mock.patch.object(DeviceResolver, "_pipelined", lambda self, *a: piped.append(a[-1]) or pipelined(self, *a))
-    with (spy, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
+    lends = mock.patch.object(Lent, "begin", lambda self: begin(self) or rings.append(self))
+    with (spy, lends, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
           _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails):
         warnings.simplefilter("always")
         assert _served(engine, prompts) == want
@@ -937,6 +938,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert report["device_is_mirror"] and bool(store.borrowed["ring"]) == bool(ring and not pipe), (
             report, store.borrowed)
         assert not pipe or (store.borrowed["stage"] and piped)
+        # "pipe": its prompt steps' staging a ring of two parts (FN §21.16), less than a pass's worth, its slots reused
+        widths = [int(r.width[store.lending_classes].max()) for r in rings if r.width is not None]
+        assert not pipe or (widths and max(widths) < store.prefill and store.peak_misses > min(widths)), (
+            widths, store.peak_misses)
     elif policy == "placement.profile_decay@1":
         assert store.policy.rounds > 0
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}

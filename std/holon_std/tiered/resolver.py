@@ -98,7 +98,7 @@ class DeviceResolver:
             n.record_stream(side)
             return slots, cpu, out[4], lambda: main.wait_stream(side)
         if parts > 1:                            # the misses part by part on a side stream, each part's entries known
-            return self._pipelined(slots, fetch, n, parts)
+            return self._pipelined(ids, slots, fetch, n, parts)
         if before_fetch is not None:
             before_fetch(cpu)
         if store.exclusive:
@@ -121,32 +121,48 @@ class DeviceResolver:
                 gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
         return slots, cpu
 
-    def _pipelined(self, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):
+    def _pipelined(self, ids: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):
         """(slots, part [T, k], landed): the misses' fetch in `parts` parts on the store's fetch stream — part i the
         entries [i·q, (i + 1)·q) of each role's list, q = ⌈n / parts⌉ —, an entry's part the latest of its pieces'
-        (−1: resident or a null slot; a staged piece's rank is its stage slot's index in the list)."""
+        (−1: resident or a null slot; a fetched piece's rank: its host unit's place in the role's list, staged or
+        admitted). Parts 0 and 1 start now; `landed[i]()` — called in order, once the work of the parts before i is
+        enqueued — starts part i + 1's fetch after that work (a staging ring of parts reuses part i − 1's slots:
+        `Lent`), then makes the current stream wait for part i."""
         main = torch.accelerator.current_stream(slots.device)
         side = self.store.fetch_stream()
         side.wait_stream(main)
-        landed = []
-        with side:
-            for i in range(parts):
+        events: list[torch.Event] = []
+
+        def start(i: int) -> None:
+            if i >= 2:                           # after the part two before it ran: its slots may be these
+                side.wait_stream(main)
+            with side:
                 self._fetch[0].gather_roles(fetch, n, [c.units() for c in self.classes],
                                             [c.slots() for c in self.classes], part=i, parts=parts)
-                event = torch.Event(device=slots.device)
-                event.record(side)
-                landed.append(lambda event=event: main.wait_event(event))
+                events.append(torch.Event(device=slots.device))
+                events[i].record(side)
+
+        def landed(i: int) -> None:
+            if i + 1 < parts and i >= 1:
+                start(i + 1)
+            main.wait_event(events[i])
+        for i in range(min(2, parts)):
+            start(i)
         fetch.record_stream(side)
         n.record_stream(side)
         width = self.stage.shape[1]
         part = torch.full(slots.shape[1:], -1, dtype=torch.int64, device=slots.device)
+        live = ids >= 0
         for r, c in enumerate(self.classes):
-            rank = torch.full((c.slots().shape[0],), -1, dtype=torch.int64, device=slots.device)
-            rank[self.stage[r].long()] = torch.arange(width, device=slots.device)
+            units = c.units().shape[0]
+            listed = torch.arange(width, device=slots.device) < n[r]
+            rank = torch.full((units + 1,), -1, dtype=torch.int64, device=slots.device)
+            rank.scatter_(0, torch.where(listed, fetch[r, 0].long(), units), torch.arange(width, device=slots.device))
+            rank[units] = -1
+            at = torch.where(live, rank[self.host[ids.long().clamp(min=0), r].long()], -1)
             q = (n[r:r + 1].long().clamp(max=width) + parts - 1) // parts
-            at = rank[slots[r].long()]
             part = torch.maximum(part, torch.where(at >= 0, at // q.clamp(min=1), -1))
-        return slots, part, landed
+        return slots, part, [lambda i=i: landed(i) for i in range(parts)]
 
     def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:
         roles = getattr(self._fetch[0], "gather_roles", None)

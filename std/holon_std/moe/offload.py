@@ -134,6 +134,7 @@ class Offload(nn.Module):
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
         self.store.tail_bytes.append(self._tail_bytes)           # read at materialize, its stacks' kernels bound
+        self.store.pipelining.append(lambda: self._cpu is None and all(takes_buffers(s.kernel) for s in self._stacks))
         if self._cpu is not None:
             self._slot = self._cpu.bind(ctx, *self._stacks)
         if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
@@ -197,6 +198,10 @@ class Offload(nn.Module):
                                               before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu),
                                               kinds=kinds)
         return slots
+
+    def pipelines(self, tokens: int) -> int:
+        """The store's fetch parts of a pass of `tokens` (more than one: the pass pipelines, it never splits)."""
+        return self.store.pipelines(tokens)
 
     def route_pipelined(self, ids: torch.Tensor, first: int, x: torch.Tensor):
         """`route` for a staging step's large pass (`store.pipelines`): (slots [R, T, k], part [T, k], landed) — each
