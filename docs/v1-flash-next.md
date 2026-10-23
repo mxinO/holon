@@ -2677,7 +2677,7 @@ more than 5% short on acceptance after the pass-time fixes. The gap is ms per pa
 
 **Where a pass goes** (the 5080 at 1K, graphed steps in nsys). A first split charged the drafter 5.24 ms: it counted
 the time between graphed steps, which the timeline spike's per-step sync and per-node tracing make (1.3 ms of host
-and launch). Without the sync and traced per graph (`tl_nosync.py`), the GPU idles 0.03 ms between steps (the next
+and launch). Without the sync and traced per graph (`spikes/fn7/f5b_timeline.py run --no-sync`), the GPU idles 0.03 ms between steps (the next
 step launches while one runs). The drafter is 3.9 ms against Strata's 2.36: the head's experts were fetched every
 sub-step (0.83 ms, its mmvq waiting on it) — the profile never counted the head's group, so F2 seeded 4 of its 512
 experts — while Strata keeps its draft layer resident (871 MiB, 675 of them experts). The output head is 1.15 ms of
@@ -2717,11 +2717,11 @@ gates, argmax and table writes; fusing all of the drafter's would save ≈ 0.25 
 
 Fix 2 retargeted to refilling the lent slots after the prompt (Strata's refill; deterministic placement, the output
 bitwise; three copy arms: blocking, first on the fetch stream, rate-limited into the link's idle windows), the glue
-fusion and Q8_0 projections dropped: the lead's call (2026-10-23). **Measured before building** (`holes4.py`, the A5000
-at 1K, the 5080's MTP deployment with `aux.*=0.3`; a second prompt after 240 decode tokens of a first): the prompt lends
-2,986 experts (2,512 for the first); the first 20 steps miss 3,590 routes (5,915), every one an expert's first miss
-since the prompt (F11 admits each at once: no repeat misses), 2,854 distinct experts (4,599). Of those routes the lent
-experts are 28% (17%); the prompt's own routing ranks no better (its 3,000 most-routed absent experts: 13%, 4%). The
-rest are the new request's working set, absent before the prompt too. A refill of the pre-prompt contents copies
-2,986 experts (≈ 4 GB) to spare ≈ 1,000 of those routes (≈ 1 GB of fetches): a blocking or first-in refill costs the
-link more than it saves; one in idle windows saves at most ≈ 28% of the transient (≈ 0.3 ms a pass on the 5090).
+fusion and Q8_0 projections dropped: the lead's call (2026-10-23). **Measured before building**
+(`spikes/fn7/after_prompt.py`, the A5000 at 1K, the 5080's MTP deployment with `aux.*=0.3`; a second prompt after 240
+decode tokens of a first, the first's in brackets): the prompt lends 2,987 experts (2,513); the first 20 steps miss
+3,581 routes (5,908), 2,848 distinct experts (4,594), each its expert's first miss since the prompt (F11 admits it at
+once: no repeat misses). The lent experts are 28% (17%) of those routes: a refill of the pre-prompt contents copies
+≈ 3,000 experts to spare ≈ 1,000 fetches. The prompt's own routes rank better: its 1,000 / 2,000 / 3,000 most-routed
+absent experts are 25 / 39 / 50% (14 / 26 / 38%) of them — at 1,000, eight or nine in ten copied are routed in the window. The
+rest are the new request's working set, which no refill can know.

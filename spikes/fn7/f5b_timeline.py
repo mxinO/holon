@@ -47,9 +47,11 @@ def run(a) -> dict:
             break
         t0 = time.perf_counter()
         out = e.step()
-        torch.cuda.synchronize()
+        if a.sync:                      # off: the next step launches while this one runs, as served (overlap)
+            torch.cuda.synchronize()
         walls.append(time.perf_counter() - t0)
         tokens += sum(len(d.token_ids) for d in out)
+    torch.cuda.synchronize()
     torch.cuda.profiler.stop()
     stats = {k: v for k, v in e.stats().items() if k.startswith("spec")}
     e.close()
@@ -110,6 +112,9 @@ def main() -> None:
     r.add_argument("--flags", required=True)
     r.add_argument("--ctx", type=int, default=1024)
     r.add_argument("--steps", type=int, default=40)
+    r.add_argument("--sync", action=argparse.BooleanOptionalAction, default=True,
+                   help="a device sync after each step (its wall); --no-sync with --cuda-graph-trace=graph shows the "
+                        "GPU's idle between graphed steps as served")
     r.add_argument("--out", required=True)
     s = sub.add_parser("summarize")
     s.add_argument("--rep", required=True)
