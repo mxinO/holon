@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import torch
 
+from .ring import SHORT
+
 RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
 ACTIVATION_LOAN = "activation_loan@1"
 TIERS, CPU_TASK = "moe_tiers@1", "cpu_task@1"
@@ -27,6 +29,12 @@ class DeviceResolver:
         for c in classes:
             facts = {"unit_bytes": c.unit_bytes, "staging": c.staging}
             self._fetch.append(ctx.select_kernel(FETCH, site=f"{site}.{c.name}", **facts).impl(ctx, **facts))
+
+    @property
+    def fetches_parts(self) -> bool:
+        """Its fetch fetches a list part by part (`expert_fetch@1`'s `parts`, every role's in one launch)."""
+        fetch = self._fetch[0]
+        return bool(getattr(fetch, "parts", False)) and getattr(fetch, "gather_roles", None) is not None
 
     def attach(self, group: int, state: dict[str, torch.Tensor]) -> None:
         """Its row `group` of the store's device tables (made when every group has its pieces)."""
@@ -71,7 +79,10 @@ class DeviceResolver:
         if store.exclusive:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
         split = split and getattr(self.resolve, "splits", False) and not store.exclusive and before_fetch is None
-        parts = parts if getattr(self._fetch[0], "parts", False) and not store.exclusive and before_fetch is None else 1
+        parts = parts if self.fetches_parts and not store.exclusive and before_fetch is None else 1
+        if store.parts > 1 and parts <= 1 and self.group < store.borrowing_groups:
+            raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step whose staging "
+                               "is a ring of parts (its slots hold two parts of a layer's misses)")
         defer = (store.cpu_admit or getattr(store.policy, "defer_cpu", False)) and before_fetch is not None and \
             getattr(self.resolve, "defers", False)
         # the policy's fill of empty slots (FN §21.15): the target's layers, their pieces listed apart (`later`)
@@ -127,14 +138,17 @@ class DeviceResolver:
         (−1: resident or a null slot; a fetched piece's rank: its host unit's place in the role's list, staged or
         admitted). Parts 0 and 1 start now; `landed[i]()` — called in order, once the work of the parts before i is
         enqueued — starts part i + 1's fetch after that work (a staging ring of parts reuses part i − 1's slots:
-        `Lent`), then makes the current stream wait for part i."""
+        `Lent`), then makes the current stream wait for part i — in such a ring; else every part starts now."""
+        store = self.store
         main = torch.accelerator.current_stream(slots.device)
-        side = self.store.fetch_stream()
+        side = store.fetch_stream()
         side.wait_stream(main)
         events: list[torch.Event] = []
+        ring = store.lent.width if store.lent is not None and store.lent.width is not None and \
+            self.group < store.borrowing_groups else None          # a staging ring's slots per class
 
         def start(i: int) -> None:
-            if i >= 2:                           # after the part two before it ran: its slots may be these
+            if i >= 2 and ring is not None:      # after the part two before it ran: its slots may be these
                 side.wait_stream(main)
             with side:
                 self._fetch[0].gather_roles(fetch, n, [c.units() for c in self.classes],
@@ -143,10 +157,10 @@ class DeviceResolver:
                 events[i].record(side)
 
         def landed(i: int) -> None:
-            if i + 1 < parts and i >= 1:
+            if i + 1 < parts and i >= 1 and ring is not None:
                 start(i + 1)
             main.wait_event(events[i])
-        for i in range(min(2, parts)):
+        for i in range(min(2, parts) if ring is not None else parts):
             start(i)
         fetch.record_stream(side)
         n.record_stream(side)
@@ -161,7 +175,10 @@ class DeviceResolver:
             rank[units] = -1
             at = torch.where(live, rank[self.host[ids.long().clamp(min=0), r].long()], -1)
             q = (n[r:r + 1].long().clamp(max=width) + parts - 1) // parts
+            # an entry's part, the latest of its roles' (each role's list the same experts: residency is whole)
             part = torch.maximum(part, torch.where(at >= 0, at // q.clamp(min=1), -1))
+            if ring is not None:                 # two parts past the ring: never (a pass misses no more than it lacks)
+                store.errors.bitwise_or_((2 * q > ring[int(store.class_table[self.group, r])]).int() * SHORT)
         return slots, part, [lambda i=i: landed(i) for i in range(parts)]
 
     def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:

@@ -500,7 +500,7 @@ class TieredStore:
         self._copies.clear()
         self.ring.fill_(-1)
         self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).expand(self.roles, -1))
-        self._mode, self.lent = None, None
+        self._mode, self.lent, self._parts = None, None, 1
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
@@ -566,7 +566,8 @@ class TieredStore:
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
-            self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining)
+            self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining) and \
+                all(r.fetches_parts for r in self.resolvers)
             if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
                 raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail (moe.lend_peak), but "
                                    "this layout stages: its large steps could not lend them")
@@ -701,6 +702,11 @@ class TieredStore:
         self._loaned = True
         loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
+
+    @property
+    def parts(self) -> int:
+        """This step's staging ring of parts (`Lent`): its parts, or 1."""
+        return self._parts
 
     def pipelines(self, tokens: int) -> int:
         """The fetch parts of a pass of `tokens` in this step: `pipeline` in a staging step's large passes — in every

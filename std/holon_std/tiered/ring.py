@@ -29,7 +29,8 @@ resident holds a slot of the range, so the rounds' picks lie outside it and no a
 victims are residents; the empty slots are the step's).
 
 Each class's lent slots are pooled (`pool`), the empty slots first; a layer's role takes its ring slots from the pool
-of its class at its half's offset, its pieces in expert order; its stage list is the pool's first `prefill` slots."""
+of its class at its half's offset, its pieces in expert order; its stage list is the pool's first `prefill` slots (a
+staging ring of parts: its first `want`, over and over)."""
 from __future__ import annotations
 
 import torch
@@ -80,11 +81,15 @@ class Lent:
             want = self._want(res, classes) if sized else stage
             if k == ROUNDS:                                                  # the last: the worst case
                 want = torch.where(held < want, BUFFERS * -(-experts // self.parts), want)
+            if self.parts > 1:                                               # (a pass's worth: no ring needed)
+                want = want.clamp(max=s.prefill)
             s.lend_needs[k] = (want - held).clamp_min(0)
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
         want = self._want(res, classes) if sized else stage
+        if self.parts > 1:
+            want = want.clamp(max=s.prefill)
         # Per class: the ring where its lent slots hold both halves, else its layers stage into them (a small class —
         # a type few layers share, FN's IQ1_M gate/up of 3 layers — cannot lend twice a layer's misses: it no longer
         # stages every class). `ring_ok`: 1 every class streamed, 2 some, 0 none.
