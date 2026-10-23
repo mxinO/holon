@@ -1,13 +1,9 @@
 """Prototype: `_mix_rows` split over K — the up projection's partial sums per (K chunk of BKC, column tile) in one
 launch, then per column the chunks summed in order and the mix's epilogue (the streams in order) in a second; float32
 products, a fixed order (not today's bits); device time and the largest difference from a float64 reference."""
-import sys
-
-import torch
-import triton
+import sys, torch, triton
 import triton.language as tl
 from holon_plugins.kernels.hc_triton import kernel as K
-
 
 @triton.jit
 def _up_part(a_ptr, up_ptr, part_ptr, T, SH, RANK, BJ: tl.constexpr, BKC: tl.constexpr):
@@ -80,7 +76,7 @@ for T in (1, 2, 4, 8):
         if e.device_time > 0:
             per.setdefault(e.name[:20], []).append(e.device_time)
     med = {k: sorted(v)[len(v) // 2] for k, v in per.items()}
-    ref = (torch.sigmoid(a.double() @ up.double().view(S, H, RANK).transpose(1, 2)) * (rn.double().view(T, S, H).transpose(0, 1) * rstd.double().t()[:, :, None] * (1 + norm.double().view(S, 1, H)))).sum(0) / S
+    ref = (torch.sigmoid((a.double() @ up.double().view(S, H, RANK).transpose(1, 2))) * (rn.double().view(T, S, H).transpose(0, 1) * rstd.double().t()[:, :, None] * (1 + norm.double().view(S, 1, H)))).sum(0) / S
     d_old = (x0.double() - ref).abs().max().item(); d_new = (x1.double() - ref).abs().max().item()
     o, n1, n2 = med['_mix_rows'], med['_up_part'], med['_mix_epi']
     print(f"T={T} bj={bj} bkc={bkc} w={warps}: old {o:.1f} us, split-K {n1:.1f} + {n2:.1f} = {n1 + n2:.1f} us "

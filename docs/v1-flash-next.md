@@ -2854,3 +2854,40 @@ the reviewer's statistic, per-pass rate × pooled acceptance: (pooled tokens per
 (The 5090's 1K prefill is 0.80 with the run-order outlier of §21.11's rule: 631 tok/s, round 1's first arm; the 5080
 row ran on another desktop than §21.11's, where its MTP 4K and 32K cells read 1.09 / 0.96. With the loan the 5080's
 MTP rows read 0.94 / 1.01 / 1.02, per pass × pooled 0.96 / 0.97 / 1.04, its prefill 0.97 / 1.20 / 1.01.)
+
+### 21.13 The HC mix's gate (item 3) and the MTP catch-up (item 4)
+
+**The HC mix** (`spikes/fn7/hc_mix_bench.py`, `hc_mix_v2.py`; 12 copies of the weights, every call reading another,
+so none is warm in the L2 — this prototype's first card runs read one copy back to back and showed 1.8–1.9×, which
+the rotation takes away). Today's mix against one read of its 13.2 MB (`torch.sum`: 1.2 TB/s on the
+5090, 0.74 on the 5080) — 5090: 16.2 µs at 1 row (1.48× the read), 24.0 at 4 (2.20×); 5080: 21.7 (1.22×), 32.9
+(1.85×). The prototype keeps today's down GEMV and `_down_sum`, splits the up projection over 64-wide K chunks (320 =
+5 × 64: no padding to 512) and sums the chunks, then the streams, in a fixed order (not today's bits; within
+`l0.check` of the oracle with and without inject and a pending combine): 5090 1.14× at 1 row, 1.31× at 4, 1.62× at 8;
+5080 1.00×, 1.18×, 1.39×, the best of eight tilings each. Folding the activations into the up projection's programs
+(no `_down_sum`) loses (every program recomputes its chunk's activations: 0.58× on the A5000), and neither unrolling
+the down GEMV's row loop nor in-program K chunks of the up projection gains. **Not built**: below the 1.6× gate at
+4 rows. At 1 row today's mix is already within 1.2–1.5× of a read of its bytes on these cards (the reviewer's 7 µs
+floor is the 5090's peak bandwidth; a plain read reaches 1.2 TB/s): what is left there is four launches against two
+and the down projection's partial pass, not the grid or the read width.
+
+**The MTP catch-up** (item 4). Holon already runs it front-only (`mtp.front`, the default: for the step's rows the
+head's input, its attention half's mix and the attention's key / value / index writes, no attention, FFN or
+experts — `std.hyper.gr_block@1`'s `write_kv`), and its first sub-step is the full layer on one row, as Strata's
+`capture_round` does. The catch-up takes 0.20 ms a pass on either card (nsys per node), its time the front's weights
+(≈ 64 MB: fc_embedding, fc_hidden, the mix, q / k / v, the indexer) read once for all the step's rows. Skipping the
+rejected rows (Strata's T = a + 1) saves nothing where the reads bind; folding the first sub-step's front into the
+catch-up would save one read of the mix and q / k / v, ≈ 0.04 ms a pass. Not built.
+
+**The table** (each card from one allocation, 3 rounds, no run-order outliers; the deployments now: §21.11's with
+`k_resolve` a8c7864, the 5080 with `moe.lend_peak=on`; ratios to Strata):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.04 | 1.04 | 1.04 | 1.13 | 1.12 | 1.02 |
+| MTP decode | 0.95 | 1.02 | 1.03 | 0.92 | 0.94 | 0.86 |
+| MTP, per-pass rate × pooled acceptance | 0.97 | 0.98 | 1.05 | 0.89 | 0.92 | 0.90 |
+| Prefill | 0.97 | 1.19 | 1.00 | 0.86 | 1.14 | 1.10 |
+
+(Pooled tokens per pass: 5080 2.79 against Strata's 2.74, 5090 2.86 against 2.92; Strata's 5090 32K MTP row read
+184 tok/s here against 175–179 in the earlier allocations.)

@@ -1,7 +1,7 @@
 """The HC mix alone (kernels.hc_triton's decode/verify path) at Flash-Next's shapes — 4 streams of 2,560, rank 320 (+4
 inject), bf16 weights — at 1 and 4 rows, each kernel's device time (torch.profiler), against a read of the same
 weight bytes (a sum over them: the bandwidth floor)."""
-import torch
+import sys, torch
 from holon_plugins.kernels.hc_triton.kernel import hc_gr_mix
 
 S, H, RANK = 4, 2560, 320
