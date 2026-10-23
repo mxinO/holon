@@ -2754,3 +2754,43 @@ head_dim 256 (`FA2DetermineCtaTileQ`): Flash-Next's split-KV partials need 256 M
 5080's 253 MiB fall to the 128 MiB floor. The plans, and so the outputs, are unchanged; the workspace test runs at
 head_dim 256 too (a split prefill past 64 packed queries). The decode rows with it, same allocation: 5080 1.04 / 1.07 /
 1.07, prefill 1.02 / 1.21 / 1.01.
+
+On the 5090 (3 rounds, `aux.*=0.5`, same allocation as Strata): MTP 157.7 / 147.5 / 155.7 → 157.5 / 151.3 / 156.5
+tok/s, ms per pass 17.87 / 18.25 / 19.88 → 17.65 / 18.11 / 19.62, tokens per pass pooled 2.866 → 2.862 (d1 / d2 / d3
+0.770 / 0.792 / 0.776 → 0.768 / 0.796 / 0.770; Strata 2.914): taken on the 5090 too.
+
+**The 5090's graphed split** (1K, nsys per node; Strata's decode timing in the same deployment's bench: verify 13.84,
+draft 1.86 ms): with the head pinned whole the verify is 14.84 ms and the drafter 2.53 (1.97 of GPU; the BF16 head:
+Q8_0 takes ≈ 0.2 off) — the gap is mostly the verify. Its pieces, per step: the routed experts' mmvq 6.22 ms in 192
+calls (the hits' pass runs beside the misses' fetch, 4.61 ms on its own CTAs), the dense mmvq 2.48, `quantize_q8_1`
+1.70 in 289 calls (5.9 µs each where 1–2 µs alone), the HC mix 2.06, `k_resolve` 0.77 (48 one-CTA launches between
+the router and the hits' pass), GDN 0.91. The hits' pass and its quantizes slow down beside the fetch kernel's CTAs
+(8 a role): on the 5080 with 4 a role the routed mmvq falls 8.34 → 4.97 ms and the quantizes 2.01 → 0.67 while the
+fetch keeps its 6.6 ms (the link is the bound), the verify 19.53 → 19.37 ms. **`expert_io.fetch_ctas=4`** (bitwise:
+copies): MTP +0.6% / +0.6% / +0.5% on the 5080 (two allocations), +0.6% / +0.6% / +0.4% on the 5090; 2 or 3 a role
+lose (the fetch slows), 16 loses 1.8%; decode +0.1%. Taken on both cards. `k_resolve` (0.77 ms, 5% of the verify)
+is the next piece on the critical path.
+
+**Item B on the 5090** (3 rounds, the deployment with off, same allocation as Strata):
+- `moe.lend_peak=on` on the pipelined staging path runs out of memory at its first prompt (31.6 GiB allocated, a
+  40 MiB block short: the pipelined parts' allocations past the loan's range): not viable as is; it lent the cache
+  50.4% of experts against 47.8%.
+- The margin: `--memory-fraction` 0.985 / 0.99 cache 48.7% / 49.0% (from 47.8%); 1K prefill +1.1% / +0.8%, 4K +2.0%
+  / +1.8%, the 32K guard −0.6% / −4.6%, decode −0.3%. Not taken: the gain is within what one prompt varies and 0.99
+  costs the guard.
+- The FlashInfer workspace (above): 47.3% → 47.8% of experts cached on the 5090; the MTP deployment's 1K prefill 1,791
+  → 1,839 (+2.7%, another node).
+- The bench's first 1K prompt in the first arm of a round ran at ≈ 640 tok/s three times in six rounds (two benches,
+  the arm right after Strata's): six fresh engines on the same node ran it at 1,674–1,682 every time. A run-order
+  effect on that node, not the engine; the 5090's 1K prefill below is without those three.
+
+**The table now** (each card's deployment: v3; the 5080 MTP with `moe.split=on`, `aux.*=0.3`, the Q8_0 head,
+`expert_io.fetch_ctas=4`; the 5090 with `moe.stream_tokens=2048 moe.pipeline=8`, MTP with `moe.split=on`,
+`aux.*=0.5`, the Q8_0 head, `expert_io.fetch_ctas=4`; ratios to Strata in the 5090's allocation, the 5080's MTP arm
+from an allocation of its own against Strata's in the Q8_0 bench):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.04 | 1.07 | 1.07 | 1.12 | 1.11 | 1.02 |
+| MTP decode | 0.90 | 1.09 | 0.96 | 0.90 | 0.96 | 0.89 |
+| Prefill | 1.02 | 1.21 | 1.01 | 0.85 | 1.13 | 1.10 |
