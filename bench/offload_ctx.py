@@ -33,6 +33,7 @@ arms.json: [{"name": "cache47", "engine": "llama", "flags": "-cmoe --moe-cache-m
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime
 import hashlib
 import http.client as client
@@ -314,16 +315,20 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             prev["map"] = store.residency.host.copy()
         store.taps.append(tap)
 
-    def passes() -> tuple[int, int]:
-        """Verify rows so far and the tokens they gave (each row: its accepted drafts and one token of its own)."""
+    def passes() -> tuple[int, int, dict[int, int]]:
+        """Verify rows so far, the tokens they gave (each row: its accepted drafts and one token of its own), and the
+        rows by drafts accepted."""
         rows = [(int(k.rsplit("_", 1)[1]), n) for k, n in engine.stats().items() if k.startswith("spec_rows_")]
-        return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows)
+        by = collections.Counter()
+        for acc, n in rows:
+            by[acc] += n
+        return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows), by
 
     def request(ids: list[int], n: int) -> dict:
         stamps, done = [], False
         torch.cuda.synchronize()
         seen.update(hits=0, routed=0)
-        rows0, tokens0 = passes()
+        rows0, tokens0, by0 = passes()
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
         while not done:
@@ -332,10 +337,13 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                     stamps += [time.perf_counter()] * len(d.token_ids)
                     done = d.finish_reason is not None
         assert len(stamps) == n, (len(stamps), n)
-        rows, tokens = passes()
+        rows, tokens, by = passes()
         out = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
         if rows > rows0:
             out["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
+            for d in range(1, 1 + max(by, default=0)):   # draft d accepted, given d - 1 were (Strata's spec depth)
+                tested = sum(n - by0[a] for a, n in by.items() if a >= d - 1)
+                out[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
         if seen["routed"]:
             out["hit_rate_all"] = seen["hits"] / seen["routed"]
         return out
