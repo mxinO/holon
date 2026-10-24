@@ -3,7 +3,7 @@
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
-                                    [--snapshot-runs 2] [--golden <fp32 golden> --floor <floor>]
+                                    [--snapshot-runs 2] [--golden <fp32 golden> --floor <floor>...]
                                     [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
@@ -96,7 +96,7 @@ def _pins(lock: Lock) -> dict[str, str]:
 def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_id: str) -> int:
     """Check `config` against `start` and write the new lock if the outcome allows."""
     prompts = PromptSet.load(a.prompts)
-    l2 = propagate.L2Inputs(prompts, a.golden, a.floor) if a.golden and a.floor else None
+    l2 = propagate.L2Inputs(prompts, a.golden, tuple(a.floor)) if a.golden and a.floor else None
     stored = start and start.snapshot and propagate.snapshot_path(a.plans, start.plan, start.snapshot)
     previous = Snapshot.load(stored) if stored and stored.is_file() else None
     fp = platform.fingerprint(torch.device(config.device))
@@ -215,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="write a lock that binds an `approx` plugin (a human gate, never a default lock)")
         p.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set of L2 and the snapshot trace")
         p.add_argument("--golden", type=pathlib.Path, help="fp32 reference recording (judge golden)")
-        p.add_argument("--floor", type=pathlib.Path, help="judge floor recording for the activation dtype")
+        p.add_argument("--floor", type=pathlib.Path, nargs="+",
+                       help="judge floor recording(s) for the activation dtype; several: one per kernel path")
         engine_flags(p)
         p.set_defaults(run=run)
         if name == "tune":

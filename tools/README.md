@@ -94,7 +94,10 @@ then:
 A code change whose trace is byte-identical advances without a human and without L2 (owner, 2026-10-21; design
 §4.6's changed-line coverage is not recorded, and the identical trace alone is accepted). L2 runs only when the trace
 moves, against the
-golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. `--snapshot-runs 3`
+golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. A deployment whose
+quantized calls take two kernel paths (an offload store's short passes beside its long ones) gives a floor per path
+(`--floor <mmq floor> <mmvq floor>`): each call must take a path one of them emulates, and L2 must pass every
+floor's budgets. `--snapshot-runs 3`
 asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
 (`docs/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
 snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can

@@ -79,8 +79,8 @@ def _report(result: Result, json_out: str | None) -> int:
 
 
 def _compare(a: argparse.Namespace) -> int:
-    floor = Recording.load(a.floor) if a.floor else None
-    return _report(compare(Recording.load(a.golden), Recording.load(a.candidate), floor), a.json)
+    floors = [Recording.load(f) for f in a.floor or ()]
+    return _report(compare(Recording.load(a.golden), Recording.load(a.candidate), floors), a.json)
 
 
 def _l2(a: argparse.Namespace) -> int:
@@ -94,7 +94,7 @@ def _l2(a: argparse.Namespace) -> int:
                            a.kv, a.act)
     if a.save:
         cand.save(a.save)
-    return _report(compare(Recording.load(a.golden), cand, Recording.load(a.floor), a.ceiling), a.json)
+    return _report(compare(Recording.load(a.golden), cand, [Recording.load(f) for f in a.floor], a.ceiling), a.json)
 
 
 def _gate(a: argparse.Namespace) -> int:
@@ -530,7 +530,7 @@ def main(argv: list[str] | None = None) -> int:
     c = sub.add_parser("compare", help="compare a recording with the golden; with --floor, pass/fail")
     c.add_argument("--golden", required=True)
     c.add_argument("--candidate", required=True)
-    c.add_argument("--floor")
+    c.add_argument("--floor", nargs="+", help="floor recording(s); several: one per kernel path the run takes")
     c.add_argument("--json", help="write the machine-readable result here")
     c.set_defaults(run=_compare)
 
@@ -546,7 +546,8 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--threads", type=int, default=0, help="CPU threads (Tier A)")
     e.add_argument("--prompts", required=True)
     e.add_argument("--golden", required=True)
-    e.add_argument("--floor", required=True)
+    e.add_argument("--floor", nargs="+", required=True,
+                   help="floor recording(s); several: one per kernel path the run takes")
     e.add_argument("--dtype", default="bfloat16", choices=golden.DTYPES)
     e.add_argument("--device", default="cuda")
     e.add_argument("--k", type=int, default=20)
