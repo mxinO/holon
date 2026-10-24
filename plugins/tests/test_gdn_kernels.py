@@ -273,6 +273,17 @@ def test_delta_rule_aligned_split_and_repeat_are_bitwise(order):
     outs = [run_batch(kernel, y, g, p, [1] * 4, [True] * 4, [0, 1, 2, 3])
             for y, p in ((x4, pools[0]), (views, pools[1]))]
     assert not views["q"].is_contiguous() and torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1])
+    # … and per-token rows of several tokens (a verify pass's, its rewind's replays) step their views token by token
+    for lens in ([4], [2, 3], [1, 4, 2]):
+        t, xs = sum(lens), rows(x, 0, sum(lens))
+        wide = {n: torch.cat([v.reshape(t, -1), torch.full_like(v.reshape(t, -1), float("nan"))], 1)
+                for n, v in xs.items()}
+        views = {n: wide[n][:, :xs[n][0].numel()].view(xs[n].shape) for n in xs}
+        pools = [torch.zeros(len(lens), hv, d, d, device="cuda") + 0.01 for _ in range(2)]
+        outs = [kernel(kernel.plan(lens, per_token=True), y["q"], y["k"], y["v"], y["a"], y["b"], g["a_log"],
+                       g["dt_bias"], p, dev(list(range(len(lens)))), dev([True] * len(lens), torch.bool))
+                for y, p in ((xs, pools[0]), (views, pools[1]))]
+        assert torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1]), lens
 
 
 def test_delta_rule_never_syncs():
