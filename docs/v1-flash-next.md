@@ -3354,10 +3354,75 @@ Speed work for FN stops here. Evidence: `evidence/fn7_step7k_2026-10-23.json`.
 - An MTP pass gains ≈ 2.2 ms (its 4 verify rows and the drafter's sub-steps, 16 rows a token each).
 - A prompt reads 16 rows a token, one `pread` each on the I/O worker's 2 threads: 65K reads for a 4K prompt, which
   binds on their latency.
-- What would cut it, not built: D5's read-ahead (deduplicated, sorted, overlapping the step before) and more I/O
-  threads (`cpu_task.io_threads`, a lock setting).
-- The tier is the fallback for a desktop that cannot hold the 28.8 GB table in RAM. Both bar cards' deployments keep
-  the RAM tier.
-- Strata's `--ple-io direct` was not paired in this measurement.
+
+**The lead's bounded round on its prefill (2026-10-24).**
+- **(a) Cheap first:**
+  - Each call's ids are sorted and its distinct rows read once, in file order (8970537).
+  - `cpu_task.io_threads` swept 2 / 4 / 8 on the 5090's MTP deployment (1 round, 1K / 4K):
+
+  | I/O threads | 1K prefill | 4K prefill | MTP decode 1K / 4K |
+  |---|---|---|---|
+  | RAM tier | 1,999 | 5,044 | 165.1 / 156.4 |
+  | 2 | 998 (−50%) | 1,519 (−70%) | −11.5% / −11.7% |
+  | 4 | 1,324 (−34%) | 2,290 (−55%) | −5.7% / −5.9% |
+  | 8 | 1,564 (−22%) | 3,096 (−39%) | −32% / −33% (the worker's threads take the engine's cores) |
+
+  The 4K prefill still cost more than 25%, so (b).
+- **(b) D5's read-ahead** (5346d3a):
+  - Before a step of prompt rows only, whose tokens the host has and whose histories it knows (a sequence's start, or
+    the end of the chunk it planned last), `qwen4_exp.ple`'s shared object hashes the step's rows on the host
+    (`host_rows`, tested against the op's oracle).
+  - `std.tiered.rows@1` reads the distinct rows ahead on the engine loop's thread (`rows.ssd_threads`, default 16),
+    into one of two read-ahead lists, while the step before runs on the device.
+  - The step still sorts its ids on the device and compares the distinct rows with the list read: the same, the
+    worker reads nothing; a difference, it reads them. The rows are the step's either way.
+  - Every prompt step of the identity runs matched (3 of 3 on each run); RAM vs SSD stays byte-identical on the
+    5090 (and the A5000), and the plant still differs.
+- **The result** (5090, 1 round, beside Strata's MTP arm with its table in RAM and read direct; prefill tok/s):
+
+  | | 1K prefill | 4K prefill | decode, MTP 1K / 4K |
+  |---|---|---|---|
+  | Holon, RAM | 2,009 | 5,025 | 165.6 / 156.7 |
+  | Holon, SSD, read-ahead, 2 I/O threads | 1,729 (−14%) | 3,729 (**−26%**) | −11.1% / −11.2% |
+  | Holon, SSD, read-ahead, 4 I/O threads | 1,696 (−16%) | 3,708 (−26%) | −7.0% / −6.1% |
+  | Holon drafting off, SSD (2 threads) | 1,763 (−15%) | 3,885 (−27%) | −9.2% / −7.5% (decode) |
+  | Strata, RAM | 2,126 | 4,538 | 175.5 / 157.5 |
+  | Strata, `--ple-io direct` | 1,885 (−11%) | 3,682 (−19%) | +0.3% / +0.2% |
+
+  - The 4K prefill on the SSD sits at Strata's own SSD figure in tok/s (3,729 against 3,682), and 1 point over the
+    25% mark against Holon's RAM tier.
+  - Decode costs 6–11% (the in-graph reads of a verify pass's 64 rows; 4 I/O threads halve it). Strata's decode
+    pays nothing for it.
+  - What is left: more read-ahead threads, a row cache (D5's "no row cache in rev 2"), and decode rows read ahead of
+    the verify (they depend on the drafts, known a step ahead). Not built.
+- **The bar cards keep the RAM tier** (the lead's call): their hosts hold the table. The SSD tier is the fallback for a
+  desktop that cannot, at 4 I/O threads there (a lock setting).
 
 Evidence: `evidence/fn_close_ple_ssd_2026-10-23.json`.
+
+### 22.2 A serving OOM at 64 sequences, fixed (the lead's call: a real serving bug)
+
+**The failure:** on an RTX A5000, the 5080-style MTP deployment at `--memory-fraction 0.97` and the default 64
+sequences ran out of memory in the snapshot trace. Found by `exact.py` at the close; the bench serves one sequence.
+
+**Two causes:**
+- **The startup profile left out the graph execs' device memory.** It reserves the worst step's activation peak plus
+  what the allocator keeps for the largest bucket's graphs. But capturing every bucket's graphs at 64 sequences
+  takes **1.29 GB more outside the allocator** (the instantiated execs), and only 0.7 GB of slack is left at 0.97 on a
+  24 GB card. The first eager step of the trace (63 prompt rows, 4,032 tokens) then failed at its first allocation.
+  - Fixed in core, +2 code lines (6b3ad67; FN's core code lines at +46 of 47): `platform.reserved_growth` also returns
+    the device memory the profile's capture keeps outside the allocator, and the executor counts it once per bucket.
+  - The A5000's reserve grows by 0.31 GB (state pools 15.58 → 15.27 GB). After every bucket is captured, 1.72 GB
+    stay free.
+- **The sampler sorted a whole verify step's vocabulary at once.** A 4-row verify of 64 sequences, sampled with
+  top-p, is 256 rows × 248K logits: 2.1 GiB past the logits.
+  - Fixed in std (same commit): sampled rows are drawn 16 at a time, and every per-row op is the same, so the draws
+    and the laws are bitwise the batch's (tested). The peak is 0.30 GiB.
+
+**Tests:**
+- The chunked draws and laws bitwise.
+- The wide filtered step's peak under 2.5 × its logits (it was 8.6×).
+- `plugins/tests/test_qwen4_exp_offload.py`: Qwen3.8-Flash-Next's 64-sequence MTP deployment at 0.97 runs the
+  snapshot trace (with `FN_GGUF` and `FN_MTP`; on the A5000: passes, 3 min). Without the core fix it fails in the
+  trunk, and without the sampler fix in the sort.
+- The run is run-identical ×2 (`exact.py`).
