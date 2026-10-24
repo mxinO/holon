@@ -110,3 +110,43 @@ def test_inverse_cdf_matches_the_oracle_cdf_at_full_vocabulary():
         t = int(sampler.draw(q, u.reshape(1).float())[0])
         lo, hi = (cdf[t - 1] if t else 0.0), cdf[t]
         assert lo - 1e-6 <= u.item() * cdf[-1] < hi + 1e-6
+
+
+def test_rows_are_drawn_a_chunk_at_a_time_bitwise(std, monkeypatch):
+    """Sampled rows go `ROWS` at a time (a vocabulary-wide sort per chunk, not per step): the draws and the laws are
+    the whole batch's, bit for bit, for every mix of greedy, plain and filtered rows."""
+    from holon_std.sampling import sampler as module
+    plugin, _ = std
+    n = 3 * module.ROWS + 5
+    logits = torch.randn(n, V, generator=torch.Generator().manual_seed(4)) * 2
+    s = plugin.sampler(len(PARAMS) + 1, torch.device("cpu"))
+    for slot, params in enumerate(PARAMS + [SamplingParams(temperature=0.0)]):
+        s.admit(slot, dataclasses.replace(params, seed=slot))
+    ctx = _ctx([i % (len(PARAMS) + 1) for i in range(n)], np.arange(n) + 3)
+    chunked = s.sample(logits, ctx).tokens, s.distribution(logits, ctx)
+    monkeypatch.setattr(module, "ROWS", n)
+    whole = s.sample(logits, ctx).tokens, s.distribution(logits, ctx)
+    assert torch.equal(chunked[0], whole[0]) and torch.equal(chunked[1], whole[1])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_wide_filtered_step_peaks_at_a_chunk(std):
+    """A 4-row verify of 64 sequences over a 248K vocabulary, every row filtered and sampled: the sampler's memory
+    past its logits is a chunk's temporaries (≈ 0.1 GB), not the batch's sort (≈ 1.8 GB, which ran out of memory on
+    a full RTX A5000 at 64 sequences and `--memory-fraction 0.97`)."""
+    plugin, _ = std
+    n, vocab = 256, 248_320
+    s = plugin.sampler(64, torch.device("cuda"))
+    for slot in range(64):
+        s.admit(slot, SamplingParams(temperature=1.0, top_p=0.9, seed=slot, logprobs=20))
+    ctx = _ctx([i // 4 for i in range(n)], np.arange(n) + 1)
+    ctx.batch.dev = _Dev(*(t.cuda() for t in dataclasses.astuple(ctx.batch.dev)))
+    logits = torch.randn(n, vocab, device="cuda")
+    s.sample(logits, ctx)                            # (warm: the allocator's blocks)
+    torch.cuda.synchronize()
+    torch.cuda.reset_peak_memory_stats()
+    base = torch.cuda.memory_allocated()
+    s.sample(logits, ctx)
+    torch.cuda.synchronize()
+    past = torch.cuda.max_memory_allocated() - base
+    assert past < 2.5 * n * vocab * 4, past         # the log-softmax for logprobs, a chunk's sort: < 0.64 GB

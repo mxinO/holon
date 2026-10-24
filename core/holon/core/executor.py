@@ -220,10 +220,11 @@ class Executor:
                 peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(small)))
             if self.graphs is not None:
                 # Captured largest bucket first, the smaller ones reuse its blocks, so the pool is what the largest
-                # bucket's variants leave reserved.
+                # bucket's variants leave reserved; every bucket's execs take the device memory the largest's do.
                 graphs, self.graphs = self.graphs, platform.Graphs(self.device)
                 peak += platform.reserved_growth(self.device, lambda: [
-                    self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()])
+                    self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()],
+                    len(self.buckets))
                 self.graphs = graphs                     # the profile's graphs go before the free memory is read
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
