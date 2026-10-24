@@ -3487,3 +3487,118 @@ F5b is not used by any deployment, so its bound against the path-aware floor doe
   - The 5080's two degenerate answers are the same two items as in §20.3.
   - **Under the owner's ruling (2026-10-24, §20.3): the 5080's (d) passes** — score 70 = 70, and the pooled degenerate
     rates are equal. The 5090's passes.
+
+### 22.5 §6.3's plants against the close's checks (the lead's call: none dropped silently)
+
+Every §6.3 plant was run through three checks (four new ones are in `holon_judge.planted`: ple_state_not_carried,
+ple_state_bf16, shexp_gate_off and mtp_stream0):
+- **`exact.py`'s must-differ:** the snapshot trace under the plant against the unplanted run. That is the A5000's
+  MTP deployment with a 2K long prompt, and for QSA and PLE chunks the RTX PRO 6000 with an 8K prompt in 2K steps.
+- **Gate (c),** on the RTX PRO 6000, all-resident, IQ2_XS, against its clean run.
+- **The tiny model's tests:** gate (b), the CPU HF match and the MTP head's pooled reference.
+
+| Plant | `exact.py` differs | Gate (c) | Tiny model (b) | Caught by |
+|---|---|---|---|---|
+| `qsa_select_shift` | yes | **fails** (decode KL mean 0.183, chunked 0.184) | fails | (c), (b) |
+| `qsa_decode_select_shift` | yes | **fails** (decode 0.102, p50 0.013) | (decode gate test) | (c) |
+| `qsa_pool_rope_last` | yes at 8K (no: 2K is below QSA's dense limit) | passes (0.024 / 0.025) | fails | **(b) only** |
+| `hc_inject_unscaled` | yes | **fails** (0.145 / 0.150) | fails | (c), (b) |
+| `ple_gate_no_sqrt` | yes | passes (0.028 / 0.025) | fails | **(b) only** |
+| `ple_state_not_carried` | **no** (2K one-shot; 8K in 2K steps: the long requests' 8 greedy tokens unchanged) | passes (chunked 0.032, clean 0.026) | fails | **(b) only** |
+| `ple_state_bf16` | yes | passes (0.025 / 0.025) | fails (2e-4 > 1e-4) | **(b) only** |
+| `shexp_gate_off` | yes | **fails** (0.190 / 0.173) | fails | (c), (b) |
+| `mtp_stream0` | yes (accepted drafts shift the verify rows' bits) | passes (the law is unchanged) | the head's reference fails | (b); tokens per pass 2.72 → 2.10, under acceptance 2's 2.2 |
+| `aux_row_padding` | yes: offload ≠ all-resident (RTX PRO 6000, 5080, 5090) | – | – | `exact.py` |
+| `rows_off_by_one` | yes: SSD ≠ RAM (all three GPUs) | – | GPU unit test | `exact.py` |
+
+**The coverage gap** these name: four numeric bugs that act on every path alike pass both full-model checks.
+- **Gate (c) cannot see them.** It compares Holon's paths with each other, and a bug that moves every path the same
+  way leaves the paths agreeing.
+- **`exact.py` cannot see them either.** It compares placements and tiers, which the bug moves alike; its snapshot
+  keeps only token ids for the long prompt, which a residual drift at chunk starts never flips.
+- **Today only the tiny model's HF match (gate (b), f32 on the CPU) catches them,** plus (d)'s task accuracy if the
+  damage is large.
+- **What would still ship:** a full-model-only bug of this kind, one that needs the real model's sparse lengths, its
+  IQ types or its 4-stream widths to show. FN's §18 dropped L2 against fp32 goldens, which was the check that covered
+  this.
+- **A cheap cover, not built:** a bf16 GPU reference of the PLE block and the QSA selection on the real model's
+  first layers, compared with the engine's at a few positions.
+
+## 23. FN's speed round, reopened (the owner's ruling, 2026-10-24: the bars in tok/s)
+
+The lead's order: A the VRAM ledger, B the allocator's reserve, C a peak diet, D the PCIe rate, E the draft-quality
+check, F 8 or more prompts per MTP row. Locks and propagation wait for this round.
+
+### 23.1 A: the VRAM ledger (`spikes/fn7/ledger.py`, each card's final deployments, a fresh engine per row)
+
+| 5090, MTP deployment (5K steps, 0.985; GiB) | 1 seq | 4 | 8 | 16 |
+|---|---|---|---|---|
+| target experts cached | **47.9%** | 43.9% | 39.1% | 31.0% |
+| the arena (experts, head, null and staging slots) | 23.16 GB | 22.21 | 21.16 | 19.31 |
+| state pools (KV, QSA index, GDN, PLE, the MTP head's; 33,792-token contexts) | 1.32 | 1.97 | 2.83 | 4.56 |
+| graphs' reserve (allocator pool + execs) | 0.12 | 0.40 | 0.55 | 0.65 |
+| activation reserve (the worst step's live peak) | 0.96 | 0.96 | 0.96 | 0.96 |
+| parameters and buffers | 4.00 | | | |
+| free after startup (the activation reserve + slack) | 1.40 | 1.46 | 1.47 | 1.44 |
+| outside the allocator (CUDA context, graph execs, libraries) | 0.92 | 1.02 | 1.08 | 1.14 |
+
+- **The 5090's drafting-off deployment:** 49.8% / 47.9% / 45.3% / 40.2% at 1 / 4 / 8 / 16 sequences.
+- **The 5080** (4K steps, `moe.lend_peak`):
+  - MTP 26.2% / 21.9% / 5.6% / 0.0%; drafting off 28.1% / 25.7% / 22.5% / 4.7%.
+  - From 8 sequences on its layout cannot lend: the loan (2.39 GB) is kept in the own tail and a pass's staging
+    slots are reserved, so the cache collapses.
+  - **The 5080's lock: at most 4 sequences.**
+- **6b3ad67 (the graph execs' memory in the profile) costs the bench's row nothing that matters:** 47.93% against
+  48.06% at 1 sequence on the 5090 (26.22% against 26.34% on the 5080), 0.4 points at 4. At 16 sequences the tree
+  before it measured a 0.82 GB graphs' pool against 0.65 GB now (the sampler's chunked draws, §22.2).
+- **Strata's ledger on the 5090** (its log, the same allocation as Holon's 5K-step runs):
+  - experts cached 24.16 GiB of its 46.84 GiB (12,735 of 24,576 expert slots): **51.6%**, not the 54% §21.14's
+    replay assumed;
+  - weights 4.79 GiB: the dense ones, the draft layer whole (its experts 675 MiB) and the Q5_K head;
+  - verify buffers 63 MiB; 251 MiB free at startup ("LOW", by its own warning);
+  - no activation reserve: its prompt path borrows 2,173 cache slots (4.12 GiB) per prompt chunk.
+- **The 5090's gap**, 47.9% against 51.6%, is 1.71 GiB of experts' bytes (Holon caches 22.45 GiB). Holon spends
+  that and more on (Strata's own KV, context and other take ≈ 2 GiB it does not itemize):
+  - **the activation reserve, 0.96 GB.** Strata borrows its prompt buffers from the cache. Holon's equivalent is
+    `moe.lend_peak`, which costs the 5090's prefill (§21.14, §21.17).
+  - **the slack, ≈ 0.44 GB,** against Strata's 0.25 (`--memory-fraction`, §23.2).
+  - **memory outside the allocator, 0.92 GB:** the CUDA context, the graph execs and the kernel libraries' module
+    images (Strata's is inside its 2 GiB of unprinted KV, context and other).
+  - **the state pools, 1.32 GB:** a 33,792-token context with its QSA index and the MTP head's KV.
+  - **the arena's null and staging slots, ≈ 0.37 GB.**
+  - The head's experts sit in Holon's arena (0.34 GB at `aux.*=0.5`) and in Strata's weights (its whole 675 MiB).
+
+### 23.2 B: the reserve against the allocator's segments
+
+- **The startup profile already reserves the worst step's *live* peak,** not the allocator's reserved peak, on both
+  cards (`peak_memory`: allocated bytes). The allocator's segments over the same step (its reserved growth) are what
+  serving actually takes, and the excess comes out of the slack:
+
+  | Card, MTP deployment (GiB) | live peak | segments before | after 168562e | slack after startup |
+  |---|---|---|---|---|
+  | 5090 (5K steps) | 0.96 GB | 1.19 GB (+24%) | 1.04 GB (+8%) | 0.44 GB |
+  | 5080 (4K steps; loan's step 0.32) | 0.79 GB | 1.19 GB (+51%) | 0.98 GB (+24%) | 0.72 GB |
+
+- **The fix (168562e, std):** `std.ffn.sum@1`'s side-stream output was freed with an event. While the host ran ahead
+  of the device, a prompt step kept a shared-expert output per layer pending. It now goes back to the side stream's
+  blocks at once, which is safe because the side stream is the unit's alone and waits for the main stream at every
+  fork. Fork on and off stay bitwise (`exact.py`). On the A5000's 4K step the traced peak fell 1,009 → 789 MiB and its
+  segments 1.29 → 0.86 GB.
+- **What it buys:**
+  - **The 5090:** the reserve does not shrink (it was the live peak), but the slack it needs does, by ≈ 0.15 GB.
+    `--memory-fraction` 0.985 → 0.99 now has the room it lacked: +0.16 GB, ≈ +0.35 points. To bench.
+  - **The 5080:** its loan is 3.0 × the live peak (`LOAN_MARGIN`), sized for the MemPool's 2.35–2.74× segments
+    (§21.12). With the fix those segments should be smaller; a loan probe re-measures them. A 2× loan would lend
+    ≈ 800 fewer experts at a 4K prompt (a bytes and after-prompt-misses gain, not a cache-share one: the loan is only
+    out during prompt steps).
+- **Not available:** the premise that half the 5090's reserve is fragmentation. Its reserve was the live peak
+  already, so a per-step arena or expandable segments (already on for the pools) cannot shrink it. They can only
+  shrink the slack the segments eat, which 168562e did most of.
+- **The live peaks' contents** (`--peak`, the allocator's trace at the profiled step):
+  - **5090, 5K tokens (0.98 GB):** GDN's chunked delta rule ≈ 630 MB of temporaries (fla's `chunk_delta_h`,
+    `wy_fast`, `solve_tril`, l2norm, the Triton gate), the HC streams [T, 4·H] f32 200 MB, a ggml dequant buffer
+    100 MB.
+  - **5080's MTP deployment (0.81 GB):** the MTP head's catch-up over the step's rows — its HC input and the mix
+    kernel's f32 [T, 4·H] buffers, 160 MB each ×3 — beside the trunk's HC streams 160 MB.
+  - These are C's targets: the catch-up in row chunks, which is row-independent and so bitwise; GDN's prefill in
+    sub-chunks with the state carried, whose bitwiseness is to check.
