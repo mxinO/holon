@@ -52,7 +52,7 @@ def main() -> None:
             return out
 
         def growth_(device, fn, copies=1, seen=seen):
-            seen["graphs"] = {"reserve": growth(device, fn, copies), "buckets": copies}
+            seen["graphs"] = {"reserve": growth(device, fn, *([copies] if copies != 1 else [])), "buckets": copies}
             return seen["graphs"]["reserve"]
         platform.peak_memory, platform.reserved_growth = peak_, growth_
         free0, total = torch.cuda.mem_get_info()
