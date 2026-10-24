@@ -94,10 +94,7 @@ then `staging` slots, then cache slots.
   missing in every role (neither resident nor in the ring) and held by the host tier the device reads (tier code −1)
   in every role; of its n of them the CPU takes c = min(`plan[n]`, n) — the last c by (best routing rank, expert id)
   ascending, the best rank being the least j of the expert's live entries (Strata's rule: the lowest-ranked misses).
-  They are not fetched (no fetch entry; a variant never admits them, though they count — unless it `defers` and the
-  call passes `defer=True`: then they are candidates as any miss, and an admitted one's pieces are listed apart, by
-  expert id, in two more outputs, `later [R, 2, F]` (unit, slot) and `n_later [R]`, for the caller to copy after the
-  call), `routed[e]` |= 4 marks them,
+  They are not fetched (no fetch entry; a variant never admits them, though they count), `routed[e]` |= 4 marks them,
   their entries read null slot j and get `cpu[t, j]` = t·k + j (every other entry −1), and they are written to
   `jobs` (`cpu_experts@1`'s table, in mapped host memory) by expert id ascending: `jobs[0, 0]` = c, zero included,
   then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
@@ -141,8 +138,7 @@ then `staging` slots, then cache slots.
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. Optional member
   `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
-  instance's copy, role r's list), so a store issues one call for a group's roles (the call itself may take
-  `beside=True`: the copy on few SMs, beside other work); an instance with `parts = True`
+  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True`
   also takes `part, parts` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a
   pipelined pass's fetch, part by part). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as
   they are in `out` (a pipelined pass computes each part's entries into one `out`).

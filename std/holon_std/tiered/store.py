@@ -118,8 +118,7 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
-                 lend_peak: bool = False, cpu_admit: bool = False, pipeline: int = 1, later_copy: str = "beside",
-                 policy: Ref | str = "",
+                 lend_peak: bool = False, pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -156,14 +155,6 @@ class TieredStore:
         # ActivationLender), so the engine reserves only the worst step that streams nothing
         self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
-        # `cpu_admit` (F5b): the CPU's experts are admitted as any miss (a variant that `defers`), their pieces fetched
-        # after the call on a side stream (the CPU serves the call), joined after the target's last layer
-        self.cpu_admit, self._later, self._pending_later = cpu_admit, None, None
-        # the deferred copies (`fetch_later`: the CPU's admitted experts, the policy's fill) on a stream of their own:
-        # one CTA a role beside the next layer (`beside`) or the fetch's CTAs (`fetch`)
-        if later_copy not in ("beside", "fetch"):
-            raise ValueError(f"{name}: later_copy {later_copy!r}: beside or fetch")
-        self.later_copy, self._later_stream = later_copy, None
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_streams: dict[bool, torch.Stream] = {}
@@ -641,9 +632,7 @@ class TieredStore:
         routed = telemetry["routed"].numpy()
         record = {"counts": telemetry["counts"].numpy(), "routed": (routed & 1).astype(bool),
                   "scope": (routed & 2).astype(bool),           # what the call with decode rows routed (variants)
-                  "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted,
-                  "cpu_admitted": self.cpu_admit or getattr(self.policy, "defer_cpu", False),   # (but as any miss
-                  #                                                with `cpu_admit` or a policy that admits them)
+                  "cpu": (routed & 4).astype(bool),             # the experts the CPU took (F5b: never admitted)
                   "records": np.concatenate([delta[g, :n[g]] for g in range(len(n))]),
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
@@ -763,45 +752,7 @@ class TieredStore:
         """Layer g's ring and stage tables for the step (at its first pass)."""
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
-    def fetch_later(self, fetches: list, classes: list, later: torch.Tensor, n_later: torch.Tensor) -> None:
-        """A call's deferred pieces (`later` [R, 2, F], `n_later` [R]: the CPU's admitted experts', a policy's fill)
-        into their slots, copied after the layer (`layer_done`) on a stream of their own (`later_copy`: one CTA a role
-        beside the next layer's mixer, or the fetch's CTAs); with the CPU's admitted experts, a later call's critical
-        fetch waits for them (`wait_later`: never two on the link) — a fill's share the link —, and they are joined
-        after the target's last layer, before any step reads those slots."""
-        self._pending_later = (fetches, classes, later, n_later)
-
-    def _start_later(self) -> None:
-        fetches, classes, later, n_later = self._pending_later
-        self._pending_later = None
-        if later.device.type == "cpu":                       # (the CPU's providers: in order, nothing to overlap)
-            for r, (gather, c) in enumerate(zip(fetches, classes, strict=True)):
-                gather(later[r], n_later[r:r + 1], c.units(), c.slots())
-            return
-        main = torch.accelerator.current_stream(later.device)
-        if self._later_stream is None:
-            self._later_stream = torch.Stream(device=self.ctx.device)
-        side = self._later_stream
-        side.wait_stream(main)
-        with side:
-            for r, (gather, c) in enumerate(zip(fetches, classes, strict=True)):
-                gather(later[r], n_later[r:r + 1], c.units(), c.slots(), beside=self.later_copy == "beside")
-        later.record_stream(side)
-        n_later.record_stream(side)
-        self._later = torch.Event(device=later.device)
-        self._later.record(side)
-
-    def wait_later(self) -> None:
-        """The current stream waits for the last call's deferred copies (none pending: nothing)."""
-        if self._later is not None:
-            torch.accelerator.current_stream(self._later.device).wait_event(self._later)
-            self._later = None
-
     def layer_done(self, g: int) -> None:
-        if self._pending_later is not None:                      # after the layer: its deferred copies
-            self._start_later()
-        if g == self.borrowing_groups - 1:                       # before any later step reads those slots
-            self.wait_later()
         if self.lent is not None:
             self.lent.done(g)
             if g == self.borrowing_groups - 1:

@@ -28,7 +28,6 @@ from collections.abc import Callable, Iterator
 from unittest import mock
 
 import numpy as np
-from holon.api import RowKind
 
 
 @contextlib.contextmanager
@@ -69,7 +68,6 @@ class Trace:
     slots: np.ndarray | None = None                    # [layers, experts, roles] the arena slots at the start, and
     stacks: list | None = None                         # each layer's empty slots ([roles] each, bottom first), and
     sizes: np.ndarray | None = None                    # the classes' arena slots: what a tail's replay reads (D11)
-    terms: dict = dataclasses.field(default_factory=dict)   # the policy's replay terms (placement.budget's)
 
     @property
     def admissions(self) -> int:
@@ -84,17 +82,14 @@ def route_dump(engine) -> Iterator[Trace]:
     device, n_empty = store.residency.device.cpu().numpy(), store.n_empty.cpu().tolist()
     trace = Trace((device >= 0).all(-1), classes=store.class_table, slots=np.maximum(device, -1),
                   stacks=[list(store.empty[g, :, :n].t().cpu().numpy()) for g, n in enumerate(n_empty)],
-                  sizes=np.array([c.size for c in store.classes.values()]),
-                  terms=dict(getattr(store.policy, "replay_terms", {})))
+                  sizes=np.array([c.size for c in store.classes.values()]))
     if "score" in store.state:
         trace.score = store.state["score"].cpu().numpy().copy()
 
     def tap(step, record) -> None:
         trace.steps.append({"step": step.step, "counts": record["counts"].copy(), "needed": record["scope"].copy(),
-                            "cpu": record["cpu"] & (not record.get("cpu_admitted", False)),   # (admitted: any miss)
+                            "cpu": record["cpu"].copy(),
                             "records": record["records"].copy(), "lends": record["lends"],
-                            "decode_only": step.row_kind is not None and bool(np.isin(
-                                step.row_kind, (RowKind.DECODE, RowKind.VERIFY)).all()),
                             "resident": resident(store, step.step),
                             "empty": np.array([len(e) for e in store.residency.empty]),
                             "stacks": [np.array(e).reshape(-1, store.roles) for e in store.residency.empty]})
@@ -134,10 +129,7 @@ def parity(trace: Trace) -> dict:
     """The replay against the device, step by step: the first step that differs (None: none), and what was compared."""
     from holon_plugins.placement.lfu.reference import replay
 
-    terms = dict(trace.terms)
-    if "budget" in terms:                              # placement.budget's: F11's replay with its cap and margin
-        terms["budget"] = None if terms["budget"] < 0 else terms["budget"]
-    want = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks, **terms)
+    want = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks)
     differs = next((s["step"] for w, s in zip(want, trace.steps, strict=True)
                     if not (np.array_equal(w["resident"], s["resident"]) and np.array_equal(w["empty"], s["empty"])
                             and all(map(np.array_equal, w["stacks"], s["stacks"])))), None)

@@ -22,8 +22,7 @@ from . import extension
 
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 LOAN = "activation_loan"
-POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2,    # the native module's policy codes (the
-            "moe_resolve.budget": 1}                                       # budget variant: LFU's, capped)
+POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
@@ -43,27 +42,22 @@ class Modules:
 class MoeResolve:
     plant = 0                              # judge-only: the calibration bugs' bits (judge/holon_judge/planted.py)
     splits = True                          # `split`: the fetched entries' slots apart (std.moe.kernels)
-    budget, gain = -1, 0.0                 # admissions per call (−1: no cap) and the score margin (LFU's code)
-    fill, fill_every = 0, 0                # LFU's fill of the empty slots (FN §21.15; the variants' options)
 
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, split: bool = False, defer: bool = False,
-                 fill: bool = True, **state):
+                 errors, delta, n_delta, group, plan, jobs, split: bool = False, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
         cpu = torch.empty(tokens, k, dtype=torch.int32, device=ids.device)
         missed = torch.empty_like(slots) if split else None
-        later, n_later = (torch.empty_like(fetch), torch.empty_like(n_fetch)) if defer else (None, None)
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
-                         misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy] if n in state],
-                         self.plant, plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed, later, n_later,
-                         self.budget, self.gain, self.fill, self.fill_every if fill else 0)
-        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ()) + ((later, n_later) if defer else ())
+                         misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed)
+        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ())
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
         """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id
@@ -81,39 +75,16 @@ class MoeResolve:
         return picked.view(experts, groups).t()
 
 
-STATE = {0: (), 1: ("score", "tick"), 2: ("last", "clock")}   # each policy's state, as its contract names it
+STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state, as its contract names it
 
 
 class MoeResolveLfu(MoeResolve):
     """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/v1-moe-prefill.md D11): F11 keeps no
-    spares, so the experts holding the range are all it picks. Device ops, no host sync. It also `defers`: the CPU's
-    experts are admitted as any miss, their pieces' fetch listed apart (`later`, `n_later`). And it fills
-    (`lfu.fill_every`, `lfu.fill`: placement.lfu's options and oracle): every fill_every-th call with decode rows of a
-    layer (its tick, phased by its group) up to `fill` absent, unrouted experts take its empty slots, listed apart."""
-
-    defers = True
-
-    def __init__(self, modules: Modules, op: str, ctx, **facts) -> None:
-        super().__init__(modules, op, ctx, **facts)
-        opts = ctx.options.get("plugins", {})
-        self.fill_every, self.fill = int(opts.get("lfu.fill_every", 0)), int(opts.get("lfu.fill", 1))
-        self.fills = self.fill_every > 0 and self.fill > 0
-        if self.fills and self.fill > self.staging:          # the later list's width (a decode step's staging)
-            raise ValueError(f"lfu.fill {self.fill}: more than the {self.staging} pieces a call lists apart")
+    spares, so the experts holding the range are all it picks. Device ops, no host sync."""
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   **state) -> torch.Tensor:
         return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
-
-
-class MoeResolveBudget(MoeResolveLfu):
-    """`moe_resolve.budget@1` (placement.budget): LFU's call with at most `budget.per_layer` admissions and a candidate
-    admitted only past its victim's score by `budget.min_gain` (plugin options; the oracle reads the same)."""
-
-    def __init__(self, modules: Modules, op: str, ctx, **facts) -> None:
-        super().__init__(modules, op, ctx, **facts)
-        opts = ctx.options.get("plugins", {})
-        self.budget, self.gain = int(opts.get("budget.per_layer", -1)), float(opts.get("budget.min_gain", 0.5))
 
 
 class ExpertFetch:
@@ -130,8 +101,8 @@ class ExpertFetch:
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    def __call__(self, fetch, n, src, dst, beside: bool = False) -> None:
-        self.lib.fetch(fetch, n, src, dst, beside)     # (`beside`: on one CTA, beside other work)
+    def __call__(self, fetch, n, src, dst) -> None:
+        self.lib.fetch(fetch, n, src, dst, False)
 
     def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
         """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
@@ -234,8 +205,7 @@ class Plugin:
                 return f["roles"] <= ROLES and (f["roles"] + w) * f["experts"] * 4 + STATIC_BYTES <= SHARED_BYTES
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.expert_io",
-                impl=functools.partial({"moe_resolve.lfu": MoeResolveLfu, "moe_resolve.budget": MoeResolveBudget}.get(
-                    op, MoeResolve), modules, op),
+                impl=functools.partial(MoeResolveLfu if op == "moe_resolve.lfu" else MoeResolve, modules, op),
                 requires=requires, props=props, priority=10, supports=supports))
         regs.kernels.add(PREFETCH, KernelSpec(
             op=PREFETCH, provider="kernels.expert_io", impl=functools.partial(ExpertPrefetch, modules),

@@ -1,7 +1,6 @@
 """Qwen3-MoE end to end on the CPU (test-only reference kernels) against an independent oracle: a tiny random HF
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
-import collections
 import contextlib
 import json
 import pathlib
@@ -388,28 +387,23 @@ def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
                                       np.ones(1, np.int32), np.zeros(1, np.int64)))
 
 
-@pytest.mark.parametrize("policy, copy", [("", "sm"), ("placement.lru@1", "sm"), ("", "dma"), ("", "fill")])
+@pytest.mark.parametrize("policy, copy", [("", "sm"), ("placement.lru@1", "sm"), ("", "dma")])
 def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, policy, copy):
     """D4's device lending and D8 on the CPU: a step of 10 prompt tokens (its whole budget) streams every layer's
     missing experts through a ring of lent slots (`moe.ring_tokens`), a smaller one stages its misses in lent slots
     (its staging slots hold a graphed step's, 3 rows × top-2); the slots come back empty, each its layer's first
     victim: the outputs are the resident store's, the cache never shrinks (per class, resident pieces + empty slots
     stay the seed's), and F11's residency, empty slots included, is its replay oracle's at every step — mixed steps
-    (decode rows and a prompt chunk, `chunk_with_decode`) included; with the fill (`lfu.fill_every`, FN §21.15), its
-    decode steps put absent experts into the empty slots the lending left, under the same parity."""
+    (decode rows and a prompt chunk, `chunk_with_decode`) included."""
     from holon_judge.placement import parity, route_dump
 
     checkpoint, prompts = tiny_moe_deep
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
-    fill = copy == "fill"
     engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": policy, "moe.ring_tokens": 10,
-        "moe.ring_copy": "sm" if fill else copy} | ({"lfu.fill_every": 2, "lfu.fill": 2} if fill else {}))
+        "moe.ring_copy": copy})
     store, mixed = engine.ctx.shared_objects[KEY], []
-    empties = []                      # after each step: the empty slots, and whether it lent
-    store.taps.append(lambda step, record: empties.append((sum(map(len, store.residency.empty)),
-                                                           record["lends"] is not None)))
     store.taps.append(lambda step, record: mixed.append(step.n_decode > 0))
     offload = engine.executor.model.layers[0].ffn._store
     assert store.staging == 6 and store.prefill == 8 and store.lending
@@ -434,9 +428,6 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and report["lends"] and report["admissions"], report
-    # a decode step after a lending one: the fill takes empty slots (none left without it but by admissions)
-    after = [b[0] for a, b in zip(empties, empties[1:], strict=False) if a[1] and not b[1]]
-    assert not fill or min(after) < max(e for e, _ in empties), empties
 
 
 @pytest.fixture(scope="module")
@@ -533,8 +524,8 @@ def _tail_checked(store):
         yield steps
 
 
-@pytest.mark.parametrize("stream, policy", [(0, ""), (20, ""), (0, "placement.budget@1")])
-def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream, policy):
+@pytest.mark.parametrize("stream", [0, 20])
+def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream):
     """docs/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
     streaming step first lends the tail — call 0, the last slots of the largest class arena (gate/up's), enough for
     the passes' `out` and `scratch` —, then X's rounds (calls 1…), every step's terms as `_tail_checked` asserts them;
@@ -552,7 +543,7 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
 
     file, prompts, want = wide_moe
     tail = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.ring_tokens": 10, "moe.ring_lend": "tail",
-            "moe.stream_tokens": stream, "moe.placement": policy}
+            "moe.stream_tokens": stream}
     engine = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
     store = engine.ctx.shared_objects[KEY]
     assert store.tail == (0, 15) and list(store.classes)[0].startswith("gate_up") and store.prefill == 512
@@ -564,15 +555,12 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
     report = parity(trace)
     assert report["first_differing_step"] is None and trace.mirrored and report["admissions"], report
     # parity compared the empty slots' stacks step by step (the host's, in the delta log's order); the device's too
-    terms = {k: (None if k == "budget" and v < 0 else v) for k, v in trace.terms.items()}     # (placement.budget's)
-    stacks = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks,
-                    **terms)[-1]
+    stacks = replay(trace.seed, trace.steps, trace.score, trace.classes, trace.slots, trace.sizes, trace.stacks)[-1]
     n_empty = store.n_empty.tolist()
     assert n_empty == stacks["empty"].tolist() and all(
         np.array_equal(store.empty[g, :, :n].t().numpy(), stacks["stacks"][g]) for g, n in enumerate(n_empty))
-    if stream or policy:
-        assert policy or (store.borrowed["stage"] and not store.borrowed["ring"] and not any(s[2] for s in steps)), \
-            store.borrowed
+    if stream:
+        assert store.borrowed["stage"] and not store.borrowed["ring"] and not any(s[2] for s in steps), store.borrowed
         return
     with tail_unmap_undone():
         planted = _engine(file, state_memory=1 << 24, host_memory=1 << 26, chunk_with_decode=4, plugin_options=tail)
@@ -878,7 +866,7 @@ def _gpu_engine(model, **kw) -> Engine:
 @pytest.mark.parametrize("policy, cache", [("", ""), ("", "*=0.25"), ("", "*=0"), ("placement.lru@1", "*=0.25"),
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
-                                           ("", "*=0.25 split"), ("", "*=0.75 pipe"), ("", "*=0.75 fill"),
+                                           ("", "*=0.25 split"), ("", "*=0.75 pipe"),
                                            ("", "*=0.25 ssd"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -899,16 +887,14 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
     ssd, split = ring == "ssd", ring == "split"      # their copies on SMs / copy engines, "tail" lending a tail (D11)
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
-    pipe, fill = ring == "pipe", ring == "fill"      # resident entries first, the misses' fetch on a side stream;
-    ring = "tail" if fill else ring                  # "pipe": prompt steps stage, their misses in 4 fetched parts;
-                                                     # "fill": the tail's, and F11's fill of empty slots (FN §21.15)
+    pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
+                                                     # "pipe": prompt steps stage, their misses in 4 fetched parts
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
         "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"} | (
         {"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {}) | (
-        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}) | (
-        {"lfu.fill_every": 2, "lfu.fill": 2, "moe.later_copy": "fetch"} if fill else {}))
+        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
@@ -971,54 +957,6 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
 
 @pytest.mark.slow
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_the_fill_maps_nothing_a_later_call_of_its_step_reads(gpu_moe):
-    """F11's fill (FN §21.15) on a step whose layers make two resolve calls — a 900-token prompt arriving while two
-    sequences decode, chunked beside their decode rows past an expert pass (512 tokens) — fills nothing there (its
-    calls carry prompt rows: a fill mapped by the first call would be read by the second before its copy lands); the
-    decode steps around it fill. The streams are the resident store's bit for bit, F11's residency its replay's."""
-    from holon_judge.placement import parity, route_dump
-    from holon_std.tiered.resolver import DeviceResolver
-
-    file, _, _ = gpu_moe
-    g = torch.Generator().manual_seed(5)
-    short, long = [torch.randint(0, 512, (n,), generator=g).tolist() for n in (40, 7)], \
-        torch.randint(0, 512, (900,), generator=g).tolist()
-    kw = dict(max_step_tokens=1024, chunk_with_decode=1000, max_model_len=1024)
-
-    def run(engine) -> list:
-        params = SamplingParams(temperature=0.0, max_tokens=24, ignore_eos=True)
-        rids = [engine.add(p, params) for p in short]
-        out = {}
-        for _ in range(4):
-            for d in engine.step():
-                out.setdefault(d.rid, []).extend(d.token_ids)
-        rids.append(engine.add(long, params))
-        while engine.has_work():
-            for d in engine.step():
-                out.setdefault(d.rid, []).extend(d.token_ids)
-        return [out[r] for r in rids]
-    want = run(_gpu_engine(file, **kw))
-    engine = _gpu_engine(file, host_memory=1 << 27, **kw, plugin_options={
-        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "lfu.fill_every": 1, "lfu.fill": 2,
-        "moe.later_copy": "fetch"})
-    store, calls = engine.ctx.shared_objects[KEY], []
-    real = DeviceResolver.__call__
-    spy = mock.patch.object(DeviceResolver, "__call__", lambda self, *a, **k: (
-        calls.append((store.step, self.group)), real(self, *a, **k))[1])
-    with spy, route_dump(engine) as trace:
-        assert run(engine) == want
-    per = collections.Counter(calls)
-    assert max(n for (_, grp), n in per.items() if grp == 0) >= 2                # a step with two calls of a layer
-    report = parity(trace)
-    assert report["first_differing_step"] is None and trace.mirrored, report
-    fills = sum(int(((s["records"][:, 2] < -1) & ~s["needed"][s["records"][:, 0], s["records"][:, 1]]).sum())
-                for s in trace.steps if s["decode_only"] and len(s["records"]))
-    assert fills > 0
-    assert all(not len(s["records"]) or not ((s["records"][:, 2] < -1) & ~s["needed"][s["records"][:, 0],
-               s["records"][:, 1]]).any() for s in trace.steps if not s["decode_only"])   # none in prompt steps
-
-
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     """The core's ActivationLender under `moe.lend_peak` (FN step 7, the toy proof): the startup profile measures the
@@ -1107,9 +1045,8 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;
     prompt logprobs stay close to the resident store's at the same step size (bounded), two engines serve the same
-    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted — or with `moe.cpu_admit`
-    admitted as any miss, their copies after the layer on side streams; with exclusive tiers too, the I/O worker
-    reading SSD pieces beside the CPU's), and a dead worker fails
+    bits (static placement; F11's residency is its replay's, the CPU's misses never admitted; with exclusive tiers too,
+    the I/O worker reading SSD pieces beside the CPU's), and a dead worker fails
     open: the wait gives up after its time bound and the step's commit stops the engine."""
     from holon_judge.placement import parity, route_dump
 
@@ -1122,21 +1059,16 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
              "cpu_task.threads": 2, "cpu_task.timeout": 0.5}
     short = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.5"}   # + exclusive tiers
     runs = []
-    admit = {"moe.cpu_admit": "on"}                           # the CPU's experts admitted, their copies deferred
-    for policy, ram, more in (("std.tiered.static@1", {}, {}), ("std.tiered.static@1", {}, {}), ("", short, {}),
-                              ("", {}, admit), ("placement.budget@1", {}, {"budget.min_gain": 0.5}), ("", {}, {})):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | more | {"moe.placement": policy},
+    for policy, ram in (("std.tiered.static@1", {}), ("std.tiered.static@1", {}), ("", short), ("", {})):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | {"moe.placement": policy},
                              **small)
         with route_dump(engine) as trace:
             runs.append(_served(engine, prompts))
         worker = engine.ctx.shared_objects["cpu_task.compute"].native
         assert worker.served() > 0 and worker.flag() == 0 and engine.stats()["graphs"] > 0
-        assert (sum(s["cpu"].sum() for s in trace.steps) > 0) != bool(more)      # (admitted: replayed as any miss)
-        if policy in ("", "placement.budget@1"):  # F11's replay (placement.budget's: with its margin, CPU candidates)
+        assert sum(s["cpu"].sum() for s in trace.steps) > 0
+        if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
-        if more:
-            assert engine.ctx.shared_objects[KEY]._later is None
-            engine.close()
         if ram:                                   # the I/O worker beside the compute one, both clean
             io = engine.ctx.shared_objects["cpu_task.io"].native
             assert io.served() > 0 and io.flag() == 0

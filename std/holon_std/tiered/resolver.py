@@ -83,21 +83,13 @@ class DeviceResolver:
         if store.parts > 1 and parts <= 1 and self.group < store.borrowing_groups:
             raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step whose staging "
                                "is a ring of parts (its slots hold two parts of a layer's misses)")
-        defer = (store.cpu_admit or getattr(store.policy, "defer_cpu", False)) and before_fetch is not None and \
-            getattr(self.resolve, "defers", False)
-        # the policy's fill of empty slots (FN §21.15): the target's layers, their pieces listed apart (`later`)
-        fill = getattr(self.resolve, "fills", False) and self.group < store.borrowing_groups and not store.exclusive
-        fills = {"fill": fill} if getattr(self.resolve, "fills", False) else {}
         out = self.resolve(
             ids, kinds, self.residency, self.host, self.limits, self.counts, store.routed[self.group], self.ring,
             self.stage, store.empty[self.group], store.n_empty[self.group:self.group + 1], store.misses, store.errors,
             store.delta[self.group], store.n_delta[self.group:self.group + 1], self.group,
             store.no_plan if plan is None else plan, store.no_jobs if jobs is None else jobs,
-            **({"split": True} if split else {}), **({"defer": True} if defer or fill else {}), **fills,
-            **self.state)
+            **({"split": True} if split else {}), **self.state)
         slots, fetch, n, cpu = out[:4]
-        if fill and not defer:                   # the fill's pieces: copied after the layer (`fetch_later`)
-            store.fetch_later(self._fetch, self.classes, out[-2], out[-1])
         self._prepared = False
         if split:                                # the fetch on a side stream; the hits' passes run meanwhile
             main = torch.accelerator.current_stream(ids.device)
@@ -120,12 +112,7 @@ class DeviceResolver:
                           store.n_moves)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
-        if store.cpu_admit or getattr(store.policy, "defer_cpu", False):
-            store.wait_later()                   # an earlier call's admitted CPU experts off the link first (a fill's
-                                                 # share it: joined at the target's last layer only)
         self._gather(fetch, n)
-        if defer:                                # the CPU's admitted experts: their pieces after the call
-            store.fetch_later(self._fetch, self.classes, out[4], out[5])
         if store.exclusive:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions

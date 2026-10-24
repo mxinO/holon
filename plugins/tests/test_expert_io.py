@@ -38,7 +38,7 @@ E, K, ROLES = 128, 8, 2
 pytestmark = pytest.mark.l0
 PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
-VARIANTS = {"lfu": ("score",), "lru": ("last", "clock"), "budget": ("score",)}
+VARIANTS = {"lfu": ("score",), "lru": ("last", "clock")}
 
 
 @pytest.fixture(scope="module")
@@ -167,7 +167,7 @@ def test_resolve_matches_the_oracle(plugins, device, sources, tokens, staging):
 def _state(policy: str, seed: int) -> dict[str, torch.Tensor]:
     """Scores on a coarse grid (ties everywhere, and equal after a decay), or stamps with ties and a clock."""
     g = torch.Generator().manual_seed(seed)
-    if policy in ("lfu", "budget"):
+    if policy == "lfu":
         return {"score": (torch.randint(0, 6, (E,), generator=g) * 0.5).float()}
     return {"last": torch.randint(0, 6, (E,), generator=g).int(), "clock": torch.tensor([7], dtype=torch.int32)}
 
@@ -204,15 +204,14 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
     misses, errors = torch.zeros(1, dtype=torch.int32, device=device), torch.zeros(1, dtype=torch.int32, device=device)
     routed = torch.zeros(E, dtype=torch.int32, device=device)
     routed[:3] = 3                                     # an earlier call's marks (scope included) stay
-    budget = policy == "budget"                             # (its contract: the CPU's experts admitted, `defer`)
     slots, fetch, n_fetch, cpu = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
                                          dev["counts"], routed, dev["ring"], dev["stage"], dev["empty"],
                                          dev["n_empty"], misses, errors, delta, n_delta, 3, plan, jobs,
-                                         **({"defer": True} if budget else {}), **{n: dev[n] for n in state})[:4]
+                                         **{n: dev[n] for n in state})
     assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(n_fetch.cpu(), want["n_fetch"])
     assert torch.equal(cpu.cpu(), want["cpu"])
     _jobs(jobs, want["jobs"])
-    assert budget or not {a for _, a, _ in want["records"]} & {row[0] for row in want["jobs"]}   # never admitted
+    assert not {a for _, a, _ in want["records"]} & {row[0] for row in want["jobs"]}   # the CPU's are never admitted
     for r in range(ROLES):
         assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
     assert torch.equal(dev["counts"].cpu(), case["counts"] + want["counts"]) and int(misses[0]) == n_fetch.max()
@@ -235,12 +234,11 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
         source = case["empty"][:, -2 - b] if b < 0 else case["residency"][b]
         assert torch.equal(want["residency"][a], source) and (b < 0 or (want["residency"][b] == -1).all())
         assert b < 0 or not ((case["ids"] == b) & (case["kinds"][:, None] != PADDING)).any()   # b routed by no row
-        listed, n = ("later", "n_later") if a in {row[0] for row in want["jobs"]} else ("fetch", "n_fetch")
-        for r in range(ROLES):                # (the CPU's, admitted under `defer`: listed apart, gathered after)
-            row = (want[listed][r, 0, :int(want[n][r])] == case["host"][a, r]).nonzero()
-            assert want[listed][r, 1, row].item() == source[r]                  # gathered straight into its slot
+        for r in range(ROLES):
+            row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
+            assert want["fetch"][r, 1, row].item() == source[r]                  # gathered straight into its slot
     assert len(admitted) == len(records)
-    if getattr(resolve, "splits", False) and not budget:     # `split`: the fetched entries' slots apart
+    if getattr(resolve, "splits", False):     # `split`: the same call, the fetched entries' slots apart
         dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
         words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
         delta, n_delta = _log(capacity, 2, device)
@@ -256,25 +254,6 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
             dst = set(want["fetch"][r, 1, :int(want["n_fetch"][r])].tolist())
             assert set(miss[r][miss[r] != null[r]].tolist()) <= dst
             assert not set(hits[r].flatten().tolist()) & (dst - {-1})
-    if getattr(resolve, "defers", False) and share:     # `defer`: the CPU's experts admitted, their copy listed apart
-        want = oracle(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
-                      *state.values(), 3, case["ring"], stage, case["empty"], int(case["n_empty"][0]), plan.cpu(),
-                      **({} if budget else {"defer": True}))
-        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
-        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
-        delta, n_delta = _log(capacity + E, 2, device)
-        slots, fetch, n_fetch, cpu, later, n_later = resolve(
-            dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"],
-            torch.zeros(E, dtype=torch.int32, device=device), dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
-            *words, delta, n_delta, 3, plan, jobs, defer=True, **{n: dev[n] for n in state})
-        assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(cpu.cpu(), want["cpu"])
-        assert torch.equal(dev["residency"].cpu(), want["residency"]) and torch.equal(n_later.cpu(), want["n_later"])
-        assert torch.equal(n_fetch.cpu(), want["n_fetch"])
-        for r in range(ROLES):
-            assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
-            assert torch.equal(later[r, :, :int(n_later[r])].cpu(), want["later"][r, :, :int(n_later[r])])
-        taken = {row[0] for row in want["jobs"]}
-        assert int(want["n_later"].sum()) == ROLES * len(taken & {a for _, a, _ in want["records"]})
 
 
 def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:
@@ -303,51 +282,6 @@ def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score:
     delta = zeros["delta"]
     return {"residency": dev["residency"].cpu(), "score": dev["score"].cpu().numpy(),
             "records": [tuple(r) for r in delta[:int(words[2][0])].cpu().tolist()]}
-
-
-@pytest.mark.parametrize("device", DEVICES)
-def test_lfu_fills_the_empty_slots_its_admissions_leave(plugins, device):
-    """The fill (`lfu.fill`, `lfu.fill_every`; FN §21.15): a due call — its layer's tick plus its group a multiple of
-    fill_every — puts up to `fill` experts absent from the map it found and routed by none of its rows into the empty
-    slots its admissions left, from the top, hottest first (ties by id: the scores' grid ties), logged as empty-slot
-    admissions and listed apart (`later`); a call not due, or with prompt rows, fills none; the tick counts the calls
-    of decode rows only."""
-    provider = "placement.lfu" if device == "cpu" else "kernels.expert_io"
-    resolve = kernel(plugins, device, "moe_resolve.lfu@1", provider, experts=E, top_k=K, roles=ROLES, staging=E)
-    resolve.fill, resolve.fill_every = 3, 4
-    from holon_plugins.placement.lfu.reference import moe_resolve_lfu
-    for tick0, due, prompt in ((1, True, False), (2, False, False), (1, False, True)):   # group 3: due at ticks 1, 5, …
-        case, state = routing(2 if prompt else 1, seed=11, whole=True), _state("lfu", 11)
-        case["kinds"][:] = DECODE
-        case["kinds"][1:] = PREFILL if prompt else DECODE       # a call with prompt rows: no fill, no tick
-        case["empty"] = (K + 1600 + torch.arange(8)).expand(ROLES, 8).int().clone()
-        case["n_empty"] = torch.tensor([8], dtype=torch.int32)
-        plan, jobs = _share(2 if prompt else 1, device, False)
-        want = moe_resolve_lfu(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"], E,
-                               state["score"], 3, case["ring"], _stage(case, E, False), case["empty"], 8, plan.cpu(),
-                               True, None, 0.0, tick0, 3, 4)
-        delta, n_delta = _log(4 * E, 0, device)
-        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": _stage(case, E, False)}).items()}
-        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
-        tick = torch.tensor([tick0], dtype=torch.int32, device=device)
-        slots, fetch, n_fetch, _, later, n_later = resolve(
-            dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"], dev["counts"],
-            torch.zeros(E, dtype=torch.int32, device=device), dev["ring"], dev["stage"], dev["empty"], dev["n_empty"],
-            *words, delta, n_delta, 3, plan, jobs, defer=True, score=dev["score"], tick=tick)
-        assert torch.equal(slots.cpu(), want["slots"]) and torch.equal(dev["residency"].cpu(), want["residency"])
-        assert torch.equal(n_later.cpu(), want["n_later"]) and int(tick[0]) == want["tick"] == tick0 + (not prompt)
-        assert int(dev["n_empty"][0]) == want["n_empty"]
-        for r in range(ROLES):
-            assert torch.equal(fetch[r, :, :int(n_fetch[r])].cpu(), want["fetch"][r, :, :int(n_fetch[r])])
-            assert torch.equal(later[r, :, :int(n_later[r])].cpu(), want["later"][r, :, :int(n_later[r])])
-        records = torch.tensor(want["records"], dtype=torch.int32).view(-1, 3)
-        assert int(n_delta[0]) == len(records) and torch.equal(delta[:len(records)].cpu(), records)
-        routed = set(case["ids"][case["ids"] >= 0].tolist())
-        filled = [a for _, a, b in want["records"] if b < -1 and a not in routed]
-        assert len(filled) == (3 if due else 0) and int(want["n_later"][0]) == len(filled)
-        absent = [e for e in range(E) if (case["residency"][e] < 0).all() and e not in routed]
-        order = sorted(absent, key=lambda e: (-float(want["score"][e]), e))
-        assert filled == order[:len(filled)]                    # hottest first, ties by id
 
 
 @pytest.mark.parametrize("device", DEVICES)

@@ -20,10 +20,8 @@ CPU's share of n misses (D4: deployment-level, never per request); past N the la
 ⌊n · plan[N] / N⌋ —, and `moe.cpu_isa`, the CPU tier it was measured on: on a host of another tier the split is off
 (S5: the store forces F5a), and `moe.cpu_min_tokens`, the fewest tokens of a pass that takes the share (default 1; 2
 at batch 1: verify passes only, a decode pass's misses all fetched — FN step 7: a verify window's misses are 87%
-one-token experts, which the CPU computes as fast as a decode's, against 3.6 times the bytes to fetch), and
-`moe.cpu_admit` (`on`: the CPU's experts are admitted as any miss would be, under a variant that `defers`, their
-pieces copied after the layer on side streams, so the cache evolves as without the split; default `off`: never
-admitted). The worker's threads are `cpu_task@1`'s options."""
+one-token experts, which the CPU computes as fast as a decode's, against 3.6 times the bytes to fetch). The worker's
+threads are `cpu_task@1`'s options."""
 from __future__ import annotations
 
 import torch
