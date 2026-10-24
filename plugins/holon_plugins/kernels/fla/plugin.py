@@ -51,6 +51,8 @@ def _to_device(values: list, device: torch.device) -> torch.Tensor:
 
 
 class GatedDeltaRule:
+    strided = True      # q, k, v, a and b may be column views of wider rows (read in place by the recurrent kernel)
+
     def __init__(self, ctx, *, heads_k: int, heads_v: int, head_k_dim: int, head_v_dim: int, v_head_order: str,
                  dtype: str, out_slots: bool = False) -> None:
         self.device, self.tiled = ctx.device, v_head_order == "tiled"

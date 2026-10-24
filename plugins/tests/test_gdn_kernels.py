@@ -265,6 +265,14 @@ def test_delta_rule_aligned_split_and_repeat_are_bitwise(order):
         pools = [torch.zeros(2, hv, d, d, device="cuda") + 0.01 for _ in range(2)]
         outs = [run_batch(kernel, x1, g, p, lens, init, [0]) for p in pools]
         assert torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1])
+    # the recurrent path reads column views of wider rows (the projections' and conv's) in place: the same bits
+    x4 = rows(x, 0, 4)
+    wide = {n: torch.cat([v.reshape(4, -1), torch.full_like(v.reshape(4, -1), float("nan"))], 1) for n, v in x4.items()}
+    views = {n: wide[n][:, :x4[n][0].numel()].view(x4[n].shape) for n in x4}
+    pools = [torch.zeros(4, hv, d, d, device="cuda") + 0.01 for _ in range(2)]
+    outs = [run_batch(kernel, y, g, p, [1] * 4, [True] * 4, [0, 1, 2, 3])
+            for y, p in ((x4, pools[0]), (views, pools[1]))]
+    assert not views["q"].is_contiguous() and torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1])
 
 
 def test_delta_rule_never_syncs():

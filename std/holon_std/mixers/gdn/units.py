@@ -221,8 +221,9 @@ class GDN(nn.Module):
             conv_state, ssm_state = self._states()
             qs, slots, has_init, rule, handle = meta.query_start, meta.slots, meta.has_init, meta.rule, meta.handle
         h = getattr(self.in_proj_qkv, "prepare_input", lambda x: x)(x)    # one input, four projections (m07 D6)
-        if hasattr(self, "in_proj_ab"):
-            a, b = (y.contiguous() for y in self.in_proj_ab(h).split(self.hv, dim=-1))
+        if hasattr(self, "in_proj_ab"):                 # (column views: a rule that takes strided rows reads them)
+            a, b = (y if getattr(rule, "strided", False) else y.contiguous()
+                    for y in self.in_proj_ab(h).split(self.hv, dim=-1))
         else:
             a, b = self.in_proj_a(h), self.in_proj_b(h)
         qkv = self.in_proj_qkv(h)
