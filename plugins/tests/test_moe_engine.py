@@ -1070,7 +1070,7 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache, kept", [("*=0.75", "own tail"), ("*=0.5", "reserved")])
+@pytest.mark.parametrize("cache, kept", [("*=0.7", "own tail"), ("*=0.5", "reserved")])
 def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, kept):
     """`moe.lend_peak` where the layout cannot lend (decided at build, never refused at a launch): a cache too small to
     lend a prompt step's staging keeps the loan in its own tail (the pool's last bytes, the cache that much smaller),

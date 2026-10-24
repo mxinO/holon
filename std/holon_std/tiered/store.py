@@ -56,9 +56,10 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
-LOAN_MARGIN, LOAN_SLACK = 3.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
+LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
 # a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
-# step's segments are 2.35-2.74x its allocated peak (FN §21.12); lent in proportion to the step's prompt tokens
+# step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12); lent in proportion
+# to the step's prompt tokens. A step past its loan takes the rest from the device (the loan's overflow)
 
 
 @dataclasses.dataclass(eq=False)
