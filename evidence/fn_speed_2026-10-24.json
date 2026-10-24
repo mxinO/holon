@@ -1,0 +1,2939 @@
+{
+ "date": "2026-10-24",
+ "doc": "docs/v1-flash-next.md \u00a722.6, \u00a723.3-\u00a723.7",
+ "ledgers": {
+  "rtx-5080": {
+   "mtp_c_1": {
+    "max_seqs": 1,
+    "cached_share": {
+     "target": 0.2622,
+     "head": 0.3008
+    },
+    "loan_bytes": 1963417600,
+    "free_after_startup": 774373376,
+    "outside_torch": 611581952,
+    "outside_stages_gib": {
+     "start": 0.263,
+     "model_built": 0.503,
+     "profiled": 0.57,
+     "before_capture": 0.57,
+     "captured": 0.57
+    },
+    "peaks": [
+     {
+      "live": 647452672,
+      "reserved_growth": 715128832
+     },
+     {
+      "live": 338807808,
+      "reserved_growth": 337641472
+     }
+    ],
+    "graphs": {
+     "reserve": 119537664,
+     "buckets": 1
+    },
+    "top_at_peak": {
+     "peak_mib": 617.4,
+     "by_frame": {
+      "hyper/units.py:56 < core/build.py:291": [
+       160.0,
+       1,
+       160.0
+      ],
+      "mtp_head/units.py:99 < mtp_head/units.py:91": [
+       160.0,
+       1,
+       160.0
+      ],
+      "ggml_cuda/plugin.py:419 < ops/units.py:109": [
+       109.0,
+       2,
+       104.0
+      ],
+      "mtp/plugin.py:74 < core/executor.py:454": [
+       80.0,
+       1,
+       80.0
+      ],
+      "triton_attn/kernel.py:504 < triton_attn/plugin.py:175": [
+       48.0,
+       1,
+       48.0
+      ],
+      "ggml_cuda/plugin.py:468 < tiered/rows.py:113": [
+       20.0,
+       1,
+       20.0
+      ],
+      "hc_triton/kernel.py:319 < hc_triton/plugin.py:23": [
+       20.0,
+       1,
+       20.0
+      ],
+      "ops/units.py:218 < gdn/units.py:225": [
+       8.1,
+       1,
+       8.1
+      ],
+      "ops/units.py:218 < ffn/units.py:45": [
+       8.1,
+       1,
+       8.1
+      ],
+      "flashinfer/ops.py:21 < ops/units.py:26": [
+       4.0,
+       1,
+       4.0
+      ],
+      "gqa/units.py:68 < core/executor.py:596": [
+       0.1,
+       4,
+       0.0
+      ],
+      "mtp/plugin.py:77 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qsa/units.py:61 < core/executor.py:596": [
+       0.0,
+       2,
+       0.0
+      ],
+      "flashinfer/plugin.py:76 < gqa/units.py:64": [
+       0.0,
+       8,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:96": [
+       0.0,
+       10,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:95": [
+       0.0,
+       5,
+       0.0
+      ],
+      "mtp/plugin.py:76 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "gdn/units.py:96 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qwen4_exp/units.py:56 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ]
+     }
+    }
+   },
+   "mtp_c_4": {
+    "max_seqs": 4,
+    "cached_share": {
+     "target": 0.2187,
+     "head": 0.3008
+    },
+    "loan_bytes": 1963417600,
+    "free_after_startup": 810024960,
+    "outside_torch": 722731008,
+    "outside_stages_gib": {
+     "start": 0.263,
+     "model_built": 0.503,
+     "profiled": 0.583,
+     "before_capture": 0.583,
+     "captured": 0.673
+    },
+    "peaks": [
+     {
+      "live": 647452672,
+      "reserved_growth": 715128832
+     },
+     {
+      "live": 338807808,
+      "reserved_growth": 337641472
+     }
+    ],
+    "graphs": {
+     "reserve": 415236096,
+     "buckets": 3
+    },
+    "top_at_peak": {
+     "peak_mib": 617.4,
+     "by_frame": {
+      "hyper/units.py:56 < core/build.py:291": [
+       160.0,
+       1,
+       160.0
+      ],
+      "mtp_head/units.py:99 < mtp_head/units.py:91": [
+       160.0,
+       1,
+       160.0
+      ],
+      "ggml_cuda/plugin.py:419 < ops/units.py:109": [
+       109.0,
+       2,
+       104.0
+      ],
+      "mtp/plugin.py:74 < core/executor.py:454": [
+       80.0,
+       1,
+       80.0
+      ],
+      "triton_attn/kernel.py:504 < triton_attn/plugin.py:175": [
+       48.0,
+       1,
+       48.0
+      ],
+      "ggml_cuda/plugin.py:468 < tiered/rows.py:113": [
+       20.0,
+       1,
+       20.0
+      ],
+      "hc_triton/kernel.py:319 < hc_triton/plugin.py:23": [
+       20.0,
+       1,
+       20.0
+      ],
+      "ops/units.py:218 < gdn/units.py:225": [
+       8.1,
+       1,
+       8.1
+      ],
+      "ops/units.py:218 < ffn/units.py:45": [
+       8.1,
+       1,
+       8.1
+      ],
+      "flashinfer/ops.py:21 < ops/units.py:26": [
+       4.0,
+       1,
+       4.0
+      ],
+      "gqa/units.py:68 < core/executor.py:596": [
+       0.1,
+       4,
+       0.0
+      ],
+      "mtp/plugin.py:77 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qsa/units.py:61 < core/executor.py:596": [
+       0.0,
+       2,
+       0.0
+      ],
+      "flashinfer/plugin.py:76 < gqa/units.py:64": [
+       0.0,
+       8,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:96": [
+       0.0,
+       10,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:95": [
+       0.0,
+       5,
+       0.0
+      ],
+      "mtp/plugin.py:76 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "gdn/units.py:96 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qwen4_exp/units.py:56 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ]
+     }
+    }
+   },
+   "off_c_1": null,
+   "mtp99_1": null
+  },
+  "rtx-5090": {
+   "mtp_c_1": {
+    "max_seqs": 1,
+    "cached_share": {
+     "target": 0.4838,
+     "head": 0.5
+    },
+    "loan_bytes": 0,
+    "free_after_startup": 1276182528,
+    "outside_torch": 984875008,
+    "outside_stages_gib": {
+     "start": 0.495,
+     "model_built": 0.833,
+     "profiled": 0.917,
+     "before_capture": 0.917,
+     "captured": 0.917
+    },
+    "peaks": [
+     {
+      "live": 805045248,
+      "reserved_growth": 903872512
+     }
+    ],
+    "graphs": {
+     "reserve": 125829120,
+     "buckets": 1
+    },
+    "top_at_peak": {
+     "peak_mib": 767.7,
+     "by_frame": {
+      "hyper/units.py:56 < core/build.py:291": [
+       200.0,
+       1,
+       200.0
+      ],
+      "mtp_head/units.py:99 < mtp_head/units.py:91": [
+       200.0,
+       1,
+       200.0
+      ],
+      "ggml_cuda/plugin.py:419 < ops/units.py:109": [
+       136.2,
+       2,
+       130.0
+      ],
+      "mtp/plugin.py:74 < core/executor.py:454": [
+       100.0,
+       1,
+       100.0
+      ],
+      "triton_attn/kernel.py:504 < triton_attn/plugin.py:175": [
+       60.0,
+       1,
+       60.0
+      ],
+      "ggml_cuda/plugin.py:468 < tiered/rows.py:113": [
+       25.0,
+       1,
+       25.0
+      ],
+      "hc_triton/kernel.py:319 < hc_triton/plugin.py:23": [
+       25.0,
+       1,
+       25.0
+      ],
+      "ops/units.py:218 < gdn/units.py:225": [
+       8.1,
+       1,
+       8.1
+      ],
+      "ops/units.py:218 < ffn/units.py:45": [
+       8.1,
+       1,
+       8.1
+      ],
+      "flashinfer/ops.py:21 < ops/units.py:26": [
+       5.0,
+       1,
+       5.0
+      ],
+      "gqa/units.py:68 < core/executor.py:596": [
+       0.2,
+       4,
+       0.0
+      ],
+      "qsa/units.py:61 < core/executor.py:596": [
+       0.0,
+       2,
+       0.0
+      ],
+      "mtp/plugin.py:77 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "flashinfer/plugin.py:76 < gqa/units.py:64": [
+       0.0,
+       8,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:96": [
+       0.0,
+       12,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:95": [
+       0.0,
+       6,
+       0.0
+      ],
+      "mtp/plugin.py:76 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "gdn/units.py:96 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qwen4_exp/units.py:56 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ]
+     }
+    }
+   },
+   "mtp_c_4": {
+    "max_seqs": 4,
+    "cached_share": {
+     "target": 0.4439,
+     "head": 0.5
+    },
+    "loan_bytes": 0,
+    "free_after_startup": 1336999936,
+    "outside_torch": 1091829760,
+    "outside_stages_gib": {
+     "start": 0.495,
+     "model_built": 0.833,
+     "profiled": 0.917,
+     "before_capture": 0.917,
+     "captured": 1.017
+    },
+    "peaks": [
+     {
+      "live": 805045248,
+      "reserved_growth": 903872512
+     }
+    ],
+    "graphs": {
+     "reserve": 427819008,
+     "buckets": 3
+    },
+    "top_at_peak": {
+     "peak_mib": 767.7,
+     "by_frame": {
+      "hyper/units.py:56 < core/build.py:291": [
+       200.0,
+       1,
+       200.0
+      ],
+      "mtp_head/units.py:99 < mtp_head/units.py:91": [
+       200.0,
+       1,
+       200.0
+      ],
+      "ggml_cuda/plugin.py:419 < ops/units.py:109": [
+       136.2,
+       2,
+       130.0
+      ],
+      "mtp/plugin.py:74 < core/executor.py:454": [
+       100.0,
+       1,
+       100.0
+      ],
+      "triton_attn/kernel.py:504 < triton_attn/plugin.py:175": [
+       60.0,
+       1,
+       60.0
+      ],
+      "ggml_cuda/plugin.py:468 < tiered/rows.py:113": [
+       25.0,
+       1,
+       25.0
+      ],
+      "hc_triton/kernel.py:319 < hc_triton/plugin.py:23": [
+       25.0,
+       1,
+       25.0
+      ],
+      "ops/units.py:218 < gdn/units.py:225": [
+       8.1,
+       1,
+       8.1
+      ],
+      "ops/units.py:218 < ffn/units.py:45": [
+       8.1,
+       1,
+       8.1
+      ],
+      "flashinfer/ops.py:21 < ops/units.py:26": [
+       5.0,
+       1,
+       5.0
+      ],
+      "gqa/units.py:68 < core/executor.py:596": [
+       0.2,
+       4,
+       0.0
+      ],
+      "qsa/units.py:61 < core/executor.py:596": [
+       0.0,
+       2,
+       0.0
+      ],
+      "mtp/plugin.py:77 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "flashinfer/plugin.py:76 < gqa/units.py:64": [
+       0.0,
+       8,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:96": [
+       0.0,
+       12,
+       0.0
+      ],
+      "fla/plugin.py:50 < fla/plugin.py:95": [
+       0.0,
+       6,
+       0.0
+      ],
+      "mtp/plugin.py:76 < core/executor.py:454": [
+       0.0,
+       1,
+       0.0
+      ],
+      "gdn/units.py:96 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ],
+      "qwen4_exp/units.py:56 < core/executor.py:596": [
+       0.0,
+       1,
+       0.0
+      ]
+     }
+    }
+   },
+   "off_c_1": {
+    "max_seqs": 1,
+    "cached_share": {
+     "target": 0.5028,
+     "head": 0.0
+    },
+    "loan_bytes": 0,
+    "free_after_startup": 1242628096,
+    "outside_torch": 934543360,
+    "outside_stages_gib": {
+     "start": 0.495,
+     "model_built": 0.831,
+     "profiled": 0.87,
+     "before_capture": 0.87,
+     "captured": 0.87
+    },
+    "peaks": [
+     {
+      "live": 804242944,
+      "reserved_growth": 882900992
+     }
+    ],
+    "graphs": {
+     "reserve": 50331648,
+     "buckets": 1
+    },
+    "top_at_peak": null
+   },
+   "mtp99_1": {
+    "max_seqs": 1,
+    "cached_share": {
+     "target": 0.4868,
+     "head": 0.5
+    },
+    "loan_bytes": 0,
+    "free_after_startup": 1144061952,
+    "outside_torch": 970194944,
+    "outside_stages_gib": {
+     "start": 0.495,
+     "model_built": 0.833,
+     "profiled": 0.904,
+     "before_capture": 0.904,
+     "captured": 0.904
+    },
+    "peaks": [
+     {
+      "live": 805045248,
+      "reserved_growth": 903872512
+     }
+    ],
+    "graphs": {
+     "reserve": 123731968,
+     "buckets": 1
+    },
+    "top_at_peak": null
+   }
+  }
+ },
+ "loan_probe_rtx-5080": {
+  "mtp_c": {
+   "head": [
+    "measured {'peak_alloc': 617, 'reserved_peak': 8390, 'reserved_now': 7728, 'growth': 662}",
+    "profile peaks MiB [617, 323] loan MiB 1872 tail (0, 2331) free MiB 738"
+   ],
+   "steps": [
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 355,
+     "range_mib": 946,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 1024,
+     "alloc_peak_mib": 203,
+     "range_mib": 483,
+     "reserved_mib": 270,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 602,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 355,
+     "range_mib": 946,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 602,
+     "range_mib": 1872,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    }
+   ]
+  },
+  "off_c": {
+   "head": [
+    "measured {'peak_alloc': 616, 'reserved_peak': 7470, 'reserved_now': 6848, 'growth': 622}",
+    "profile peaks MiB [616, 323] loan MiB 1870 tail (0, 2329) free MiB 690"
+   ],
+   "steps": [
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 300,
+     "range_mib": 945,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 1024,
+     "alloc_peak_mib": 197,
+     "range_mib": 482,
+     "reserved_mib": 230,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 300,
+     "range_mib": 945,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 600,
+     "range_mib": 1870,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    }
+   ]
+  },
+  "mtp_m2": {
+   "head": [
+    "measured {'peak_alloc': 617, 'reserved_peak': 8390, 'reserved_now': 7728, 'growth': 662}",
+    "profile peaks MiB [617, 323] loan MiB 1254 tail (0, 1714) free MiB 739"
+   ],
+   "steps": [
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 355,
+     "range_mib": 637,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 1024,
+     "alloc_peak_mib": 203,
+     "range_mib": 328,
+     "reserved_mib": 270,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 602,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 2048,
+     "alloc_peak_mib": 355,
+     "range_mib": 637,
+     "reserved_mib": 530,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 601,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    },
+    {
+     "tokens": 4096,
+     "alloc_peak_mib": 602,
+     "range_mib": 1254,
+     "reserved_mib": 1030,
+     "overflow_mib": 0
+    }
+   ]
+  }
+ },
+ "draft_quality": {
+  "rtx-5080 1024": {
+   "ctx": "1024",
+   "prompts": 8,
+   "tokens": 256,
+   "per_prompt": [
+    {
+     "strata": [
+      0.775,
+      0.768,
+      0.83
+     ],
+     "holon": [
+      0.787,
+      0.743,
+      0.846
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.787,
+      0.757,
+      0.849
+     ],
+     "holon": [
+      0.787,
+      0.786,
+      0.764
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.784,
+      0.797,
+      0.782
+     ],
+     "holon": [
+      0.773,
+      0.809,
+      0.8
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.779,
+      0.689,
+      0.725
+     ],
+     "holon": [
+      0.8,
+      0.658,
+      0.7
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.685,
+      0.662,
+      0.51
+     ],
+     "holon": [
+      0.652,
+      0.644,
+      0.511
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.883,
+      0.882,
+      0.867
+     ],
+     "holon": [
+      0.883,
+      0.868,
+      0.881
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.69,
+      0.739,
+      0.725
+     ],
+     "holon": [
+      0.687,
+      0.765,
+      0.712
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.703,
+      0.704,
+      0.68
+     ],
+     "holon": [
+      0.703,
+      0.704,
+      0.68
+     ],
+     "followed": true
+    }
+   ],
+   "pooled": {
+    "strata": [
+     0.755,
+     0.748,
+     0.751
+    ],
+    "holon": [
+     0.752,
+     0.745,
+     0.743
+    ]
+   }
+  },
+  "rtx-5080 32768": {
+   "ctx": "32768",
+   "prompts": 8,
+   "tokens": 256,
+   "per_prompt": [
+    {
+     "strata": [
+      0.818,
+      0.847,
+      0.607
+     ],
+     "holon": [
+      0.802,
+      0.795,
+      0.586
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.758,
+      0.797,
+      0.782
+     ],
+     "holon": [
+      0.756,
+      0.809,
+      0.782
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.831,
+      0.841,
+      0.828
+     ],
+     "holon": [
+      0.81,
+      0.838,
+      0.825
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.905,
+      0.896,
+      0.9
+     ],
+     "holon": [
+      0.905,
+      0.896,
+      0.917
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.925,
+      0.784,
+      0.776
+     ],
+     "holon": [
+      0.875,
+      0.843,
+      0.797
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.812,
+      0.855,
+      0.712
+     ],
+     "holon": [
+      0.791,
+      0.868,
+      0.712
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.828,
+      0.722,
+      0.865
+     ],
+     "holon": [
+      0.795,
+      0.729,
+      0.902
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.869,
+      0.767,
+      0.75
+     ],
+     "holon": [
+      0.878,
+      0.792,
+      0.772
+     ],
+     "followed": true
+    }
+   ],
+   "pooled": {
+    "strata": [
+     0.841,
+     0.812,
+     0.776
+    ],
+    "holon": [
+     0.824,
+     0.82,
+     0.785
+    ]
+   }
+  },
+  "rtx-5090 1024": {
+   "ctx": "1024",
+   "prompts": 8,
+   "tokens": 256,
+   "per_prompt": [
+    {
+     "strata": [
+      0.872,
+      0.868,
+      0.847
+     ],
+     "holon": [
+      0.859,
+      0.896,
+      0.833
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.593,
+      0.642,
+      0.744
+     ],
+     "holon": [
+      0.625,
+      0.614,
+      0.698
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.747,
+      0.809,
+      0.782
+     ],
+     "holon": [
+      0.734,
+      0.783,
+      0.722
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.773,
+      0.68,
+      0.667
+     ],
+     "holon": [
+      0.712,
+      0.662,
+      0.592
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.619,
+      0.63,
+      0.413
+     ],
+     "holon": [
+      0.605,
+      0.625,
+      0.422
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.827,
+      0.866,
+      0.879
+     ],
+     "holon": [
+      0.895,
+      0.868,
+      0.898
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.693,
+      0.743,
+      0.654
+     ],
+     "holon": [
+      0.673,
+      0.729,
+      0.608
+     ],
+     "followed": true
+    },
+    {
+     "strata": [
+      0.654,
+      0.657,
+      0.717
+     ],
+     "holon": [
+      0.648,
+      0.643,
+      0.733
+     ],
+     "followed": true
+    }
+   ],
+   "pooled": {
+    "strata": [
+     0.71,
+     0.735,
+     0.722
+    ],
+    "holon": [
+     0.704,
+     0.725,
+     0.7
+    ]
+   }
+  }
+ },
+ "link_rates": {
+  "rtx-5080": {
+   "4k": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "pool_gib": 64.0,
+    "ctas_per_role": 4,
+    "rows": [
+     {
+      "pages": "4k",
+      "units_per_role": 3,
+      "gather_gbs": 47.9
+     },
+     {
+      "pages": "4k",
+      "units_per_role": 10,
+      "gather_gbs": 48.4
+     },
+     {
+      "pages": "4k",
+      "units_per_role": 64,
+      "gather_gbs": 48.9,
+      "dma_gbs": 46.9
+     }
+    ],
+    "device_mib_4k": 128,
+    "lock_s_per_gib_4k": 0.246,
+    "anon_huge_gib_4k": 0.0
+   },
+   "thp": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "pool_gib": 64.0,
+    "ctas_per_role": 4,
+    "rows": [
+     {
+      "pages": "thp",
+      "units_per_role": 3,
+      "gather_gbs": 48.7
+     },
+     {
+      "pages": "thp",
+      "units_per_role": 10,
+      "gather_gbs": 50.2
+     },
+     {
+      "pages": "thp",
+      "units_per_role": 64,
+      "gather_gbs": 50.4,
+      "dma_gbs": 53.2
+     }
+    ],
+    "device_mib_thp": 128,
+    "lock_s_per_gib_thp": 0.063,
+    "anon_huge_gib_thp": 64.0
+   }
+  },
+  "rtx-5090": {
+   "4k": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "pool_gib": 80.0,
+    "ctas_per_role": 4,
+    "rows": [
+     {
+      "pages": "4k",
+      "units_per_role": 3,
+      "gather_gbs": 48.9
+     },
+     {
+      "pages": "4k",
+      "units_per_role": 10,
+      "gather_gbs": 49.3
+     },
+     {
+      "pages": "4k",
+      "units_per_role": 64,
+      "gather_gbs": 49.0,
+      "dma_gbs": 46.9
+     }
+    ],
+    "device_mib_4k": 160,
+    "lock_s_per_gib_4k": 0.257,
+    "anon_huge_gib_4k": 0.0
+   },
+   "thp": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "pool_gib": 80.0,
+    "ctas_per_role": 4,
+    "rows": [
+     {
+      "pages": "thp",
+      "units_per_role": 3,
+      "gather_gbs": 51.0
+     },
+     {
+      "pages": "thp",
+      "units_per_role": 10,
+      "gather_gbs": 51.5
+     },
+     {
+      "pages": "thp",
+      "units_per_role": 64,
+      "gather_gbs": 50.7,
+      "dma_gbs": 53.0
+     }
+    ],
+    "device_mib_thp": 160,
+    "lock_s_per_gib_thp": 0.062,
+    "anon_huge_gib_thp": 80.0
+   }
+  }
+ },
+ "outside_allocator": {
+  "rtx-5080": {
+   "mtp": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sms": 84,
+    "threads_per_sm": 1536,
+    "stack_default": 1024,
+    "context": 333,
+    "stack_set": 0,
+    "context_with_stack_set": 207,
+    "stack_after_startup": 352,
+    "stack_after_requests": 352,
+    "stages_mib": {
+     "built": 397,
+     "profiled": 529,
+     "before_capture": 529,
+     "captured": 529,
+     "startup": 529,
+     "after_requests": 539
+    },
+    "host_mappings": [
+     {
+      "gib": 0.31,
+      "mapped": true,
+      "device_mib": 0
+     },
+     {
+      "gib": 26.82,
+      "mapped": true,
+      "device_mib": 54
+     },
+     {
+      "gib": 17.02,
+      "mapped": true,
+      "device_mib": 34
+     },
+     {
+      "gib": 10.55,
+      "mapped": true,
+      "device_mib": 22
+     },
+     {
+      "gib": 1.03,
+      "mapped": true,
+      "device_mib": 2
+     },
+     {
+      "gib": 4.43,
+      "mapped": true,
+      "device_mib": 8
+     },
+     {
+      "gib": 0.44,
+      "mapped": true,
+      "device_mib": 2
+     },
+     {
+      "gib": 0.22,
+      "mapped": true,
+      "device_mib": 0
+     }
+    ],
+    "split_mib": {
+     "context": 207,
+     "host_pool_mappings": 122,
+     "rest_of_build": 68,
+     "profile": 132,
+     "graph_execs": 0,
+     "requests": 10
+    },
+    "stack_mib_per_kib": 126
+   },
+   "off": {
+    "gpu": "NVIDIA GeForce RTX 5080",
+    "sms": 84,
+    "threads_per_sm": 1536,
+    "stack_default": 1024,
+    "context": 333,
+    "stack_set": 0,
+    "context_with_stack_set": 207,
+    "stack_after_startup": 352,
+    "stack_after_requests": 352,
+    "stages_mib": {
+     "built": 395,
+     "profiled": 481,
+     "before_capture": 481,
+     "captured": 481,
+     "startup": 481,
+     "after_requests": 487
+    },
+    "host_mappings": [
+     {
+      "gib": 0.31,
+      "mapped": true,
+      "device_mib": 0
+     },
+     {
+      "gib": 26.82,
+      "mapped": true,
+      "device_mib": 54
+     },
+     {
+      "gib": 17.02,
+      "mapped": true,
+      "device_mib": 34
+     },
+     {
+      "gib": 10.55,
+      "mapped": true,
+      "device_mib": 22
+     },
+     {
+      "gib": 1.03,
+      "mapped": true,
+      "device_mib": 2
+     },
+     {
+      "gib": 4.43,
+      "mapped": true,
+      "device_mib": 8
+     }
+    ],
+    "split_mib": {
+     "context": 207,
+     "host_pool_mappings": 120,
+     "rest_of_build": 68,
+     "profile": 86,
+     "graph_execs": 0,
+     "requests": 6
+    },
+    "stack_mib_per_kib": 126
+   }
+  },
+  "rtx-5090": {
+   "mtp": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "sms": 170,
+    "threads_per_sm": 1536,
+    "stack_default": 1024,
+    "context": 635,
+    "stack_set": 0,
+    "context_with_stack_set": 381,
+    "stack_after_startup": 416,
+    "stack_after_requests": 416,
+    "stages_mib": {
+     "built": 599,
+     "profiled": 791,
+     "before_capture": 791,
+     "captured": 791,
+     "startup": 791,
+     "after_requests": 801
+    },
+    "host_mappings": [
+     {
+      "gib": 0.31,
+      "mapped": true,
+      "device_mib": 0
+     },
+     {
+      "gib": 26.82,
+      "mapped": true,
+      "device_mib": 54
+     },
+     {
+      "gib": 0.83,
+      "mapped": true,
+      "device_mib": 2
+     },
+     {
+      "gib": 17.14,
+      "mapped": true,
+      "device_mib": 34
+     },
+     {
+      "gib": 10.17,
+      "mapped": true,
+      "device_mib": 20
+     },
+     {
+      "gib": 6.71,
+      "mapped": true,
+      "device_mib": 14
+     },
+     {
+      "gib": 10.01,
+      "mapped": true,
+      "device_mib": 20
+     },
+     {
+      "gib": 1.98,
+      "mapped": true,
+      "device_mib": 4
+     },
+     {
+      "gib": 0.44,
+      "mapped": true,
+      "device_mib": 0
+     },
+     {
+      "gib": 0.22,
+      "mapped": true,
+      "device_mib": 2
+     }
+    ],
+    "split_mib": {
+     "context": 381,
+     "host_pool_mappings": 150,
+     "rest_of_build": 68,
+     "profile": 192,
+     "graph_execs": 0,
+     "requests": 10
+    },
+    "stack_mib_per_kib": 255
+   },
+   "off": {
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "sms": 170,
+    "threads_per_sm": 1536,
+    "stack_default": 1024,
+    "context": 635,
+    "stack_set": 0,
+    "context_with_stack_set": 381,
+    "stack_after_startup": 416,
+    "stack_after_requests": 416,
+    "stages_mib": {
+     "built": 597,
+     "profiled": 743,
+     "before_capture": 743,
+     "captured": 743,
+     "startup": 743,
+     "after_requests": 751
+    },
+    "host_mappings": [
+     {
+      "gib": 0.31,
+      "mapped": true,
+      "device_mib": 0
+     },
+     {
+      "gib": 26.82,
+      "mapped": true,
+      "device_mib": 54
+     },
+     {
+      "gib": 0.83,
+      "mapped": true,
+      "device_mib": 2
+     },
+     {
+      "gib": 17.14,
+      "mapped": true,
+      "device_mib": 34
+     },
+     {
+      "gib": 10.17,
+      "mapped": true,
+      "device_mib": 20
+     },
+     {
+      "gib": 6.71,
+      "mapped": true,
+      "device_mib": 14
+     },
+     {
+      "gib": 10.01,
+      "mapped": true,
+      "device_mib": 20
+     },
+     {
+      "gib": 1.98,
+      "mapped": true,
+      "device_mib": 4
+     }
+    ],
+    "split_mib": {
+     "context": 381,
+     "host_pool_mappings": 148,
+     "rest_of_build": 68,
+     "profile": 146,
+     "graph_execs": 0,
+     "requests": 8
+    },
+    "stack_mib_per_kib": 255
+   }
+  },
+  "rtx-a5000": {
+   "gpu": "NVIDIA RTX A5000",
+   "sms": 64,
+   "threads_per_sm": 1536,
+   "stack_default": 1024,
+   "context": 247,
+   "stack_set": 0,
+   "context_with_stack_set": 151,
+   "stack_after_startup": 528,
+   "stack_after_requests": 528,
+   "stages_mib": {
+    "built": 293,
+    "profiled": 501,
+    "before_capture": 501,
+    "captured": 501,
+    "startup": 501,
+    "after_requests": 525
+   },
+   "host_mappings": [
+    {
+     "gib": 0.31,
+     "mapped": true,
+     "device_mib": 0
+    },
+    {
+     "gib": 26.82,
+     "mapped": true,
+     "device_mib": 54
+    },
+    {
+     "gib": 17.02,
+     "mapped": true,
+     "device_mib": 34
+    },
+    {
+     "gib": 10.55,
+     "mapped": true,
+     "device_mib": 22
+    },
+    {
+     "gib": 1.03,
+     "mapped": true,
+     "device_mib": 2
+    },
+    {
+     "gib": 4.43,
+     "mapped": true,
+     "device_mib": 8
+    },
+    {
+     "gib": 0.44,
+     "mapped": true,
+     "device_mib": 2
+    },
+    {
+     "gib": 0.22,
+     "mapped": true,
+     "device_mib": 0
+    }
+   ],
+   "split_mib": {
+    "context": 151,
+    "host_pool_mappings": 122,
+    "rest_of_build": 20,
+    "profile": 208,
+    "graph_execs": 0,
+    "requests": 24
+   },
+   "stack_mib_per_kib": 96
+  }
+ },
+ "cover_rtx-a5000": {
+  "clean": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": null,
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 7.979073757269362e-07,
+     "median": 1.6987888784569805e-07,
+     "max_at_step_starts": 4.003034632660274e-07,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": true
+  },
+  "final_clean": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": null,
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 7.979073757269362e-07,
+     "median": 1.6987888784569805e-07,
+     "max_at_step_starts": 4.003034632660274e-07,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": true
+  },
+  "final_ple_state_bf16": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": "ple_state_bf16",
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 0.00040775747038424015,
+     "median": 1.7006911434691574e-07,
+     "max_at_step_starts": 0.00040775747038424015,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": false
+  },
+  "ple_gate_no_sqrt": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": "ple_gate_no_sqrt",
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 0.9988265037536621,
+     "median": 0.8033928871154785,
+     "max_at_step_starts": 0.9948362112045288,
+     "max_elsewhere": 0.9988265037536621
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": false
+  },
+  "ple_state_bf16": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": "ple_state_bf16",
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 0.00040775747038424015,
+     "median": 1.7006911434691574e-07,
+     "max_at_step_starts": 0.00040775747038424015,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": true
+  },
+  "ple_state_not_carried": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": "ple_state_not_carried",
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 0.5750524997711182,
+     "median": 1.7006911434691574e-07,
+     "max_at_step_starts": 0.5750524997711182,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 1.0,
+    "overlap": 1.0
+   },
+   "pass": false
+  },
+  "qsa_pool_rope_last": {
+   "ctx": 8192,
+   "step": 2048,
+   "plant": "qsa_pool_rope_last",
+   "ple": [
+    {
+     "rows": 8192,
+     "max": 7.979073757269362e-07,
+     "median": 1.6987888784569805e-07,
+     "max_at_step_starts": 4.003034632660274e-07,
+     "max_elsewhere": 7.979073757269362e-07
+    }
+   ],
+   "qsa": {
+    "rows": 256,
+    "same": 0.00390625,
+    "overlap": 0.9762544985170717
+   },
+   "pass": false
+  }
+ },
+ "final_bench": {
+  "rtx-5080": {
+   "arms": [
+    {
+     "name": "a_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8",
+     "env": {
+      "PYTHONPATH": "<checkout a>"
+     }
+    },
+    {
+     "name": "m_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8",
+     "env": {
+      "PYTHONPATH": "<checkout m>"
+     }
+    },
+    {
+     "name": "b_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8"
+    },
+    {
+     "name": "a_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on moe.cache=aux.*=0.3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8",
+     "env": {
+      "PYTHONPATH": "<checkout a>"
+     }
+    },
+    {
+     "name": "m_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on moe.cache=aux.*=0.3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8",
+     "env": {
+      "PYTHONPATH": "<checkout m>"
+     }
+    },
+    {
+     "name": "b_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on moe.cache=aux.*=0.3 expert_io.fetch_ctas=4 moe.lend_peak=on moe.stream_tokens=2048 moe.pipeline=8"
+    },
+    {
+     "name": "strata_na_off",
+     "engine": "strata",
+     "env": {
+      "STRATA_ROUTE_TAIL_SKIP": "0",
+      "STRATA_PREFILL_CPU_SHARE": "0",
+      "STRATA_SPEC_DEPTH": "1",
+      "STRATA_DECODE_TIMING": "1"
+     },
+     "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+    },
+    {
+     "name": "strata_na_mtp",
+     "engine": "strata",
+     "env": {
+      "STRATA_ROUTE_TAIL_SKIP": "0",
+      "STRATA_MTP_FULL_HEAD": "1",
+      "STRATA_PREFILL_CPU_SHARE": "0",
+      "STRATA_SPEC_DEPTH": "1",
+      "STRATA_DECODE_TIMING": "1"
+     },
+     "flags": "--pack local/fn/strata/packs/iq2_xs --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp local/fn/strata/mtp/rt --spec 4 --spec-min-p 0 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+    }
+   ],
+   "checkouts": {
+    "a": "b6f75fc6",
+    "m": "56d97054",
+    "b": "a7a5fdfc"
+   },
+   "summary": {
+    "means": {
+     "a_fin_off": {
+      "1024": {
+       "decode": 95.84031875,
+       "prefill": 1612.3629375,
+       "n": 16
+      },
+      "4096": {
+       "decode": 91.6157375,
+       "prefill": 3264.83759375,
+       "n": 16
+      },
+      "32768": {
+       "decode": 88.033475,
+       "prefill": 3123.33296875,
+       "n": 16
+      }
+     },
+     "m_fin_off": {
+      "1024": {
+       "decode": 96.8551375,
+       "prefill": 1630.12734375,
+       "n": 16
+      },
+      "4096": {
+       "decode": 92.8950875,
+       "prefill": 3324.79850625,
+       "n": 16
+      },
+      "32768": {
+       "decode": 89.36174375,
+       "prefill": 3175.49304375,
+       "n": 16
+      }
+     },
+     "b_fin_off": {
+      "1024": {
+       "decode": 97.7487,
+       "prefill": 1585.14651875,
+       "n": 16
+      },
+      "4096": {
+       "decode": 93.78410625,
+       "prefill": 3338.89183125,
+       "n": 16
+      },
+      "32768": {
+       "decode": 90.173475,
+       "prefill": 3188.7963437500002,
+       "n": 16
+      }
+     },
+     "a_fin_mtp": {
+      "1024": {
+       "decode": 117.37691875,
+       "prefill": 1582.88145625,
+       "tpp": 2.6448875,
+       "ms_pass": 22.486087803431445,
+       "n": 16
+      },
+      "4096": {
+       "decode": 116.07360625,
+       "prefill": 3251.71816875,
+       "tpp": 2.8025124999999997,
+       "ms_pass": 24.125541473017126,
+       "n": 16
+      },
+      "32768": {
+       "decode": 119.34923125,
+       "prefill": 3118.4008375,
+       "tpp": 2.9695,
+       "ms_pass": 24.992503772994816,
+       "n": 16
+      }
+     },
+     "m_fin_mtp": {
+      "1024": {
+       "decode": 116.74146875,
+       "prefill": 1590.09201875,
+       "tpp": 2.6448875,
+       "ms_pass": 22.609763381381626,
+       "n": 16
+      },
+      "4096": {
+       "decode": 115.93186874999999,
+       "prefill": 3267.41786875,
+       "tpp": 2.8025124999999997,
+       "ms_pass": 24.156540728394994,
+       "n": 16
+      },
+      "32768": {
+       "decode": 119.47803125,
+       "prefill": 3128.00985,
+       "tpp": 2.9695,
+       "ms_pass": 24.973140174152675,
+       "n": 16
+      }
+     },
+     "b_fin_mtp": {
+      "1024": {
+       "decode": 117.88461875,
+       "prefill": 1596.9771125,
+       "tpp": 2.6448875,
+       "ms_pass": 22.389109746362603,
+       "n": 16
+      },
+      "4096": {
+       "decode": 117.1590875,
+       "prefill": 3262.60909375,
+       "tpp": 2.8025124999999997,
+       "ms_pass": 23.901671977204415,
+       "n": 16
+      },
+      "32768": {
+       "decode": 120.6863125,
+       "prefill": 3124.3027875,
+       "tpp": 2.9695,
+       "ms_pass": 24.719014470029485,
+       "n": 16
+      }
+     },
+     "strata_na_off": {
+      "1024": {
+       "decode": 90.9443375,
+       "prefill": 1593.5654375,
+       "tpp": 1.0,
+       "ms_pass": 11.021809839639218,
+       "n": 16
+      },
+      "4096": {
+       "decode": 87.6621,
+       "prefill": 2752.55913125,
+       "tpp": 1.0,
+       "ms_pass": 11.419019141209255,
+       "n": 16
+      },
+      "32768": {
+       "decode": 86.86218125,
+       "prefill": 3116.077125,
+       "tpp": 1.0,
+       "ms_pass": 11.528392704855017,
+       "n": 16
+      }
+     },
+     "strata_na_mtp": {
+      "1024": {
+       "decode": 123.54928125,
+       "prefill": 1555.3207375,
+       "tpp": 2.7280125,
+       "ms_pass": 22.08951663830506,
+       "n": 16
+      },
+      "4096": {
+       "decode": 120.14133749999999,
+       "prefill": 2733.0831375,
+       "tpp": 2.835275,
+       "ms_pass": 23.59858088191907,
+       "n": 16
+      },
+      "32768": {
+       "decode": 125.988775,
+       "prefill": 3093.43646875,
+       "tpp": 3.17145,
+       "ms_pass": 25.269225600347053,
+       "n": 16
+      }
+     }
+    },
+    "ratios": {
+     "a_fin_off": {
+      "decode": [
+       1.054,
+       1.045,
+       1.013
+      ],
+      "prefill": [
+       1.012,
+       1.186,
+       1.002
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "m_fin_off": {
+      "decode": [
+       1.065,
+       1.06,
+       1.029
+      ],
+      "prefill": [
+       1.023,
+       1.208,
+       1.019
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "b_fin_off": {
+      "decode": [
+       1.075,
+       1.07,
+       1.038
+      ],
+      "prefill": [
+       0.995,
+       1.213,
+       1.023
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "a_fin_mtp": {
+      "decode": [
+       0.95,
+       0.966,
+       0.947
+      ],
+      "prefill": [
+       1.018,
+       1.19,
+       1.008
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.982,
+       0.978,
+       1.011
+      ],
+      "tpp": [
+       2.64,
+       2.8,
+       2.97
+      ],
+      "strata_tpp": [
+       2.73,
+       2.84,
+       3.17
+      ]
+     },
+     "m_fin_mtp": {
+      "decode": [
+       0.945,
+       0.965,
+       0.948
+      ],
+      "prefill": [
+       1.022,
+       1.196,
+       1.011
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.977,
+       0.977,
+       1.012
+      ],
+      "tpp": [
+       2.64,
+       2.8,
+       2.97
+      ],
+      "strata_tpp": [
+       2.73,
+       2.84,
+       3.17
+      ]
+     },
+     "b_fin_mtp": {
+      "decode": [
+       0.954,
+       0.975,
+       0.958
+      ],
+      "prefill": [
+       1.027,
+       1.194,
+       1.01
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.987,
+       0.987,
+       1.022
+      ],
+      "tpp": [
+       2.64,
+       2.8,
+       2.97
+      ],
+      "strata_tpp": [
+       2.73,
+       2.84,
+       3.17
+      ]
+     }
+    },
+    "items": {
+     "fin_off C+loan (m/a)": {
+      "decode": [
+       0.0106,
+       0.014,
+       0.0151
+      ],
+      "prefill": [
+       0.011,
+       0.0184,
+       0.0167
+      ]
+     },
+     "fin_off THP (b/m)": {
+      "decode": [
+       0.0092,
+       0.0096,
+       0.0091
+      ],
+      "prefill": [
+       -0.0276,
+       0.0042,
+       0.0042
+      ]
+     },
+     "fin_off all (b/a)": {
+      "decode": [
+       0.0199,
+       0.0237,
+       0.0243
+      ],
+      "prefill": [
+       -0.0169,
+       0.0227,
+       0.021
+      ]
+     },
+     "fin_mtp C+loan (m/a)": {
+      "decode": [
+       -0.0054,
+       -0.0012,
+       0.0011
+      ],
+      "prefill": [
+       0.0046,
+       0.0048,
+       0.0031
+      ]
+     },
+     "fin_mtp THP (b/m)": {
+      "decode": [
+       0.0098,
+       0.0106,
+       0.0101
+      ],
+      "prefill": [
+       0.0043,
+       -0.0015,
+       -0.0012
+      ]
+     },
+     "fin_mtp all (b/a)": {
+      "decode": [
+       0.0043,
+       0.0094,
+       0.0112
+      ],
+      "prefill": [
+       0.0089,
+       0.0033,
+       0.0019
+      ]
+     }
+    }
+   },
+   "paired": [
+    "fin_off C+loan  1K dec +1.1\u00b10.3 | 1K pre +1.1\u00b10.1 | 4K dec +1.4\u00b10.3 | 4K pre +1.8\u00b10.2 | 32K dec +1.5\u00b10.3 | 32K pre +1.7\u00b10.2",
+    "fin_off THP     1K dec +0.9\u00b10.1 | 1K pre -2.9\u00b13.9 | 4K dec +1.0\u00b10.0 | 4K pre +0.4\u00b10.0 | 32K dec +0.9\u00b10.0 | 32K pre +0.4\u00b10.0",
+    "fin_off all     1K dec +2.0\u00b10.3 | 1K pre -1.8\u00b13.9 | 4K dec +2.4\u00b10.3 | 4K pre +2.3\u00b10.2 | 32K dec +2.4\u00b10.3 | 32K pre +2.1\u00b10.2",
+    "fin_mtp C+loan  1K dec -0.5\u00b10.2 | 1K pre +0.5\u00b10.1 | 4K dec -0.1\u00b10.2 | 4K pre +0.5\u00b10.1 | 32K dec +0.1\u00b10.2 | 32K pre +0.3\u00b10.1",
+    "fin_mtp THP     1K dec +1.0\u00b10.1 | 1K pre +0.4\u00b10.1 | 4K dec +1.1\u00b10.0 | 4K pre -0.1\u00b10.2 | 32K dec +1.0\u00b10.0 | 32K pre -0.1\u00b10.1",
+    "fin_mtp all     1K dec +0.4\u00b10.2 | 1K pre +0.9\u00b10.2 | 4K dec +0.9\u00b10.2 | 4K pre +0.3\u00b10.3 | 32K dec +1.1\u00b10.2 | 32K pre +0.2\u00b10.3"
+   ]
+  },
+  "rtx-5090": {
+   "arms": [
+    {
+     "name": "a_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 expert_io.fetch_ctas=4",
+     "env": {
+      "PYTHONPATH": "<checkout a>"
+     }
+    },
+    {
+     "name": "m_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 expert_io.fetch_ctas=4",
+     "env": {
+      "PYTHONPATH": "<checkout m>"
+     }
+    },
+    {
+     "name": "b_fin_off",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 expert_io.fetch_ctas=4"
+    },
+    {
+     "name": "a_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 moe.split=on moe.cache=aux.*=0.5 expert_io.fetch_ctas=4",
+     "env": {
+      "PYTHONPATH": "<checkout a>"
+     }
+    },
+    {
+     "name": "m_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 moe.split=on moe.cache=aux.*=0.5 expert_io.fetch_ctas=4",
+     "env": {
+      "PYTHONPATH": "<checkout m>"
+     }
+    },
+    {
+     "name": "b_fin_mtp",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.985 --max-step-tokens 5120 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 moe.split=on moe.cache=aux.*=0.5 expert_io.fetch_ctas=4"
+    },
+    {
+     "name": "b_fin_mtp99",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.99 --max-step-tokens 5120 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0-q8.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 moe.split=on moe.cache=aux.*=0.5 expert_io.fetch_ctas=4"
+    },
+    {
+     "name": "b_fin_off99",
+     "engine": "holon",
+     "flags": "--memory-fraction 0.99 --max-step-tokens 5120 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.pipeline=8 expert_io.fetch_ctas=4"
+    },
+    {
+     "name": "strata_na_off",
+     "engine": "strata",
+     "env": {
+      "STRATA_ROUTE_TAIL_SKIP": "0",
+      "STRATA_PREFILL_CPU_SHARE": "0",
+      "STRATA_SPEC_DEPTH": "1",
+      "STRATA_DECODE_TIMING": "1"
+     },
+     "flags": "--pack local/fn/strata/packs/iq3_s --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+    },
+    {
+     "name": "strata_na_mtp",
+     "engine": "strata",
+     "env": {
+      "STRATA_ROUTE_TAIL_SKIP": "0",
+      "STRATA_MTP_FULL_HEAD": "1",
+      "STRATA_PREFILL_CPU_SHARE": "0",
+      "STRATA_SPEC_DEPTH": "1",
+      "STRATA_DECODE_TIMING": "1"
+     },
+     "flags": "--pack local/fn/strata/packs/iq3_s --expert-profile bench/.envs/src/Strata/data/expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp local/fn/strata/mtp/rt --spec 4 --spec-min-p 0 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+    }
+   ],
+   "checkouts": {
+    "a": "b6f75fc6",
+    "m": "56d97054",
+    "b": "a7a5fdfc"
+   },
+   "summary": {
+    "means": {
+     "a_fin_off": {
+      "1024": {
+       "decode": 129.8360125,
+       "prefill": 2074.50024375,
+       "n": 16
+      },
+      "4096": {
+       "decode": 123.24661875,
+       "prefill": 5272.2346125,
+       "n": 16
+      },
+      "32768": {
+       "decode": 119.85783125,
+       "prefill": 5533.20513125,
+       "n": 16
+      }
+     },
+     "m_fin_off": {
+      "1024": {
+       "decode": 131.6353125,
+       "prefill": 2097.41509375,
+       "n": 16
+      },
+      "4096": {
+       "decode": 124.787375,
+       "prefill": 5273.18090625,
+       "n": 16
+      },
+      "32768": {
+       "decode": 121.462625,
+       "prefill": 5530.10300625,
+       "n": 16
+      }
+     },
+     "b_fin_off": {
+      "1024": {
+       "decode": 132.84906875,
+       "prefill": 2068.766375,
+       "n": 16
+      },
+      "4096": {
+       "decode": 126.01578125,
+       "prefill": 5648.91795,
+       "n": 16
+      },
+      "32768": {
+       "decode": 122.4636375,
+       "prefill": 5617.6312625,
+       "n": 16
+      }
+     },
+     "a_fin_mtp": {
+      "1024": {
+       "decode": 160.5396625,
+       "prefill": 2013.1897375,
+       "tpp": 2.7063,
+       "ms_pass": 16.782345278446794,
+       "n": 16
+      },
+      "4096": {
+       "decode": 160.1191875,
+       "prefill": 5116.94665,
+       "tpp": 2.838475,
+       "ms_pass": 17.7896821890904,
+       "n": 16
+      },
+      "32768": {
+       "decode": 175.4282875,
+       "prefill": 5464.3303125,
+       "tpp": 3.247775,
+       "ms_pass": 18.541357675583967,
+       "n": 16
+      }
+     },
+     "m_fin_mtp": {
+      "1024": {
+       "decode": 161.2729625,
+       "prefill": 2026.71936875,
+       "tpp": 2.7063,
+       "ms_pass": 16.70604188544821,
+       "n": 16
+      },
+      "4096": {
+       "decode": 160.71428125,
+       "prefill": 5112.039275,
+       "tpp": 2.838475,
+       "ms_pass": 17.721045627320372,
+       "n": 16
+      },
+      "32768": {
+       "decode": 176.18408125,
+       "prefill": 5455.58275,
+       "tpp": 3.247775,
+       "ms_pass": 18.45885670806007,
+       "n": 16
+      }
+     },
+     "b_fin_mtp": {
+      "1024": {
+       "decode": 163.15966875,
+       "prefill": 2069.27813125,
+       "tpp": 2.7063,
+       "ms_pass": 16.513244768094538,
+       "n": 16
+      },
+      "4096": {
+       "decode": 162.7622,
+       "prefill": 5449.812175,
+       "tpp": 2.838475,
+       "ms_pass": 17.49407736909246,
+       "n": 16
+      },
+      "32768": {
+       "decode": 178.45228125,
+       "prefill": 5560.2873875000005,
+       "tpp": 3.247775,
+       "ms_pass": 18.222615416465285,
+       "n": 16
+      }
+     },
+     "b_fin_mtp99": {
+      "1024": {
+       "decode": 163.028675,
+       "prefill": 2072.35053125,
+       "tpp": 2.7063,
+       "ms_pass": 16.52693011273736,
+       "n": 16
+      },
+      "4096": {
+       "decode": 162.81005,
+       "prefill": 5456.56416875,
+       "tpp": 2.838475,
+       "ms_pass": 17.489891467592496,
+       "n": 16
+      },
+      "32768": {
+       "decode": 178.21934375,
+       "prefill": 5518.4266625,
+       "tpp": 3.247775,
+       "ms_pass": 18.246549189643535,
+       "n": 16
+      }
+     },
+     "b_fin_off99": {
+      "1024": {
+       "decode": 131.24133750000001,
+       "prefill": 2134.10966875,
+       "n": 16
+      },
+      "4096": {
+       "decode": 124.7591625,
+       "prefill": 5641.3997,
+       "n": 16
+      },
+      "32768": {
+       "decode": 121.14829375,
+       "prefill": 5537.6334875,
+       "n": 16
+      }
+     },
+     "strata_na_off": {
+      "1024": {
+       "decode": 113.279,
+       "prefill": 2154.54255,
+       "tpp": 1.0,
+       "ms_pass": 8.848076574051506,
+       "n": 16
+      },
+      "4096": {
+       "decode": 109.71085,
+       "prefill": 4619.11151875,
+       "tpp": 1.0,
+       "ms_pass": 9.1310509405363,
+       "n": 16
+      },
+      "32768": {
+       "decode": 109.66086875,
+       "prefill": 5638.66818125,
+       "tpp": 1.0,
+       "ms_pass": 9.134707667290517,
+       "n": 16
+      }
+     },
+     "strata_na_mtp": {
+      "1024": {
+       "decode": 164.5548375,
+       "prefill": 2079.7578875,
+       "tpp": 2.6649000000000003,
+       "ms_pass": 16.21563174202223,
+       "n": 16
+      },
+      "4096": {
+       "decode": 174.43741875,
+       "prefill": 4582.83956875,
+       "tpp": 2.9258125,
+       "ms_pass": 16.83972427242456,
+       "n": 16
+      },
+      "32768": {
+       "decode": 194.26896250000001,
+       "prefill": 5612.28119375,
+       "tpp": 3.2789,
+       "ms_pass": 17.042723683941187,
+       "n": 16
+      }
+     }
+    },
+    "ratios": {
+     "a_fin_off": {
+      "decode": [
+       1.146,
+       1.123,
+       1.093
+      ],
+      "prefill": [
+       0.963,
+       1.141,
+       0.981
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "m_fin_off": {
+      "decode": [
+       1.162,
+       1.137,
+       1.108
+      ],
+      "prefill": [
+       0.973,
+       1.142,
+       0.981
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "b_fin_off": {
+      "decode": [
+       1.173,
+       1.149,
+       1.117
+      ],
+      "prefill": [
+       0.96,
+       1.223,
+       0.996
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     },
+     "a_fin_mtp": {
+      "decode": [
+       0.976,
+       0.918,
+       0.903
+      ],
+      "prefill": [
+       0.968,
+       1.117,
+       0.974
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.966,
+       0.947,
+       0.919
+      ],
+      "tpp": [
+       2.71,
+       2.84,
+       3.25
+      ],
+      "strata_tpp": [
+       2.66,
+       2.93,
+       3.28
+      ]
+     },
+     "m_fin_mtp": {
+      "decode": [
+       0.98,
+       0.921,
+       0.907
+      ],
+      "prefill": [
+       0.974,
+       1.115,
+       0.972
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.971,
+       0.95,
+       0.923
+      ],
+      "tpp": [
+       2.71,
+       2.84,
+       3.25
+      ],
+      "strata_tpp": [
+       2.66,
+       2.93,
+       3.28
+      ]
+     },
+     "b_fin_mtp": {
+      "decode": [
+       0.992,
+       0.933,
+       0.919
+      ],
+      "prefill": [
+       0.995,
+       1.189,
+       0.991
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.982,
+       0.963,
+       0.935
+      ],
+      "tpp": [
+       2.71,
+       2.84,
+       3.25
+      ],
+      "strata_tpp": [
+       2.66,
+       2.93,
+       3.28
+      ]
+     },
+     "b_fin_mtp99": {
+      "decode": [
+       0.991,
+       0.933,
+       0.917
+      ],
+      "prefill": [
+       0.996,
+       1.191,
+       0.983
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ],
+      "per_pass": [
+       0.981,
+       0.963,
+       0.934
+      ],
+      "tpp": [
+       2.71,
+       2.84,
+       3.25
+      ],
+      "strata_tpp": [
+       2.66,
+       2.93,
+       3.28
+      ]
+     },
+     "b_fin_off99": {
+      "decode": [
+       1.159,
+       1.137,
+       1.105
+      ],
+      "prefill": [
+       0.991,
+       1.221,
+       0.982
+      ],
+      "n": [
+       16,
+       16,
+       16
+      ]
+     }
+    },
+    "items": {
+     "fin_off C+loan (m/a)": {
+      "decode": [
+       0.0139,
+       0.0125,
+       0.0134
+      ],
+      "prefill": [
+       0.011,
+       0.0002,
+       -0.0006
+      ]
+     },
+     "fin_off THP (b/m)": {
+      "decode": [
+       0.0092,
+       0.0098,
+       0.0082
+      ],
+      "prefill": [
+       -0.0137,
+       0.0713,
+       0.0158
+      ]
+     },
+     "fin_off all (b/a)": {
+      "decode": [
+       0.0232,
+       0.0225,
+       0.0217
+      ],
+      "prefill": [
+       -0.0028,
+       0.0714,
+       0.0153
+      ]
+     },
+     "fin_off 0.99 (b99/b)": {
+      "decode": [
+       -0.0121,
+       -0.01,
+       -0.0107
+      ],
+      "prefill": [
+       0.0316,
+       -0.0013,
+       -0.0142
+      ]
+     },
+     "fin_mtp C+loan (m/a)": {
+      "decode": [
+       0.0046,
+       0.0037,
+       0.0043
+      ],
+      "prefill": [
+       0.0067,
+       -0.001,
+       -0.0016
+      ]
+     },
+     "fin_mtp THP (b/m)": {
+      "decode": [
+       0.0117,
+       0.0127,
+       0.0129
+      ],
+      "prefill": [
+       0.021,
+       0.0661,
+       0.0192
+      ]
+     },
+     "fin_mtp all (b/a)": {
+      "decode": [
+       0.0163,
+       0.0165,
+       0.0172
+      ],
+      "prefill": [
+       0.0279,
+       0.0651,
+       0.0176
+      ]
+     },
+     "fin_mtp 0.99 (b99/b)": {
+      "decode": [
+       -0.0008,
+       0.0003,
+       -0.0013
+      ],
+      "prefill": [
+       0.0015,
+       0.0012,
+       -0.0075
+      ]
+     }
+    }
+   },
+   "paired": [
+    "fin_off C+loan  1K dec +1.4\u00b10.3 | 1K pre +1.1\u00b10.2 | 4K dec +1.3\u00b10.3 | 4K pre +0.0\u00b10.3 | 32K dec +1.4\u00b10.3 | 32K pre -0.1\u00b10.2",
+    "fin_off THP     1K dec +0.9\u00b10.0 | 1K pre -1.9\u00b14.1 | 4K dec +1.0\u00b10.1 | 4K pre +7.1\u00b10.2 | 32K dec +0.8\u00b10.1 | 32K pre +1.6\u00b10.0",
+    "fin_off all     1K dec +2.3\u00b10.3 | 1K pre -0.9\u00b14.1 | 4K dec +2.3\u00b10.3 | 4K pre +7.2\u00b10.4 | 32K dec +2.2\u00b10.3 | 32K pre +1.5\u00b10.2",
+    "fin_off 0.99    1K dec -1.2\u00b10.4 | 1K pre +10.7\u00b111.1 | 4K dec -1.0\u00b10.3 | 4K pre -0.1\u00b10.4 | 32K dec -1.1\u00b10.3 | 32K pre -1.4\u00b10.4",
+    "fin_mtp C+loan  1K dec +0.5\u00b10.0 | 1K pre +0.7\u00b10.1 | 4K dec +0.4\u00b10.1 | 4K pre -0.1\u00b10.2 | 32K dec +0.4\u00b10.1 | 32K pre -0.2\u00b10.2",
+    "fin_mtp THP     1K dec +1.2\u00b10.1 | 1K pre +2.1\u00b10.1 | 4K dec +1.3\u00b10.1 | 4K pre +6.6\u00b10.2 | 32K dec +1.3\u00b10.0 | 32K pre +1.9\u00b10.1",
+    "fin_mtp all     1K dec +1.6\u00b10.1 | 1K pre +2.8\u00b10.1 | 4K dec +1.7\u00b10.1 | 4K pre +6.5\u00b10.3 | 32K dec +1.7\u00b10.1 | 32K pre +1.8\u00b10.2",
+    "fin_mtp 0.99    1K dec -0.1\u00b10.1 | 1K pre +0.1\u00b10.1 | 4K dec +0.0\u00b10.1 | 4K pre +0.1\u00b10.6 | 32K dec -0.1\u00b10.1 | 32K pre -0.8\u00b10.2"
+   ]
+  }
+ }
+}

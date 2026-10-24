@@ -3736,3 +3736,65 @@ a stack of 0 bytes, after the plan's 1K, 4K and 32K prompts and a sampled reques
 - **Not built.** It takes 3–4 core lines (a `cuCtxSetLimit` on the engine's device, beside `configure_allocator`), and
   FN's core is at +47 of 47. A kernel first launched after startup with a larger frame would grow it from the slack.
   This one is the lead's call.
+
+### 23.7 F and the round's bench: 8 prompts per row, the ship rule per item
+
+**The run** (`evidence/fn_speed_2026-10-24.json`). One allocation per card. Each of the bench's three contexts
+had 8 prompts, the first 3 the earlier rows', and each arm ran 2 rounds in the bench's alternating order: 16 samples
+per row. Three checkouts of each deployment ran side by side:
+- **a** — b6f75fc6, before 168562e and C;
+- **m** — 56d97054: C and the loan at 2.0×;
+- **b** — a7a5fdfc: m plus THP host pools.
+
+The 5090 also ran b at 0.99 for both deployments. Strata's two arms ran beside them. Every arm drafted the same
+tokens per pass as the others on its card, so the trees are bitwise alike on the bench's greedy rows.
+
+**Each item, paired per prompt and round** (mean ± standard error over 16 pairs; decode / prefill, %):
+
+| Item | 5090 drafting off | 5090 MTP | 5080 drafting off | 5080 MTP |
+|---|---|---|---|---|
+| 168562e + C + loan 2.0× (m / a) | decode +1.3–1.4 ±0.3; prefill +1.1 at 1K, 0 at 4K and 32K | decode +0.4–0.5 ±0.1; prefill +0.7 / −0.1 / −0.2 | decode +1.1–1.5 ±0.3; prefill +1.1–1.8 ±0.2 | decode **−0.5 ±0.2** / −0.1 / +0.1; prefill +0.3–0.5 |
+| THP host pools (b / m) | decode +0.8–1.0 ±0.1; prefill −1.9 ±4.1 / **+7.1** / +1.6 | decode **+1.2–1.3 ±0.1**; prefill +2.1 / **+6.6** / +1.9 | decode +0.9–1.0; prefill −2.9 ±3.9 / +0.4 / +0.4 | decode **+1.0–1.1 ±0.1**; prefill +0.4 / −0.1 / −0.1 |
+| 0.99 (b at 0.99 / b) | decode −1.0–1.2 ±0.3; prefill noise at 1K, −0.1 / −1.4 | decode −0.1 / 0.0 / −0.1; prefill 0 / +0.1 / −0.8 | – | – |
+
+**The ship rule** (no gated row it costs falls below bar × 1.05, and the rows below the bar gain):
+- **THP ships.** Every MTP row gains 1.0–1.3%, and every drafting-off decode row 0.8–1.0%. Prefill gains 6.6–7.1%
+  at 4K on the 5090, where the ring's DMA copies dominate. The drafting-off 1K prefill moves −2 to −3%, but at ±4%
+  that is the 1K prompts' noise, and those rows stay at 0.96 and 0.995, over 0.945.
+- **168562e and C ship.** On the 5090, every row gains 0.4–1.4% or holds.
+- **The loan margin (5080 only) is the lead's call.** Its drafting-off rows gain 1.1–1.8%. Its MTP 1K row, below
+  the bar, moves −0.5 ± 0.2%; 4K and 32K are flat. The 5080's item mixes C (a smaller peak, so a smaller loan) with
+  the margin. With THP on top (b / a) the same row gains +0.4 ± 0.2%, and every 5080 row gains 0.4–2.4%. Kept in the
+  tree; reverting it is one constant.
+- **0.99 does not ship.** The 5090's MTP rows do not move (−0.1 to 0.0%: the replay's +0.3 points of cache are under
+  the bench's resolution), and its drafting-off decode loses ≈ 1%. The deployments stay at 0.985.
+- **The 5090's drafting-off rows at 5K steps (the lead's call, §21.17):** decode 1.12–1.17, prefill 0.96 / 1.22 /
+  **1.00 at 32K**, over 0.945.
+
+**The table** (ratios to Strata, no approximation; checkout b, each card's deployment):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.08 | 1.07 | 1.04 | 1.17 | 1.15 | 1.12 |
+| MTP decode (tok/s) | **0.95** | **0.98** | **0.96** | **0.99** | **0.93** | **0.92** |
+| MTP, per-pass rate × pooled acceptance | **0.99** | **0.99** | 1.02 | **0.98** | **0.96** | **0.94** |
+| Prefill | 1.00 | 1.21 | 1.02 | 0.96 | 1.22 | 1.00 |
+| Prefill, MTP deployment | 1.03 | 1.19 | 1.01 | 1.00 | 1.19 | 0.99 |
+
+- Tokens per pass, Holon / Strata: 5080 2.64 / 2.73, 2.80 / 2.84, 2.97 / 3.17; 5090 2.71 / 2.66, 2.84 / 2.93,
+  3.25 / 3.28.
+- Against checkout a, the round adds 1.6–1.7% to the 5090's MTP rows, 0.4–1.1% to the 5080's, and 2.0–2.4% to every
+  drafting-off decode row.
+- §21.17's 3-prompt rows differ from these by more than the round's gains (the 5090's 4K MTP 0.98 there, 0.93 here
+  at 8 prompts). That is the variance F was asked to take out.
+
+**Still below the bar** (MTP-matched decode, 1.0×): all six MTP rows in tok/s, 0.92–0.99. Per pass, the 5080's 32K
+is over at 1.02; the others are 0.94–0.99. Every drafting-off decode row and every prefill row is over its bar. The
+draft heads accept alike (§23.5), so the rest is per-pass time, mostly on the 5090 at 4K and 32K.
+
+**What is left that is not built:**
+- **The stack trim** (§23.6): 151 MiB on the 5090, ≈ 0.3 points of cache. 0.99's +0.3 points did not show on the
+  bench, so this would not either. It needs core lines past the budget. Not proposed.
+- **The head's catch-up in row chunks** (§23.3): ≈ 0.3–0.5 points of the 5090's cache, under the bench's
+  resolution for the same reason.
+- **§21.17's structural levers:** partial lending, Strata's CPU-side miss serving, and mmvq skipping null slots.
