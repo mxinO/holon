@@ -10,9 +10,12 @@ golden. On four `v1-long` prompts (natural text and recall, 6K-20K tokens):
 Per pair: KL(reference || path) mean, p50 and p99 over positions, the signed mean ΔNLL of the scored tokens (path
 minus reference, nats) per prompt and per 1,024-position band. Bars, set before the gate's first run from the bf16
 noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `v1-long`: KL mean 0.043 / 0.063, p50
-0.0023 / 0.0032, worst band |ΔNLL| 0.50): KL mean ≤ 0.13, KL p50 ≤ 0.007, and for `mtp` KL mean ≤ 0.13 over the
-agreeing positions; every band's |ΔNLL| ≤ 0.75 is reported (`band_within`), not gated (owner, 2026-10-21). `--plant
-qsa_decode_select_shift` (decode and verify only) must fail.
+0.0023 / 0.0032, worst band |ΔNLL| 0.50): KL mean ≤ 0.13, KL p50 ≤ 0.007; every band's |ΔNLL| ≤ 0.75 is reported
+(`band_within`), not gated (owner, 2026-10-21). `--plant qsa_decode_select_shift` (decode and verify only) must fail.
+`mtp`'s bars (the lead's call, 2026-10-24, set before the final tree's run, docs/v1-flash-next.md §22.8): about 5× the
+clean pairs' (KL mean 0.0020 / 0.0044, p99 0.023 / 0.063 on the RTX 5080 / 5090, 5346d3a) — KL mean ≤ 0.02 and p99
+≤ 0.3 over at least 100 agreeing positions; `--plant linear_rows_swap` (verify passes only) and `shexp_gate_off` must
+fail. The pair runs at the reference's step (`--prefill-step`, the deployment's).
 
     python spikes/fn7/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
         [--holon-flags '<engine flags>'] [--prefill-step N]
@@ -32,6 +35,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 PROMPTS = ("summary-6k", "recall-8k", "recall-16k", "chat-multiturn-20k")
 DRAFTS, K = 3, 20
 BARS = {"kl_mean": 0.13, "kl_p50": 0.007, "band_dnll": 0.75}
+MTP_BARS = {"kl_mean": 0.02, "kl_p99": 0.3, "positions": 100}
 
 
 def engine(a, **kw):
@@ -92,7 +96,7 @@ def mtp_vs_plain(a, chats: list[list[int]]) -> dict:
     params = SamplingParams(temperature=0.0, max_tokens=a.tokens, ignore_eos=True, logprobs=K)
     runs = {}
     for name, kw in (("plain", {}), ("mtp", {"mtp": True})):
-        e = engine(a, max_step_tokens=8192, **kw)
+        e = engine(a, max_step_tokens=a.prefill_step or 8192, **kw)
         runs[name] = _generate(e, chats, params)
         e.close()
     from holon_judge.compare import kl_topk
@@ -114,8 +118,11 @@ def mtp_vs_plain(a, chats: list[list[int]]) -> dict:
     rec = {name: Recording(torch.cat(ids[name]), torch.cat(lps[name]), torch.cat(lps[name])[:, 0],
                            tail_from_topk(torch.cat(lps[name])), offsets, {}) for name in ids}
     kl = kl_topk(rec["plain"], rec["mtp"])[0].double()
-    return {"tokens": a.tokens, "first_difference": first, "positions": len(kl), "kl_mean": kl.mean().item(),
-            "kl_p99": kl.quantile(0.99).item(), "pass": kl.mean().item() <= BARS["kl_mean"]}
+    out = {"tokens": a.tokens, "first_difference": first, "positions": len(kl), "kl_mean": kl.mean().item(),
+           "kl_p99": kl.quantile(0.99).item(), "bars": MTP_BARS}
+    out["pass"] = out["kl_mean"] <= MTP_BARS["kl_mean"] and out["kl_p99"] <= MTP_BARS["kl_p99"] and \
+        out["positions"] >= MTP_BARS["positions"]
+    return out
 
 
 def main() -> None:

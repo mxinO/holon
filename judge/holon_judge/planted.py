@@ -255,6 +255,24 @@ def mtp_stream0() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def linear_rows_swap() -> Iterator[None]:
+    """`linear_rows@1` (FN §23.8, a dense weight's 2-16-row matmul): its first two output rows swapped, eagerly and in
+    graph captures — verify passes and short prompt steps only (one-row decode steps never bind it). Gate (c)'s
+    MTP-vs-plain pair must fail it (§22.8). Reports how often it fired."""
+    from holon_plugins.kernels.triton_fp8 import plugin
+
+    call, fired = plugin.LinearRows.__call__, collections.Counter()
+
+    def planted(self, x, weight):
+        fired[_when()] += 1
+        y = call(self, x, weight)
+        return y[torch.tensor([1, 0, *range(2, len(y))], device=y.device)]
+    with mock.patch.object(plugin.LinearRows, "__call__", planted):
+        yield
+    print(f"plant linear-rows-swap fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def rows_off_by_one() -> Iterator[None]:
     """The PLE table's SSD tier (§6.3, D5): every row read one row past its id's (`std.tiered.rows@1`'s read list), in
     eager steps and graph captures alike; the RAM-vs-SSD identity fails (spikes/fn7/ple_ssd.py, the GPU unit test)."""
@@ -1974,7 +1992,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
     "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
     "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
-    "mtp_stream0": mtp_stream0,
+    "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
