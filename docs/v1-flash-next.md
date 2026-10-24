@@ -3992,7 +3992,9 @@ before the fixes, fix 1 as first written, and fixes 1 and 2 as shipped. Fix 3 th
   - Holon fetches every miss over PCIe, 215–294 MiB per pass, which is 4.7–6.4 ms on the critical path.
   - Strata serves two thirds of its misses on its CPU beside the GPU, and its GPU waits 3.1–3.9 ms.
   - Behind that is the cache share: Holon caches 48.4% of the 5090's experts against Strata's 51.6% (§23.1).
-- The levers there are §21.17's structural ones:
-  - partial lending, which needs core lines past the budget: the lead's candidate for the owner;
+- **The lead's call (2026-10-24): rows at the bar are enough; the locks go ahead.** If a later allocation reads an
+  MTP row below 1.0, the next lever is partial lending (core lines past the budget, for the owner then). The levers
+  there are §21.17's structural ones:
+  - partial lending;
   - a CPU share of the misses: Holon's CPU path was ≈ 5× slower per expert, and the split lost 2–14% (§21.5);
   - none of them is a kernel.
