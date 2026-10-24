@@ -45,9 +45,6 @@ class GatedSwiGLU(SwiGLU):
         return super().forward(x) * torch.sigmoid(self.gate(x))
 
 
-_SIDE: dict[torch.device, torch.Stream] = {}      # per device, the later parts' stream
-
-
 class Sum(nn.Module):
     """FFN parts summed (D7): each `parts` Ref built at this layer (e.g. routed experts, then a gated shared expert).
     The later parts are summed in order, then added to the first part's output — in the first part's own kernel when
@@ -63,7 +60,8 @@ class Sum(nn.Module):
         self.parts = nn.ModuleList(ctx.unit(p, hidden=hidden, layer=layer) for p in parts)
         cuda = torch.device(ctx.device).type == "cuda" and \
             str(ctx.options.get("plugins", {}).get("ffn.fork", "on")) != "off"
-        self._side = _SIDE.setdefault(torch.device(ctx.device), torch.Stream(device=ctx.device)) if cuda else None
+        # the later parts' stream: one per engine, shared by its sum units (built once, released with the engine)
+        self._side = ctx.shared("std.ffn.side_stream", lambda root: torch.Stream(device=root.device)) if cuda else None
 
     def _rest(self, x: torch.Tensor) -> torch.Tensor:
         acc = self.parts[1](x)
@@ -84,8 +82,8 @@ class Sum(nn.Module):
         self._side.wait_stream(main)                         # x is ready
         with self._side:
             acc = self._rest(x)
-        # `acc` goes back to the side stream's blocks when it is dropped, with no event: the side stream is this
-        # unit's alone and waits for the main stream's work at every fork, so no later write of the side stream can
-        # pass the main stream's read of it (an event would keep one per layer alive while the host runs ahead: a
-        # prompt step's 11 shared-expert outputs, 20 MiB each at 4K tokens, at its activation peak)
+        # `acc` goes back to the side stream's blocks when it is dropped, with no event: the side stream is shared by
+        # the engine's sum units and waits for the main stream's work at every fork, so no later write of the side
+        # stream can pass the main stream's read of it (an event would keep one per layer alive while the host runs
+        # ahead: a prompt step's 11 shared-expert outputs, 20 MiB each at 4K tokens, at its activation peak)
         return add(x, acc, join=lambda: main.wait_stream(self._side))
