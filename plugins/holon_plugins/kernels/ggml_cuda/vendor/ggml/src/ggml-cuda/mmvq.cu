@@ -891,6 +891,26 @@ static __global__ void mul_mat_vec_q(
     }
 }
 
+// Holon: the MoE kernel's IQ3 grids in shared memory (a block's warps look up the same table, the L1-resident one
+// conflicting less there): the grid's words, 0 for types without one; and a vec_dot reading the staged grid.
+template <ggml_type type>
+static constexpr __device__ int holon_moe_grid_words() {
+    return type == GGML_TYPE_IQ3_S ? 512 : type == GGML_TYPE_IQ3_XXS ? 256 : 0;
+}
+
+template <ggml_type type>
+static __device__ __forceinline__ float holon_moe_vec_dot(const void * __restrict__ vx, const block_q8_1 * __restrict__ y,
+                                                          const int kbx, const int iqs, const uint32_t * grid) {
+    if constexpr (type == GGML_TYPE_IQ3_S) {
+        return vec_dot_iq3_s_q8_1_grid(vx, y, kbx, iqs, grid);
+    } else if constexpr (type == GGML_TYPE_IQ3_XXS) {
+        return vec_dot_iq3_xxs_q8_1_grid(vx, y, kbx, iqs, grid);
+    } else {
+        GGML_UNUSED(grid);
+        return get_vec_dot_q_cuda(type)(vx, y, kbx, iqs);
+    }
+}
+
 // Dedicated MoE multi-token kernel.
 // Grid: (ceil(nrows_x / c_rows_per_block), nchannels_dst)
 // Block: (warp_size, ncols_dst) - each warp handles one token independently.
@@ -913,8 +933,6 @@ static __global__ void mul_mat_vec_q_moe(
     constexpr int qi  = ggml_cuda_type_traits<type>::qi;
     constexpr int vdr = get_vdr_mmvq(type);
     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
-
-    constexpr vec_dot_q_cuda_t vec_dot_q_cuda = get_vec_dot_q_cuda(type);
 
     const bool shared_expert = has_fusion && fusion.shared_up && blockIdx.y == gridDim.y - 1;
     if (shared_expert) {
@@ -958,6 +976,16 @@ static __global__ void mul_mat_vec_q_moe(
     }
 
     ggml_cuda_pdl_sync();
+    // Holon: an IQ3 type's grid staged in shared memory, once per block (every warp gets here: blockDim.y = ncols_dst)
+    constexpr int grid_words = holon_moe_grid_words<type>();
+    __shared__ uint32_t s_grid[grid_words > 0 ? grid_words : 1];
+    if constexpr (grid_words > 0) {
+        const uint32_t * table = type == GGML_TYPE_IQ3_S ? iq3s_grid : iq3xxs_grid;
+        for (int i = threadIdx.y*warp_size + threadIdx.x; i < grid_words; i += warp_size*blockDim.y) {
+            s_grid[i] = table[i];
+        }
+        __syncthreads();
+    }
     const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
     const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
     if (!shared_expert && int32_t(channel_x) < 0) { // Holon: an entry skipped on purpose: its rows left as they are
@@ -984,10 +1012,10 @@ static __global__ void mul_mat_vec_q_moe(
 
 #pragma unroll
         for (int i = 0; i < c_rows_per_block; ++i) {
-            tmp[i] += vec_dot_q_cuda(vx, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs);
+            tmp[i] += holon_moe_vec_dot<type>(vx, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs, s_grid);
             if constexpr (has_fusion) {
                 if (use_gate) {
-                    tmp_gate[i] += vec_dot_q_cuda(vgate, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs);
+                    tmp_gate[i] += holon_moe_vec_dot<type>(vgate, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs, s_grid);
                 }
             }
         }
