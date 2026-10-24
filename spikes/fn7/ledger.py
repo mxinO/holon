@@ -117,7 +117,8 @@ def top_at_peak(snap: dict, n: int = 30) -> dict:
         count[where] += 1
         biggest[where] = max(biggest[where], ev["size"])
     return {"peak_mib": round(best / 2**20, 1),
-            "by_frame": {k: [round(v / 2**20, 1), count[k], round(biggest[k] / 2**20, 1)] for k, v in by.most_common(n)}}
+            "by_frame": {k: [round(v / 2**20, 1), count[k], round(biggest[k] / 2**20, 1)]
+                         for k, v in by.most_common(n)}}
 
 
 if __name__ == "__main__":
