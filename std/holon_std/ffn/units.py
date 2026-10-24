@@ -84,5 +84,8 @@ class Sum(nn.Module):
         self._side.wait_stream(main)                         # x is ready
         with self._side:
             acc = self._rest(x)
-        acc.record_stream(main)                             # read on the main stream: freed after its use there
+        # `acc` goes back to the side stream's blocks when it is dropped, with no event: the side stream is this
+        # unit's alone and waits for the main stream's work at every fork, so no later write of the side stream can
+        # pass the main stream's read of it (an event would keep one per layer alive while the host runs ahead: a
+        # prompt step's 11 shared-expert outputs, 20 MiB each at 4K tokens, at its activation peak)
         return add(x, acc, join=lambda: main.wait_stream(self._side))
