@@ -3553,6 +3553,68 @@ is the kernels' float32 rounding. The run costs one 8K prompt plus seconds.
 - **Part of the accuracy method from here:** the close runs `cover.py` clean on each bar card's deployment beside
   `exact.py` and gate (c). §22.5's gap of four plants that only gate (b) caught is closed at full-model scale.
 
+### 22.7 The locks (`tune --new-model`, the lead's calls of 2026-10-24)
+
+**Settings.** Each card's MTP deployment as shipped, at `max_seqs` 1. This replaces the earlier "5080 at 4 sequences".
+- **RTX 5080, IQ2_XS:** 4K steps; the step-peak loan on (margin 2.0); 1K prompts staged (`moe.stream_tokens=2048`,
+  `moe.pipeline=8`); `aux.*=0.3`.
+- **RTX 5090, IQ3_S:** 5K steps; `aux.*=0.5`.
+- **Both:** `fetch_ctas=4`; the Q8_0 head (`mtp-q2_0-q8`); the hits-first split; THP host pools.
+- **Not in a lock (deployment flags, as `tools/README.md` says):** `--memory-fraction` (0.97 on the 5080, 0.985 on the
+  5090) and `--host-memory` (70 GB and 86 GB). The routing profile `moe.placement.profile` is a file beside the
+  checkpoint (`holon_tools profile`).
+
+**The VRAM ledger's share of target experts cached** (§23.1's tool, the final tree, a fresh engine per row):
+
+| Card, deployment | 1 seq | 2 | 4 |
+|---|---|---|---|
+| RTX 5080, MTP | 26.2% | 24.8% | 21.9% |
+| RTX 5080, drafting off | 28.1% | 27.3% | 25.7% |
+| RTX 5090, MTP | 48.4% | 47.1% | 44.4% |
+| RTX 5090, drafting off | 50.3% | 49.6% | 48.3% |
+
+**L2 for a first lock (the lead's call).** `propagate` writes a model's first lock only after L2 passes, and §18
+dropped FN's full-model L2: no new goldens or floors.
+- **Taken:** L2 against step 5's existing v1-qwen3_5 golden and floors. Nothing new is recorded, nothing runs in fp32,
+  and it is one bf16 GPU run per card.
+- **Not taken:** a first lock that carries gates (c) and (d) in place of L2. That changes lock semantics for every
+  lock, which is a tools design change, not FN's.
+
+**The first run failed only the floor's path check:** "192 calls on mmvq/q8_1, the floor emulates mmq/q8_1". Its
+statistics were in budget.
+- **The source, found by logging each dispatch with its call site:** all 192 are 1-row expert calls in std.moe's
+  `_forward`, 48 layers × 4 (the resident entries' gate/up and down, and the split's miss pass).
+- They come from one prompt, `chat-math-think`, of 2,049 tokens. The step's last partial CHUNK is a pass of its own by
+  design (every row's chunk and kernel path are a chunk's), and a 1-row pass takes mmvq.
+- It is not `linear_rows@1`, which binds only bf16 weights.
+- **The lead's call: judge it against both of step 5's floors** (f48159c6). `compare` takes several floors, each
+  emulating one path (mmq or mmvq) in one mode:
+  - every counted call must take a path one of them emulates;
+  - the run must pass every floor's full budgets;
+  - the report gives the calls per path.
+
+  This is at least as strict as one floor, and it uses only existing recordings. A unit test plants a mixed-path run
+  that fails against the mmq floor alone, passes against both, fails one floor's budget when far off, and a path no
+  floor emulates.
+
+**Both locks pass** (`tune --new-model --batch 1`, golden v1-qwen3_5, `--floor` mmq and mmvq; the snapshot trace
+run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 / 143 tok/s against FlashInfer's
+55 / 44):
+
+| Card | top-1 (budget mmq / mmvq) | KL p99 (budget mmq / mmvq) | ΔPPL vs mmq floor (budget) | ΔPPL vs mmvq floor (budget) | Calls mmq / mmvq |
+|---|---|---|---|---|---|
+| RTX 5080, IQ2_XS | 97.37% (≥ 96.93 / 97.02) | 0.263 (≤ 0.631 / 0.601) | −0.91% ± 0.90 (≤ 2.50%) | +0.09% ± 0.47 (≤ 1.41%) | 41,616 / 192 |
+| RTX 5090, IQ3_S | 96.91% (≥ 96.36 / 96.51) | 0.425 (≤ 0.972 / 0.765) | −1.75% ± 1.12 (≤ 3.05%) | −1.62% ± 0.92 (≤ 2.56%) | 41,784 / 192 |
+
+- **The locks:**
+  - `plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/…/1.lock`
+  - `…/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/…/1.lock`
+- **The first write was read from node-local copies of the shards,** so its model id lacked the repository, and
+  `check_locks` refused it as not servable by name.
+  - The locks above were tuned again with the shards hard-linked into a hub-cache-named directory. The id's build
+    hash is the shards' sha256 either way.
+  - The second run, in another allocation, gave the same L2 tables to the last digit and the same snapshot traces.
+
 ## 23. FN's speed round, reopened (the owner's ruling, 2026-10-24: the bars in tok/s)
 
 The lead's order: A the VRAM ledger, B the allocator's reserve, C a peak diet, D the PCIe rate, E the draft-quality
@@ -3998,3 +4060,32 @@ before the fixes, fix 1 as first written, and fixes 1 and 2 as shipped. Fix 3 th
   - partial lending;
   - a CPU share of the misses: Holon's CPU path was ≈ 5× slower per expert, and the split lost 2–14% (§21.5);
   - none of them is a kernel.
+### 23.9 The launch failure under the profiler (the lead's call: not passed as noise)
+
+§23.8's base tree (b04066a9) lost its 5090 32K verify trace once to "unspecified launch failure" under nsys. The fixed
+tree (0060f1df: fixes 1, 2, 3 and 5) was checked for it:
+- **The 5090's 32K verify under nsys (node trace), three times:** all three ran to the end, 24 steps and 38 graphed
+  verify passes each, with no error.
+- **compute-sanitizer on the kernel harnesses** (`plugins/tests/memcheck_*`, the caching allocator off):
+  - on the 5090 (sm_120), memcheck shows 0 errors on `triton_fp8` (`linear_rows@1` included, outputs 16 to 256 × 2 to
+    16 rows), `gdn_kernels` (the recurrent path on contiguous rows and on column views) and `ggml_cuda_moe`;
+  - racecheck shows 0 hazards on `triton_fp8` and `gdn_kernels`;
+  - on the 4090 (sm_89), the same: 0 errors, 0 hazards.
+- **The A5000, the engine under memcheck** (`spikes/fn7/sanitize.py`, IQ2_XS with MTP): it does not run under
+  memcheck, which is a sanitizer limit.
+  - At a 16K context with 4K steps, and at an 8K context with 1K steps, the startup profile runs out of device memory.
+    Memcheck had reported 0 errors up to that point.
+  - A record of allocations under memcheck shows every layer's activations staying alive through the profile's
+    prompt step: the HC mix's 5.4 GiB, the GDN chunk path, the conv. Without the sanitizer the same flags build and
+    serve, with a 7.2 GiB peak at the profile.
+  - `CUDA_LAUNCH_BLOCKING=1` changes nothing, so the GPU running behind the host is not the cause.
+  - Coverage reached: the build, the weight load, the pools' materialize and the profile's prompt step through
+    several layers. No verify pass was reached.
+- **Kernel L0 on the final tree:** `test_triton_fp8`, `test_gdn_kernels`, `test_ggml_cuda_moe` and `test_ggml_cuda`:
+  - sm_86 (A5000): 386 passed, 11 skipped (sm_90+ and Blackwell-only cases);
+  - sm_120 (5090): 402 passed, 1 skipped;
+  - sm_89 (4090): `test_triton_fp8` passed, `linear_rows@1` included.
+- **Not reproduced.** It was seen once, on the pre-fix tree b04066a9.
+- **The bar cards' model copies are now checked:** each node-local shard is checked against its source's size and
+  full BLAKE2b digest, and re-copied on a mismatch. Two nodes' copies had been corrupt at the right size (§23.8's bus
+  errors).
