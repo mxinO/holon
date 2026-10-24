@@ -3618,6 +3618,7 @@ run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 
 - **The locks:**
   - `plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/…/1.lock`
   - `…/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/…/1.lock`
+  - At the final tree both advanced byte-identical to `2.lock` (§22.10).
 - **The first write was read from node-local copies of the shards,** so its model id lacked the repository, and
   `check_locks` refused it as not servable by name.
   - The locks above were tuned again with the shards hard-linked into a hub-cache-named directory. The id's build
@@ -3677,7 +3678,8 @@ The pair runs at the reference's step: the deployment's, `--prefill-step`. It ha
 **Two faults found by the final tree's gates on the RTX 5090 (IQ3_S), one cause.**
 - **What failed:**
   - `exact.py` at 64 sequences ran out of memory inside GDN's chunked rule in a prompt step.
-  - Gate (c)'s first pass (2 sequences, 8K reference steps) died of an illegal memory access, twice.
+  - Gate (c)'s first pass (2 sequences, 8K reference steps) died of an illegal memory access: the gate, then its pass
+    alone twice.
 - **The cause: C (585c1862).** It sub-chunked GDN's chunked rule only for a one-row step, the one the startup profile
   measures. A step holding two prompts' chunks ran in one call and took 2.7× the temporaries: 358 against 133 MiB per
   call at 4K. So the reserve was overrun whenever two sequences prefill in one step. Past it at 0.985, what failed was
@@ -3690,7 +3692,7 @@ The pair runs at the reference's step: the deployment's, `--prefill-step`. It ha
 
   | Tree, setting | Result |
   |---|---|
-  | f48159c6, 8K steps | illegal address, 2 of 2 runs |
+  | f48159c6, 8K steps | illegal address, 3 of 3 runs |
   | f48159c6, `CUDA_LAUNCH_BLOCKING=1` | passes |
   | f48159c6, 5K steps (the deployment's) | passes |
   | f48159c6, `--memory-fraction 0.9` | passes |
@@ -3734,6 +3736,80 @@ The pair runs at the reference's step: the deployment's, `--prefill-step`. It ha
 - **Shipped settings resting on one round** (the loan margin 2.0, fix 5's prefill) are arbitrated by D11 on the final
   tree: a gated row below its bar with one of them a plausible cause is A/B'd in the same allocation and reverted if it
   does not hold.
+
+### 22.10 The final tree (8818cdca): locks, propagation, gates, D11
+
+Evidence: `evidence/fn_close_final_2026-10-24.json`. The runtime is 8818cdca; gate (c)'s script is 00ebb81d (the same
+runtime: spikes and docs only).
+
+**The second runtime round** (panels B and C, re-review):
+- `kernels.fla` packs consecutive short rows into calls of at most `SUB_TOKENS` tokens, and splits only longer rows
+  (b54c6d02). Row by row had cost 32 rows × 64 tokens 15.4 ms against one call's 2.2 ms on the 27B GDN shape.
+- `std.ffn`'s side stream is an engine-shared object, not module-level state (6e8a1781).
+- `test_reserve.py` states its one bounded margin: GDN's in-step conv checkpoint windows, `(max_seqs − 1)` rows'.
+- Plus the minors (8818cdca).
+- Panels A, B and C: clean on code after it.
+
+**No speed regression outside FN** (all bitwise):
+- The GDN call, packed against one call, on the RTX A5000 at the 27B shape: 4,096 tokens in one row 2.19 / 2.10 ms;
+  32 × 64 2.27 / 2.26; 62 × 33 3.83 / 3.70; 8 × 512 2.39 / 2.23; 4 × 512 1.36 / 1.24; 1,100 + 30 1.54 / 1.11 (a step
+  straddling `SUB_TOKENS`: the memory bound's price).
+- `bench/perf_smoke.py` (batch-1 decode, 3 ABBA rounds, RTX A5000) against f48159c6: Qwen3-8B Q4_K_M 1.0001 and
+  Qwen3.8-27B UD-Q4_K_M 1.0008, both within noise.
+  - Main's build cannot be the base: its core implements ABI 1.4, and this environment's FN plugins require 1.5, so
+    discovery refuses them.
+- The 27B lock's multi-prompt prefill (8 × 1,000 tokens, ABBA against f48159c6): RTX 5080 (UD-IQ3_S) 2,592 / 2,582
+  against 2,571 / 2,572 tok/s; RTX 5090 (UD-Q4_K_M) 4,978 / 4,958 against 4,986 / 4,984.
+
+**The propagation on the final tree** (`holon_tools impact f48159c6..HEAD`: all 25 histories), without `--approve`:
+- **All 23 existing histories advance, every trace byte-identical** (no L2): RTX 3090 4, RTX 4090 8, RTX 5080 7, RTX
+  5090 4.
+- **FN's two locks**, re-tuned from their first locks, advance byte-identical too.
+  - The RTX 5080's first re-tune read "approve", with only `site:std.tiered[moe]/activation_loan@1` missing. `tune`
+    starting from a lock pins the stored snapshot's pool bytes, an explicit state budget that skips the startup
+    profile, so the step-peak loan (`moe.lend_peak`) never binds.
+  - Re-run with the pools measured (the stored snapshot left out of the plans copy), it advanced with the site bound,
+    as serving binds it. The RTX 5090's deployment lends nothing.
+- Every newest lock's unit pins equal the tree's sources (0 of 25 outdated). `run_all.sh` passes but the known commit
+  message.
+- **The lead's call on SHAs (2026-10-24):** the lead replays FN's branch onto main at the merge, without squashing,
+  and writes the old → new map to `docs/history/` (as for 2026-10-20). So the locks' `deploy.commit` (provenance only:
+  it never makes a plan "changed") and this record's short SHAs still resolve.
+
+**The gates on the final tree:**
+
+| | RTX 5080 (IQ2_XS) | RTX 5090 (IQ3_S) |
+|---|---|---|
+| gate (c): decode vs prefill, KL mean / p50 / p99 | 0.025 / 0.0018 / 0.36 | 0.029 / 0.0024 / 0.48 |
+| gate (c): chunked vs one-shot | 0.022 / 0.0016 / 0.33 | 0.030 / 0.0025 / 0.47 |
+| gate (c): MTP vs plain (§22.8's bars), positions, KL mean / p99 | 539, 0.0017 / 0.027: passes | 740, 0.0026 / 0.022: passes |
+| plant `linear_rows_swap` (must fail) | 280, 0.065 / 1.42: fails | 166, 0.107 / 2.49: fails |
+| plant `shexp_gate_off` (must fail) | 67, 0.137 / 1.91: fails | 79, 0.178 / 1.98: fails |
+| the cover (PLE max row error; QSA rows selecting the same blocks) | 7.8e-7; 100%: passes | 7.9e-7; 100%: passes |
+| `exact.py`: the deployment ×3, capped cache, ring on SMs, unpipelined | identical; `aux_row_padding` differs | identical; the plant differs |
+| post-profile module loads (`outside.py`, after the plan's requests) | 8 MiB | 12 MiB |
+
+- Gate (c) on the RTX 5090 ran at the deployment's 5K step: no fault.
+- The cover's tolerance holds on sm_120 (clean 7.8–7.9e-7, against 1e-5).
+- The slack after startup holds the post-profile loads with room: free memory after startup less the reserve,
+  ≈ 0.43 GB on the 5080 and ≈ 0.47 GB on the 5090 (§23.1's ledger), against 8 / 12 MiB.
+
+**D11 on the final tree** (`offload_ctx`, 8 prompts per context × 2 rounds, each arm a fresh process; a discarded
+warm-up run first in each allocation; Holon / Strata no-approx; per round in brackets):
+
+| Row (bar) | RTX 5080 1K | 4K | 32K | RTX 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| decode (1.0) | 1.086 | 1.090 | 1.071 | 1.167 | 1.143 | 1.111 |
+| MTP decode (1.0) | 1.087 | 1.141 | 1.116 | 1.067 [1.075, 1.060] | **1.001** [1.006, 0.996] | **1.000** [1.005, 0.995] |
+| prefill (0.9) | 1.090 | 1.222 | 1.022 | 0.995 | 1.225 | 0.994 |
+| MTP prefill (0.9) | 1.089 | 1.219 | 1.021 | 1.003 | 1.175 | 0.976 |
+| tokens per pass, Holon / Strata | 2.76 / 2.78 | 2.83 / 2.81 | 2.95 / 2.95 | 2.65 / 2.66 | 2.78 / 2.93 | 3.21 / 3.28 |
+
+- **Every row meets its bar.**
+- The RTX 5090's MTP rows at 4K and 32K sit at it (1.001, 1.000), with one round of each 0.4–0.5% under it. Its tokens
+  per pass trail Strata's there (2.78 against 2.93; 3.21 against 3.28).
+- Neither one-round setting is a plausible cause: the loan margin is the 5080's, and fix 5 moves no MTP row. So
+  nothing was A/B'd, and the lead's call (§23.8) stands: rows at the bar are enough.
 
 ## 23. FN's speed round, reopened (the owner's ruling, 2026-10-24: the bars in tok/s)
 
