@@ -3850,6 +3850,32 @@ the GDN commit, 0.25 ms in Strata's trace, is outside its stages):
   - IQ grids staged in shared memory: −1–2%;
   - 4 rows per block: down −16%, gate/up +6%.
 
+**The 5090 at 4K and 32K** (the same method; Holon's base tree's 32K trace was lost to a launch failure under the
+profiler, once, which the fixed tree's run did not repeat). Holon's pass before the fixes (4K) and after all three
+(4K, 32K), against Strata's stages at each:
+
+| Component (ms) | Holon 4K, before | Holon 4K, after | Strata 4K | Holon 32K, after | Strata 32K |
+|---|---|---|---|---|---|
+| miss fetch (Holon: 234 / 215 / 294 MiB at 48–49 GB/s) / Strata's waits | 4.99 | 4.72 | 3.90 | 6.38 | 3.14 |
+| routed experts | 4.43 | 4.40 | 2.68 | 4.62 | 2.67 |
+| router and resolve | 0.91 | 0.91 | 0.56 | 0.93 | 0.56 |
+| shared expert | 1.18 | 1.02 | 0.88 | 1.02 | 0.88 |
+| attention (QSA and the indexer, their projections) | 1.08 | 1.07 | 1.71 | 1.53 | 1.80 |
+| GDN (projections; Holon's rewind replay) | 3.63 | 3.00 | 2.19 | 2.99 | 2.19 |
+| HC | 2.39 | 2.39 | 3.33 | 2.39 | 3.33 |
+| lm_head | 0.34 | 0.34 | 0.39 | 0.34 | 0.39 |
+| norms, glue, PLE, idle | 0.81 | 0.58 | 0.03 | 0.59 | 0.03 |
+| the draft sub-steps and the head's catch-up | 2.11 | 2.06 | 1.89 | 2.19 | 2.29 |
+| **the pass** | **17.15** | **15.92** | 18.08 (profiled) | **17.40** | 17.66 (profiled) |
+
+- The fixes take 7.2% off the 5090's 4K pass, as on the 5080.
+- **What is left at 32K is miss serving.** Per layer, Holon fetches 1.9 experts over PCIe. Strata misses about as
+  many (2.0) but serves two thirds of them on its CPU, beside the GPU, and fetches 0.67. Its GPU waits 3.1 ms for
+  them, against Holon's 6.4 ms fetch on the critical path. That is §21.17's structural lever (Strata's CPU-side miss
+  serving; Holon's CPU path was ≈ 5× slower per expert, and the split lost 2–14%, §21.5). It is not a kernel.
+- Holon is ahead on HC (−0.9 ms) and attention (−0.3 to −0.6 ms). Its own MoE kernels per entry match Strata's; the
+  "routed experts" row's difference is the entries Strata computes on its CPU.
+
 **Fix 1: the split fetch's stream at high priority (0442c8b3, b0cb2877; std, bitwise).** The fetch now starts 2.5
 µs (median) after the resolve. The 5080's 1K pass is 20.52 → 19.49 ms (−5.0%), with the same tokens. Launching the
 hits' mmvq without PDL fixes it equally (19.42 ms) but changes vendored code, so the priority ships.
@@ -3870,3 +3896,70 @@ not bitwise, L0).** cuBLAS runs the GDN a/b projection at 4 rows as a split-K GE
 gate stays on cuBLAS's GEMV, which its kernel did not beat: 5.2 µs against 3.0), with
 float32 sums in a fixed order. L0 against the f64 product, run-to-run and graph replay identical. On the A5000 in
 a graph: 6.2 µs against cuBLAS's 14.7.
+
+**Fix 4: the MoE mmvq stages an IQ3 type's grid in shared memory (e74b0d4b; kernels.ggml_cuda's vendor.patch;
+bitwise).** On the 5090, the hits' pass of Holon's mmvq runs ≈ 1.6–1.9× Strata's grouped kernels per call:
+- gate/up 38–42 µs against 24 µs, down 27–32 µs against 13–17 µs;
+- its gate/up types are IQ3, which decode through a grid of 256 or 512 words.
+
+On the 5080's types (IQ2_S, Q2_0) the two match per entry. The IQ3 vec_dots now read the grid through a pointer, and
+the MoE kernel stages it once per block. At 4 rows on the 5080's silicon, IQ3_S gate/up is 54.3 → 50.3 µs and
+IQ3_XXS 46.9 → 43.9 µs, with the same bits.
+
+Other variants of the kernel, measured there and dropped:
+- entries in expert order: +1–3%;
+- each weight block decoded once for all of its tokens: faster only when 12 experts serve 40 entries, slower at
+  realistic sharing;
+- 4 rows or 1 row per block.
+
+**The 5080's benches** (8 prompts × 2 rounds; paired per prompt and round). Three checkouts ran in one allocation:
+before the fixes, fix 1 as first written, and fixes 1 and 2 as shipped. Fix 3 then ran against them:
+
+| Item | MTP decode | MTP prefill | Drafting-off decode | Drafting-off prefill |
+|---|---|---|---|---|
+| fix 1 (both streams at high priority) | +4.6–4.7% ± 0.2 | +0.2 / −0.5 / −0.5 | +1.0–1.1 ± 0.3 | +0.7–0.8 |
+| fix 1 on the split's stream only, plus fix 2 | +1.6–1.8% ± 0.1 | −0.5 ± 0.1 | 0.0 | 0.0 (1K: −4 ± 4) |
+| all of them | **+6.3–6.5% ± 0.2** | −0.3 / −1.1 / −1.0 | +1.0 ± 0.3 | 1K −3.5 ± 3.8, +0.8 |
+| fix 3 | +4.1 ± 2.2 / +5.0 ± 3.2 / +0.2 ± 1.7 | 0.0 | 0.0 | 0.0 |
+
+- **After fixes 1 and 2, the 5080's rows against Strata:**
+  - MTP decode **1.026 / 1.046 / 1.026**, per pass 1.06 / 1.06 / 1.10;
+  - drafting-off decode 1.08 / 1.07 / 1.04, prefill 0.99–1.21.
+- **Fix 3 changes the numerics,** so the drafts' acceptance moves per prompt:
+  - tokens per pass 2.64 → 2.76 at 1K, 2.80 → 2.84 at 4K, 2.97 → 2.95 at 32K;
+  - its per-pass rate moves −0.3%, +3.2% and +0.6%;
+  - the drafting-off and prefill rows are untouched, bitwise: their linears take one row or more than 16.
+- **The ship rule:**
+  - every MTP row, the ones below the bar, gains;
+  - no gated row falls under its bar × 1.05 for these fixes (the 32K drafting-off decode was under 1.05 before and
+    gains 1%);
+  - fixes 1–3 ship on the 5080, and fix 4 does not act there.
+
+**The 5090's bench** (the same plan; one allocation, three checkouts: before the fixes, fixes 1–2, fixes 1–3):
+
+| Item | MTP decode | MTP prefill | Drafting-off decode | Drafting-off prefill |
+|---|---|---|---|---|
+| fixes 1–2 | **+4.9–5.1% ± 0.1** | −0.1 / −0.6 / −0.8 | −0.1 | 0.0 / 0.0 / −0.3 |
+| fix 3 | +1.0 / +1.4 / +2.3 (± 2) | +0.7 / −0.4 / −0.9 | 0.0 | 0.0 / −0.2 / −0.3 |
+| all | **+6.2 / +6.6 / +7.3%** | +0.7 / −1.0 / −1.7 ± 0.4 | −0.1 | −0.1 / −0.2 / −0.6 |
+
+- Fix 3's per-pass rate gains 3% on the 5090: 1.053 / 1.050 / 1.024 → 1.083 / 1.087 / 1.058. Its tokens per pass
+  moved the other way, 2.71 / 2.84 / 3.25 → 2.65 / 2.78 / 3.21.
+- The drafting-off 32K prefill at 5K steps is **0.991** (≥ 0.945, the lead's check before the lock).
+- The ship rule: the MTP rows below the bar (0.97 and 0.965 at 4K and 32K before) gain 6.6–7.3%. The MTP 32K prefill
+  falls 1.7%, to 0.974, still over 0.945. Fixes 1–3 ship. Fix 4 (bitwise, IQ3 only) is benched on its own next.
+
+**The table now** (ratios to Strata; the 5080 after fixes 1–2, the 5090 after fixes 1–3; 8 prompts × 2 rounds):
+
+| Row | 5080 1K | 4K | 32K | 5090 1K | 4K | 32K |
+|---|---|---|---|---|---|---|
+| Decode | 1.08 | 1.07 | 1.04 | 1.21 | 1.16 | 1.11 |
+| MTP decode (tok/s) | **1.03** | **1.05** | **1.03** | **1.06** | **1.03** | **1.04** |
+| MTP, per-pass rate × pooled acceptance | 1.06 | 1.06 | 1.10 | 1.08 | 1.09 | 1.06 |
+| Prefill | 0.99 | 1.21 | 1.02 | 0.97 | 1.20 | 0.99 |
+| Prefill, MTP deployment | 1.03 | 1.20 | 1.01 | 0.98 | 1.16 | 0.97 |
+
+- **Every row is over its bar,** the six MTP rows included (the owner's bar: tok/s ≥ 1.0).
+- Strata's own rows move between allocations: the 5090's base tree read 1.00 / 0.97 / 0.97 here against §23.7's 0.99
+  / 0.93 / 0.92. Each item's paired change is the measure; the bars hold with room on every row but the 4K and 32K
+  MTP rows (1.03–1.05).
