@@ -14,8 +14,9 @@ noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `
 (`band_within`), not gated (owner, 2026-10-21). `--plant qsa_decode_select_shift` (decode and verify only) must fail.
 `mtp`'s bars (the lead's call, 2026-10-24, set before the final tree's run, docs/v1-flash-next.md §22.8): about 5× the
 clean pairs' (KL mean 0.0020 / 0.0044, p99 0.023 / 0.063 on the RTX 5080 / 5090, 5346d3a) — KL mean ≤ 0.02 and p99
-≤ 0.3 over at least 100 agreeing positions; `--plant linear_rows_swap` (verify passes only) and `shexp_gate_off` must
-fail. The pair runs at the reference's step (`--prefill-step`, the deployment's).
+≤ 0.3 over at least 100 agreeing positions, on 8 chat prompts (the four's and `MTP_MORE`); `--plant
+linear_rows_swap` (verify passes only) and `shexp_gate_off` must fail. The pair runs at the reference's step
+(`--prefill-step`, the deployment's).
 
     python spikes/fn7/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
         [--holon-flags '<engine flags>'] [--prefill-step N]
@@ -36,6 +37,7 @@ PROMPTS = ("summary-6k", "recall-8k", "recall-16k", "chat-multiturn-20k")
 DRAFTS, K = 3, 20
 BARS = {"kl_mean": 0.13, "kl_p50": 0.007, "band_dnll": 0.75}
 MTP_BARS = {"kl_mean": 0.02, "kl_p99": 0.3, "positions": 100}
+MTP_MORE = ("chat-explain", "code-lru", "agent-csv", "chat-zh")   # v1-qwen3_5's, beside the four: 8 prompts in all
 
 
 def engine(a, **kw):
@@ -129,7 +131,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--model", required=True)
     ap.add_argument("--pack", required=True)
-    ap.add_argument("--tokens", type=int, default=512)        # (the MTP pair: well past its 100 positions)
+    ap.add_argument("--tokens", type=int, default=256)
     ap.add_argument("--max-len", type=int, default=20480)
     ap.add_argument("--plant", help="a judge plant, e.g. qsa_decode_select_shift (must fail)")
     ap.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
@@ -144,6 +146,8 @@ def main() -> None:
     prompts = PromptSet(full.name, full.sha256, [keep[p] for p in PROMPTS])
     rows = {r["id"]: r for r in map(json.loads, (ROOT / "judge/prompts/v1-long.jsonl").read_text().splitlines())}
     chats = [rows[p]["ids"][:rows[p]["gen_start"]] for p in PROMPTS]
+    more = {r["id"]: r for r in map(json.loads, (ROOT / "judge/prompts/v1-qwen3_5.jsonl").read_text().splitlines())}
+    chats += [more[p]["ids"][:more[p]["gen_start"]] for p in MTP_MORE]    # the MTP pair's 8 prompts (§22.8)
     a.max_len = max(a.max_len, max(len(p.ids) for p in prompts.prompts) + a.tokens + 8)
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
     out = {"name": "fn7_consistency", "date": datetime.date.today().isoformat(), "gpu": torch.cuda.get_device_name(),

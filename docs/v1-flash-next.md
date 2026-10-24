@@ -3637,8 +3637,10 @@ Panel C: the MTP-vs-plain pair's bar (KL mean ≤ 0.13) could not see a verify-p
 / 0.0044, p99 0.023 / 0.063 on the 5080 / 5090):
 - KL mean ≤ 0.02;
 - KL p99 ≤ 0.3;
-- at least 100 agreeing positions, over 512 tokens a prompt (panel C: at 256 a clean 5090, 189 positions, falls under
-  100 about one run in six).
+- at least 100 agreeing positions, over 8 chat prompts: the four `v1-long` ones and four of `v1-qwen3_5` (chat-explain,
+  code-lru, agent-csv, chat-zh). Panel C: positions count the tokens before each prompt's first difference (a clean
+  5090's came at 27–68), so with 4 prompts a clean 5090 falls under 100 about one run in six, with 8 about one in
+  500; more tokens a prompt would not help.
 
 The pair runs at the reference's step: the deployment's, `--prefill-step`. It had run at 8,192 on every card.
 
@@ -3944,7 +3946,7 @@ tokens per pass as the others on its card, so the trees are bitwise alike on the
 - **168562e and C ship.** On the 5090, every row gains 0.4–1.4% or holds.
 - **The loan margin (5080 only) is the lead's call.** Its drafting-off rows gain 1.1–1.8%. Its MTP 1K row, below
   the bar, moves −0.5 ± 0.2% (one round only: §22.9); 4K and 32K are flat. The 5080's item mixes C (a smaller peak, so a smaller loan) with
-  the margin. With THP on top (b / a) the same row gains +0.4 ± 0.2%, and every 5080 row gains 0.4–2.4% (by round: §22.9). Kept in the
+  the margin. With THP on top (b / a) the same row gains +0.4 ± 0.2%, and every 5080 decode row gains 0.4–2.4% (by round: §22.9). Kept in the
   tree; reverting it is one constant.
 - **0.99 does not ship.** The 5090's MTP rows do not move (−0.1 to 0.0%: the replay's +0.3 points of cache are under
   the bench's resolution), and its drafting-off decode loses ≈ 1% (one round only: §22.9). The deployments stay at 0.985.
