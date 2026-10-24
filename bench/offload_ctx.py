@@ -89,11 +89,12 @@ def fn_corpus() -> list[int]:
     return tok.encode(text, add_special_tokens=False).ids
 
 
-def fn_starts(n: int, contexts: list[int]) -> dict[int, list[int]]:
-    """Each context's six candidate starts (D11), none inside the warm-up span [n - FN_WARMUP, n)."""
+def fn_starts(n: int, contexts: list[int], count: int = 6) -> dict[int, list[int]]:
+    """Each context's `count` candidate starts (D11: six, each a sixth of the corpus apart; past six, the midpoints
+    between them), none inside the warm-up span [n - FN_WARMUP, n)."""
     out = {}
     for c, context in enumerate(contexts):
-        starts = [(k * (n // 6) + c * (n // 18)) % n for k in range(6)]
+        starts = [(k % 6 * (n // 6) + k // 6 * (n // 12) + c * (n // 18)) % n for k in range(count)]
         out[context] = [0 if o >= n - FN_WARMUP else o for o in starts]
     return out
 
@@ -109,7 +110,7 @@ def plan(a: argparse.Namespace) -> dict:
     else:
         corpus = fn_corpus()
         warm = {"ids": corpus[-FN_WARMUP:], "output": 64}
-        starts = fn_starts(len(corpus), a.contexts)
+        starts = fn_starts(len(corpus), a.contexts, max(6, max(a.spans) + 1))
         reqs = [{"key": f"{c}/{k}", "context": c, "start": starts[c][k], "ids": span(corpus, starts[c][k], c)}
                 for c in a.contexts for k in a.spans]
     digest = hashlib.sha256(json.dumps(corpus).encode()).hexdigest()
@@ -489,7 +490,8 @@ def main() -> None:
     pl.add_argument("--out", required=True)
     for p in (o, pl):
         p.add_argument("--corpus", choices=("v1", "fn"), default="v1")
-        p.add_argument("--spans", type=int, nargs="+", default=[0, 1, 2], help="fn: the candidate starts timed")
+        p.add_argument("--spans", type=int, nargs="+", default=[0, 1, 2],
+                       help="fn: the candidate starts timed (0-11; past 5 the midpoints between the six D11 starts)")
         p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])
     o.add_argument("--out")
     o.add_argument("--resume", action="store_true", help="keep the rows of bench/.out/<name>/raw.jsonl")
