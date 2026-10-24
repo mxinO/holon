@@ -27,8 +27,9 @@ an OpenAI client, an Anthropic client or Claude Code can use it directly; the de
 Other GPUs: GGUF files refuse at startup (the GGUF kernels are built for SM 86, 89 and 120 only); bf16 checkpoints
 are untested.
 
-Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`) and the Qwen3.5 hybrid (`models.qwen3_5`, which
-also serves Qwen3.8), from HF safetensors directories or GGUF files. The recommended file per card and its lock
+Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`), the Qwen3.5 hybrid (`models.qwen3_5`, which
+also serves Qwen3.8) and Qwen3.8-Flash-Next (`models.qwen4_exp`, GGUF, with its MTP head), from HF safetensors
+directories or GGUF files. The recommended file per card and its lock
 (`holon models` lists them for the card it runs on):
 
 | model file (hub repository) | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
@@ -125,7 +126,8 @@ cache, and `HF_HUB_OFFLINE=1` to serve cached models without the network (a tag 
 Offline, a hub name is found through the cache's `refs/main`, which a download writes; in a cache filled another way
 (by revision, or copied without `refs/`) serve the file's path instead,
 `<HF cache>/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/<revision>/<file>`: it finds the same lock.
-Split GGUF files (`-00001-of-0000N.gguf`) are not supported.
+A split GGUF file (`-00001-of-0000N.gguf`) is served by its first shard's path or its stem; a hub reference
+fetches all its shards.
 
 `holon serve` listens on `127.0.0.1:8000` (`holon serve <model> --host H --port P`) and checks no API key: do not
 expose it beyond a trusted network. Its log says which lock it starts from, or why none:

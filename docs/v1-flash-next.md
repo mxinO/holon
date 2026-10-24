@@ -217,6 +217,10 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
 8. **Core:** C1–C3 (§4) only, additive.
    - ABI **1.4 or 1.5 by merge order with K**: whichever lands its seams first takes 1.4.
    - ≤ +47 code lines relative to FN's step-1 base, toy-proven.
+   - **As built (the close, panel B):** a fourth seam, `ActivationLender` (the step-peak loan, approved by the lead in
+     §21.6), and **+49 code lines**, not +47: 19ac3213's two lines (freeing each prompt-logprob piece before the next)
+     were never counted, so §22.2's "+46" was +48 and §23.6's "+47" +49. No FN core line serves a dropped feature.
+     The lead reports the overshoot to the owner for sign-off (§22.9).
 
 **Non-goals:**
 - the vision tower;
@@ -3304,10 +3308,10 @@ experts against Holon's 48.1%):
 
 **Tried and dropped** (measured, not shipped):
 - F5b's CPU share and the Strata-style split (−2% to −14%).
-- The hits-first split (−8% to −10%).
-- THP host pools (a core option).
-- `placement.budget@1`.
-- `moe.cpu_admit`.
+- The hits-first split (−8% to −10%). *Superseded: shipped with the high-priority fetch stream (§21.9, §23.8).*
+- THP host pools (a core option). *Superseded: shipped in §23.6 (a7a5fdfc).*
+- `placement.budget@1`. *Deleted at the close (§22.9).*
+- `moe.cpu_admit`. *Deleted at the close (§22.9).*
 - The layer-ahead likely-routed prefetch (more bytes than it hides).
 - The capped high-τ prefetch (not built).
 - A refill of the lent slots right after a prompt (fix 2: the same bytes in the bus-bound prefill).
@@ -3416,7 +3420,7 @@ sequences ran out of memory in the snapshot trace. Found by `exact.py` at the cl
   what the allocator keeps for the largest bucket's graphs. But capturing every bucket's graphs at 64 sequences
   takes **1.29 GB more outside the allocator** (the instantiated execs), and only 0.7 GB of slack is left at 0.97 on a
   24 GB card. The first eager step of the trace (63 prompt rows, 4,032 tokens) then failed at its first allocation.
-  - Fixed in core, +2 code lines (6b3ad67; FN's core code lines at +46 of 47): `platform.reserved_growth` also returns
+  - Fixed in core, +2 code lines (6b3ad67; FN's core code lines at +48, counted then as +46: §1 item 8): `platform.reserved_growth` also returns
     the device memory the profile's capture keeps outside the allocator, and the executor counts it once per bucket.
   - The A5000's reserve grows by 0.31 GB (state pools 15.58 → 15.27 GB). After every bucket is captured, 1.72 GB
     stay free.
@@ -3558,7 +3562,8 @@ is the kernels' float32 rounding. The run costs one 8K prompt plus seconds.
 **Settings.** Each card's MTP deployment as shipped, at `max_seqs` 1. This replaces the earlier "5080 at 4 sequences".
 - **RTX 5080, IQ2_XS:** 4K steps; the step-peak loan on (margin 2.0); 1K prompts staged (`moe.stream_tokens=2048`,
   `moe.pipeline=8`); `aux.*=0.3`.
-- **RTX 5090, IQ3_S:** 5K steps; `aux.*=0.5`.
+- **RTX 5090, IQ3_S:** 5K steps; `aux.*=0.5`; the staging ring of parts too (`moe.stream_tokens=2048`,
+  `moe.pipeline=8`, kept by §21.9's call).
 - **Both:** `fetch_ctas=4`; the Q8_0 head (`mtp-q2_0-q8`); the hits-first split; THP host pools.
 - **Not in a lock (deployment flags, as `tools/README.md` says):** `--memory-fraction` (0.97 on the 5080, 0.985 on the
   5090) and `--host-memory` (70 GB and 86 GB). The routing profile `moe.placement.profile` is a file beside the
@@ -3596,6 +3601,10 @@ statistics were in budget.
   This is at least as strict as one floor, and it uses only existing recordings. A unit test plants a mixed-path run
   that fails against the mmq floor alone, passes against both, fails one floor's budget when far off, and a path no
   floor emulates.
+- **What the mmvq floor judges (panel C):** the 192 calls are the 1-row pass of the prompt's last token, whose logits
+  only predict the sampled token, which L2 never scores (prompt logprobs come from rows 0 … n−2). So the mmvq floor
+  judged no scored position: the mmq floor carries the statistics, and the mmvq floor only covers the path (the lead's
+  call). Requiring both floors' budgets can also fail a correct run (each pair's tighter budget applies).
 
 **Both locks pass** (`tune --new-model --batch 1`, golden v1-qwen3_5, `--floor` mmq and mmvq; the snapshot trace
 run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 / 143 tok/s against FlashInfer's
@@ -3614,6 +3623,114 @@ run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 
   - The locks above were tuned again with the shards hard-linked into a hub-cache-named directory. The id's build
     hash is the shards' sha256 either way.
   - The second run, in another allocation, gave the same L2 tables to the last digit and the same snapshot traces.
+
+### 22.8 Gate (c)'s MTP pair, tightened (the lead's call; set before the final tree's run)
+
+Panel C: the MTP-vs-plain pair's bar (KL mean ≤ 0.13) could not see a verify-path bug. `shexp_gate_off` passed it at
+0.124, over 19 positions. Yet this pair is the only full-model check that reads verify rows:
+- L2 scores prompt logprobs;
+- the cover records prompt steps;
+- gate (d) ran drafting off;
+- `exact.py` compares placements of one tree.
+
+**The bars from here** (`spikes/fn7/consistency.py`, `MTP_BARS`), about 5× the clean pairs of 5346d3a (KL mean 0.0020
+/ 0.0044, p99 0.023 / 0.063 on the 5080 / 5090):
+- KL mean ≤ 0.02;
+- KL p99 ≤ 0.3;
+- at least 100 agreeing positions.
+
+The pair runs at the reference's step: the deployment's, `--prefill-step`. It had run at 8,192 on every card.
+
+**Must fail:**
+- `shexp_gate_off`;
+- the new `linear_rows_swap`: `linear_rows@1`'s first two output rows swapped, so verify passes and short prompt steps
+  only.
+
+**Checked on the A5000** (IQ2_XS, offload, 2 sequences, 4K steps, 256 tokens):
+- clean: 363 positions, KL mean 0.0017, p99 0.0135; passes;
+- `shexp_gate_off`: 94 positions, mean 0.128, p99 1.76; fails.
+
+### 22.9 The close's panel review and two faults (2026-10-24)
+
+**Panels A (correctness), B (architecture), C (numerics and performance), on the FN diff against main.**
+
+| Finding | Disposition |
+|---|---|
+| B (blocker): `placement.budget` imported `placement.lfu`'s modules (CI's import contracts) | deleted (e02053ae), with the other dropped features below |
+| B: dropped features still shipped as off-by-default flags (AGENTS.md) | deleted (e02053ae): `placement.budget@1`; `lfu.fill` / `lfu.fill_every` and LFU's budget / gain terms in `k_resolve`; F5b's `moe.cpu_admit` with the resolve's deferred lists and the store's deferred-copy stream (`moe.later_copy`). The CPU share itself stays. The record of what was tried stays here |
+| B: FN's core at +49, not +47 (19ac3213's two lines uncounted); `ActivationLender` a fourth seam | §1 item 8 amended, §22.2 and §23.6 corrected; no FN core line served a dropped feature. The lead reports the overshoot to the owner |
+| B: FN's kernel tests lacked `l0`; acceptance 3's L0 / memcheck on sm_89 and sm_120 unrecorded | marked; `test_qsa_kernels` and `test_hc_ple_kernels` 17 passed, `memcheck_fn_kernels` 0 errors on the RTX 4090 and 5090 |
+| B: the tiny-model proof skips silently in the locked env | a warning naming the environment and the command; release §22's checks list it |
+| B, C: GPU tests failing on a fresh cache (`NotBuilt`) | one conftest fixture builds the extensions a module lists in `PREBUILT` |
+| B: README, judge/README, record inaccuracies | corrected (split GGUF files, `models.qwen4_exp`, `--floor <floor>...`, §21.17's superseded items, §23.4's script, §23.8's 48.4%) |
+| A: ggml's SwiGLU after an unfused mmq and the slot scales touched −1 entries' rows (latent) | they skip them (51c0d8b8); tests |
+| A: `linear_rows` assumed a dense weight | reads the row stride, refuses non-dense rows (a439b288) |
+| C: the 4-row mmvq blocks read past a matrix of rows not a multiple of 4 | 2 rows per block then (vendor.patch, 51c0d8b8) |
+| C: loose L0s | `linear_rows`: within one bf16 ulp of float64, odd widths, rows independent of the call; GDN: per-token rows of several tokens on views |
+| C: gate (c)'s MTP bar; no full-model check of the final tree's verify path | §22.8; the final tree's gates below |
+| C: the mmvq floor judged no scored position | §22.7 |
+| C: §23's statistics — the run, not the prompt, is the unit | accepted: per-round effects below; the run is the unit from here; D11 on the final tree arbitrates the settings whose benefit held in one round |
+
+**Two faults found by the final tree's gates on the RTX 5090 (IQ3_S), one cause.**
+- **What failed:**
+  - `exact.py` at 64 sequences ran out of memory inside GDN's chunked rule in a prompt step.
+  - Gate (c)'s first pass (2 sequences, 8K reference steps) died of an illegal memory access, twice.
+- **The cause: C (585c1862).** It sub-chunked GDN's chunked rule only for a one-row step, the one the startup profile
+  measures. A step holding two prompts' chunks ran in one call and took 2.7× the temporaries: 358 against 133 MiB per
+  call at 4K. So the reserve was overrun whenever two sequences prefill in one step. Past it at 0.985, what failed was
+  whatever needed device memory next:
+  - torch's allocator (`exact.py`);
+  - an illegal address;
+  - in one variant, ggml's `cudaFuncSetAttribute` out of memory (kernel modules load lazily).
+- **Bisected on the 5090** (IQ3_S, `fin_off`, 2 sequences, gate (c)'s first pass alone:
+  `spikes/fn7/prefill_pass.py`):
+
+  | Tree, setting | Result |
+  |---|---|
+  | f48159c6, 8K steps | illegal address, 2 of 2 runs |
+  | f48159c6, `CUDA_LAUNCH_BLOCKING=1` | passes |
+  | f48159c6, 5K steps (the deployment's) | passes |
+  | f48159c6, `--memory-fraction 0.9` | passes |
+  | f48159c6, `ffn.fork=off` | passes |
+  | f48159c6, `moe.pipeline=1` | passes |
+  | f48159c6 + a stream-ordering change in `std.ffn` (suspected, not kept) | fails: ggml's launch out of memory; once passes |
+  | d2c759c8 (the fix), 8K steps | passes |
+  | d2c759c8, `exact.py` at 64 sequences | completes |
+
+  Every passing setting lowers the pressure.
+- **§23.9's "unspecified launch failure" (b04066a9, the 5090's 32K verify under nsys) was most likely this cause:**
+  the same card at 0.985, a failure in a kernel launch with no out-of-memory error, and a tree with C's one-row
+  sub-chunks. It did not recur in three runs on 0060f1df, whose steps there were one row. The failure is silent by
+  nature — the overrun shows in whatever needs device memory next — so it gets two guards:
+  - **`plugins/tests/test_reserve.py`:** every step of a tiny Qwen3.5 on the GPU kernels must fit the profiled reserve,
+    across step shapes (one row with a tail, several prompts' rows, prefill beside decode rows, a 1-token tail). On
+    f48159c6 its several-rows step took 54.0 MB against a 32.0 MB reserve; with the fix 23.5 MB. Test-only.
+  - **Kernels first loaded after the profile need device memory then** (§23.6: ≈ 10 MiB on the first requests, beyond
+    the ≈ 88 MiB of modules the profiled step loads). The slack `--memory-fraction` leaves (the free memory after
+    startup less the reserve) must hold them. It is measured on the final tree (`spikes/fn7/outside.py`, both cards)
+    against that slack, in the final gates.
+- **The fix (d2c759c8):** a step past `SUB_TOKENS` runs row by row, each row in sub-chunks, with one row's state at a
+  time. It is bitwise one call (tested with several rows and snapshots). A two-row step's peak is now the one-row
+  step's (130.3 MiB at 4K, tested). A sub-chunk's plan is always chunked: a 1-token tail had taken the decode plan
+  and a host sync.
+- **Also seen:** the 5080's gate (c) died of SIGBUS on the node where every 5080 run so far had landed. Its
+  `exact.py` ran clean (run-identical ×3, cross-placement identical, the plant differs). Later runs exclude the node.
+
+**§23's effects by round** (panel C's split of the paired runs; round 0 / round 1).
+- **In both rounds:**
+  - THP: +0.8–1.3% each.
+  - Fix 1, MTP: +5.5 / +5.1%.
+  - Fix 5, MTP: 5080 +1.0 / +1.0%, 5090 +1.3 / +0.7%.
+  - C on the 5090's MTP rows: +0.45 / +0.45%.
+- **In one round only** (the other run shifted as a whole by 1–2.5%):
+  - C + loan, drafting-off decode: 5080 +2.1–2.5 / +0.0–0.5%, 5090 +2.3–2.5 / +0.2–0.3%.
+  - The 5080's MTP 1K under C + loan: +0.03 / −1.12%. The loan margin's "−0.5 ± 0.2" is not established.
+  - 0.99's drafting-off decode: +0.1–0.2 / −2.2–2.6%.
+  - Fix 5 on the 5090's drafting-off prefill.
+  - Fix 1's drafting-off loss: 0.0 / −1.0%.
+- **Shipped settings resting on one round** (the loan margin 2.0, fix 5's prefill) are arbitrated by D11 on the final
+  tree: a gated row below its bar with one of them a plausible cause is A/B'd in the same allocation and reverted if it
+  does not hold.
 
 ## 23. FN's speed round, reopened (the owner's ruling, 2026-10-24: the bars in tok/s)
 
@@ -3728,7 +3845,7 @@ check, F 8 or more prompts per MTP row. Locks and propagation wait for this roun
 - **The 5090 at `--memory-fraction 0.99`** (C's tree, MTP deployment, 1 sequence): experts cached **48.7%**
   against 48.4% at 0.985. Free after startup 1.09 GB, against the step's segments of 0.86 GB plus the graphs' pool:
   0.99 now fits with ≈ 0.2 GB to spare. To bench (§23.7).
-- **The 5080's loan** (`loan_probe5.py`, both deployments, the bench's order: warm-up, 1K, 4K, 6K, 32K prompts):
+- **The 5080's loan** (`spikes/fn7/loan_probe.py` with these prompt lengths, both deployments, the bench's order: warm-up, 1K, 4K, 6K, 32K prompts):
   - the loan's pool segments per lending step: 230–270 MiB at 1K, 530 MiB at 2K, **1,030 MiB at 4K** against a
     616 MiB live peak: **1.6–1.75×** the peak in proportion to the step's tokens (§21.12 measured 2.35–2.74× before
     168562e);
@@ -3769,7 +3886,7 @@ are 1 + a₁ + a₁a₂ + a₁a₂a₃:
 
 - Strata copies at 48–50.6 GB/s busy (nsys, §21.6): its host arenas are THP-backed (§21.1). Holon's gather was
   already at 49 GB/s outside the engine; over 4 KiB pages its DMA was the slower path.
-- **Shipped (a7a5fdfc, core +1 code line: FN at +47 of 47):** `platform.host_memory` asks `MADV_HUGEPAGE` before
+- **Shipped (a7a5fdfc, core +1 code line: FN at +49, counted then as +47: §1 item 8):** `platform.host_memory` asks `MADV_HUGEPAGE` before
   page-locking. Zero-copy gathers gain 3–4% and DMA 13%. The 5090's pool page-locks in ≈ 5 s, not 21. Where the
   kernel cannot find huge pages it falls back to small ones. The old note in `host_memory` (2–8 s per GiB on the
   development host, from compaction) no longer holds there: 0.14 s per GiB with THP, 0.32 without.
@@ -3796,7 +3913,7 @@ a stack of 0 bytes, after the plan's 1K, 4K and 32K prompts and a sampled reques
   5080.** The frames are Triton spills, which on the A5000 are `hc_triton`'s `_down_u` and `_mix_dot` (248–752 B);
   without them it would free all 254 MiB.
 - **Not built.** It takes 3–4 core lines (a `cuCtxSetLimit` on the engine's device, beside `configure_allocator`), and
-  FN's core is at +47 of 47. A kernel first launched after startup with a larger frame would grow it from the slack.
+  FN's core is at +49 (§1 item 8). A kernel first launched after startup with a larger frame would grow it from the slack.
   This one is the lead's call.
 
 ### 23.7 F and the round's bench: 8 prompts per row, the ship rule per item
@@ -4053,7 +4170,8 @@ before the fixes, fix 1 as first written, and fixes 1 and 2 as shipped. Fix 3 th
 - **What is left at 4K and 32K is miss serving** (the table above):
   - Holon fetches every miss over PCIe, 215–294 MiB per pass, which is 4.7–6.4 ms on the critical path.
   - Strata serves two thirds of its misses on its CPU beside the GPU, and its GPU waits 3.1–3.9 ms.
-  - Behind that is the cache share: Holon caches 48.4% of the 5090's experts against Strata's 51.6% (§23.1).
+  - Behind that is the cache share: Holon caches 48.4% of the 5090's experts against Strata's 51.6% (§23.4, §22.7;
+    §23.1's 47.9% was the tree before C).
 - **The lead's call (2026-10-24): rows at the bar are enough; the locks go ahead.** If a later allocation reads an
   MTP row below 1.0, the next lever is partial lending (core lines past the budget, for the owner then). The levers
   there are §21.17's structural ones:
@@ -4085,7 +4203,8 @@ tree (0060f1df: fixes 1, 2, 3 and 5) was checked for it:
   - sm_86 (A5000): 386 passed, 11 skipped (sm_90+ and Blackwell-only cases);
   - sm_120 (5090): 402 passed, 1 skipped;
   - sm_89 (4090): `test_triton_fp8` passed, `linear_rows@1` included.
-- **Not reproduced.** It was seen once, on the pre-fix tree b04066a9.
+- **Not reproduced here.** It was seen once, on the pre-fix tree b04066a9. *Superseded: §22.9 traces it to a reserve
+  overrun (most likely), found by the final tree's gates.*
 - **The bar cards' model copies are now checked:** each node-local shard is checked against its source's size and
-  full BLAKE2b digest, and re-copied on a mismatch. Two nodes' copies had been corrupt at the right size (§23.8's bus
-  errors).
+  full BLAKE2b digest, and re-copied on a mismatch. Two nodes' copies had been corrupt at the right size (they died
+  of bus errors in §23.8's profile steps).
