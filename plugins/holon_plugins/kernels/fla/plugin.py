@@ -11,6 +11,9 @@ gathered into a scratch (zeros without has_init) and the final states scattered 
 unit). `plan` builds the chunk indices, offsets and snapshot rows on the host, so no call syncs; a decode handle
 depends on the row count only and its tensors belong to the instance, so decode calls capture into CUDA graphs and
 replay for any inputs of that shape.
+A step of one row with more than `SUB_TOKENS` tokens runs the chunked kernel in sub-chunks of `SUB_TOKENS` (whole
+64-token chunks), each from the state the one before left: the same chunks in the same order, so the same bits
+(tested), at a quarter of the temporaries — the largest part of a prompt step's activation peak (FN §23.3).
 
 Also `gdn_rewind@1` (`rewind.py`, ours): a verify step's rewind glue for every GDN layer in one launch (D5)."""
 from __future__ import annotations
@@ -27,6 +30,7 @@ from .vendor import chunk_gated_delta_rule, fused_sigmoid_gating_delta_rule_upda
 from .vendor.utils import FLA_CHUNK_SIZE
 
 OP, REWIND = "gated_delta_rule", "gdn_rewind"
+SUB_TOKENS = 1024                     # a one-row step's sub-chunk (a multiple of FLA_CHUNK_SIZE)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -38,6 +42,7 @@ class _Handle:
     chunk_offsets: torch.Tensor | None    # chunked: each row's first chunk
     live: torch.Tensor | None             # chunked: the rows with tokens, when some row has none
     snap: tuple[torch.Tensor, torch.Tensor] | None = None   # chunked: per live row, payload unit and chunk (-1: none)
+    subs: tuple | None = None             # one row: per sub-chunk (first token, tokens, its handle)
 
 
 def _to_device(values: list, device: torch.device) -> torch.Tensor:
@@ -77,9 +82,19 @@ class GatedDeltaRule:
             at = {row: (unit, offset // FLA_CHUNK_SIZE) for row, offset, unit in snapshots}
             per = [at.get(r, (-1, -1)) for r in rows]
             snap = (_to_device([u for u, _ in per], self.device), _to_device([c for _, c in per], self.device))
+        subs = None
+        if len(live) == 1 and live[0] > SUB_TOKENS:          # one row: in sub-chunks
+            chunk, unit = (snapshots[0][1] // FLA_CHUNK_SIZE, snapshots[0][2]) if snapshots else (-1, -1)
+            subs = []
+            for s0 in range(0, live[0], SUB_TOKENS):
+                tokens, c0 = min(live[0], s0 + SUB_TOKENS) - s0, s0 // FLA_CHUNK_SIZE
+                inner = [(0, (chunk - c0) * FLA_CHUNK_SIZE, unit)] if 0 < chunk - c0 < -(-tokens // FLA_CHUNK_SIZE) \
+                    else []                                   # its snapshot inside this sub-chunk, or …
+                subs.append((s0, tokens, self.plan([tokens], inner), unit if chunk == c0 else None))   # … at its start
+            subs = tuple(subs)
         return _Handle(False, sum(live), _to_device([0, *itertools.accumulate(live)], self.device),
                        _to_device(indices, self.device), _to_device([0, *itertools.accumulate(chunks)], self.device),
-                       None if len(rows) == n else _to_device(rows, self.device), snap)
+                       None if len(rows) == n else _to_device(rows, self.device), snap, subs)
 
     @torch.no_grad()
     def __call__(self, h: _Handle, q, k, v, a, b, a_log, dt_bias, state, slots, has_init, snapshot=None,
@@ -108,15 +123,18 @@ class GatedDeltaRule:
         g = -a_log.float().exp() * F.softplus(a.float() + dt_bias.float())
         beta = torch.sigmoid(b.float()).to(v.dtype)      # the chunk kernels' operand dtype (as vLLM and HF feed it)
         o = torch.empty(v.shape, dtype=v.dtype, device=v.device)
-        snap = None
-        if h.snap is not None:
-            if snapshot is None or not snapshot.is_contiguous() or snapshot.dtype != torch.float32:
-                raise ValueError("a plan with snapshots needs a contiguous f32 payload view to store them in")
-            snap = (snapshot, *h.snap)
-        _, final = chunk_gated_delta_rule(
-            q[None], k[None], v[None], g[None], beta[None], initial_state=h0, output_final_state=True,
-            cu_seqlens=h.cu_seqlens, chunk_indices=h.chunk_indices, chunk_offsets=h.chunk_offsets,
-            use_qk_l2norm_in_kernel=True, core_attn_out=o[None], v_head_tiled=self.tiled, snapshot=snap)
+        if h.snap is not None and (snapshot is None or not snapshot.is_contiguous() or snapshot.dtype != torch.float32):
+            raise ValueError("a plan with snapshots needs a contiguous f32 payload view to store them in")
+        final = h0
+        for s0, tokens, sub, at_start in h.subs or ((0, h.tokens, h, None),):   # (one row: its sub-chunks in turn)
+            if at_start is not None:                   # its snapshot at this sub-chunk's start: the state carried
+                snapshot[at_start].copy_(final[0])
+            part = slice(s0, s0 + tokens)
+            _, final = chunk_gated_delta_rule(
+                q[None, part], k[None, part], v[None, part], g[None, part], beta[None, part], initial_state=final,
+                output_final_state=True, cu_seqlens=sub.cu_seqlens, chunk_indices=sub.chunk_indices,
+                chunk_offsets=sub.chunk_offsets, use_qk_l2norm_in_kernel=True, core_attn_out=o[None, part],
+                v_head_tiled=self.tiled, snapshot=None if sub.snap is None else (snapshot, *sub.snap))
         state.index_copy_(0, units, final)
         return o
 

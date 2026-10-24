@@ -506,6 +506,30 @@ def test_a_snapshot_is_the_final_state_of_a_split_there(order):
         assert not torch.equal(payload[unit], split[slots[row]].bfloat16().float())   # plant: fla's bf16 `h`
 
 
+@pytest.mark.parametrize("snap", [None, 384, 512, 640])
+def test_one_row_in_sub_chunks_is_one_call(snap, monkeypatch):
+    """A one-row step past SUB_TOKENS runs in sub-chunks, each from the state the one before left (FN §23.3): its
+    outputs, final state and snapshot — inside a sub-chunk (384, 640) or at one's start (512) — are bitwise one call's
+    (SUB_TOKENS 256 here: 1,100 tokens in five)."""
+    from holon_plugins.kernels.fla import plugin as fla
+    hk, hv, d = SHAPES["qwen3.8-27b"]
+    lens, init, slots = [1100], [True], [2]
+    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(1100, hk, hv, d), gates(hv)
+    pool, warm = warm_states(x, g, "grouped", UNITS)
+    pool[2] = warm
+    snaps = [(0, snap, 1)] if snap else []
+    runs = []
+    for sub in (1 << 20, 256):
+        monkeypatch.setattr(fla, "SUB_TOKENS", sub)
+        state, payload = pool.clone(), torch.full((2, hv, d, d), float("nan"), device="cuda")
+        runs.append((_call(kernel, x, g, state, lens, init, slots, snaps, payload), state, payload))
+    assert kernel.plan(lens, snaps).subs is not None and len(kernel.plan(lens, snaps).subs) == 5
+    (o0, s0, p0), (o1, s1, p1) = runs
+    assert torch.equal(o0, o1) and torch.equal(s0.nan_to_num(), s1.nan_to_num())       # (untouched units: NaN)
+    assert torch.equal(p0.nan_to_num(), p1.nan_to_num())
+    assert snap is None or not p1[1].isnan().any()
+
+
 def test_snapshots_must_fall_inside_their_row_on_a_chunk():
     kernel = gdn("small", "grouped")
     for bad in [(0, 0, 0), (0, 32, 0), (0, 192, 0), (1, 64, 0)]:   # chunk 0, off a chunk, past the end, a 0-token row

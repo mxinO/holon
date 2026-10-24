@@ -21,6 +21,8 @@ PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@
 
 Skips without a GPU.
 """
+from unittest import mock
+
 import pytest
 import torch
 from holon.core.build import BuildContext
@@ -123,6 +125,15 @@ def test_hc_prefill_bf16x3():
             _check(x, x_ref, torch.bfloat16, width, f"mix x, {what}")
             _check(w, w_ref, torch.float32, width, f"mix w, {what}")
             _check(ours, r_ref, torch.float32, 1, f"mix r, {what}")
+    # its passes of PREFILL_ROWS_X3 rows (whole `_mm3` row tiles): the same bits as one pass
+    from holon_plugins.kernels.hc_triton import kernel as hc_kernel
+    r = (torch.randn(300, width, generator=g) * 2).cuda()
+    outs = []
+    for rows in (128, 4096):
+        with mock.patch.object(hc_kernel, "PREFILL_ROWS_X3", rows):
+            ours = r.clone()
+            outs.append((*mix(ours, *weights, None, None), ours))
+    assert all(torch.equal(a, b) for a, b in zip(*outs, strict=True))
 
 
 @pytest.mark.parametrize("warps", [4, 8])

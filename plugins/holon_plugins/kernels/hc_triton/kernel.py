@@ -12,7 +12,8 @@ import triton
 import triton.language as tl
 
 BM, BN, BK = 16, 64, 64          # token, output and reduction tiles (`_down_sum`'s, and the hidden size's multiple)
-PREFILL_ROWS = 4096               # prefill: rows per pass (its float32 scratch: 2 × rows × S·H)
+PREFILL_ROWS = 4096               # prefill: rows per pass (its float32 scratch: 2 × rows × S·H) — under bf16x3
+PREFILL_ROWS_X3 = 1024           # 1,024 (`_mm3`'s products are per row tile and K order: whole tiles, the same bits)
 # Decode and verify steps (at most GEMV_ROWS tokens) run GEMV-shaped kernels, `_down_gemv` over one (stream, K chunk)
 # with its weight tile held while the rows loop. A one-token step takes two launches: every program of `_mix_gemv`
 # sums the partials in a fixed order and a pending combine rides along (`rn`). At 2-16 tokens `_down_sum` sums once
@@ -356,8 +357,9 @@ def hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, streams: int, eps: floa
     w_down = torch.cat([cast(down), cast(inj)]) if inject is not None else cast(down)   # [NOUT, S·H]
     w_down = w_down.view(nout, streams, hidden).permute(1, 2, 0)                   # [S, H, NOUT]
     w_up = cast(up).t()                                                            # [rank, S·H]
-    for c0 in range(0, t, PREFILL_ROWS):                       # the scratch bounded at PREFILL_ROWS rows
-        c1 = min(t, c0 + PREFILL_ROWS)
+    rows = PREFILL_ROWS_X3 if x3 else PREFILL_ROWS
+    for c0 in range(0, t, rows):                               # the scratch bounded at `rows` rows
+        c1 = min(t, c0 + rows)
         n = c1 - c0
         rc, xc = r[c0:c1], x[c0:c1]
         yc, wc = (y[c0:c1], w_prev[c0:c1]) if pending else (y, w_prev)

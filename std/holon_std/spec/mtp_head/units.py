@@ -96,5 +96,5 @@ class MTPHCHead(nn.Module):
     def _input(self, embedded: torch.Tensor, r: torch.Tensor) -> torch.Tensor:
         t, h = r.shape[0], self.hidden
         e = self.fc_embedding(self.enorm(embedded.to(self.dtype)))
-        g = self.fc_hidden(self.hnorm(r.to(self.dtype)).view(t * self.n, h)).view(t, self.n, h)
-        return (g.float() + e.float()[:, None]).view(t, self.n * h)
+        g = self.fc_hidden(self.hnorm(r.to(self.dtype)).view(t * self.n, h)).view(t, self.n, h).float()
+        return g.add_(e.float()[:, None]).view(t, self.n * h)          # (in place: one [T, n·H] float32, not two)
