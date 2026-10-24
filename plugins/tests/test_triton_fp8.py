@@ -11,7 +11,7 @@ emulations, on random e4m3 bytes (every finite code, subnormals and ±448 includ
   bf16 activations, T ≤ 16) or W8A8 (activations as `fp8_act`, T > 16) in f64, and the call counted on that path
   and mode. Below sm_89 only the decode path runs (FP8 there is v1).
 - CUDA graphs replay bitwise like eager calls on both paths, and calls are run-to-run identical.
-- `linear_rows@1` (bf16, 2 to 16 rows; a GDN a/b projection's and a shared expert gate's shapes): `l0.check` against
+- `linear_rows@1` (bf16, 2 to 16 rows; a GDN a/b projection's shape and the narrowest served): `l0.check` against
   its f64 product, run-to-run identical, and a graph replay bitwise like the eager call.
 """
 import pytest
@@ -131,7 +131,7 @@ def test_graphs_and_run_to_run(ctx):
         assert torch.equal(captured, lin(x, parts))
 
 
-@pytest.mark.parametrize("out", [64, 1])
+@pytest.mark.parametrize("out", [96, 16])
 def test_linear_rows(out):
     k, rows = 2560, LinearRows(None, **{"in": 2560, "out": out, "dtype": "bfloat16"})
     w = (torch.randn(out, k, generator=torch.Generator().manual_seed(out)) / k ** 0.5).bfloat16().cuda()

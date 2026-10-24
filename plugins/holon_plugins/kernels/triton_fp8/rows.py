@@ -9,7 +9,7 @@ import triton
 import triton.language as tl
 
 BK = 512
-OUT_MAX = 256           # narrow outputs only: cuBLAS's few-row GEMMs are fine past them
+OUT_MIN, OUT_MAX = 16, 256      # narrow outputs: cuBLAS's few-row GEMMs are fine past them, its GEMV below them
 
 
 @triton.jit
@@ -29,6 +29,6 @@ def linear_rows(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
     m, k = x.shape
     n = w.shape[0]
     y = torch.empty(m, n, dtype=x.dtype, device=x.device)
-    bn = 2 if n >= 32 else 1
+    bn = 2
     _rows[(triton.cdiv(n, bn),)](x.contiguous(), w, y, m, n, k, triton.next_power_of_2(m), bn, BK, num_warps=4)
     return y

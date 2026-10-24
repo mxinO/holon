@@ -3866,6 +3866,7 @@ fewer per GDN layer in every decode and verify step, and three in each rewind re
 
 **Fix 3: `linear_rows@1`, a dense weight's matmul over a few rows (573063ac; std.ops contract, kernels.triton_fp8;
 not bitwise, L0).** cuBLAS runs the GDN a/b projection at 4 rows as a split-K GEMM of ≈ 15 µs; its one-row GEMV takes
-≈ 3. A Triton kernel serves 2–16 rows of narrow outputs (≤ 256: the a/b projection, the shared expert's gate), with
+≈ 3. A Triton kernel serves 2–16 rows of outputs from 16 to 256 (the a/b projection; the shared expert's one-output
+gate stays on cuBLAS's GEMV, which its kernel did not beat: 5.2 µs against 3.0), with
 float32 sums in a fixed order. L0 against the f64 product, run-to-run and graph replay identical. On the A5000 in
 a graph: 6.2 µs against cuBLAS's 14.7.

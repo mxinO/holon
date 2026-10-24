@@ -71,6 +71,6 @@ class Plugin:
                                         props=frozenset({"graph_safe", "deterministic"}), config={"act": ACT}))
         regs.kernels.add("linear_rows", KernelSpec(
             op="linear_rows", provider="kernels.triton_fp8", impl=LinearRows, requires=Constraint(sm_min=80),
-            supports=lambda f: f["in"] % rows.BK == 0 and f["out"] <= rows.OUT_MAX
+            supports=lambda f: f["in"] % rows.BK == 0 and rows.OUT_MIN <= f["out"] <= rows.OUT_MAX
             and f["dtype"] in ("bfloat16", "float16"),
             props=frozenset({"graph_safe", "deterministic"})))
