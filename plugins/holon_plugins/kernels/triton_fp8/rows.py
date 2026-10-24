@@ -13,22 +13,26 @@ OUT_MIN, OUT_MAX = 16, 256      # narrow outputs: cuBLAS's few-row GEMMs are fin
 
 
 @triton.jit
-def _rows(x, w, y, M, N, K: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
+def _rows(x, w, y, M, N, SW, K: tl.constexpr, BM: tl.constexpr, BN: tl.constexpr, BK: tl.constexpr):
     n = tl.program_id(0) * BN + tl.arange(0, BN)
     m = tl.arange(0, BM)
     acc = tl.zeros([BM, BN], dtype=tl.float32)
     for k0 in range(0, K, BK):
         k = k0 + tl.arange(0, BK)
         xb = tl.load(x + m[:, None] * K + k[None, :], mask=(m < M)[:, None], other=0).to(tl.float32)
-        wb = tl.load(w + n[:, None] * K + k[None, :], mask=(n < N)[:, None], other=0).to(tl.float32)
+        wb = tl.load(w + n[:, None] * SW + k[None, :], mask=(n < N)[:, None], other=0).to(tl.float32)
         acc += tl.sum(xb[:, None, :] * wb[None, :, :], axis=2)
     tl.store(y + m[:, None] * N + n[None, :], acc.to(y.dtype.element_ty), mask=(m < M)[:, None] & (n < N)[None, :])
 
 
 def linear_rows(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+    """`w` [out, in] read with its row stride (e.g. rows of a wider merged weight); its elements must be dense."""
     m, k = x.shape
     n = w.shape[0]
+    if w.shape[1] != k or w.stride(1) != 1:
+        raise ValueError(f"linear_rows: weight {tuple(w.shape)} strides {w.stride()}: [out, {k}] with dense rows")
     y = torch.empty(m, n, dtype=x.dtype, device=x.device)
     bn = 2
-    _rows[(triton.cdiv(n, bn),)](x.contiguous(), w, y, m, n, k, triton.next_power_of_2(m), bn, BK, num_warps=4)
+    _rows[(triton.cdiv(n, bn),)](x.contiguous(), w, y, m, n, w.stride(0), k, triton.next_power_of_2(m), bn, BK,
+                                 num_warps=4)
     return y
