@@ -11,11 +11,11 @@ gathered into a scratch (zeros without has_init) and the final states scattered 
 unit). `plan` builds the chunk indices, offsets and snapshot rows on the host, so no call syncs; a decode handle
 depends on the row count only and its tensors belong to the instance, so decode calls capture into CUDA graphs and
 replay for any inputs of that shape.
-A step of more than `SUB_TOKENS` tokens runs the chunked kernel row by row, each row in sub-chunks of at most
-`SUB_TOKENS` (whole 64-token chunks), each from the state the one before left: the same chunks in the same order, so
-the same bits (tested), at a quarter of the temporaries — the largest part of a prompt step's activation peak
-(FN §23.3) — whatever the step's rows (the startup profile measures a one-row step; two prompts' chunks in one step
-must not need more).
+A step of more than `SUB_TOKENS` tokens runs the chunked kernel in calls of at most `SUB_TOKENS` tokens and
+`SUB_TOKENS / 64` chunks: consecutive whole rows packed into one call, a longer row in sub-chunks (whole 64-token
+chunks), each from the state the one before left — the same chunks in the same order, so the same bits (tested), at
+a quarter of the temporaries, the largest part of a prompt step's activation peak (FN §23.3), whatever the step's rows
+(the startup profile measures a one-row step; two prompts' chunks in one step must not need more, §22.9).
 
 Also `gdn_rewind@1` (`rewind.py`, ours): a verify step's rewind glue for every GDN layer in one launch (D5)."""
 from __future__ import annotations
@@ -44,8 +44,8 @@ class _Handle:
     chunk_offsets: torch.Tensor | None    # chunked: each row's first chunk
     live: torch.Tensor | None             # chunked: the rows with tokens, when some row has none
     snap: tuple[torch.Tensor, torch.Tensor] | None = None   # chunked: per live row, payload unit and chunk (-1: none)
-    subs: tuple | None = None             # a step past SUB_TOKENS: per sub-chunk (live row, first token, tokens, its
-    #                                       handle, the payload unit of a snapshot at its start)
+    subs: tuple | None = None             # a step past SUB_TOKENS: per call (its live rows [i0, i1), first token,
+    #                                       tokens, handle, a snapshot's unit at its start, starts / ends its rows)
 
 
 def _to_device(values: list, device: torch.device) -> torch.Tensor:
@@ -89,18 +89,29 @@ class GatedDeltaRule:
             per = [at.get(r, (-1, -1)) for r in rows]
             snap = (_to_device([u for u, _ in per], self.device), _to_device([c for _, c in per], self.device))
         subs = None
-        if not sub and sum(live) > SUB_TOKENS:             # row by row, each in sub-chunks
-            at = {row: (offset // FLA_CHUNK_SIZE, unit) for row, offset, unit in snapshots}
-            subs, first = [], 0
-            for i, (row, t) in enumerate(zip(rows, live, strict=True)):
-                chunk, unit = at.get(row, (-1, -1))
-                for s0 in range(0, t, SUB_TOKENS):
-                    tokens, c0 = min(t, s0 + SUB_TOKENS) - s0, s0 // FLA_CHUNK_SIZE
-                    inner = [(0, (chunk - c0) * FLA_CHUNK_SIZE, unit)] \
-                        if 0 < chunk - c0 < -(-tokens // FLA_CHUNK_SIZE) else []   # its snapshot inside it, or …
-                    subs.append((i, first + s0, tokens, self.plan([tokens], inner, sub=True),
-                                 unit if chunk == c0 else None))                    # … at its start
-                first += t
+        if not sub and sum(live) > SUB_TOKENS:             # in calls of at most SUB_TOKENS tokens
+            at = {row: (offset, unit) for row, offset, unit in snapshots}
+            subs, first, i, most = [], 0, 0, SUB_TOKENS // FLA_CHUNK_SIZE
+            while i < len(rows):
+                t = live[i]
+                if t > SUB_TOKENS:                         # a long row: in sub-chunks, its state carried
+                    offset, unit = at.get(rows[i], (-1, -1))
+                    chunk = offset // FLA_CHUNK_SIZE if offset >= 0 else -1
+                    for s0 in range(0, t, SUB_TOKENS):
+                        tokens, c0 = min(t, s0 + SUB_TOKENS) - s0, s0 // FLA_CHUNK_SIZE
+                        inner = [(0, (chunk - c0) * FLA_CHUNK_SIZE, unit)] \
+                            if 0 < chunk - c0 < -(-tokens // FLA_CHUNK_SIZE) else []   # its snapshot inside it, or …
+                        subs.append((i, i + 1, first + s0, tokens, self.plan([tokens], inner, sub=True),
+                                     unit if chunk == c0 else None, s0 == 0, s0 + tokens == t))   # … at its start
+                    first, i = first + t, i + 1
+                    continue
+                j, packed, calls = i, 0, 0                # whole rows packed while the call stays that small
+                while j < len(rows) and live[j] <= SUB_TOKENS and packed + live[j] <= SUB_TOKENS and \
+                        calls + -(-live[j] // FLA_CHUNK_SIZE) <= most:
+                    packed, calls, j = packed + live[j], calls + -(-live[j] // FLA_CHUNK_SIZE), j + 1
+                inner = [(r - i, *at[rows[r]]) for r in range(i, j) if rows[r] in at]
+                subs.append((i, j, first, packed, self.plan(live[i:j], inner, sub=True), None, True, True))
+                first, i = first + packed, j
             subs = tuple(subs)
         return _Handle(False, sum(live), _to_device([0, *itertools.accumulate(live)], self.device),
                        _to_device(indices, self.device), _to_device([0, *itertools.accumulate(chunks)], self.device),
@@ -143,12 +154,10 @@ class GatedDeltaRule:
                 snapshot=None if h.snap is None else (snapshot, *h.snap))
             state.index_copy_(0, units, final)
             return o
-        row = cur = None                               # row by row, each in sub-chunks: one row's state at a time
-        for i, s0, tokens, sub, at_start in h.subs:
-            if i != row:
-                if row is not None:
-                    state.index_copy_(0, units[row:row + 1], cur)
-                row, cur = i, state.index_select(0, units[i:i + 1]).masked_fill_(init[i:i + 1], 0.0)
+        cur = None                                     # call by call: whole rows, or one row's sub-chunks in turn
+        for i0, i1, s0, tokens, sub, at_start, starts, ends in h.subs:
+            if starts:                                 # its rows' states (a long row's: carried between its calls)
+                cur = state.index_select(0, units[i0:i1]).masked_fill_(init[i0:i1], 0.0)
             if at_start is not None:                   # its snapshot at this sub-chunk's start: the state carried
                 snapshot[at_start].copy_(cur[0])
             part = slice(s0, s0 + tokens)
@@ -157,7 +166,8 @@ class GatedDeltaRule:
                 output_final_state=True, cu_seqlens=sub.cu_seqlens, chunk_indices=sub.chunk_indices,
                 chunk_offsets=sub.chunk_offsets, use_qk_l2norm_in_kernel=True, core_attn_out=o[None, part],
                 v_head_tiled=self.tiled, snapshot=None if sub.snap is None else (snapshot, *sub.snap))
-        state.index_copy_(0, units[row:row + 1], cur)
+            if ends:
+                state.index_copy_(0, units[i0:i1], cur)
         return o
 
 
