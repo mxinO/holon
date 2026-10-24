@@ -10,11 +10,12 @@ Where each table lives is the deployment's: the plugin option `rows.place` names
 (a dense one is the weight loader's, on the device).
 
 On the SSD (D5's fallback, where a desktop cannot hold the table in RAM) a table stays in its checkpoint file: each
-call's rows are read there, in the graph, by `cpu_task@1`'s copy task on the I/O worker — the call writes each id's
-file offset into its read list (mapped host memory), signals the worker, which reads every row with `O_DIRECT` (the
-row's aligned pages into a bounce buffer: the page cache holds no copy), waits, and gathers the rows it read with the
-same kernel, so the rows are the RAM tier's, byte for byte. A call reads at most `per_token` rows a token of the
-engine's largest step (the read list's size); an I/O error stops the engine at the step's commit."""
+call's rows are read there, in the graph, by `cpu_task@1`'s copy task on the I/O worker — the call sorts its ids,
+writes each distinct one's file offset into its read list (mapped host memory) in file order, signals the worker,
+which reads every row with `O_DIRECT` (the row's aligned pages into a bounce buffer: the page cache holds no copy),
+waits, and gathers the rows it read with the same kernel, so the rows are the RAM tier's, byte for byte. A call
+reads at most `per_token` rows a token of the engine's largest step (the read list's size); an I/O error stops the
+engine at the step's commit."""
 from __future__ import annotations
 
 import os
@@ -117,9 +118,9 @@ class _Reads:
         self.base, self.shape, self.dtype = extent.offset, (-1, *blocks.shape[1:]), blocks.dtype
         name = f"tiered.rows.{rows.name}.ssd"
         lists = [ctx.pool(f"{name}.{part}", unit_bytes=unit, min_units=n, pref_units=n, device="host", mapped=True)
-                 for part, unit, n in (("list", 32, self.width), ("requests", 8, 1 + self.width),
+                 for part, unit, n in (("list", 32, self.width + 1), ("requests", 8, 1 + self.width),
                                        ("rows", self.row, self.width))]
-        if any(p.capacity < n for p, n in zip(lists, (self.width, 1 + self.width, self.width), strict=True)):
+        if any(p.capacity < n for p, n in zip(lists, (self.width + 1, 1 + self.width, self.width), strict=True)):
             raise ValueError(f"std.tiered.rows@1 {rows.name}: host_memory holds no SSD read list of {self.width} rows")
         fd, direct = files._open(extent.path)
         desc = lists[0].view(torch.int64, (lists[0].capacity, 1, 4))[: self.width]
@@ -130,23 +131,27 @@ class _Reads:
         out = lists[2].view(torch.uint8, (lists[2].capacity, self.row))[: self.width]
         self.io = ctx.select_kernel(CPU_TASK, site=f"std.tiered.rows[{rows.name}].io", pool="io").impl(ctx, pool="io")
         self.slot = self.io.bind(self.io.copy([(desc, out, requests)]))
-        self.offsets = lists[0].device_view(torch.int64, (lists[0].capacity, 4))[: self.width, 2]
+        self.offsets = lists[0].device_view(torch.int64, (lists[0].capacity, 4))[: self.width + 1, 2]   # (+ a sink)
         self.n = lists[1].device_view(torch.int32, (lists[1].capacity, 2))[0, :1]
         self.rows = lists[2].device_view(torch.uint8, (lists[2].capacity, self.row))[: self.width]
-        self.index = ctx.static(f"{name}.index", (self.width,), torch.int64)
-        self.index.copy_(torch.arange(self.width))
         ctx.shared(f"{name}.errors", lambda root: _Errors(self.io.errors, rows.name, fd))
 
     def __call__(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """The table of this call's rows (row i id i's) and the ids into it, once the worker has read them."""
+        """The table of this call's distinct rows, in id order, and each id's index into it, once the worker has read
+        them (no host sync: the count goes to the worker in mapped memory)."""
         n = ids.numel()
         if n > self.width:
             raise ValueError(f"std.tiered.rows@1: {n} ids past the SSD read list's {self.width}")
-        self.offsets[:n].copy_((ids.reshape(-1) + self.plant) * self.row + self.base)
-        self.n.fill_(n)
+        flat, order = ids.reshape(-1).sort()
+        first = torch.ones_like(flat, dtype=torch.bool)
+        first[1:] = flat[1:] != flat[:-1]
+        unit = first.long().cumsum(0) - 1                                    # each sorted id's distinct row
+        self.offsets.scatter_(0, torch.where(first, unit, self.width), (flat + self.plant) * self.row + self.base)
+        self.n.copy_(unit[-1:] + 1)
         self.io.signal(self.slot)
         self.io.wait(self.slot)
-        return self.rows[:n].view(self.dtype).view(self.shape), self.index[:n].view(ids.shape)
+        index = torch.empty_like(unit).scatter_(0, order, unit)
+        return self.rows[:n].view(self.dtype).view(self.shape), index.view(ids.shape)
 
 
 class _Errors:
