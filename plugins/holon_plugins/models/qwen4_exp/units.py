@@ -13,8 +13,9 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+import numpy as np
 import torch
-from holon.api import Ref, Slot, StateSpec
+from holon.api import Ref, RowKind, Slot, StateSpec
 from torch import nn
 
 from . import kernels
@@ -53,6 +54,57 @@ class PLEPlanner:
     def prepare_device(self, meta: PLEMeta, ctx) -> None:
         dev = ctx.batch.dev
         meta.has_init = dev.positions[dev.query_start[:-1]] > 0
+
+
+def host_rows(seq: np.ndarray, multipliers: np.ndarray, sizes: np.ndarray, offsets: np.ndarray,
+              heads_per_ngram: int, eos: int) -> np.ndarray:
+    """`qwen4_exp.ple_rows@1` on the host, for one row: `seq` its history (two ids) then its tokens; the rows [T,
+    heads] of its tokens (numpy: int64 products wrap, `%` floors, as the op's)."""
+    seq = np.asarray(seq, np.int64)
+    at = np.arange(len(seq))
+    last = np.maximum.accumulate(np.where(seq == eos, at, -1))          # the last EOS at or before each position
+    before = np.concatenate([[-1], last[:-1]])[2:]                       # … before each token: its window's cut
+    i = at[2:]
+    mixed, out = np.zeros(len(i), np.int64), []
+    for shift in range(len(multipliers)):
+        j = i - shift
+        pred = np.where((j >= 0) & (before < j), seq[np.maximum(j, 0)], eos)
+        mixed = mixed ^ (pred * multipliers[shift])
+        if shift >= 1:                                                   # the (shift + 1)-gram's heads
+            h = slice((shift - 1) * heads_per_ngram, shift * heads_per_ngram)
+            out.append(mixed[:, None] % sizes[h] + offsets[h])
+    return np.concatenate(out, axis=1)
+
+
+class ReadAhead:
+    """D5's read-ahead for a table on the SSD (shared object): before a step of prompt rows only, whose tokens the host
+    has (`host_tokens`) and whose histories it knows — a sequence's start, or the end of the chunk it planned last —,
+    the rows the step's PLE will read, computed on the host and read ahead (`std.tiered.rows@1`'s `prefetch`)."""
+
+    def __init__(self, ple: PLE) -> None:
+        self.ple, self.after = ple, {}          # slot -> (its next position, its last two ids)
+
+    def before_launch(self, plan):
+        table, kinds = self.ple.table, plan.row_kind
+        if not getattr(table, "reads_ahead", False) or kinds is None or not len(plan.slots):
+            return [], []
+        multipliers, sizes, offsets, per = self.ple._host_hashes
+        eos, tokens, rows, at, known = self.ple.eos, plan.host_tokens, [], 0, True
+        prompt = bool((kinds == RowKind.PREFILL).all()) and len(tokens) == int(plan.n_query.sum())
+        for slot, start, n in zip(plan.slots.tolist(), plan.start_upper.tolist(), plan.n_query.tolist(),
+                                  strict=True):
+            mine = tokens[at:at + n].tolist() if prompt else []
+            at += n
+            last = (start, [eos, eos]) if start == 0 else self.after.get(slot)
+            if not prompt or last is None or last[0] != start:
+                known, self.after[slot] = False, None
+                continue
+            seq = last[1] + mine
+            rows.append(host_rows(np.array(seq), multipliers, sizes, offsets, per, eos))
+            self.after[slot] = (start + n, seq[-2:])
+        if known and rows:
+            table.prefetch(np.concatenate(rows).reshape(-1))
+        return [], []
 
 
 class PLE(nn.Module):
@@ -98,6 +150,9 @@ class PLE(nn.Module):
             hashes[1], hashes[2] = torch.tensor(sizes), torch.tensor(offsets)
         self.hashes.copy_(hashes)
         self.ngram, self.eos = ngram, eos
+        self._host_hashes = (np.array(multipliers[:ngram], np.int64), np.array(sizes, np.int64),
+                             np.array(offsets, np.int64), heads_per_ngram)
+        ctx.shared("qwen4_exp.ple.read_ahead", lambda root: ReadAhead(self))
         history, conv = ctx.state(HISTORY, layer), ctx.state(CONV, layer)
         self._state = None if history is None else (history[1], conv[1])
         self._wide: torch.Tensor | None = None       # a wider verify step's C (`rewind` reads it)

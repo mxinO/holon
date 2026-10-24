@@ -52,9 +52,11 @@ def main() -> None:
                 tps.append(a.tokens / (time.perf_counter() - t0))
                 got.append((tokens, [(_list(i), _list(x)) for lp in lps for i, x in zip(lp.top_ids, lp.top,
                                                                                            strict=True)]))
+            reads = [m._ssd for m in e.executor.model.modules() if getattr(m, "_ssd", None) is not None]
+            ahead = [r.ahead[0] for r in reads], [int(r.ahead[1]) for r in reads]
             e.close()
         runs[name] = got
-        out[name] = {"tok_s": [round(x, 2) for x in tps]}
+        out[name] = {"tok_s": [round(x, 2) for x in tps], "read_ahead_calls_matched": ahead}
     out["identical"] = runs["host"] == runs["ssd"]
     if a.plant:
         out["plant_differs"] = runs["plant"] != runs["host"]

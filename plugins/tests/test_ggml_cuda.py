@@ -542,6 +542,8 @@ def test_rows_on_the_ssd_read_what_the_host_holds(ctx, tmp_path):
             static.copy_(torch.randint(0, OUT, (16,), generator=torch.Generator().manual_seed(seed)))
             graph.replay()
             assert same_bits(out, want[static])
+        for ahead in (ids, ids + 1):                     # D5's read-ahead: the step's ids, then other ones (read again)
+            assert table.prefetch(ahead.cpu().numpy()) and same_bits(table(ids), want[ids])
         with mock.patch.object(tiered_rows._Reads, "plant", 1):        # (not the last row: past the file's end)
             assert not same_bits(table(ids[2:]), want[ids[2:]])
         torch.cuda.synchronize()

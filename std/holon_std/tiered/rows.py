@@ -94,6 +94,16 @@ class Rows(nn.Module):
             host.reshape(-1).copy_(blocks.reshape(-1).view(torch.uint8))
         return pool.device_view(torch.uint8, (pool.capacity, row))[: self.vocab].view(blocks.dtype).view(blocks.shape)
 
+    @property
+    def reads_ahead(self) -> bool:
+        """The table is on the SSD: a client that knows a step's ids on the host may `prefetch` them."""
+        return self._ssd is not None
+
+    def prefetch(self, ids: np.ndarray) -> bool:
+        """Before an eager step's launch, its ids (host-computed): their rows read ahead, on this thread; the step's
+        call then reads none it was given (False: nothing read ahead)."""
+        return self._ssd.prefetch(ids) if self._ssd is not None else False
+
     def forward(self, ids: torch.Tensor) -> torch.Tensor:
         if self._kernel is None:
             return nn.functional.embedding(ids, self.weight)
@@ -103,9 +113,36 @@ class Rows(nn.Module):
         return self._kernel(ids, self._table)
 
 
+class _List:
+    """One read list: per row (fd, O_DIRECT, offset, row bytes) in mapped host memory (+ a sink entry), the request
+    table naming its first n rows ([0] = (n the worker reads, n the host read ahead)), the rows read (mapped), its copy
+    task on the I/O worker, and the event after the last call that gathered from it."""
+
+    def __init__(self, ctx, name: str, width: int, row: int, fd: int, direct: bool, io) -> None:
+        pools = [ctx.pool(f"{name}.{part}", unit_bytes=unit, min_units=n, pref_units=n, device="host", mapped=True)
+                 for part, unit, n in (("list", 32, width + 1), ("requests", 8, 1 + width), ("rows", row, width))]
+        if any(p.capacity < n for p, n in zip(pools, (width + 1, 1 + width, width), strict=True)):
+            raise ValueError(f"std.tiered.rows@1 {name}: host_memory holds no SSD read list of {width} rows")
+        self.desc = pools[0].view(torch.int64, (pools[0].capacity, 1, 4))[:width]
+        self.desc[:, 0, 0], self.desc[:, 0, 1], self.desc[:, 0, 3] = fd, int(direct), row
+        self.requests = pools[1].view(torch.int32, (pools[1].capacity, 2))[: 1 + width]
+        self.requests[1:] = torch.arange(width, dtype=torch.int32)[:, None]      # row i into unit i
+        self.requests[0] = 0
+        out = pools[2].view(torch.uint8, (pools[2].capacity, row))[:width]
+        self.task = io.copy([(self.desc, out, self.requests)])
+        self.slot = io.bind(self.task)
+        self.offsets = pools[0].device_view(torch.int64, (pools[0].capacity, 4))[: width + 1, 2]   # (+ the sink)
+        self.n, self.ahead = (pools[1].device_view(torch.int32, (pools[1].capacity, 2))[0, i:i + 1] for i in (0, 1))
+        self.rows = pools[2].device_view(torch.uint8, (pools[2].capacity, row))[:width]
+        self.event: torch.Event | None = None
+
+
 class _Reads:
-    """A table on the SSD: the read list (per row (fd, O_DIRECT, offset, row bytes), in mapped host memory), the request
-    table naming its first n rows, the rows read (mapped), the copy task's slot on the I/O worker."""
+    """A table on the SSD: three read lists — the graphs' (decode and verify steps read in the graph), and two a
+    prompt step's rows may be read into ahead of it, on the host (`prefetch`: D5's read-ahead, the engine loop's
+    thread blocking while the step before runs on the device), alternately. A step read ahead still sorts its ids on
+    the device and compares the distinct rows with the list read: the same, the worker reads nothing; else it reads
+    them (so the rows are the step's whatever the host computed)."""
 
     plant = 0                                   # judge-only (`rows_off_by_one`): rows read this far past each id's
 
@@ -116,25 +153,31 @@ class _Reads:
         tokens = max(o.get("max_step_tokens", 1), o.get("max_seqs", 1) * (1 + o.get("max_draft_tokens", 0)))
         self.width, self.row = rows.per_token * tokens, extent.nbytes // rows.vocab
         self.base, self.shape, self.dtype = extent.offset, (-1, *blocks.shape[1:]), blocks.dtype
+        self.threads = int(o.get("plugins", {}).get("rows.ssd_threads", 16))
         name = f"tiered.rows.{rows.name}.ssd"
-        lists = [ctx.pool(f"{name}.{part}", unit_bytes=unit, min_units=n, pref_units=n, device="host", mapped=True)
-                 for part, unit, n in (("list", 32, self.width + 1), ("requests", 8, 1 + self.width),
-                                       ("rows", self.row, self.width))]
-        if any(p.capacity < n for p, n in zip(lists, (self.width + 1, 1 + self.width, self.width), strict=True)):
-            raise ValueError(f"std.tiered.rows@1 {rows.name}: host_memory holds no SSD read list of {self.width} rows")
         fd, direct = files._open(extent.path)
-        desc = lists[0].view(torch.int64, (lists[0].capacity, 1, 4))[: self.width]
-        desc[:, 0, 0], desc[:, 0, 1], desc[:, 0, 3] = fd, int(direct), self.row
-        requests = lists[1].view(torch.int32, (lists[1].capacity, 2))[: 1 + self.width]
-        requests[1:] = torch.arange(self.width, dtype=torch.int32)[:, None]        # row i into unit i
-        requests[0] = 0
-        out = lists[2].view(torch.uint8, (lists[2].capacity, self.row))[: self.width]
         self.io = ctx.select_kernel(CPU_TASK, site=f"std.tiered.rows[{rows.name}].io", pool="io").impl(ctx, pool="io")
-        self.slot = self.io.bind(self.io.copy([(desc, out, requests)]))
-        self.offsets = lists[0].device_view(torch.int64, (lists[0].capacity, 4))[: self.width + 1, 2]   # (+ a sink)
-        self.n = lists[1].device_view(torch.int32, (lists[1].capacity, 2))[0, :1]
-        self.rows = lists[2].device_view(torch.uint8, (lists[2].capacity, self.row))[: self.width]
+        self.lists = [_List(ctx, f"{name}.{i}", self.width, self.row, fd, direct, self.io) for i in range(3)]
+        self.index = torch.arange(self.width + 1, device=ctx.device)
+        self.turn, self.pending = 0, 0
+        self.ahead = [0, torch.zeros((), dtype=torch.int64, device=ctx.device)]   # calls read ahead, of them matched
         ctx.shared(f"{name}.errors", lambda root: _Errors(self.io.errors, rows.name, fd))
+
+    def prefetch(self, ids: np.ndarray) -> bool:
+        """Read the distinct rows of the next step's ids (host-computed: a prompt step's) into a read-ahead list."""
+        want = np.unique(ids.astype(np.int64))
+        if not 0 < len(want) <= self.width:
+            return False
+        self.turn ^= 1
+        lst = self.lists[1 + self.turn]
+        if lst.event is not None:
+            lst.event.synchronize()              # its last step has gathered from it
+        lst.desc[: len(want), 0, 2] = torch.from_numpy((want + self.plant) * self.row + self.base)
+        lst.requests[0] = len(want)
+        failed = lst.task._task.run(self.threads)        # (the copy task's threads, on this one)
+        lst.requests[0, 1] = -1 if failed else len(want)   # (a failed read: the device reads them again)
+        self.pending = 1 + self.turn
+        return True
 
     def __call__(self, ids: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """The table of this call's distinct rows, in id order, and each id's index into it, once the worker has read
@@ -142,16 +185,31 @@ class _Reads:
         n = ids.numel()
         if n > self.width:
             raise ValueError(f"std.tiered.rows@1: {n} ids past the SSD read list's {self.width}")
+        lst, ahead = self.lists[self.pending], self.pending > 0
+        self.pending = 0
         flat, order = ids.reshape(-1).sort()
         first = torch.ones_like(flat, dtype=torch.bool)
         first[1:] = flat[1:] != flat[:-1]
         unit = first.long().cumsum(0) - 1                                    # each sorted id's distinct row
-        self.offsets.scatter_(0, torch.where(first, unit, self.width), (flat + self.plant) * self.row + self.base)
-        self.n.copy_(unit[-1:] + 1)
-        self.io.signal(self.slot)
-        self.io.wait(self.slot)
+        count = unit[-1:] + 1
+        offsets = (flat + self.plant) * self.row + self.base
+        if ahead:                                # read ahead: the same distinct rows, the worker reads none
+            listed = torch.zeros(self.width + 1, dtype=torch.bool, device=ids.device)
+            listed.scatter_(0, torch.where(first, unit, self.width), lst.offsets.gather(
+                0, torch.where(first, unit, self.width)) == offsets)
+            same = (lst.ahead == count) & (listed[:-1] | (self.index[:-1] >= count)).all()
+            count = torch.where(same, 0, count)
+            self.ahead[0] += 1
+            self.ahead[1] += same.squeeze()
+        lst.offsets.scatter_(0, torch.where(first, unit, self.width), offsets)
+        lst.n.copy_(count)
+        self.io.signal(lst.slot)
+        self.io.wait(lst.slot)
         index = torch.empty_like(unit).scatter_(0, order, unit)
-        return self.rows[:n].view(self.dtype).view(self.shape), index.view(ids.shape)
+        if ahead:
+            lst.event = torch.Event(device=ids.device)
+            lst.event.record()
+        return lst.rows[:n].view(self.dtype).view(self.shape), index.view(ids.shape)
 
 
 class _Errors:

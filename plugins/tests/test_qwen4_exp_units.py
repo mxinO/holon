@@ -110,3 +110,21 @@ def test_an_in_step_checkpoint_is_the_state_a_step_ending_there_leaves():
     history, conv = ple._views(history_payloads, conv_payloads)
     want = _state(ple, 1)
     assert torch.equal(history[0], want[0]) and torch.equal(conv[0], want[1])
+
+
+def test_host_rows_are_the_ops_rows():
+    """D5's read-ahead hashes a prompt row on the host (`units.host_rows`): the rows `qwen4_exp.ple_rows@1`'s oracle
+    gives, over EOS cuts, wrapping products and negative mixes, a fresh history and a carried one."""
+    from holon_plugins.models.qwen4_exp import reference
+    g = torch.Generator().manual_seed(5)
+    ngram, per, eos = 3, 4, 7
+    multipliers = torch.tensor([1, 0x5DEECE66D1, -0x7FFFFFFFFF13], dtype=torch.int64)
+    sizes = torch.randint(1000, 100_000, ((ngram - 1) * per,), generator=g)
+    offsets = torch.cat([torch.zeros(1, dtype=torch.int64), sizes.cumsum(0)[:-1]])
+    for history in ([eos, eos], [11, 12]):
+        ids = torch.randint(0, 12, (300,), generator=g)                       # EOS (7) about every 12 tokens
+        want = reference.ple_rows(ids, torch.tensor([history]), torch.tensor([0]), torch.tensor([0, len(ids)]),
+                                  torch.tensor([history != [eos, eos]]), multipliers, sizes, offsets, ngram, per, eos)
+        got = units.host_rows(np.array(history + ids.tolist()), multipliers.numpy(), sizes.numpy(), offsets.numpy(),
+                              per, eos)
+        assert (got == want.numpy()).all()
