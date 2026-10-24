@@ -3521,8 +3521,37 @@ ple_state_bf16, shexp_gate_off and mtp_stream0):
 - **What would still ship:** a full-model-only bug of this kind, one that needs the real model's sparse lengths, its
   IQ types or its 4-stream widths to show. FN's §18 dropped L2 against fp32 goldens, which was the check that covered
   this.
-- **A cheap cover, not built:** a bf16 GPU reference of the PLE block and the QSA selection on the real model's
-  first layers, compared with the engine's at a few positions.
+- **A cheap cover:** the PLE block and the QSA selection on the real model checked against their oracles on the
+  engine's own inputs. Built in §22.6; all four plants fail it.
+
+### 22.6 The cover, built (`spikes/fn7/cover.py`; the lead's call, 2026-10-24)
+
+**What it checks.** The engine serves one long prompt in prompt steps of the deployment's size. Its PLE block and its
+first QSA layer's selection are then checked against their float32 oracles, which take the whole prompt in one piece
+from a fresh state and read the engine's own inputs:
+- **PLE** (`qwen4_exp.reference.ple_block`, on the GPU): each row's addition to R, the engine's against the oracle's.
+  The error is read at the conv window's rows after each step start, where the carried state enters, and elsewhere.
+- **QSA** (`std.mixers.qsa.reference`, float64 scores, D2's tie rule): the pooled keys built from every step's raw
+  index keys, then 256 sampled sparse rows' selected blocks, the engine's against the oracle's.
+
+Because it reads one engine's numbers against the math, placement, tiers and quantization do not enter. The bound
+is the kernels' float32 rounding. The run costs one 8K prompt plus seconds.
+
+**The four plants** (the A5000, IQ2_XS, the plain deployment, an 8K prompt in 2K steps):
+
+| Run | PLE: max row error (at step starts / elsewhere) | QSA: rows selecting the same blocks | Cover |
+|---|---|---|---|
+| clean | 8.0e-7 (4.0e-7 / 8.0e-7) | 100% | passes |
+| `qsa_pool_rope_last` | 8.0e-7 | **0.4%** (97.6% of blocks shared) | **fails** |
+| `ple_gate_no_sqrt` | **1.0** (median 0.80) | 100% | **fails** |
+| `ple_state_not_carried` | **0.58** at step starts / 8.0e-7 elsewhere | 100% | **fails** |
+| `ple_state_bf16` | **4.1e-4** at step starts / 8.0e-7 elsewhere | 100% | **fails** |
+
+- The bounds: a row's PLE error at most 1e-5, 12× the clean run's largest and 40× under the bf16 plant's. At least
+  98% of the sampled QSA rows must select the same blocks as the oracle.
+- Each check is local. A PLE plant leaves the QSA check's inputs and outputs consistent, and the other way round.
+- **Part of the accuracy method from here:** the close runs `cover.py` clean on each bar card's deployment beside
+  `exact.py` and gate (c). §22.5's gap of four plants that only gate (b) caught is closed at full-model scale.
 
 ## 23. FN's speed round, reopened (the owner's ruling, 2026-10-24: the bars in tok/s)
 
@@ -3602,3 +3631,108 @@ check, F 8 or more prompts per MTP row. Locks and propagation wait for this roun
     kernel's f32 [T, 4·H] buffers, 160 MB each ×3 — beside the trunk's HC streams 160 MB.
   - These are C's targets: the catch-up in row chunks, which is row-independent and so bitwise; GDN's prefill in
     sub-chunks with the state carried, whose bitwiseness is to check.
+
+### 23.3 C: the prompt step's peak (585c1862)
+
+- **What changed (std and kernel plugins, bitwise):**
+  - A one-row GDN step past 1,024 tokens runs fla's chunked rule in 1,024-token sub-chunks. Each sub-chunk starts
+    from the state the last one carried, with its snapshot inside one sub-chunk or at one's start. Tested against one
+    call: outputs, states and snapshots.
+  - The bf16x3 HC prefill mix runs in 1,024-row passes (whole `_mm3` row tiles). Tested against one pass.
+  - The MTP head's input is summed in place: one [T, n·H] float32, not two.
+- **The live peaks** (`ledger.py --peak`, each card's final MTP deployment, against §23.1–§23.2's):
+
+  | Card | step | live peak | segments | experts cached, 1 / 4 seqs | the 5080's loan (3.0×) |
+  |---|---|---|---|---|---|
+  | 5090 | 5K | 0.96 → **0.81 GB** | 1.04 → 0.90 GB | 47.9% → **48.4%** / 43.9% → **44.4%** | — |
+  | 5080 | 4K | 0.79 → **0.65 GB** | 0.98 → 0.72 GB | 26.2% / 21.9% (unchanged) | 2.39 → **1.96 GB** |
+  | A5000 | 4K | 0.85 → 0.64 GB | | | 2.50 → 1.96 GB |
+
+  - The 5090's drafting-off deployment: 49.8% → **50.3%** at 1 sequence.
+  - The 5080's share does not move: a lending layout reserves the step it does not lend (0.34 GB, the decode and
+    verify steps'). Its gain is the loan, lent only during prompt steps.
+- **What is left at the 5090's 5K peak (0.77 GiB traced):**
+  - the trunk's HC streams, [T, 4·H] float32, 200 MB;
+  - the MTP head's catch-up over the step's rows: its input, [T, 4·H] float32, 200 MB, and its predecessors'
+    hiddens, [T, 4·H] bf16, 100 MB;
+  - two ggml dequant buffers, 136 MB; Triton attention's 60 MB; GDN's temporaries are gone from the top.
+- **Not built: the head's catch-up in row chunks.** Its input mix is row-wise, but the head's KV and index writes
+  take the step's whole metadata, so chunking its rows means slicing the step's views. At 1,024 rows it would free
+  ≈ 160–240 MB of the 5090's peak: ≈ 0.3–0.5 points of cache share. §21.17's replays put 0.9 points at ≈ +0.6% MTP
+  decode, so this is ≈ +0.2–0.3%.
+
+### 23.4 The 5090 at 0.99, the 5080's loan re-sized
+
+- **The 5090 at `--memory-fraction 0.99`** (C's tree, MTP deployment, 1 sequence): experts cached **48.7%**
+  against 48.4% at 0.985. Free after startup 1.09 GB, against the step's segments of 0.86 GB plus the graphs' pool:
+  0.99 now fits with ≈ 0.2 GB to spare. To bench (§23.7).
+- **The 5080's loan** (`loan_probe5.py`, both deployments, the bench's order: warm-up, 1K, 4K, 6K, 32K prompts):
+  - the loan's pool segments per lending step: 230–270 MiB at 1K, 530 MiB at 2K, **1,030 MiB at 4K** against a
+    616 MiB live peak: **1.6–1.75×** the peak in proportion to the step's tokens (§21.12 measured 2.35–2.74× before
+    168562e);
+  - no step overflowed into the device's memory.
+- **`LOAN_MARGIN` 3.0 → 2.0** (d71e2afd, std): the 5080's 4K loan 1,872 → 1,254 MiB, ≈ 20% over the segments at
+  every size. A step past its loan takes the rest from the device. A 4K prompt now lends ≈ 600 fewer experts. The
+  own-tail test's cache moves 0.75 → 0.7 (a smaller loan lends at 0.75). To bench (§23.7).
+
+### 23.5 E: the draft-quality check (`spikes/fn7/draft_quality.py`, 6a62185d)
+
+Strata serves the bench plan's prompts greedily with its MTP arm's flags, 256 tokens each. Holon then decodes the
+same prompts forced along Strata's tokens, so every verify pass judges Holon's drafts on Strata's exact context.
+Acceptance per depth (accepted / tested, so conditional on the depth before), pooled over 8 prompts; tokens per pass
+are 1 + a₁ + a₁a₂ + a₁a₂a₃:
+
+| Card, context | Strata a₁ / a₂ / a₃ | Holon a₁ / a₂ / a₃ | tokens per pass, Strata / Holon |
+|---|---|---|---|
+| 5080, 1K | 0.755 / 0.748 / 0.751 | 0.752 / 0.745 / 0.743 | 2.74 / 2.73 (−0.5%) |
+| 5080, 32K | 0.841 / 0.812 / 0.776 | 0.824 / 0.820 / 0.785 | 3.05 / 3.03 (−0.8%) |
+| 5090, 1K | 0.710 / 0.735 / 0.722 | 0.704 / 0.725 / 0.700 | 2.61 / 2.57 (−1.4%) |
+
+- Every prompt was followed to its end (Holon's forced tokens never diverged from the context).
+- **Holon's head drafts as well as Strata's, within 1.5%.** Per-prompt differences go both ways and are as large as
+  ±0.06.
+- So the MTP rows' gaps are not draft quality. They are per-pass time, plus the variance of acceptance on the
+  bench's own contexts, which is what F's 8 prompts per row address.
+
+### 23.6 D: the PCIe rate; the memory outside the allocator
+
+**The link rate** (`spikes/fn7/thp.py`, each card, a host pool of the deployment's size, the deployed
+`gather_roles` at 4 CTAs per role over the 5090's IQ3_XXS / IQ4_NL units):
+
+| GB/s | 5080, 4 KiB pages | 5080, THP | 5090, 4 KiB pages | 5090, THP |
+|---|---|---|---|---|
+| gather, 3 / 10 / 64 units per role (a decode layer, a verify pass, a prompt pass) | 47.9 / 48.4 / 48.9 | 48.7 / 50.2 / 50.4 | 48.9 / 49.3 / 49.0 | 51.0 / 51.5 / 50.7 |
+| copy-engine DMA, 64 units per role (the ring's copies) | 46.9 | **53.2** | 46.9 | **53.0** |
+| page-locking, s per GiB | 0.25 | **0.06** | 0.26 | **0.06** |
+
+- Strata copies at 48–50.6 GB/s busy (nsys, §21.6): its host arenas are THP-backed (§21.1). Holon's gather was
+  already at 49 GB/s outside the engine; over 4 KiB pages its DMA was the slower path.
+- **Shipped (a7a5fdfc, core +1 code line: FN at +47 of 47):** `platform.host_memory` asks `MADV_HUGEPAGE` before
+  page-locking. Zero-copy gathers gain 3–4% and DMA 13%. The 5090's pool page-locks in ≈ 5 s, not 21. Where the
+  kernel cannot find huge pages it falls back to small ones. The old note in `host_memory` (2–8 s per GiB on the
+  development host, from compaction) no longer holds there: 0.14 s per GiB with THP, 0.32 without.
+- The GPU's mappings of the pools cost the same either way (below).
+- Not tried: a wider `k_fetch` or TMA. The gather is within 5% of the DMA ceiling over THP.
+
+**The 5090's ≈ 1 GiB outside the allocator** (`spikes/fn7/outside.py`, the MTP deployment, 1 sequence, stages from
+a stack of 0 bytes, after the plan's 1K, 4K and 32K prompts and a sampled request; MiB):
+
+| Item | 5090 | 5080 | Trimmable? |
+|---|---|---|---|
+| CUDA context, without its stack | 381 | 207 | no |
+| the context's per-thread stack: SMs × 1,536 threads × its size; 1 KiB by default | 254 | 126 | **to what the kernels need:** 416 B (104 MiB) on the 5090, 352 B (43 MiB) on the 5080 |
+| the host pools' device mappings, ≈ 2 MiB per GiB mapped (74 GiB on the 5090), the same over THP | 150 | 122 | only by mapping fewer bytes |
+| kernel modules loaded at build (ggml, expert_io and the rest) | 68 | 68 | no |
+| modules first run at the profiled step (Triton, fla, FlashInfer, mmq) | ≈ 88 | ≈ 43 | no |
+| graph execs, 1 bucket (3 buckets: ≈ 100) | 0 | 0 | by fewer buckets |
+| first requests (sampling paths) | 10 | 10 | no |
+
+- cuBLAS's and cuBLASLt's workspaces, ggml's scratch and FlashInfer's buffers are inside the allocator (statics, or
+  torch's workspaces), not here.
+- **The one real trim is the stack.** Setting it to 0 at engine start makes the driver grow it to the largest frame a
+  launch needs and keep it there. That frees **151 MiB on the 5090 (≈ +0.3 points of cache) and 83 MiB on the
+  5080.** The frames are Triton spills, which on the A5000 are `hc_triton`'s `_down_u` and `_mix_dot` (248–752 B);
+  without them it would free all 254 MiB.
+- **Not built.** It takes 3–4 core lines (a `cuCtxSetLimit` on the engine's device, beside `configure_allocator`), and
+  FN's core is at +47 of 47. A kernel first launched after startup with a larger frame would grow it from the slack.
+  This one is the lead's call.
