@@ -30,10 +30,15 @@ def main() -> None:
     a = ap.parse_args()
     sys.path.insert(0, str(ROOT / "spikes/fn6"))
     from _engine import STORE, engine
-    from holon.core import platform
+    from holon.core import executor, platform
     from vram import component
-
     peak, growth = platform.peak_memory, platform.reserved_growth
+    state_memory, capture = executor.Executor.state_memory, executor.Executor.capture_graphs
+
+    def outside() -> float:                        # device bytes outside torch's allocator (GiB)
+        torch.cuda.synchronize()
+        free, total = torch.cuda.mem_get_info()
+        return round((total - free - torch.cuda.memory_reserved()) / 2**30, 3)
     for seqs in a.seqs:
         seen = {"peaks": [], "graphs": None}
 
@@ -56,9 +61,23 @@ def main() -> None:
             seen["graphs"] = {"reserve": growth(device, fn, *more), "buckets": copies}
             return seen["graphs"]["reserve"]
         platform.peak_memory, platform.reserved_growth = peak_, growth_
+        stages = {"start": outside()}
+
+        def state_memory_(self, ledger, fraction, stages=stages):
+            stages["model_built"] = outside()
+            out = state_memory(self, ledger, fraction)
+            stages["profiled"] = outside()
+            return out
+
+        def capture_(self, stages=stages):
+            stages["before_capture"] = outside()
+            capture(self)
+            stages["captured"] = outside()
+        executor.Executor.state_memory, executor.Executor.capture_graphs = state_memory_, capture_
         free0, total = torch.cuda.mem_get_info()
         e = engine(a.model, a.flags, max_seqs=seqs, max_model_len=a.max_len)
         platform.peak_memory, platform.reserved_growth = peak, growth
+        executor.Executor.state_memory, executor.Executor.capture_graphs = state_memory, capture
         per, ptrs = collections.Counter(), set()
         aux = getattr(e.ctx, "aux", None)
         modules = [("", e.executor.model)] + [(f"mtp.{ns}.", m) for ns, m in (aux.modules if aux is not None else [])]
@@ -88,7 +107,7 @@ def main() -> None:
                "lending": getattr(s, "lending", None), "own_tail": getattr(s, "_own_tail", None),
                "cached_share": share, "arena": arena, "allocated": torch.cuda.memory_allocated(),
                "reserved": torch.cuda.memory_reserved(),
-               "outside_torch": total - free - torch.cuda.memory_reserved()}
+               "outside_torch": total - free - torch.cuda.memory_reserved(), "outside_stages_gib": stages}
         print(json.dumps(out), flush=True)
         e.close()
         del e, s
