@@ -1070,6 +1070,35 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("cache, kept", [("*=0.75", "own tail"), ("*=0.5", "reserved")])
+def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, kept):
+    """`moe.lend_peak` where the layout cannot lend (decided at build, never refused at a launch): a cache too small to
+    lend a prompt step's staging keeps the loan in its own tail (the pool's last bytes, the cache that much smaller),
+    each large step's activations allocated at its end; a tail class too small to hold the loan beside a pass's
+    staging drops the loan (the engine reserves the worst step's peak). Both say so, and serve the resident store's
+    bits."""
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on",
+            "moe.cache": cache}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    ranges = []
+    if store._loan is not None:
+        use = store._loan.use
+        store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel())), use(r))[1]
+    assert _served(engine, prompts) == want
+    said = capsys.readouterr().out
+    if kept == "own tail":
+        at, n = store._own_tail
+        end = store.arena.view(torch.uint8, (store.arena.capacity * store.granule,))[at:at + n][-1:].data_ptr() + 1
+        assert not store.lending and n >= store._loan_bytes and ranges and "own tail" in said
+        assert all(a + nbytes == end for a, nbytes in ranges)
+    else:
+        assert store._loan is None and store._loan_bytes == 0 and "stay reserved" in said
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;

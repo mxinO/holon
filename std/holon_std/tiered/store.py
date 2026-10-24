@@ -450,7 +450,7 @@ class TieredStore:
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
-            keep = self._own_bytes() if staging == self.prefill else 0
+            keep = self._own_bytes(loan=False) if staging == self.prefill else 0
             while True:
                 budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes),
                                  floors)
@@ -468,6 +468,10 @@ class TieredStore:
             if self.lending or staging == self.prefill:
                 break
             floors = dict(pinned)
+        if keep and not self.lending and self._loan is not None:    # a staging layout: the step-peak loan reserved in
+            keep = self._own_bytes(loan=True)                       # its own tail, the cache that much smaller
+            budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
+            seed = self.policy.seed(self._profile_counts(), budget)
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
@@ -569,8 +573,11 @@ class TieredStore:
             self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining) and \
                 all(r.fetches_parts for r in self.resolvers)
             if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
-                raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail (moe.lend_peak), but "
-                                   "this layout stages: its large steps could not lend them")
+                if self._own_tail is None:
+                    raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail "
+                                       "(moe.lend_peak), but this layout neither lends nor keeps a tail")
+                print(f"holon: {self.name}: this layout stages (its cache cannot lend a prompt step's staging): the "
+                      "step-peak loan (moe.lend_peak) stays reserved, in the pool's own tail")
         self._step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
         if step.row_kind is None:                                    # launched plans are the scheduler's
@@ -603,10 +610,11 @@ class TieredStore:
         if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
             cls, n = self.tail
             if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
-                loan = -(-(int(self._loan_per_token * at) + LOAN_SLACK) // self._align) * self._align
-                self._step_loan = min(self._loan_bytes, loan)
+                self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
             need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
             self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
+        elif self._loan is not None and self._own_tail is not None and self.large_passes(at):   # a staging layout's
+            self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))           # loan: its own tail's end
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
         self.step, self.step_tokens = step.step, at
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
@@ -684,23 +692,35 @@ class TieredStore:
         if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned
                 and self.ctx.candidates(ACTIVATION_LOAN, {})):
             return 0
+        loan = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
+        self._loan_bytes = loan
+        try:
+            tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
+        except ValueError:                             # its class cannot hold it beside a pass's staging
+            self._loan_bytes = 0
+            print(f"holon: {self.name}: the tail's class cannot hold the step-peak loan (moe.lend_peak) beside a "
+                  "prefill pass's staging: the activations stay reserved")
+            return 0
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
-        self._loan_bytes = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
         self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
-        self.tail = self._tail(lambda c: c.cap)        # the tail grows by the loan (for the final materialize)
+        self.tail = tail
         return self.ring_tokens
 
     def activations(self, step):
         """The core's ActivationLender, at an eager step's launch: a tail step's forward allocates from the tail's
         last bytes, its loan's (lent with the tail at its first resolve: nothing reads the tail's experts before, they
         are never read after); None for any other step."""
-        if self._loan is None or self._step_tail is None:
+        if self._loan is None or not self._step_loan:
             return None
-        cls, n = self._step_tail
-        c = list(self.classes.values())[cls]
+        if self._step_tail is not None:
+            cls, n = self._step_tail
+            c = list(self.classes.values())[cls]
+            loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
+        else:                                   # a staging layout's own tail, its last bytes
+            at, n = self._own_tail
+            loan = self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n][-self._step_loan:]
         self._loaned = True
-        loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     @property
@@ -729,7 +749,7 @@ class TieredStore:
             if self._own_tail is None:
                 return None
             at, n = self._own_tail              # fixed bytes of the pool, used within a step: graphs may hold them
-            return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n]
+            return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n - self._step_loan]
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
         view = c.slots()[c.size - n:].view(-1)
@@ -852,13 +872,18 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
-    def _own_bytes(self) -> int:
-        """The bytes a staging layout keeps for the large passes' buffers: the tail's (but its activation loan: a
-        staging layout lends none), aligned."""
+    def _own_bytes(self, loan: bool = True) -> int:
+        """The bytes a staging layout keeps for the large passes' buffers — and, `loan`, the step-peak loan's
+        (`moe.lend_peak`: reserved there where the cache cannot lend it, its activations at the end) —, aligned."""
         if not self.tail:
             return 0
         cls, n = self.tail
-        return -(-(n * list(self.classes.values())[cls].unit_bytes - self._loan_bytes) // self._align) * self._align
+        nbytes = n * list(self.classes.values())[cls].unit_bytes - (0 if loan else self._loan_bytes)
+        return -(-nbytes // self._align) * self._align
+
+    def _step_loan_bytes(self, at: int) -> int:
+        """The loan of a step of `at` prompt tokens: its share of the worst step's, aligned (at most the worst's)."""
+        return -(-(int(self._loan_per_token * at) + LOAN_SLACK) // self._align) * self._align
 
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
