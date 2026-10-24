@@ -738,9 +738,11 @@ class TieredStore:
         return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
     def fetch_stream(self) -> torch.Stream:
-        """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store."""
+        """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store. High priority: the
+        hits' pass beside it has its blocks on every SM (launched early, PDL), so a fetch of the default priority found
+        no SM until they drained, ≈ 40 µs of each layer of a 5080's verify pass (FN §23.8)."""
         if self._fetch_stream is None:
-            self._fetch_stream = torch.Stream(device=self.ctx.device)
+            self._fetch_stream = torch.Stream(device=self.ctx.device, priority=-1)
         return self._fetch_stream
 
     def tail_view(self) -> torch.Tensor | None:
