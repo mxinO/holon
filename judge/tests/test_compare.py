@@ -66,11 +66,12 @@ def test_a_run_on_two_paths_passes_only_against_both_paths_floors(case):
     assert compare(g, close, [loose]).failures == ("3 calls on mmvq/q8_1, the floor emulates mmq/q8_1",)
     both = compare(g, close, [loose, tight])
     assert both.passed and [path for path, *_ in both.others] == ["mmvq"]
-    assert "calls: mmq/q8_1 40, mmvq/q8_1 3" in both.table()
+    assert "calls: mmq/q8_1 40, mmvq/q8_1 3" in both.table() and "floor mmq" in both.table()
     r = compare(g, far, [loose, tight])
     assert r.passed is False and r.failures and all(f.startswith("against the mmvq floor: ") for f in r.failures)
     far.meta["calls"] = {"mmq/q8_1": 40, "mmvq/q8_1": 3, "mmq/fp4": 2}           # a path no floor emulates
     assert "2 calls on mmq/fp4, no floor emulates it (mmq/q8_1, mmvq/q8_1)" in compare(g, far, [loose, tight]).failures
+    assert compare(g, close, [loose, loose]).failures == ("several floors of one kernel path: one floor per path",)
     tight.meta["act"] = "fp4"                                                     # floors of two modes
     assert compare(g, close, [loose, tight]).failures[0] == "several floors in different modes: ['fp4', 'q8_1']"
 

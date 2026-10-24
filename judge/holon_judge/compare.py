@@ -87,6 +87,7 @@ class Result:
     dppl_vs_floor: tuple[float, float] | None = None   # the candidate's ΔPPL against the floor, its SE
     drafter: dict | None = None    # the L0-drafter rule's numbers (`compare_drafter`): its verdict replaces L2's
     others: tuple[tuple[str, Metrics, Budgets, tuple[float, float]], ...] = ()   # floors past the first: (path, …)
+    floor_path: str | None = None  # with several floors, the first one's path (its rows say which)
 
     @property
     def passed(self) -> bool | None:
@@ -102,11 +103,11 @@ class Result:
                f"{'KL max':>9s} {'ΔPPL ± SE':>17s} {'missing':>7s}"
         rows = [head, _row("overall", self.overall)]
         if self.floor is not None:
-            rows.append(_row("floor", self.floor))
+            rows.append(_row(f"floor {self.floor_path}" if self.floor_path else "floor", self.floor))
         if self.dppl_vs_floor is not None:
             d, se = self.dppl_vs_floor
-            rows.append(f"{'vs floor':10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} "
-                        f"{f'{d:+.3%} ± {se:.3%}':>17s}")
+            vs = "vs " + (self.floor_path or "floor")
+            rows.append(f"{vs:10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} {f'{d:+.3%} ± {se:.3%}':>17s}")
         if self.budgets is not None:
             b = self.budgets
             rows.append(f"{'budget':10s} {'':6s} {'≥' + format(b.top1_min, '.3%'):>8s} {'':10s} "
@@ -264,6 +265,8 @@ def _paths_failures(floors: list[dict], cand: dict) -> list[str]:
     (`compare`), so every counted call must take a path one of them emulates, in their mode, and some must."""
     if any(f.get("q8_1") not in ("mmq", "mmvq") for f in floors):
         return ["several floors: each must emulate one kernel path (q8_1 mmq or mmvq)"]
+    if len({f["q8_1"] for f in floors}) < len(floors):
+        return ["several floors of one kernel path: one floor per path"]
     if len(modes := {f.get("act") or "q8_1" for f in floors}) > 1:
         return [f"several floors in different modes: {sorted(modes)}"]
     mode = modes.pop()
@@ -316,7 +319,7 @@ def compare(golden: Recording, cand: Recording, floor: Recording | Sequence[Reco
         failures.append(f"KL p99 {overall.kl_p99:.3e} > the sanity ceiling {ceiling:.0e}")
     first = judged[0][1:] if judged else (None, None, None)
     return Result(_provenance(golden), _provenance(cand), overall, categories, first[0], first[1], tuple(failures),
-                  first[2], others=tuple(judged[1:]))
+                  first[2], others=tuple(judged[1:]), floor_path=judged[0][0] if len(judged) > 1 else None)
 
 
 def _logit_shift(golden: Recording, floor: Recording) -> torch.Tensor:
