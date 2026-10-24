@@ -100,7 +100,7 @@ def run(a) -> dict:
 def _db(rep: str) -> sqlite3.Connection:
     rep = pathlib.Path(rep)
     db = rep.with_suffix(".sqlite")
-    if not db.exists():
+    if not db.exists() or db.stat().st_mtime < rep.stat().st_mtime:      # (a stale export of an earlier report)
         subprocess.run(["nsys", "export", "--type", "sqlite", "--force-overwrite", "true", "-o", str(db), str(rep)],
                        check=True, capture_output=True)
     return sqlite3.connect(db)

@@ -2514,56 +2514,8 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              }
          }
      }
-@@ -850,6 +891,26 @@
-     }
- }
- 
-+// Holon: the MoE kernel's IQ3 grids in shared memory (a block's warps look up the same table, the L1-resident one
-+// conflicting less there): the grid's words, 0 for types without one; and a vec_dot reading the staged grid.
-+template <ggml_type type>
-+static constexpr __device__ int holon_moe_grid_words() {
-+    return type == GGML_TYPE_IQ3_S ? 512 : type == GGML_TYPE_IQ3_XXS ? 256 : 0;
-+}
-+
-+template <ggml_type type>
-+static __device__ __forceinline__ float holon_moe_vec_dot(const void * __restrict__ vx, const block_q8_1 * __restrict__ y,
-+                                                          const int kbx, const int iqs, const uint32_t * grid) {
-+    if constexpr (type == GGML_TYPE_IQ3_S) {
-+        return vec_dot_iq3_s_q8_1_grid(vx, y, kbx, iqs, grid);
-+    } else if constexpr (type == GGML_TYPE_IQ3_XXS) {
-+        return vec_dot_iq3_xxs_q8_1_grid(vx, y, kbx, iqs, grid);
-+    } else {
-+        GGML_UNUSED(grid);
-+        return get_vec_dot_q_cuda(type)(vx, y, kbx, iqs);
-+    }
-+}
-+
- // Dedicated MoE multi-token kernel.
- // Grid: (ceil(nrows_x / c_rows_per_block), nchannels_dst)
- // Block: (warp_size, ncols_dst) - each warp handles one token independently.
-@@ -873,8 +934,6 @@
-     constexpr int vdr = get_vdr_mmvq(type);
-     constexpr int warp_size = ggml_cuda_get_physical_warp_size();
- 
--    constexpr vec_dot_q_cuda_t vec_dot_q_cuda = get_vec_dot_q_cuda(type);
--
-     const bool shared_expert = has_fusion && fusion.shared_up && blockIdx.y == gridDim.y - 1;
-     if (shared_expert) {
-         vx = fusion.shared_up;
-@@ -917,8 +976,28 @@
-     }
- 
+@@ -919,6 +960,16 @@
      ggml_cuda_pdl_sync();
-+    // Holon: an IQ3 type's grid staged in shared memory, once per block (every warp gets here: blockDim.y = ncols_dst)
-+    constexpr int grid_words = holon_moe_grid_words<type>();
-+    __shared__ uint32_t s_grid[grid_words > 0 ? grid_words : 1];
-+    if constexpr (grid_words > 0) {
-+        const uint32_t * table = type == GGML_TYPE_IQ3_S ? iq3s_grid : iq3xxs_grid;
-+        for (int i = threadIdx.y*warp_size + threadIdx.x; i < grid_words; i += warp_size*blockDim.y) {
-+            s_grid[i] = table[i];
-+        }
-+        __syncthreads();
-+    }
      const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
      const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
 +    if (!shared_expert && int32_t(channel_x) < 0) { // Holon: an entry skipped on purpose: its rows left as they are
@@ -2579,20 +2531,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const block_q8_1 * y = ((const block_q8_1 *) vy) + channel_y*stride_channel_y + token_idx*stride_col_y;
      const int kbx_offset  = channel_x*stride_channel_x + row0*stride_row_x;
-@@ -933,10 +1012,10 @@
- 
- #pragma unroll
-         for (int i = 0; i < c_rows_per_block; ++i) {
--            tmp[i] += vec_dot_q_cuda(vx, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs);
-+            tmp[i] += holon_moe_vec_dot<type>(vx, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs, s_grid);
-             if constexpr (has_fusion) {
-                 if (use_gate) {
--                    tmp_gate[i] += vec_dot_q_cuda(vgate, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs);
-+                    tmp_gate[i] += holon_moe_vec_dot<type>(vgate, &y[kby], kbx_offset + i*stride_row_x + kbx, kqs, s_grid);
-                 }
-             }
-         }
-@@ -1022,7 +1101,7 @@
+@@ -1022,7 +1073,7 @@
  
  template<ggml_type type, int c_ncols_dst, bool small_k = false, bool halve_iters = false>
  static void mul_mat_vec_q_switch_fusion(
@@ -2601,7 +2540,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const uint32_t ncols_x, const uint3 nchannels_y, const uint32_t stride_row_x, const uint32_t stride_col_y,
          const uint32_t stride_col_dst, const uint3 channel_ratio, const uint32_t stride_channel_x,
          const uint32_t stride_channel_y, const uint32_t stride_channel_dst, const uint3 sample_ratio,
-@@ -1043,7 +1122,10 @@
+@@ -1043,7 +1094,10 @@
          }
      }
  
@@ -2613,7 +2552,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
      ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters>, launch_params,
-@@ -1062,14 +1144,17 @@
+@@ -1062,14 +1116,17 @@
          const int warp_size, const int nchannels_dst, cudaStream_t stream) {
  
      constexpr int rows_per_block = 2; // 2 gives best perf based on tuning
@@ -2635,7 +2574,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      if (has_fusion) {
          ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, true>, launch_params,
              vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
-@@ -1077,7 +1162,7 @@
+@@ -1077,7 +1134,7 @@
              stride_channel_x, stride_channel_y, stride_channel_dst,
              ncols_dst, ids_stride);
      } else {
@@ -2644,7 +2583,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
              stride_row_x, stride_col_y, stride_col_dst,
              stride_channel_x, stride_channel_y, stride_channel_dst,
-@@ -1087,7 +1172,7 @@
+@@ -1087,7 +1144,7 @@
  
  template <ggml_type type>
  static void mul_mat_vec_q_switch_ncols_dst(
@@ -2653,7 +2592,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1178,7 +1263,7 @@
+@@ -1178,7 +1235,7 @@
      if (has_ids && ncols_dst > 1) {
          // Multi-token MUL_MAT_ID path - dedicated MoE kernel
          mul_mat_vec_q_moe_launch<type>(
@@ -2662,7 +2601,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              stride_row_x, stride_col_y, stride_col_dst,
              stride_channel_x, stride_channel_y, stride_channel_dst,
              ncols_dst, ids_stride, warp_size, nchannels_dst, stream);
-@@ -1279,7 +1364,7 @@
+@@ -1279,7 +1336,7 @@
      }
  }
  static void mul_mat_vec_q_switch_type(
@@ -2671,7 +2610,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1434,8 +1519,9 @@
+@@ -1434,8 +1491,9 @@
  void ggml_cuda_mul_mat_vec_q(
          ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
          const ggml_cuda_mm_fusion_args_host * fusion) {
@@ -2683,7 +2622,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      GGML_ASSERT(!ids || ids->type  == GGML_TYPE_I32); // Optional, used for batched GGML_MUL_MAT_ID.
  
      GGML_TENSOR_BINARY_OP_LOCALS;
-@@ -1453,16 +1539,16 @@
+@@ -1453,16 +1511,16 @@
  
      GGML_ASSERT(!ids || ne12 <= MMVQ_MAX_BATCH_SIZE);
  
@@ -2703,7 +2642,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          // Scale fusion is only allowed for NVFP4 currently as the cost of checking this at run-time in the prologue is
          // non-negligible for some models such as gpt-oss-20b
          GGML_ASSERT((fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4);
-@@ -1528,13 +1614,17 @@
+@@ -1528,13 +1586,17 @@
      }
  
      const int64_t ne10_padded = GGML_PAD(ne10, MATRIX_ROW_PADDING);
@@ -2724,7 +2663,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const int64_t s01 = src0->nb[1] / ts_src0;
      const int64_t s11 = ne10_padded / QK8_1;
-@@ -1559,7 +1649,7 @@
+@@ -1559,7 +1621,7 @@
      const int64_t ids_stride = ids ? ids->nb[1] / ggml_type_size(ids->type) : 0;
  
      mul_mat_vec_q_switch_type(
@@ -3332,72 +3271,3 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cuh b/ggml/src/ggml-cuda/topk-moe.cuh
 +void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const void * w, bool w_bf16, int n_rows, int hidden,
 +                                int n_experts, int n_expert_used, float clamp_val, float * logits, unsigned int * done,
 +                                float * weights, int32_t * ids, void * x_q8_1, cudaStream_t stream);
-diff -ruN a/ggml/src/ggml-cuda/vecdotq.cuh b/ggml/src/ggml-cuda/vecdotq.cuh
---- a/ggml/src/ggml-cuda/vecdotq.cuh
-+++ b/ggml/src/ggml-cuda/vecdotq.cuh
-@@ -1169,8 +1169,10 @@
- #define VDR_IQ3_XXS_Q8_1_MMVQ 2
- #define VDR_IQ3_XXS_Q8_1_MMQ  2
- 
--static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1(
--    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-+// Holon: the grid read through `grid` (mmvq.cu's MoE kernel stages it in shared memory), else from the table
-+static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1_grid(
-+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,
-+    const uint32_t * grid) {
- 
-     const block_iq3_xxs * bq3 = (const block_iq3_xxs *) vbq + kbx;
- 
-@@ -1181,7 +1183,7 @@
-     int sumi = 0;
- #pragma unroll
-     for (int l0 = 0; l0 < 8; l0 += 2) {
--        const int2 grid_pos = make_int2(iq3xxs_grid[q3[l0 + 0]], iq3xxs_grid[q3[l0 + 1]]);
-+        const int2 grid_pos = make_int2(grid[q3[l0 + 0]], grid[q3[l0 + 1]]);
-         const uint32_t signs = unpack_ksigns(aux32 >> (7*l0/2));
- 
-         const int signs0 = __vcmpne4(signs & 0x08040201, 0);
-@@ -1204,12 +1206,18 @@
-     return d * sumi;
- }
- 
-+static __device__ __forceinline__ float vec_dot_iq3_xxs_q8_1(
-+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-+    return vec_dot_iq3_xxs_q8_1_grid(vbq, bq8_1, kbx, iqs, iq3xxs_grid);
-+}
-+
- #define VDR_IQ3_S_Q8_1_MMVQ 2
- #define VDR_IQ3_S_Q8_1_MMQ  2
- 
- // TODO: don't use lookup table for signs
--static __device__ __forceinline__ float vec_dot_iq3_s_q8_1(
--    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-+static __device__ __forceinline__ float vec_dot_iq3_s_q8_1_grid( // Holon: as vec_dot_iq3_xxs_q8_1_grid
-+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs,
-+    const uint32_t * grid) {
- 
-     const block_iq3_s * bq3 = (const block_iq3_s *) vbq + kbx;
- 
-@@ -1225,8 +1233,8 @@
- #pragma unroll
-     for (int l0 = 0; l0 < 8; l0 += 2) {
-         const int2 grid_pos = make_int2(
--            iq3s_grid[qs[l0 + 0] | ((qh << (8 - l0)) & 0x100)],
--            iq3s_grid[qs[l0 + 1] | ((qh << (7 - l0)) & 0x100)]);
-+            grid[qs[l0 + 0] | ((qh << (8 - l0)) & 0x100)],
-+            grid[qs[l0 + 1] | ((qh << (7 - l0)) & 0x100)]);
- 
-         const int signs0 = __vcmpne4(((signs_packed_8[l0/2] & 0x03) << 7) | ((signs_packed_8[l0/2] & 0x0C) << 21), 0x00000000);
-         const int signs1 = __vcmpne4(((signs_packed_8[l0/2] & 0x30) << 3) | ((signs_packed_8[l0/2] & 0xC0) << 17), 0x00000000);
-@@ -1247,6 +1255,11 @@
-     return d * sumi;
- }
- 
-+static __device__ __forceinline__ float vec_dot_iq3_s_q8_1(
-+    const void * __restrict__ vbq, const block_q8_1 * __restrict__ bq8_1, const int & kbx, const int & iqs) {
-+    return vec_dot_iq3_s_q8_1_grid(vbq, bq8_1, kbx, iqs, iq3s_grid);
-+}
-+
- #define VDR_IQ1_S_Q8_1_MMVQ 1
- #define VDR_IQ1_S_Q8_1_MMQ  1
- 
