@@ -180,6 +180,81 @@ def hc_inject_unscaled() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def ple_state_not_carried() -> Iterator[None]:
+    """PLE (§6.3): its conv window read as zeros at every prompt chunk's start (`has_init` False for the block on prompt
+    steps; the n-gram history still carried) — chunked prefill differs from one-shot. Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import units
+
+    run, fired = units.PLE._run, collections.Counter()
+
+    def planted(self, r, ids, history, state, slots, query_start, has_init):
+        if len(ids) <= len(slots) * 4:                      # decode and verify steps (at most 1 + 3 rows each)
+            return run(self, r, ids, history, state, slots, query_start, has_init)
+        fired[_when()] += 1
+        block = self._block
+        self._block = lambda *a: block(*a[:-1], torch.zeros_like(a[-1]))
+        try:
+            return run(self, r, ids, history, state, slots, query_start, has_init)
+        finally:
+            self._block = block
+    with mock.patch.object(units.PLE, "_run", planted):
+        yield
+    print(f"plant ple-state-not-carried fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ple_state_bf16() -> Iterator[None]:
+    """PLE (§6.3): its conv history stored in bf16 (the window rounded after every step's block, eagerly and in graph
+    captures). Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import units
+
+    run, fired = units.PLE._run, collections.Counter()
+
+    def planted(self, r, ids, history, state, slots, query_start, has_init):
+        c = run(self, r, ids, history, state, slots, query_start, has_init)
+        fired[_when()] += 1
+        index = slots.long()
+        state[index] = state[index].bfloat16().float()
+        return c
+    with mock.patch.object(units.PLE, "_run", planted):
+        yield
+    print(f"plant ple-state-bf16 fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def shexp_gate_off() -> Iterator[None]:
+    """The shared expert (§6.3, D7): ungated (`swiglu(x)`, its σ(gate · x) dropped), eagerly and in graph captures.
+    Reports how often it fired."""
+    from holon_std.ffn import units
+
+    fired = collections.Counter()
+
+    def planted(self, x):
+        fired[_when()] += 1
+        return units.SwiGLU.forward(self, x)
+    with mock.patch.object(units.GatedSwiGLU, "forward", planted):
+        yield
+    print(f"plant shexp-gate-off fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def mtp_stream0() -> Iterator[None]:
+    """The MTP head (§6.3): its input reads the trunk's stream 0 for every stream (fc_hidden over stream 0 n times) —
+    the drafts worse, the verified outputs unchanged. Reports how often it fired."""
+    from holon_std.spec.mtp_head import units
+
+    input_, fired = units.MTPHCHead._input, collections.Counter()
+
+    def planted(self, embedded, r):
+        fired[_when()] += 1
+        h = self.hidden
+        return input_(self, embedded, r[:, :h].repeat(1, self.n))
+    with mock.patch.object(units.MTPHCHead, "_input", planted):
+        yield
+    print(f"plant mtp-stream0 fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def rows_off_by_one() -> Iterator[None]:
     """The PLE table's SSD tier (§6.3, D5): every row read one row past its id's (`std.tiered.rows@1`'s read list), in
     eager steps and graph captures alike; the RAM-vs-SSD identity fails (spikes/fn7/ple_ssd.py, the GPU unit test)."""
@@ -1891,6 +1966,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
     "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
     "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
+    "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
+    "mtp_stream0": mtp_stream0,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
