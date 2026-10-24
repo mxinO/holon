@@ -18,6 +18,8 @@ from holon_testing.gguf_files import write
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM
 
+PREBUILT = ("ggml_cuda",)  # its per-shape floor asks the ggml plugin (built if missing: the root conftest)
+
 
 @pytest.fixture(scope="module")
 def files(tiny_checkpoint, tmp_path_factory):

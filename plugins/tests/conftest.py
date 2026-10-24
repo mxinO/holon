@@ -1,5 +1,4 @@
 import gc
-import importlib
 import os
 
 # Expandable allocator segments from the session's first CUDA allocation, as launchers set them (the engine requires
@@ -13,24 +12,6 @@ import pytest  # noqa: E402
 import torch  # noqa: E402
 
 QWEN3_0_6B = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
-
-
-@pytest.fixture(scope="module", autouse=True)
-def _prebuilt(request):
-    """The engine never compiles (a missing prebuilt module raises NotBuilt naming `holon prebuild`), so a test module
-    lists the CUDA extensions it needs in `PREBUILT` (e.g. `("expert_io",)`) and any missing one is built here for
-    the visible GPU's SM, into the user cache, before its tests run: a fresh cache does not fail them."""
-    names = getattr(request.module, "PREBUILT", ())
-    if not names or not torch.cuda.is_available():
-        return
-    major, minor = torch.cuda.get_device_capability()
-    sm = 10 * major + minor
-    for name in names:
-        ext = importlib.import_module(f"holon_plugins.kernels.{name}.extension")
-        try:
-            ext.load(sm)
-        except ext.NotBuilt:
-            ext.build(sm, os.cpu_count()) if name == "ggml_cuda" else ext.build(sm)
 
 
 @pytest.fixture(autouse=True)

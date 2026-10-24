@@ -3637,7 +3637,8 @@ Panel C: the MTP-vs-plain pair's bar (KL mean ≤ 0.13) could not see a verify-p
 / 0.0044, p99 0.023 / 0.063 on the 5080 / 5090):
 - KL mean ≤ 0.02;
 - KL p99 ≤ 0.3;
-- at least 100 agreeing positions.
+- at least 100 agreeing positions, over 512 tokens a prompt (panel C: at 256 a clean 5090, 189 positions, falls under
+  100 about one run in six).
 
 The pair runs at the reference's step: the deployment's, `--prefill-step`. It had run at 8,192 on every card.
 
@@ -3942,11 +3943,11 @@ tokens per pass as the others on its card, so the trees are bitwise alike on the
   that is the 1K prompts' noise, and those rows stay at 0.96 and 0.995, over 0.945.
 - **168562e and C ship.** On the 5090, every row gains 0.4–1.4% or holds.
 - **The loan margin (5080 only) is the lead's call.** Its drafting-off rows gain 1.1–1.8%. Its MTP 1K row, below
-  the bar, moves −0.5 ± 0.2%; 4K and 32K are flat. The 5080's item mixes C (a smaller peak, so a smaller loan) with
-  the margin. With THP on top (b / a) the same row gains +0.4 ± 0.2%, and every 5080 row gains 0.4–2.4%. Kept in the
+  the bar, moves −0.5 ± 0.2% (one round only: §22.9); 4K and 32K are flat. The 5080's item mixes C (a smaller peak, so a smaller loan) with
+  the margin. With THP on top (b / a) the same row gains +0.4 ± 0.2%, and every 5080 row gains 0.4–2.4% (by round: §22.9). Kept in the
   tree; reverting it is one constant.
 - **0.99 does not ship.** The 5090's MTP rows do not move (−0.1 to 0.0%: the replay's +0.3 points of cache are under
-  the bench's resolution), and its drafting-off decode loses ≈ 1%. The deployments stay at 0.985.
+  the bench's resolution), and its drafting-off decode loses ≈ 1% (one round only: §22.9). The deployments stay at 0.985.
 - **The 5090's drafting-off rows at 5K steps (the lead's call, §21.17):** decode 1.12–1.17, prefill 0.96 / 1.22 /
   **1.00 at 32K**, over 0.945.
 
@@ -3963,7 +3964,7 @@ tokens per pass as the others on its card, so the trees are bitwise alike on the
 - Tokens per pass, Holon / Strata: 5080 2.64 / 2.73, 2.80 / 2.84, 2.97 / 3.17; 5090 2.71 / 2.66, 2.84 / 2.93,
   3.25 / 3.28.
 - Against checkout a, the round adds 1.6–1.7% to the 5090's MTP rows, 0.4–1.1% to the 5080's, and 2.0–2.4% to every
-  drafting-off decode row.
+  drafting-off decode row (about 1 point less by round: §22.9).
 - §21.17's 3-prompt rows differ from these by more than the round's gains (the 5090's 4K MTP 0.98 there, 0.93 here
   at 8 prompts). That is the variance F was asked to take out.
 
@@ -4008,7 +4009,7 @@ the GDN commit, 0.25 ms in Strata's trace, is outside its stages):
 | lm_head | 0.48 | 0.44 | +0.04 |
 | norms, glue, PLE, idle | 0.72 | 0.03 | +0.69 |
 | the draft sub-steps and the head's catch-up | 2.54 | 2.37 | +0.17 |
-| **the pass** | **20.52** | 22.66 (verify 19.83 + draft 2.37 + commit) | |
+| **the pass** | **20.52** | 22.66 (verify 19.83 + draft 2.37 + commit 0.46) | |
 
 - **The components overlap, so their sum is not the pass.** The miss fetch runs beside the hits' pass on another
   graph branch. What counts is each layer's MoE critical path, and there the trace showed a stall: **the fetch
@@ -4099,7 +4100,7 @@ bitwise).**
   - 5080: MTP decode **+0.9–1.1% ± 0.0**; the prefill and drafting-off rows unchanged (they do not take this
     kernel);
   - 5090: MTP decode **+1.0–1.1% ± 0.1**, MTP prefill −0.2 to −0.5%, drafting-off decode +0.3–0.4%, drafting-off
-    prefill −0.5% ± 0.3 at 4K and −1.2% ± 0.3 at 32K (0.98, over 0.945).
+    prefill −0.5% ± 0.3 at 4K and −1.2% ± 0.3 at 32K (0.98, over 0.945; one round only: §22.9).
 - It ships.
 
 Other variants of the kernel, measured on both cards and dropped:
@@ -4115,7 +4116,7 @@ before the fixes, fix 1 as first written, and fixes 1 and 2 as shipped. Fix 3 th
 |---|---|---|---|---|
 | fix 1 (both streams at high priority) | +4.6–4.7% ± 0.2 | +0.2 / −0.5 / −0.5 | +1.0–1.1 ± 0.3 | +0.7–0.8 |
 | fix 1 on the split's stream only, plus fix 2 | +1.6–1.8% ± 0.1 | −0.5 ± 0.1 | 0.0 | 0.0 (1K: −4 ± 4) |
-| all of them | **+6.3–6.5% ± 0.2** | −0.3 / −1.1 / −1.0 | +1.0 ± 0.3 | 1K −3.5 ± 3.8, +0.8 |
+| all of them | **+6.3–6.5% ± 0.2** | −0.3 / −1.1 / −1.0 | +1.0 ± 0.3 (one round: §22.9) | 1K −3.5 ± 3.8, +0.8 |
 | fix 3 | +4.1 ± 2.2 / +5.0 ± 3.2 / +0.2 ± 1.7 | 0.0 | 0.0 | 0.0 |
 
 - **After fixes 1 and 2, the 5080's rows against Strata:**

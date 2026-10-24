@@ -129,7 +129,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--model", required=True)
     ap.add_argument("--pack", required=True)
-    ap.add_argument("--tokens", type=int, default=256)
+    ap.add_argument("--tokens", type=int, default=512)        # (the MTP pair: well past its 100 positions)
     ap.add_argument("--max-len", type=int, default=20480)
     ap.add_argument("--plant", help="a judge plant, e.g. qsa_decode_select_shift (must fail)")
     ap.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")

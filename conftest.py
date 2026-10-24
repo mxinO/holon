@@ -11,6 +11,7 @@
 
 - FlashInfer's JIT modules cached per environment: their build files name the environment's paths, so environments
   sharing the home directory's cache (one per worktree) rebuild every module the other one built last."""
+import importlib
 import os
 import sys
 
@@ -32,3 +33,24 @@ def pytest_configure(config: pytest.Config) -> None:
         config.issue_config_time_warning(pytest.PytestConfigWarning(
             f"{workers} workers and {len(gpus) or 'no'} GPUs listed in CUDA_VISIBLE_DEVICES: workers share GPUs "
             "(list one idle GPU per worker)"), stacklevel=2)
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _prebuilt(request):
+    """The engine never compiles (a missing prebuilt module raises NotBuilt naming `holon prebuild`), so a test module
+    lists the CUDA extensions it needs in `PREBUILT` (e.g. `("expert_io",)`) and any missing one is built here for
+    the visible GPU's SM, into the user cache, before its tests run: a fresh cache does not fail them."""
+    names = getattr(request.module, "PREBUILT", ())
+    if not names:
+        return
+    import torch
+    if not torch.cuda.is_available():
+        return
+    major, minor = torch.cuda.get_device_capability()
+    sm = 10 * major + minor
+    for name in names:
+        ext = importlib.import_module(f"holon_plugins.kernels.{name}.extension")
+        try:
+            ext.load(sm)
+        except ext.NotBuilt:
+            ext.build(sm, os.cpu_count()) if name == "ggml_cuda" else ext.build(sm)
