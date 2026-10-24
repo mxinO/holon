@@ -9,7 +9,7 @@ pool (a row on the last unit), the inputs, the chunk indices or the outputs is o
 shape (Hv 32) and the small one (head dim 64) in both v-head orders: the mixed batch of the L0 (lengths 1 to 1000,
 a zero-token row, slot 0 and the last slot) on the chunked path and a decode batch on the recurrent path, each with
 has_init mixed and then all set (so the last unit is read too); the convolution on the same batches; the gated norm
-with a strided z.
+with a strided z; the recurrent path on column views of wider rows (q, k, v, a and b read in place).
 """
 import torch
 
@@ -33,8 +33,14 @@ def main() -> None:
         norm = t.select("gated_rmsnorm@1", dim=d, eps=t.EPS, dtype="bfloat16")
         zw = torch.randn(37, hv + 1, d, device="cuda").bfloat16()
         norm(torch.randn(37, hv, d, device="cuda").bfloat16(), zw[:, 1:], torch.ones(d, device="cuda").bfloat16())
+        x = t.tokens(len(t.DECODE_SLOTS), hk, hv, d)                 # the recurrent path's in-place reads
+        wide = {n: torch.cat([v.reshape(len(v), -1)] * 2, 1) for n, v in x.items()}
+        views = {n: wide[n][:, :x[n][0].numel()].view(x[n].shape) for n in x}
+        pool = torch.zeros(t.UNITS, hv, d, d, device="cuda")
+        t.run_batch(t.gdn(shape, "tiled"), views, g, pool, [1] * len(t.DECODE_SLOTS), t.DECODE_INIT, t.DECODE_SLOTS)
     torch.cuda.synchronize()
-    print("memcheck run: gated_delta_rule, causal_conv1d, gated_rmsnorm on qwen3.5 and small")
+    print("memcheck run: gated_delta_rule (contiguous and column views), causal_conv1d, gated_rmsnorm on qwen3.5 and "
+          "small")
 
 
 if __name__ == "__main__":
