@@ -648,6 +648,27 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   silently (now refused with a tier, required when set, warned when the default); `branch_at` changed across
   preemption (kept); the clock's write lane outlasts the drive's real writes at the default write rate (3a's miss);
   two desktops lost their GPU mid-run. Old → new SHA maps of `main`'s rewrite: `docs/history/`. Next: FN, GLM.
+
+  **FN status (2026-10-24): closed, every gated row at or above its bar.** Design and record:
+  `docs/v1-flash-next.md` (§17–§21 the build and speed record, §22 the close, §23 the last speed round); records
+  `evidence/fn*`, the close in `evidence/fn_close_final_2026-10-24.json`. The branch was replayed onto `main` to drop a
+  private name from one merge message: old → new SHAs in `docs/history/2026-10-24-fn-replay-map.tsv`.
+
+  | # | Result |
+  |---|---|
+  | 1 | Qwen3.8-Flash-Next end to end on 16 GB (RTX 5080, IQ2_XS) and 32 GB (RTX 5090, IQ3_S): QSA + indexer, hyper-connections, the PLE table in host RAM or on SSD (`std.tiered.rows@1`), GDN's out gate, the MTP head (its experts through the offload store) |
+  | 2 | Accuracy by the owner's method (§18): the tiny model against HF; GPU self-consistency (gate c, MTP bars tightened, two plants); 72 hard items vs Strata (5080 70 = 70, 5090 72 vs 70; degenerate items judged by pooled rates, owner 2026-10-24); the PLE / QSA cover |
+  | 3 | Exact: the offload store byte-identical to all-resident (RTX PRO 6000); run-identical ×3 and cross-placement identical on both bar cards; the PLE tier RAM vs SSD identical |
+  | 4 | Bars vs Strata (D11, 8 prompts × 2 rounds; 1K / 4K / 32K): decode 1.09 / 1.09 / 1.07 (5080), 1.17 / 1.14 / 1.11 (5090); MTP decode 1.09 / 1.14 / 1.12, 1.07 / 1.00 / 1.00; prefill 1.09 / 1.22 / 1.02, 1.00 / 1.23 / 0.99 |
+  | 5 | Core: ABI 1.5; +49 code lines over FN's base against the design's 47 (`ActivationLender` a fourth seam): for the owner's sign-off |
+  | 6 | Locks: FN's `rtx-5080` and `rtx-5090` (`max_seqs` 1; L2 against step 5's golden and both kernel paths' floors, `compare` taking one floor per path); every other history propagated (L2 passing, then advanced byte-identical at the final tree) |
+
+  Decisions: the bars are tok/s ≥ Strata, MTP included (owner, 2026-10-24); not shipped: the CPU split and budgeted
+  admission (they lose on the bar cards), the hole fill, the layer-ahead prefetch; one step size per card (the
+  5090's 5K at 0.985); `max_seqs` 1 in FN's locks (more sequences cost the expert cache, §23). Found on the way: the
+  split fetch waiting behind the hits' kernel (a high-priority stream, +5% MTP); THP host pools (+13% PCIe copy rate);
+  a GDN sub-chunking change that overran the activation reserve with two prompts in a step (an illegal address on
+  the 5090; fixed, and `plugins/tests/test_reserve.py` now checks every step against the reserve). Next: GLM.
 - **Required staging units and a short card** (panel, K's close): when the staging units are in a pool's minimum
   (a state tier's, `max_seqs` + 1), a shortfall should come out of the context instead of refusing the start. Checked
   at the close review: a served start already does (`clamp_context`: `rtx-5080/12.lock` at a 2.79 GiB state budget
