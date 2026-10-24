@@ -3421,7 +3421,7 @@ sequences ran out of memory in the snapshot trace. Found by `exact.py` at the cl
 
 **Tests:**
 - The chunked draws and laws bitwise.
-- The wide filtered step's peak under 2.5 × its logits (it was 8.6×).
+- The wide filtered step's peak under 2.5 × its logits (now 1.3×, it was 9.0×).
 - `plugins/tests/test_qwen4_exp_offload.py`: Qwen3.8-Flash-Next's 64-sequence MTP deployment at 0.97 runs the
   snapshot trace (with `FN_GGUF` and `FN_MTP`; on the A5000: passes, 3 min). Without the core fix it fails in the
   trunk, and without the sampler fix in the sort.
