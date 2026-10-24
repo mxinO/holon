@@ -3798,3 +3798,74 @@ draft heads accept alike (§23.5), so the rest is per-pass time, mostly on the 5
 - **The head's catch-up in row chunks** (§23.3): ≈ 0.3–0.5 points of the 5090's cache, under the bench's
   resolution for the same reason.
 - **§21.17's structural levers:** partial lending, Strata's CPU-side miss serving, and mmvq skipping null slots.
+
+### 23.8 The verify pass side by side (the lead's call after §23.7)
+
+The decode rows are over the bar (1.04–1.17) and the MTP rows are not (0.92–0.99). E rules out the drafts (§23.5), so
+the gap is the verify pass's time. Strata's verify had only ever been split into verify and draft totals.
+
+**Method:**
+- **Holon** (`spikes/fn7/verify_split.py run` / `holon`): the deployment serves one bench prompt, then 24 graphed
+  verify steps under `nsys --cuda-graph-trace=node`. `breakdown.instrument`'s component ranges are installed before
+  the graphs are captured, so every graph node is created inside its component's range, and the trace's
+  node-creation events carry that. Each kernel goes to its step (by its graph launch) and to the component it was
+  captured in. `moe` is split by kernel into the miss fetch, router and resolve, and the routed experts.
+- **Strata:** its own GPU stage profile (`STRATA_VERIFY_PROFILE=1`, events per stage, ms per window) and its decode
+  timing line, with an nsys node trace of its `--serve` to read its kernels.
+- Both on the same prompt (the bench plan's first of each context), one allocation per card.
+
+**The 5080 at 1K** (Holon's pass from the graphed trace; Strata's stages as it profiles them, its slowdown included;
+the GDN commit, 0.25 ms in Strata's trace, is outside its stages):
+
+| Component | Holon ms | Strata ms | Holon − Strata |
+|---|---|---|---|
+| miss fetch (Holon: `k_fetch`, 242 MiB at 47 GB/s) / Strata's waits for its misses (PCIe and CPU) | 5.35 | 6.05 | −0.70 |
+| routed experts (hits and misses passes, quantize, combine) | 5.63 | 3.80 | +1.83 |
+| router and resolve | 0.95 | 0.73 | +0.22 |
+| shared expert | 1.36 | 0.98 | +0.38 |
+| attention (QSA and the indexer, their projections) | 0.94 | 1.52 | −0.58 |
+| GDN (its projections; Holon's rewind replay, 0.64) | 4.13 | 2.56 | +1.57 |
+| HC | 3.21 | 3.66 | −0.45 |
+| lm_head | 0.48 | 0.44 | +0.04 |
+| norms, glue, PLE, idle | 0.72 | 0.03 | +0.69 |
+| the draft sub-steps and the head's catch-up | 2.54 | 2.37 | +0.17 |
+| **the pass** | **20.52** | 22.66 (verify 19.83 + draft 2.37 + commit) | |
+
+- **The components overlap, so their sum is not the pass.** The miss fetch runs beside the hits' pass on another
+  graph branch. What counts is each layer's MoE critical path, and there the trace showed a stall: **the fetch
+  started 33–44 µs after the store's resolve, every layer**.
+  - The hits' mmvq is launched with programmatic dependent launch (ggml's PDL), so its blocks sit on every SM before
+    the resolve ends.
+  - The fetch's 8 CTAs, at the default priority, got no SM until those blocks drained.
+  - A toy graph reproduces it, and a high-priority stream removes it: torch's graphs keep node priorities.
+- **The per-call kernel time is not the gap.** On the 5080 at 4 rows and 40 entries, the hits' gate/up mmvq takes
+  44.8 µs (IQ2_S) and its down 19.0 µs (Q2_0), whatever the tokens share. Strata's grouped kernels take 34.8 µs and
+  21.7 µs over ≈ 33 entries, which is the same per entry. The "routed experts" row's difference is Holon's 40 entries
+  on the GPU against Strata's ≈ 36 (it computes ≈ 3 per layer on its CPU), plus the hits' pass sharing the GPU with
+  the fetch.
+- **Kernel variants tried on the 5080's shapes and dropped** (the vendored `mul_mat_vec_q_moe`, all bitwise):
+  - entries in expert order (L1 reuse of shared experts): +1–3%;
+  - grouped by expert, each weight block decoded once for all of its tokens: −19% gate/up only when 12 experts
+    serve 40 entries, +6–29% at realistic sharing, +30–80% on down;
+  - IQ grids staged in shared memory: −1–2%;
+  - 4 rows per block: down −16%, gate/up +6%.
+
+**Fix 1: the split fetch's stream at high priority (0442c8b3, b0cb2877; std, bitwise).** The fetch now starts 2.5
+µs (median) after the resolve. The 5080's 1K pass is 20.52 → 19.49 ms (−5.0%), with the same tokens. Launching the
+hits' mmvq without PDL fixes it equally (19.42 ms) but changes vendored code, so the priority ships.
+- **Its bench on the 5080** (8 prompts × 2 rounds, paired): MTP decode **+5.2–5.4% ± 0.1** at every context,
+  1.006 / 1.029 / 1.008 against Strata (per pass 1.04 / 1.04 / 1.08).
+- The first version also raised the pipelined prompt passes' parts (the same stream). The drafting-off rows lost 0.4%
+  decode and 0.6–1.2% prefill, so b0cb2877 keeps the high priority for the split call's fetch only.
+
+**Fix 2: GDN's recurrent kernel reads its inputs in place (5c1331dc; kernels.fla, std; bitwise).** The vendored
+`fused_sigmoid_gating` copied q, k, v, a and b to contiguous tensors, and the unit copied a and b out of the merged
+projection. They are column views of wider rows, so the kernel now takes their token strides. That is five copies
+fewer per GDN layer in every decode and verify step, and three in each rewind replay. The 5080's 1K pass is 19.49 →
+**18.98 ms** (−2.6%), with the same tokens. L0: column views give the same bits as contiguous inputs.
+
+**Fix 3: `linear_rows@1`, a dense weight's matmul over a few rows (573063ac; std.ops contract, kernels.triton_fp8;
+not bitwise, L0).** cuBLAS runs the GDN a/b projection at 4 rows as a split-K GEMM of ≈ 15 µs; its one-row GEMV takes
+≈ 3. A Triton kernel serves 2–16 rows of narrow outputs (≤ 256: the a/b projection, the shared expert's gate), with
+float32 sums in a fixed order. L0 against the f64 product, run-to-run and graph replay identical. On the A5000 in
+a graph: 6.2 µs against cuBLAS's 14.7.
