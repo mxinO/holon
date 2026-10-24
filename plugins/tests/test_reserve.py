@@ -4,9 +4,13 @@ prompts' chunks once needed 2.7× the GDN temporaries of the one-row step the pr
 
 A tiny Qwen3.5 (GDN and attention layers, GDN wide enough that its temporaries dominate a step) on the GPU kernels,
 eager steps, with fla's sub-chunks at one FLA chunk so a step splits: after each step, the peak it allocated beyond
-what was allocated before it must be at most the reserve the profile measured, across step shapes — one long prompt
-(full chunks and a tail), several prompts' rows in one step, prefill beside decode rows, a 1-token tail. Before
-d2c759c8 the several-rows step took 54.0 MB against a 32.0 MB reserve. Test-only: serving pays nothing for it."""
+what was allocated before it must be at most the reserve the profile measured (and the margin below), across step
+shapes — one long prompt (full chunks and a tail), several prompts' rows in one step, prefill beside decode rows, a
+1-token tail. Before d2c759c8 the several-rows step took 54.0 MB against a 32.0 MB reserve.
+
+One term grows with a step's rows and is bounded, so it is the stated margin: GDN's in-step conv checkpoint takes each
+checkpointed row's last `kernel − 1` inputs (`(kernel − 1) × channels` elements) — one row's in the profiled step,
+at most `max_seqs` rows' in any step, one layer's at a time. Test-only: serving pays nothing for it."""
 import pytest
 import torch
 from holon.api import SamplingParams
@@ -38,8 +42,17 @@ def engine(tmp_path_factory):
         platform.peak_memory, fla.SUB_TOKENS = measure, sub
 
 
+def _margin(engine) -> int:
+    """GDN's conv checkpoint windows of `max_seqs − 1` rows more than the profiled step's (the module docstring)."""
+    from holon_std.mixers.gdn.units import GDN
+    gdns = [m for m in engine.executor.model.modules() if isinstance(m, GDN)]
+    window = max((m.kernel - 1) * m.channels * m.conv_weight.element_size() for m in gdns)
+    return (engine.cfg.max_seqs - 1) * window
+
+
 def _steps(engine, prompts: list[int], reserve: int) -> list[int]:
-    """Serve `prompts` (lengths) to the end; every step's peak against the reserve."""
+    """Serve `prompts` (lengths) to the end; every step's peak against the reserve and the stated margin."""
+    reserve += _margin(engine)
     gen = torch.Generator().manual_seed(len(prompts))
     params = SamplingParams(temperature=0.0, max_tokens=4, ignore_eos=True)
     for n in prompts:
