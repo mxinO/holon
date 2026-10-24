@@ -130,7 +130,10 @@ def trace(prompts: PromptSet, width: int = 64, short_len: int = 32, long_len: in
     """The snapshot trace (design §7.10), as far as M0 serves it:
 
     - request 0: the longest prompt (at most `long_len` tokens) — long context;
-    - request 1: that prompt extended, submitted once request 0 has finished — a prefix-cache hit;
+    - request 1: that prompt extended, submitted once request 0 has finished — a prefix-cache hit — and scored: its
+      two tokens' logprobs (top 5) carry the long context's numerics into the trace bits, chunked prefill and cached
+      blocks (the first, sampled in a prefill step) and one decode step at ≈ 2,065 tokens of context (the second),
+      which greedy tokens hide;
     - `width - 2` short requests (windows of `short_len` tokens over the prompt set) whose `max_tokens` grow by one,
       so once they decode together the batch shrinks about one sequence per step through every graph bucket up to
       `width`. The early finishers carry seeded sampling (one with n = 2), generated-token logprobs and prompt
@@ -140,7 +143,8 @@ def trace(prompts: PromptSet, width: int = 64, short_len: int = 32, long_len: in
     stream = [t for p in prompts.prompts for t in p.ids]
     longest = max(prompts.prompts, key=lambda p: len(p.ids)).ids[:long_len]
     greedy = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True)
-    requests = [Request(longest, greedy), Request(longest + stream[:16], greedy, after=0)]
+    scored = dataclasses.replace(greedy, max_tokens=2, logprobs=5)
+    requests = [Request(longest, greedy), Request(longest + stream[:16], scored, after=0)]
     special = {1: {"logprobs": 5}, 2: {"prompt_logprobs": 5}, 3: {"temperature": 0.8, "top_p": 0.9, "seed": 3, "n": 2}}
     for i in range(width - 2):
         start = (i * short_len) % max(1, len(stream) - short_len)

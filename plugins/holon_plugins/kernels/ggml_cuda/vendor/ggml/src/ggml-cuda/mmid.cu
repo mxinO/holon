@@ -9,7 +9,8 @@
 // Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
 // ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
 // included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
-// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none):
+// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none) — but a negative id is a pair the call skips on
+// purpose (a pass of a pipelined expert path computes its own entries: FN step 7), listed last, no error:
 // - per slot (ggml_cuda_mm_ids_per_slot: the launch lists every slot, a small scan): one warp per slot scanning every
 //   pair, as ggml's; z is the slot;
 // - compact: one block radix-sorts the pairs, keys `slot << pair_bits | pair` sorted on the slot bits (stable), and
@@ -53,12 +54,14 @@ static __global__ void mm_ids_helper_per_slot(
 
     int nex_prev = 0;   // pairs before this block's (this lane's share)
     int it_compact = 0; // this block's pairs
+    bool past = false;  // an id past the slots (a negative one is skipped on purpose)
     for (int p0 = 0; p0 < n_pairs; p0 += WARP_SIZE) {
         const int p = p0 + lane;
         const int id = p < n_pairs ? ids[(p / n_expert_used)*si1 + p % n_expert_used] : INT_MAX;
         const bool valid = 0 <= id && id < n_experts;
         const bool mine = p < n_pairs && (expert < n_experts ? id == expert : !valid);
         nex_prev += valid && id < expert;
+        past = past || (p < n_pairs && id >= n_experts);
         const unsigned ballot = __ballot_sync(0xFFFFFFFF, mine);
         if (mine) {
             pairs_mm_ids_helper[it_compact + __popc(ballot & lanes_below)] = p;
@@ -66,6 +69,7 @@ static __global__ void mm_ids_helper_per_slot(
         it_compact += __popc(ballot);
     }
     nex_prev = warp_reduce_sum<WARP_SIZE>(nex_prev);
+    past = __any_sync(0xFFFFFFFF, past);
     __syncwarp();
 
     for (int i = lane; i < it_compact; i += WARP_SIZE) {
@@ -80,7 +84,7 @@ static __global__ void mm_ids_helper_per_slot(
         if (it_compact > max_cols) {
             mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
         }
-    } else if (it_compact > 0) {
+    } else if (past) {
         mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
     }
 }
@@ -104,6 +108,9 @@ static __global__ void mm_ids_helper_compact(
         const int i = tid*items + q;
         const int id = i < n_pairs ? ids[(i / n_expert_used)*si1 + i % n_expert_used] : n_experts;
         keys[q] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
+        if (i < n_pairs && id >= n_experts) {
+            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
+        }
     }
     if (tid == 0) {
         n_valid = n_pairs;
@@ -162,9 +169,6 @@ static __global__ void mm_ids_helper_compact(
     }
     if (tid == 0 && n_active > n_z) {
         mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
-    }
-    if (tid == 0 && n_valid < n_pairs) {
-        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
     }
 }
 
@@ -232,13 +236,16 @@ size_t ggml_cuda_mm_ids_scratch_bytes(const int n_pairs) {
 
 static __global__ void mm_ids_device_keys(
         const int32_t * __restrict__ ids, uint32_t * __restrict__ keys, int * __restrict__ n_valid, const int n_experts,
-        const int n_pairs, const int pair_bits, const int n_expert_used, const int si1) {
+        const int n_pairs, const int pair_bits, const int n_expert_used, const int si1, int32_t * __restrict__ errors) {
     const int i = blockIdx.x*blockDim.x + threadIdx.x;
     if (i >= n_pairs) {
         return;
     }
     const int id = ids[(i / n_expert_used)*si1 + i % n_expert_used];
     keys[i] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
+    if (id >= n_experts) {
+        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
+    }
     if (i == 0) {
         *n_valid = n_pairs;
     }
@@ -306,9 +313,6 @@ static __global__ void mm_ids_device_finish(
     if (tid == 0 && n_active > n_z) {
         mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
     }
-    if (tid == 0 && n_valid < n_pairs) {
-        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
-    }
 }
 
 static void launch_mm_ids_helper_device(
@@ -320,7 +324,7 @@ static void launch_mm_ids_helper_device(
     mm_ids_scratch s = mm_ids_scratch_layout((char *) scratch, n_pairs);
     const int threads = 256;
     const int blocks = (n_pairs + threads - 1) / threads;
-    mm_ids_device_keys<<<blocks, threads, 0, stream>>>(ids, s.keys_in, s.n_valid, n_experts, n_pairs, pair_bits, n_expert_used, si1);
+    mm_ids_device_keys<<<blocks, threads, 0, stream>>>(ids, s.keys_in, s.n_valid, n_experts, n_pairs, pair_bits, n_expert_used, si1, errors);
     CUDA_CHECK(cub::DeviceRadixSort::SortKeys(s.temp, s.temp_bytes, s.keys_in, s.keys_out, n_pairs, pair_bits,
                                               pair_bits + slot_bits, stream));
     mm_ids_device_rows<<<blocks, threads, 0, stream>>>(s.keys_out, s.heads, s.n_valid, ids_src1, ids_dst, n_experts, n_pairs,

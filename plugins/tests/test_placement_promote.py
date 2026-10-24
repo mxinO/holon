@@ -16,6 +16,9 @@ from holon_std.moe.kernels import DECODE, PADDING, PREFILL
 from .test_expert_io import DEVICES, ROLES, E, K, _jobs, _log, _share, _stage, kernel, plugins, routing  # noqa: F401
 from .test_moe_engine import KEY, Q, _engine, _gguf_and_dense, _gpu_engine, _served, gpu_moe, tiny_moe_deep  # noqa: F401
 
+PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
+
+
 OP = "moe_resolve.promote@1"
 PROVIDERS = {"cpu": "placement.promote", "cuda": "kernels.promote"}
 

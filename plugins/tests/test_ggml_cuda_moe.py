@@ -40,11 +40,10 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   SwiGLU) fail them. sm_120, `quant.act = a4`: native W4A4 mmq with ids against the f64 product of its own decoded
   activation codes, gate/up (bf16, one row per token) and down (f32, one per slot).
 
-Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
+Skips without a GPU; conftest builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
 import math
-import os
 import re
 import types
 from unittest import mock
@@ -90,6 +89,7 @@ from .test_ggml_cuda import (
 )
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
+PREBUILT = ("ggml_cuda",)  # CUDA extensions built if missing (conftest)
 
 E, K = 32, 8                    # the type sweep's stacks (E = 128, Qwen3-30B-A3B's, for routings and graphs)
 EQ = 128
@@ -104,10 +104,6 @@ def sm() -> int:
     major, minor = torch.cuda.get_device_capability()
     sm = 10 * major + minor
     assert sm >= 75, "q8_1.MMQ emulates llama.cpp's MMA kernels (turing_mma_available)"
-    try:
-        extension.load(sm)
-    except extension.NotBuilt:
-        extension.build(sm, os.cpu_count())
     return sm
 
 
@@ -515,7 +511,7 @@ def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
         h, out = torch.full((tokens, K, INTER), torch.nan, device="cuda"), torch.full_like(y, torch.nan)
         scratch = torch.full((max(gate_up.scratch_bytes(tokens), down.scratch_bytes(tokens)),), 0xFF,
                              dtype=torch.uint8, device="cuda")
-        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens and not gate_up.glu_store)
+        assert (gate_up.scratch_bytes(tokens) > 0) == (tokens > gate_up.mmvq_tokens)
         graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(graph):
             down(gate_up(x, pg, ids, out=h, scratch=scratch), pd, ids, out=out, scratch=scratch)
@@ -656,11 +652,77 @@ def test_an_arena_call_of_many_chunks_gives_the_chunks_rows(ctx, name, stage):
     assert int(errors) == ID_ERRORS["slots"], "more slots than the bound"
 
 
+
+@pytest.mark.parametrize(("stage", "glu"), [("gate_up", "none"), ("gate_up", "swiglu"), ("down", "none")])
+def test_mmvq_skips_an_arenas_null_slots(ctx, stage, glu):
+    """An arena binding's mmvq calls (one token, and the multi-token kernel at the type's limit) store 0 for an entry
+    on a null slot (below top_k, std.moe.kernels) without reading the slot: NaN-poisoned null slots give the bits of
+    zeroed ones, and the other entries' rows are unchanged."""
+    k, out, rows = STAGES[stage]
+    s = stack("q4_k", EP, out, k, seed=41)
+    facts = {"layout": "ggml.q4_k/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
+             "rows_per_token": rows, "glu": glu, "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
+             "slots": EP + K}
+    kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
+    zero = torch.cat([torch.zeros_like(s.parts["blocks"][:K]), s.parts["blocks"]])
+    poisoned = zero.clone()
+    poisoned[:K] = 0xFF
+    x, ids = placed_inputs(stage, kernel.mmvq_tokens, seed=42)
+    slots = ids.int() + K
+    slots[:, ::2] = torch.arange(0, K, 2, dtype=torch.int32, device="cuda")      # even ranks on their null slots
+    for tokens in sorted({1, kernel.mmvq_tokens}):
+        want = kernel(x[:tokens], {"blocks": zero}, slots[:tokens])
+        got = kernel(x[:tokens], {"blocks": poisoned}, slots[:tokens])
+        assert torch.equal(got, want) and not got[:, ::2].any() and got[:, 1::2].any(), f"T={tokens}"
+    assert {p for p, n in kernel.calls.items() if n} == {"mmvq/q8_1"}, kernel.calls
+
+
+@pytest.mark.parametrize("glu", ["none", "swiglu"])
+@pytest.mark.parametrize("stage", sorted(STAGES))
+def test_entries_split_across_calls_compose_the_one_call(ctx, stage, glu):
+    """A pipelined pass (FN step 7): an entry's id −1 is skipped on purpose — mmq's id helper lists it last without a
+    range error, mmvq leaves its rows, our SwiGLU after an unfused mmq leaves them too —, so calls over a partition of a
+    pass's entries, each with the others' ids −1, write into one `out` exactly the one call's rows (mmq at 300 tokens,
+    a 1-token and an mmvq-limit tail)."""
+    k, out, rows = STAGES[stage]
+    s = stack("q4_k", EP, out, k, seed=51)
+    facts = {"layout": "ggml.q4_k/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
+             "rows_per_token": rows, "glu": glu, "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
+             "slots": EP + K}
+    kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
+    kernel.glu_store = False                                     # (swiglu: mmq's gate/up, then our SwiGLU)
+    parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
+    for tokens in (300, 1, kernel.mmvq_tokens):
+        x, ids = placed_inputs(stage, tokens, seed=52)
+        want = kernel(x, parts, ids)
+        part = torch.randint(-1, 3, ids.shape, generator=torch.Generator().manual_seed(tokens)).cuda()
+        got = torch.full_like(want, torch.nan)
+        kernel.errors.zero_()
+        for i in range(-1, 3):
+            kernel(x, parts, torch.where(part == i, ids, -1), out=got)
+        assert torch.equal(got, want) and not int(kernel.errors), f"T={tokens}"
+
+
+def test_scaled_slots_leave_minus_one_entries_untouched(ctx):
+    """An expert scale (NVFP4's scale2) applied after an arena call's mmq multiplies only its own entries' rows: a −1
+    entry's row, which another call of the pass wrote, is untouched (it had taken the last expert's scale)."""
+    from holon_plugins.kernels.ggml_cuda.plugin import LinearExperts
+    y = torch.randn(9, K, 64, device="cuda")
+    ids = torch.randint(0, EP, (9, K), device="cuda", dtype=torch.int32)
+    ids[::2, 0] = -1
+    scale = torch.rand(EP, device="cuda") + 0.5
+    got = y.clone()
+    LinearExperts._scale_slots(got, scale, ids)
+    want = torch.where((ids >= 0)[..., None], y * scale[ids.clamp_min(0)][..., None], y)
+    assert torch.equal(got, want) and torch.equal(got[::2, 0], y[::2, 0])
+
+
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
     """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
-    tail) give the allocating call's bits; `scratch` is gate/up's f32 output only (the persistent workspace holds every
-    call's id maps), none for D4's store; mmvq calls do none of D10's work; a short or misaligned buffer, or one
+    tail) give the allocating call's bits; `scratch` is gate/up's f32 output (none for D4's store), then the mmq
+    launches' id maps and q8_1 rows (the persistent workspace holds the mmvq calls'); mmvq calls do none of D10's
+    work; a short or misaligned buffer, or one
     overlapping another or `x`, is refused before anything is launched."""
     for glu, fused in (("none", True), ("swiglu", True), ("swiglu", False)):
         f = facts | {"glu": glu}
@@ -672,7 +734,8 @@ def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Te
         with (mock.patch.object(kernel, "_gate_up_out", side_effect=AssertionError),        # mmvq calls do none of
               mock.patch.object(kernel, "scratch_bytes", side_effect=AssertionError)):     # D10's work (host-bound)
             assert torch.equal(kernel(x[:small], parts, ids[:small], scratch=empty), want)
-        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4)
+        assert kernel.scratch_bytes(64) == (0 if glu == "none" or kernel.glu_store else 64 * K * kernel.out * 4) + \
+            kernel._id_bytes(64)
         for tokens in (len(ids), len(ids) - CHUNK + 1):
             want = kernel(x[:tokens], parts, ids[:tokens])
             out, scratch = torch.full_like(want, torch.nan), torch.full((kernel.scratch_bytes(tokens),), 0xFF,
@@ -888,6 +951,19 @@ def test_moe_router(ctx, lib, n, hidden):
                     assert bitwise(logits_of(x[a:b]), gemm[a:b]), f"router GEMM rows {a}:{b}"
                 assert all(map(bitwise, route(x, router), choose(gemm)))
         assert route(x32[:0].bfloat16(), router)[1].shape == (0, k)
+    rb = router.bfloat16()                 # a bf16 router (moe.router_dtype): its values as f32 or held bf16, same bits
+    for x in (x32.bfloat16(), x32):
+        held = []
+        for r in (rb.float(), rb):
+            logits = torch.empty(rows, n, device="cuda")
+            w, ids = torch.empty(rows, K, device="cuda"), torch.empty(rows, K, dtype=torch.int32, device="cuda")
+            lib.moe_router(x[:rows], r, logits, done, w[:, :min(K, n)], ids[:, :min(K, n)], True)
+            gemm = None
+            if n % 64 == 0:
+                gemm = torch.empty(len(x), n, device="cuda")
+                lib.moe_router_logits(x, r, torch.empty(lib.moe_router_partials(n), *gemm.shape, device="cuda"), gemm)
+            held.append((logits, w[:, :min(K, n)], ids[:, :min(K, n)], gemm))
+        assert all(bitwise(a, b) for a, b in zip(*held, strict=True) if a is not None), "a bf16 router's bits"
 
 
 def test_the_router_prepares_the_gate_up_input(ctx, lib):

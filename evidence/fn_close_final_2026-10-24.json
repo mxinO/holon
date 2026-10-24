@@ -1,0 +1,983 @@
+{
+ "name": "fn_close_final",
+ "date": "2026-10-24",
+ "final_tree": "8818cdca (runtime); gate (c) script 00ebb81d",
+ "gpus": "RTX 3090, 4090, 5080, 5090 (sm_86, sm_89, sm_120); RTX A5000 (sm_86) local",
+ "locks": {
+  "rtx-5080": {
+   "first_lock_l2": [
+    "  L2 Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf bfloat16 vs float32 golden, prompts v1-qwen3_5.jsonl",
+    "                n    top-1 top-1 conf    KL p50    KL p99    KL max         \u0394PPL \u00b1 SE missing",
+    "overall     33372  97.366%    98.316%  4.32e-04  2.63e-01  9.51e+00  +0.123% \u00b1 0.422%   4.75%",
+    "floor       33372  97.177%    98.144%  5.35e-04  3.16e-01  1.03e+01  +1.046% \u00b1 0.843%   5.06%",
+    "vs floor                                                             -0.913% \u00b1 0.902%",
+    "budget            \u226596.927%            \u22641.07e-03 \u22646.31e-01                     \u22642.504%",
+    "floor mmvq  33372  97.267%    98.233%  5.04e-04  3.01e-01  1.10e+01  +0.033% \u00b1 0.373%   5.03%",
+    "vs mmvq                                                              +0.090% \u00b1 0.465%",
+    "budget            \u226597.017%            \u22641.01e-03 \u22646.01e-01                     \u22641.411%",
+    "calls: mmq/q8_1 41616, mmvq/q8_1 192",
+    "chat         8167  98.861%    99.635%  2.96e-04  1.23e-02  7.93e-01  -0.541% \u00b1 0.199%   2.40%",
+    "code         9308  98.743%    99.492%  2.04e-04  4.57e-02  4.02e+00  +0.767% \u00b1 0.776%   2.99%",
+    "recall       8846  96.123%    97.490%  1.77e-03  2.59e-01  8.26e+00  -0.508% \u00b1 1.189%   4.52%",
+    "agent        7051  95.377%    96.273%  2.97e-04  7.54e-01  9.51e+00  +0.845% \u00b1 0.959%  10.11%",
+    "PASS"
+   ],
+   "retune": [
+    "verdict: advance",
+    "  snapshot trace byte-identical",
+    "wrote plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/cu130-torch2.11/2.lock"
+   ],
+   "retune_note": "tune from the first lock with its stored pool bytes skips the startup profile, so the step-peak loan (moe.lend_peak) never bound and its site was missing (verdict approve); re-run with the pools measured: advance, the site bound"
+  },
+  "rtx-5090": {
+   "first_lock_l2": [
+    "  L2 Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf bfloat16 vs float32 golden, prompts v1-qwen3_5.jsonl",
+    "                n    top-1 top-1 conf    KL p50    KL p99    KL max         \u0394PPL \u00b1 SE missing",
+    "overall     33372  96.905%    97.890%  6.76e-04  4.25e-01  8.48e+00  -2.101% \u00b1 0.680%   5.70%",
+    "floor       33372  96.614%    97.662%  7.49e-04  4.86e-01  7.34e+00  -0.359% \u00b1 0.900%   5.89%",
+    "vs floor                                                             -1.749% \u00b1 1.121%",
+    "budget            \u226596.364%            \u22641.50e-03 \u22649.72e-01                     \u22643.053%",
+    "floor mmvq  33372  96.758%    97.779%  7.33e-04  3.82e-01  1.28e+01  -0.492% \u00b1 0.941%   5.73%",
+    "vs mmvq                                                              -1.617% \u00b1 0.924%",
+    "budget            \u226596.508%            \u22641.47e-03 \u22647.65e-01                     \u22642.561%",
+    "calls: mmq/q8_1 41784, mmvq/q8_1 192",
+    "chat         8167  98.531%    99.658%  6.76e-04  3.89e-02  3.30e-01  -0.807% \u00b1 0.866%   3.26%",
+    "code         9308  98.496%    99.326%  2.98e-04  4.58e-02  6.29e+00  +0.344% \u00b1 0.810%   3.41%",
+    "recall       8846  95.489%    96.694%  2.10e-03  3.31e-01  5.22e+00  -4.720% \u00b1 0.998%   5.06%",
+    "agent        7051  94.696%    95.474%  3.70e-04  1.26e+00  8.48e+00  -3.439% \u00b1 1.704%  12.34%",
+    "PASS"
+   ],
+   "retune": [
+    "verdict: advance",
+    "  snapshot trace byte-identical",
+    "wrote plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/cu130-torch2.11/2.lock"
+   ]
+  }
+ },
+ "propagation_f48159c6": {
+  "rtx-3090": {
+   "27b-ud-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/9.lock",
+    "trace": "PASS"
+   },
+   "30b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-3090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   },
+   "8b-bf16": {
+    "verdict": "approve",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-3090/cu130-torch2.11/6.lock",
+    "trace": "PASS"
+   },
+   "8b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   }
+  },
+  "rtx-4090": {
+   "27b-ud-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/13.lock",
+    "trace": "PASS"
+   },
+   "30b-mxfp4_moe": {
+    "verdict": "approve",
+    "wrote": "plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/9.lock",
+    "trace": "PASS"
+   },
+   "30b-nvfp4": {
+    "verdict": "approve",
+    "wrote": "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/10.lock",
+    "trace": "PASS"
+   },
+   "30b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/14.lock",
+    "trace": "PASS"
+   },
+   "8b-bf16": {
+    "verdict": "approve",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/18.lock",
+    "trace": "PASS"
+   },
+   "8b-fp8": {
+    "verdict": "approve",
+    "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   },
+   "8b-nvfp4": {
+    "verdict": "approve",
+    "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/10.lock",
+    "trace": "PASS"
+   },
+   "8b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   }
+  },
+  "rtx-5080": {
+   "27b-ud-iq3_s-tier": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/14.lock",
+    "trace": "PASS"
+   },
+   "30b-q4_k_m-offload": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/5.lock",
+    "trace": "PASS"
+   },
+   "30b-ud-iq3_xxs": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/13.lock",
+    "trace": "PASS"
+   },
+   "8b-fp8": {
+    "verdict": "approve",
+    "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   },
+   "8b-nvfp4": {
+    "verdict": "approve",
+    "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/10.lock",
+    "trace": "PASS"
+   },
+   "8b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/15.lock",
+    "trace": "PASS"
+   },
+   "8b-ud-iq3_xxs": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/15.lock",
+    "trace": "PASS"
+   }
+  },
+  "rtx-5090": {
+   "27b-ud-q4_k_m-tier": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/8.lock",
+    "trace": "PASS"
+   },
+   "30b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   },
+   "8b-bf16": {
+    "verdict": "approve",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-5090/cu130-torch2.11/12.lock",
+    "trace": "PASS"
+   },
+   "8b-q4_k_m": {
+    "verdict": "approve",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/7.lock",
+    "trace": "PASS"
+   }
+  }
+ },
+ "propagation_final": {
+  "rtx-3090": {
+   "27b-ud-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/10.lock",
+    "trace": "byte-identical"
+   },
+   "30b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-3090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   },
+   "8b-bf16": {
+    "verdict": "advance",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-3090/cu130-torch2.11/7.lock",
+    "trace": "byte-identical"
+   },
+   "8b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   }
+  },
+  "rtx-4090": {
+   "27b-ud-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/14.lock",
+    "trace": "byte-identical"
+   },
+   "30b-mxfp4_moe": {
+    "verdict": "advance",
+    "wrote": "plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/10.lock",
+    "trace": "byte-identical"
+   },
+   "30b-nvfp4": {
+    "verdict": "advance",
+    "wrote": "plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/11.lock",
+    "trace": "byte-identical"
+   },
+   "30b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/15.lock",
+    "trace": "byte-identical"
+   },
+   "8b-bf16": {
+    "verdict": "advance",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/19.lock",
+    "trace": "byte-identical"
+   },
+   "8b-fp8": {
+    "verdict": "advance",
+    "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   },
+   "8b-nvfp4": {
+    "verdict": "advance",
+    "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/11.lock",
+    "trace": "byte-identical"
+   },
+   "8b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   }
+  },
+  "rtx-5080": {
+   "27b-ud-iq3_s-tier": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/15.lock",
+    "trace": "byte-identical"
+   },
+   "30b-q4_k_m-offload": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/6.lock",
+    "trace": "byte-identical"
+   },
+   "30b-ud-iq3_xxs": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/14.lock",
+    "trace": "byte-identical"
+   },
+   "8b-fp8": {
+    "verdict": "advance",
+    "wrote": "plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   },
+   "8b-nvfp4": {
+    "verdict": "advance",
+    "wrote": "plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/11.lock",
+    "trace": "byte-identical"
+   },
+   "8b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/16.lock",
+    "trace": "byte-identical"
+   },
+   "8b-ud-iq3_xxs": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/16.lock",
+    "trace": "byte-identical"
+   }
+  },
+  "rtx-5090": {
+   "27b-ud-q4_k_m-tier": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/9.lock",
+    "trace": "byte-identical"
+   },
+   "30b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   },
+   "8b-bf16": {
+    "verdict": "advance",
+    "wrote": "plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-5090/cu130-torch2.11/13.lock",
+    "trace": "byte-identical"
+   },
+   "8b-q4_k_m": {
+    "verdict": "advance",
+    "wrote": "plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/8.lock",
+    "trace": "byte-identical"
+   }
+  }
+ },
+ "ledger_cached_share": {
+  "rtx-5080": {
+   "mtp": [
+    0.2621,
+    0.2477,
+    0.2194
+   ],
+   "off": [
+    0.2814,
+    0.2732,
+    0.2573
+   ]
+  },
+  "rtx-5090": {
+   "mtp": [
+    0.4839,
+    0.4706,
+    0.4444
+   ],
+   "off": [
+    0.5028,
+    0.4962,
+    0.4831
+   ]
+  }
+ },
+ "ledger_note": "tree 0060f1df, a fresh engine per row, max_seqs 1 / 2 / 4",
+ "fault_bisection_rtx-5090": {
+  "a8k": "illegal address",
+  "blk8k": "passes",
+  "r19_5k": "passes",
+  "r19_8k_b": "illegal address",
+  "r19_8k_c": "illegal address",
+  "r19_8k_mf90": "passes",
+  "r19_8k_nofork": "passes",
+  "r19_8k_pipe1": "passes",
+  "r20_8k": "passes",
+  "r21_8k": "out of memory",
+  "r21_8k_b": "passes"
+ },
+ "final_tree_gates": {
+  "rtx-5080": {
+   "gate_c_final": {
+    "decode": {
+     "pass": true,
+     "kl_mean": 0.024860180645315057,
+     "kl_p50": 0.0017760167442408769,
+     "kl_p99": 0.3604632117841324
+    },
+    "chunked": {
+     "pass": true,
+     "kl_mean": 0.02177283488044791,
+     "kl_p50": 0.0015902513032268716,
+     "kl_p99": 0.32999432920057836
+    },
+    "mtp": {
+     "pass": true,
+     "kl_mean": 0.0016876901408339167,
+     "kl_p99": 0.02663719501535592,
+     "positions": 539
+    },
+    "pass": true
+   },
+   "gate_c_plant_lrswap": {
+    "mtp": {
+     "pass": false,
+     "kl_mean": 0.06465610656000924,
+     "kl_p99": 1.418697113634175,
+     "positions": 280
+    },
+    "pass": false
+   },
+   "gate_c_plant_shexp": {
+    "mtp": {
+     "pass": false,
+     "kl_mean": 0.1365417406693366,
+     "kl_p99": 1.9115393179888285,
+     "positions": 67
+    },
+    "pass": false
+   },
+   "cover": {
+    "ctx": 8192,
+    "step": 4096,
+    "plant": null,
+    "ple": [
+     {
+      "rows": 8192,
+      "max": 7.820303267180861e-07,
+      "median": 1.696492546443551e-07,
+      "max_at_step_starts": 2.203689604129977e-07,
+      "max_elsewhere": 7.820303267180861e-07
+     }
+    ],
+    "qsa": {
+     "rows": 256,
+     "same": 1.0,
+     "overlap": 1.0
+    },
+    "pass": true
+   },
+   "exact": {
+    "pass": true,
+    "steps": 651,
+    "runs": [
+     [
+      "dep",
+      0,
+      null,
+      true
+     ],
+     [
+      "dep",
+      1,
+      null,
+      true
+     ],
+     [
+      "dep",
+      2,
+      null,
+      true
+     ],
+     [
+      "cap",
+      0,
+      null,
+      true
+     ],
+     [
+      "sm",
+      0,
+      null,
+      true
+     ],
+     [
+      "pipe1",
+      0,
+      null,
+      true
+     ],
+     [
+      "pad",
+      0,
+      "aux_row_padding",
+      false
+     ]
+    ]
+   },
+   "outside_mib": {
+    "stages": {
+     "built": 515,
+     "profiled": 583,
+     "before_capture": 583,
+     "captured": 583,
+     "startup": 583,
+     "after_requests": 591
+    },
+    "split": {
+     "context": 325,
+     "host_pool_mappings": 122,
+     "rest_of_build": 68,
+     "profile": 68,
+     "graph_execs": 0,
+     "requests": 8
+    }
+   },
+   "prefill27_8x1000": [
+    "fn-run23: prefill 8 x 1000: 3086.4 ms, 2592 tok/s (runs [3.084, 3.086, 3.097])",
+    "fn-run19: prefill 8 x 1000: 3111.7 ms, 2571 tok/s (runs [3.106, 3.112, 3.113])",
+    "fn-run19: prefill 8 x 1000: 3110.9 ms, 2572 tok/s (runs [3.103, 3.111, 3.113])",
+    "fn-run23: prefill 8 x 1000: 3098.8 ms, 2582 tok/s (runs [3.098, 3.099, 3.099])"
+   ]
+  },
+  "rtx-5090": {
+   "gate_c_final": {
+    "decode": {
+     "pass": true,
+     "kl_mean": 0.029346328105883498,
+     "kl_p50": 0.0024363947992402414,
+     "kl_p99": 0.48202972458169274
+    },
+    "chunked": {
+     "pass": true,
+     "kl_mean": 0.0304881695914558,
+     "kl_p50": 0.002536468761085444,
+     "kl_p99": 0.46813106878264765
+    },
+    "mtp": {
+     "pass": true,
+     "kl_mean": 0.002552829622414116,
+     "kl_p99": 0.02154388702374923,
+     "positions": 740
+    },
+    "pass": true
+   },
+   "gate_c_plant_lrswap": {
+    "mtp": {
+     "pass": false,
+     "kl_mean": 0.10675548671271534,
+     "kl_p99": 2.4866599005721617,
+     "positions": 166
+    },
+    "pass": false
+   },
+   "gate_c_plant_shexp": {
+    "mtp": {
+     "pass": false,
+     "kl_mean": 0.17839617752143735,
+     "kl_p99": 1.980682314538463,
+     "positions": 79
+    },
+    "pass": false
+   },
+   "cover": {
+    "ctx": 8192,
+    "step": 5120,
+    "plant": null,
+    "ple": [
+     {
+      "rows": 8192,
+      "max": 7.910204544714361e-07,
+      "median": 1.7116086326041113e-07,
+      "max_at_step_starts": 2.365517701719e-07,
+      "max_elsewhere": 7.910204544714361e-07
+     }
+    ],
+    "qsa": {
+     "rows": 256,
+     "same": 1.0,
+     "overlap": 1.0
+    },
+    "pass": true
+   },
+   "exact": {
+    "pass": true,
+    "steps": 43,
+    "runs": [
+     [
+      "dep",
+      0,
+      null,
+      true
+     ],
+     [
+      "dep",
+      1,
+      null,
+      true
+     ],
+     [
+      "dep",
+      2,
+      null,
+      true
+     ],
+     [
+      "cap",
+      0,
+      null,
+      true
+     ],
+     [
+      "sm",
+      0,
+      null,
+      true
+     ],
+     [
+      "pipe1",
+      0,
+      null,
+      true
+     ],
+     [
+      "pad",
+      0,
+      "aux_row_padding",
+      false
+     ]
+    ]
+   },
+   "outside_mib": {
+    "stages": {
+     "built": 853,
+     "profiled": 921,
+     "before_capture": 921,
+     "captured": 921,
+     "startup": 921,
+     "after_requests": 933
+    },
+    "split": {
+     "context": 635,
+     "host_pool_mappings": 150,
+     "rest_of_build": 68,
+     "profile": 68,
+     "graph_execs": 0,
+     "requests": 12
+    }
+   },
+   "prefill27_8x1000": [
+    "fn-run23: prefill 8 x 1000: 1607.0 ms, 4978 tok/s (runs [1.605, 1.607, 1.609])",
+    "fn-run19: prefill 8 x 1000: 1604.5 ms, 4986 tok/s (runs [1.603, 1.604, 1.606])",
+    "fn-run19: prefill 8 x 1000: 1605.2 ms, 4984 tok/s (runs [1.604, 1.605, 1.607])",
+    "fn-run23: prefill 8 x 1000: 1613.5 ms, 4958 tok/s (runs [1.612, 1.614, 1.615])"
+   ]
+  }
+ },
+ "perf_smoke_vs_f48159c6_rtx_a5000": {
+  "Qwen3-8B-Q4_K_M": [
+   "round 0: candidate 119.84, base 119.83 tok/s, ratio 1.0001",
+   "round 1: candidate 118.83, base 119.35 tok/s, ratio 0.9956",
+   "round 2: candidate 118.67, base 118.53 tok/s, ratio 1.0012",
+   "candidate / base: median 1.0001, rounds [1.0001, 0.9956, 1.0012]; within noise"
+  ],
+  "Qwen3.8-27B-UD-Q4_K_M": [
+   "round 0: candidate 37.10, base 36.83 tok/s, ratio 1.0073",
+   "round 1: candidate 36.75, base 36.75 tok/s, ratio 1.0000",
+   "round 2: candidate 36.76, base 36.73 tok/s, ratio 1.0008",
+   "candidate / base: median 1.0008, rounds [1.0073, 1.0, 1.0008]; within noise"
+  ]
+ },
+ "perf_smoke_note": "main's build cannot be the base: its core is ABI 1.4 and this env's FN plugins need 1.5",
+ "gdn_calls_27b_shape_rtx_a5000_ms": {
+  "packed vs one call": {
+   "1x4096": [
+    2.19,
+    2.1
+   ],
+   "32x64": [
+    2.27,
+    2.26
+   ],
+   "62x33": [
+    3.83,
+    3.7
+   ],
+   "8x512": [
+    2.39,
+    2.23
+   ],
+   "4x512": [
+    1.36,
+    1.24
+   ],
+   "1100+30": [
+    1.54,
+    1.11
+   ]
+  },
+  "bitwise": true
+ },
+ "suite_8818cdca": "1,766 passed, 122 skipped, 0 failed (pytest -m '' -n 4 on four RTX A5000s)",
+ "d11": {
+  "rtx-5080": {
+   "rows": {
+    "decode": {
+     "bar": 1.0,
+     "contexts": {
+      "1024": {
+       "ratio": 1.086,
+       "by_round": [
+        1.087,
+        1.085
+       ],
+       "holon": 96.5,
+       "strata": 88.9,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.09,
+       "by_round": [
+        1.091,
+        1.088
+       ],
+       "holon": 92.6,
+       "strata": 85.0,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.071,
+       "by_round": [
+        1.072,
+        1.069
+       ],
+       "holon": 89.1,
+       "strata": 83.2,
+       "n": 16
+      }
+     }
+    },
+    "MTP decode": {
+     "bar": 1.0,
+     "contexts": {
+      "1024": {
+       "ratio": 1.087,
+       "by_round": [
+        1.088,
+        1.086
+       ],
+       "holon": 132.3,
+       "strata": 121.7,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.141,
+       "by_round": [
+        1.141,
+        1.141
+       ],
+       "holon": 131.6,
+       "strata": 115.4,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.116,
+       "by_round": [
+        1.116,
+        1.115
+       ],
+       "holon": 129.4,
+       "strata": 116.0,
+       "n": 16
+      }
+     }
+    },
+    "prefill": {
+     "bar": 0.9,
+     "contexts": {
+      "1024": {
+       "ratio": 1.09,
+       "by_round": [
+        1.09,
+        1.09
+       ],
+       "holon": 1633.9,
+       "strata": 1499.5,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.222,
+       "by_round": [
+        1.223,
+        1.221
+       ],
+       "holon": 3343.1,
+       "strata": 2735.9,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.022,
+       "by_round": [
+        1.022,
+        1.022
+       ],
+       "holon": 3187.3,
+       "strata": 3118.6,
+       "n": 16
+      }
+     }
+    },
+    "MTP prefill": {
+     "bar": 0.9,
+     "contexts": {
+      "1024": {
+       "ratio": 1.089,
+       "by_round": [
+        1.089,
+        1.088
+       ],
+       "holon": 1594.5,
+       "strata": 1464.8,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.219,
+       "by_round": [
+        1.219,
+        1.219
+       ],
+       "holon": 3299.3,
+       "strata": 2707.3,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.021,
+       "by_round": [
+        1.021,
+        1.021
+       ],
+       "holon": 3154.1,
+       "strata": 3090.4,
+       "n": 16
+      }
+     }
+    }
+   },
+   "tokens_per_pass": {
+    "fin_mtp": {
+     "1024": 2.76,
+     "4096": 2.83,
+     "32768": 2.95
+    },
+    "strata_na_mtp": {
+     "1024": 2.78,
+     "4096": 2.81,
+     "32768": 2.95
+    }
+   },
+   "rounds": [
+    0,
+    1
+   ]
+  },
+  "rtx-5090": {
+   "rows": {
+    "decode": {
+     "bar": 1.0,
+     "contexts": {
+      "1024": {
+       "ratio": 1.167,
+       "by_round": [
+        1.176,
+        1.157
+       ],
+       "holon": 132.0,
+       "strata": 113.1,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.143,
+       "by_round": [
+        1.153,
+        1.133
+       ],
+       "holon": 125.3,
+       "strata": 109.6,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.111,
+       "by_round": [
+        1.12,
+        1.102
+       ],
+       "holon": 121.7,
+       "strata": 109.5,
+       "n": 16
+      }
+     }
+    },
+    "MTP decode": {
+     "bar": 1.0,
+     "contexts": {
+      "1024": {
+       "ratio": 1.067,
+       "by_round": [
+        1.075,
+        1.06
+       ],
+       "holon": 175.6,
+       "strata": 164.5,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.001,
+       "by_round": [
+        1.006,
+        0.996
+       ],
+       "holon": 174.7,
+       "strata": 174.5,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 1.0,
+       "by_round": [
+        1.005,
+        0.995
+       ],
+       "holon": 194.3,
+       "strata": 194.4,
+       "n": 16
+      }
+     }
+    },
+    "prefill": {
+     "bar": 0.9,
+     "contexts": {
+      "1024": {
+       "ratio": 0.995,
+       "by_round": [
+        0.995,
+        0.994
+       ],
+       "holon": 2139.2,
+       "strata": 2150.7,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.225,
+       "by_round": [
+        1.221,
+        1.228
+       ],
+       "holon": 5647.3,
+       "strata": 4611.2,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 0.994,
+       "by_round": [
+        0.997,
+        0.992
+       ],
+       "holon": 5608.3,
+       "strata": 5640.6,
+       "n": 16
+      }
+     }
+    },
+    "MTP prefill": {
+     "bar": 0.9,
+     "contexts": {
+      "1024": {
+       "ratio": 1.003,
+       "by_round": [
+        1.011,
+        0.996
+       ],
+       "holon": 2083.9,
+       "strata": 2076.8,
+       "n": 16
+      },
+      "4096": {
+       "ratio": 1.175,
+       "by_round": [
+        1.185,
+        1.166
+       ],
+       "holon": 5383.9,
+       "strata": 4580.9,
+       "n": 16
+      },
+      "32768": {
+       "ratio": 0.976,
+       "by_round": [
+        0.991,
+        0.961
+       ],
+       "holon": 5477.7,
+       "strata": 5614.4,
+       "n": 16
+      }
+     }
+    }
+   },
+   "tokens_per_pass": {
+    "fin_mtp": {
+     "1024": 2.65,
+     "4096": 2.78,
+     "32768": 3.21
+    },
+    "strata_na_mtp": {
+     "1024": 2.66,
+     "4096": 2.93,
+     "32768": 3.28
+    }
+   },
+   "rounds": [
+    0,
+    1
+   ]
+  }
+ },
+ "d11_note": "8 prompts per context (spans 0-7) x 2 rounds, each arm a fresh process, arms interleaved and reversed on odd rounds; a discarded warm-up run of fin_off first in each allocation; Strata's no-approx arms"
+}

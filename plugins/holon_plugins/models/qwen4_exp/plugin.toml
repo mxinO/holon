@@ -1,0 +1,16 @@
+[plugin]
+name = "models.qwen4_exp"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "model"
+license = "Apache-2.0"
+derived_from = "models.qwen3_5@a561b15"
+core_abi = ">=1.5,<2.0"
+
+[resources]
+provides = ["op.qwen4_exp.ple_rows@1", "op.qwen4_exp.ple_block@1", "model.qwen4_exp@1", "arch.gguf.qwen4exp@1",
+            "unit.qwen4_exp.ple@1", "transform.qwen4_exp.minus_one@1", "transform.qwen4_exp.a_log@1",
+            "transform.qwen4_exp.row@1"]
+
+[reference]
+module = "reference"

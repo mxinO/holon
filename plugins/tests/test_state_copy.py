@@ -10,6 +10,8 @@ from holon_std.state_tier import reference
 from holon_std.state_tier.kernels import STATE_COPY
 
 pytestmark = pytest.mark.l0
+PREBUILT = ("state_copy",)  # CUDA extensions built if missing (conftest)
+
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")

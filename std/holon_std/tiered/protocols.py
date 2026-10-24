@@ -17,7 +17,8 @@ class Budget(Protocol):
 
     def warm_start(self, profile: np.ndarray) -> list[tuple[int, int]]:
         """F2's order (every policy's warm start): each group's 4 hottest items — the hottest of every group, then
-        the second, … —, then the rest by count across groups; ties by item, then group."""
+        the second, … —, then the rest by count across groups; ties by item, then group. A class the store's layout
+        floors (one the seed would leave short of a prefill pass's lent staging) has its first items moved first."""
 
 
 class PlacementPolicy(Protocol):

@@ -151,11 +151,13 @@ def test_masks_select_only_kernels_that_implement_them(layout):
             assert ctx.select_kernel(op, site="t", **facts, **masks).provider == "kernels.triton_attn"
 
 
+@pytest.mark.parametrize("geometry", [(32, 1, 128), (24, 1, 256)])
 @pytest.mark.parametrize("op", ["attention.paged_prefill", "attention.paged_decode"])
-def test_flashinfer_workspace_holds_the_widest_split(op):
+def test_flashinfer_workspace_holds_the_widest_split(op, geometry):
     # One KV head and long contexts: FlashInfer splits the KV into up to 2 CTAs per SM, whose f32 partials exceed the
-    # 128 MiB floor on a 64-SM card (Qwen3-30B-A3B's 4 KV heads did on a 128-SM RTX 4090).
-    geometry = (32, 1, 128)
+    # 128 MiB floor on a 64-SM card (Qwen3-30B-A3B's 4 KV heads did on a 128-SM RTX 4090). At head_dim 256 its query
+    # tile is 64 rows, not 128 (FA2DetermineCtaTileQ): the workspace sized so (Flash-Next's 24 / 2 / 256: half of the
+    # 5090's 512 MiB) still holds a split prefill of rows past 64 packed queries.
     q, kv, batch, pages = _case([(2000, 3 if op.endswith("prefill") else 1)] * MAX_SEQS, *geometry)
     ours = _run(_kernel(op, "kernels.flashinfer", *geometry), q, kv, batch, pages)
     torch.testing.assert_close(ours.float(), _run(PagedAttention(None), q, kv, batch, pages).float(),

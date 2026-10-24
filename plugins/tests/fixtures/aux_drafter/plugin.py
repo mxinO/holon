@@ -31,7 +31,7 @@ class Drafter:
 
     def __init__(self, ctx, target) -> None:
         w = target.spec.weights
-        layer0 = next(r.pattern for r in w.rules if "layers.{i}." in r.pattern).split("layers.{i}.")[0] + "layers.0."
+        layer0 = next(r.pattern for r in w.rules if "{i}." in r.pattern).split("{i}.")[0] + "0."   # HF's, GGUF's
         spec = AuxSpec(Ref("tests.aux_head@1", hidden=target.spec.hidden, block=target.spec.block,
                            norm=target.spec.norm),
                        target.spec.layers[:1], WeightMap(w.source, w.rules, w.root, only=(layer0,)))

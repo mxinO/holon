@@ -21,9 +21,10 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
+LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
-STATIC_BYTES = 9 * 4                       # its static shared words (and the variants' alignment word)
+STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
 
 class Modules:
@@ -40,21 +41,23 @@ class Modules:
 
 class MoeResolve:
     plant = 0                              # judge-only: the calibration bugs' bits (judge/holon_judge/planted.py)
+    splits = True                          # `split`: the fetched entries' slots apart (std.moe.kernels)
 
     def __init__(self, modules: Modules, op: str, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
         self.lib, self.policy, self.roles, self.staging = modules(ctx.fingerprint.sm), POLICIES[op], roles, staging
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, **state):
+                 errors, delta, n_delta, group, plan, jobs, split: bool = False, **state):
         tokens, k = ids.shape
         slots = torch.empty(self.roles, tokens, k, dtype=torch.int32, device=ids.device)
         fetch = torch.empty(self.roles, 2, stage.shape[1], dtype=torch.int32, device=ids.device)
         n_fetch = torch.empty(self.roles, dtype=torch.int32, device=ids.device)
         cpu = torch.empty(tokens, k, dtype=torch.int32, device=ids.device)
+        missed = torch.empty_like(slots) if split else None
         self.lib.resolve(self.policy, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty,
                          misses, errors, delta, n_delta, group, [state[n] for n in STATE[self.policy]], self.plant,
-                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging)
-        return slots, fetch, n_fetch, cpu
+                         plan, jobs, slots, fetch, n_fetch, cpu, self.staging, missed)
+        return (slots, fetch, n_fetch, cpu) + ((missed,) if split else ())
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, **state) -> torch.Tensor:
         """Whole resident experts in the policy's order (LFU: by score; LRU: least recently routed), ties by expert id
@@ -85,11 +88,26 @@ class MoeResolveLfu(MoeResolve):
 
 
 class ExpertFetch:
+    """`expert_fetch@1`, and its optional `gather_roles`: a group's every role in one launch (item 2 of FN's step 7: a
+    decode layer's two small gathers were two launches of 8 CTAs each, ≈ 27 GB/s on a 5080's link), on
+    `expert_io.fetch_ctas` CTAs per role (plugin option, default 8); `expert_io.fetch_roles=off` withholds it."""
+
+    parts = True                           # `gather_roles(..., part, parts)`: one part of the lists (std.moe.kernels)
+
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, staging: int) -> None:
         self.lib = modules(ctx.fingerprint.sm)
+        opts = ctx.options.get("plugins", {})
+        self.ctas = int(opts.get("expert_io.fetch_ctas", 8))
+        if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
+            self.gather_roles = None
 
     def __call__(self, fetch, n, src, dst) -> None:
         self.lib.fetch(fetch, n, src, dst, False)
+
+    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
+        """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
+        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉."""
+        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts)
 
 
 class ExpertPrefetch:
@@ -138,9 +156,40 @@ class MoeTiers:
                        owner, capacity, heat, io, moves, n_moves)
 
 
+class ActivationLoan:
+    """`activation_loan@1`: a MemPool of torch's caching allocator whose segments the native module's pluggable
+    allocator cuts from the range `use` names — a new pool at each `use` (the last one's segments go back with it), so
+    a step starts from an empty range; `held` is the current pool's live bytes."""
+
+    def __init__(self, modules: Modules, ctx) -> None:
+        self.lib = modules(ctx.fingerprint.sm)
+        self.allocator = torch.cuda.memory.CUDAPluggableAllocator(self.lib.__file__, "holon_loan_malloc",
+                                                                  "holon_loan_free")
+        self.pool = None
+        device = torch.device(ctx.device)
+        self.index = device.index if device.index is not None else torch.cuda.current_device()
+
+    def use(self, range_: torch.Tensor):
+        self.release()
+        self.lib.loan_set(range_.data_ptr(), range_.numel())
+        self.pool = torch.cuda.MemPool(self.allocator.allocator())
+        return torch.cuda.use_mem_pool(self.pool, self.index)
+
+    def release(self) -> None:
+        """The pool's segments back (none alive: `held`), the range free for the next `use`."""
+        self.pool = None
+
+    def held(self) -> int:
+        return 0 if self.pool is None else sum(b["size"] for seg in self.pool.snapshot() for b in seg["blocks"]
+                                               if b["state"] == "active_allocated")
+
+
 class Plugin:
     def register(self, regs) -> None:
         modules = Modules()
+        regs.kernels.add(LOAN, KernelSpec(
+            op=LOAN, provider="kernels.expert_io", impl=functools.partial(ActivationLoan, modules),
+            requires=Constraint(sms=frozenset(extension.ARCHS)), props=frozenset({"deterministic"}), priority=10))
         props = frozenset({"graph_safe", "deterministic"})
         requires = Constraint(sms=frozenset(extension.ARCHS))
         regs.kernels.add(TIERS, KernelSpec(

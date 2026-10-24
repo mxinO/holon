@@ -1,0 +1,216 @@
+{
+ "name": "fn0_predictions",
+ "date": "2026-10-18",
+ "about": "Milestone FN step 0 (docs/v1-flash-next.md section 8, N0-N4): predictions written before any measurement; point estimates with a band. tok/s unless stated; contexts 1K / 4K / 32K; batch 1, 256 output tokens, greedy, ignore-EOS. Strata rows per D11: no-approx = STRATA_ROUTE_TAIL_SKIP=0 --kv fp16 --ple-io ram, calibrated; defaults = setup's command for the card (tail skip on, int8 KV above 8K, PLE O_DIRECT); drafting off = no --mtp, --suffix-draft 0; MTP matched = --spec 4 --spec-min-p 0 --suffix-draft 0, STRATA_MTP_FULL_HEAD=1.",
+ "n0": {
+  "eos_ids_ignore": "Strata's --eos-ids accepts an id outside the vocabulary (999999), so every request ends at its length: no EOS pre-screening needed",
+  "prompt_cache_0": "every request reports 0 reused tokens",
+  "calibrate": "tools/calibrate.py keeps the defaults on both cards except possibly --pcie-frac (one setting moves at most); about 30 min per card"
+ },
+ "n1": {
+  "rtx-5080 IQ2_XS": {
+   "strata_noapprox_off": {
+    "decode": [
+     70,
+     68,
+     62
+    ],
+    "prefill": [
+     1600,
+     3000,
+     3000
+    ],
+    "band": "decode +-25%, prefill +-40%"
+   },
+   "strata_noapprox_mtp": {
+    "decode": [
+     110,
+     105,
+     95
+    ],
+    "tokens_per_pass": 2.4,
+    "prefill": "as drafting off"
+   },
+   "strata_defaults_off": {
+    "decode": [
+     80,
+     78,
+     70
+    ],
+    "prefill": [
+     1500,
+     2900,
+     2900
+    ]
+   },
+   "strata_defaults_mtp": {
+    "decode": [
+     125,
+     120,
+     108
+    ]
+   },
+   "llama_cpp": {
+    "decode": [
+     30,
+     28,
+     25
+    ],
+    "prefill": [
+     500,
+     700,
+     700
+    ],
+    "band": "x0.5-2"
+   },
+   "freetoken": {
+    "decode": [
+     60,
+     58,
+     50
+    ],
+    "prefill": [
+     1500,
+     2500,
+     2000
+    ],
+    "band": "x0.5-1.5; may not load the IQ1_M / Q2_0 experts"
+   }
+  },
+  "rtx-5090 IQ3_S": {
+   "strata_noapprox_off": {
+    "decode": [
+     95,
+     92,
+     85
+    ],
+    "prefill": [
+     2000,
+     5000,
+     5000
+    ],
+    "band": "decode +-25%, prefill +-40%"
+   },
+   "strata_noapprox_mtp": {
+    "decode": [
+     150,
+     145,
+     130
+    ],
+    "tokens_per_pass": 2.4
+   },
+   "strata_defaults_off": {
+    "decode": [
+     108,
+     105,
+     97
+    ],
+    "prefill": [
+     1900,
+     4800,
+     4800
+    ]
+   },
+   "strata_defaults_mtp": {
+    "decode": [
+     165,
+     160,
+     145
+    ]
+   },
+   "llama_cpp": {
+    "decode": [
+     45,
+     42,
+     35
+    ],
+    "prefill": [
+     900,
+     1200,
+     1200
+    ],
+    "band": "x0.5-2"
+   },
+   "freetoken": {
+    "decode": [
+     85,
+     80,
+     70
+    ],
+    "prefill": [
+     2000,
+     4000,
+     3500
+    ],
+    "band": "x0.5-1.5"
+   }
+  },
+  "strata_expert_cache": "auto picks about 6.5-8 GB of experts on the 16 GB card (20-23%), 20-24 GB on the 32 GB card (40-48%); prefill chunk auto = 8192 on both",
+  "strata_decode_hit_rate": "75-90% on the RTX 5080, 88-95% on the RTX 5090"
+ },
+ "n2": {
+  "row_gather_zero_copy": {
+   "us_per_call": {
+    "1": 8,
+    "64": 12,
+    "1024": 160,
+    "4096": 600
+   },
+   "note": "16 rows x 90 B per token from a mapped pinned host table over PCIe; about 10 GB/s of useful bytes at 4,096 tokens; RTX 5090 within 20% of the 5080"
+  },
+  "odirect_4k_reads": {
+   "kiops": {
+    "16": 250,
+    "64": 450,
+    "256": 600
+   },
+   "p50_us": {
+    "16": 60,
+    "64": 140,
+    "256": 400
+   },
+   "note": "random 4 KiB O_DIRECT reads of the PLE shard on the desktop's NVMe, Linux AIO; a prefill token needs at most 16 pages, so queue depth 32-64 covers >= 15K tok/s of read-ahead"
+  }
+ },
+ "n3": {
+  "method": "Holon decode per token = (dense bytes + hit bytes) / 816 GB/s (RTX 5080; 1,500 GB/s RTX 5090) + miss bytes / 44 GB/s (F5a) + per-layer overhead (X's capped Qwen3-30B-A3B row: 8.39 ms per token at 170 MB of misses gives 2.1 ms per 48 layers; FN's denser layers: 2.5-3 ms); hit rate from a routing trace with lfu at Holon's cache. Prefill per step = max(PCIe streaming of non-resident and lent experts, expert GEMMs + dense trunk), the expert GEMMs scaled from X's measured mmq rows.",
+  "holon_decode_off_vs_strata_noapprox": {
+   "rtx-5080": 1.2,
+   "rtx-5090": 1.15,
+   "band": "0.95-1.5"
+  },
+  "holon_prefill_vs_strata": {
+   "rtx-5080": 1.0,
+   "rtx-5090": 1.0,
+   "band": "0.8-1.2 (the MoE prefill track's D1-D5 decide it; R2)"
+  },
+  "rows_predicted_below_0_9": "none at the central estimate; prefill rows at risk",
+  "non_lendable_peak_kb_per_token": {
+   "point": 200,
+   "band": [
+    150,
+    260
+   ]
+  }
+ },
+ "oracle_32k": {
+  "note": "one 32K v1-long prompt through the streamed fp32 HF driver (transformers 5.19.0) on the CPU, one layer resident",
+  "hf_attention_materialises_T_by_T": true,
+  "query_chunked_mode_needed": true,
+  "time_h": {
+   "point": 2.0,
+   "band": [
+    1.0,
+    4.0
+   ]
+  },
+  "peak_rss_gb": {
+   "point": 50,
+   "band": [
+    30,
+    80
+   ]
+  },
+  "dominant_cost": "dequantizing a layer's 512 experts to fp32 (10 GB per layer) in gguf-py"
+ }
+}

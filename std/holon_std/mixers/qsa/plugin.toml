@@ -1,0 +1,16 @@
+[plugin]
+name = "std.mixers.qsa"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "unit"
+license = "Apache-2.0"
+core_abi = ">=1.5,<2.0"            # BuildCtx.unit_class
+
+[resources]
+provides = ["op.qsa_index@1", "op.qsa_select@1", "op.qsa_attend@1", "unit.std.mixers.qsa@1"]
+
+[properties]
+numerics = "exact"
+
+[reference]
+module = "reference"

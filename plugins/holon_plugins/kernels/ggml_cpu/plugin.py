@@ -17,10 +17,11 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 OP = "cpu_experts"
-# The weight types the CPU path serves and their ggml type ids (activations: Q8_0 for the first four, Q8_K for the
-# rest; std.moe.reference `Q8_0_DOT`, `Q8_K_DOT`).
-TYPES = {"q4_0": 2, "q5_0": 6, "q8_0": 8, "iq4_nl": 20, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13, "q6_k": 14,
-         "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq3_s": 21, "iq2_s": 22, "iq4_xs": 23, "iq1_m": 29}
+# The weight types the CPU path serves and their ggml type ids (activations: Q8_0 for the first five, Q8_K for the
+# rest; std.moe.reference `Q8_0_DOT`, `Q8_K_DOT`). Q2_0 (type 42): Qwen3.8-Flash-Next's down experts (FN D1).
+TYPES = {"q2_0": 42, "q4_0": 2, "q5_0": 6, "q8_0": 8, "iq4_nl": 20, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
+         "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq3_s": 21, "iq2_s": 22, "iq4_xs": 23,
+         "iq1_m": 29}
 
 
 def ggml_type(layout: str) -> int | None:
@@ -68,9 +69,19 @@ class CpuExperts:
         return Task(self.lib.Task(self.experts, jobs, x, gate_up, down, rows, self.plant))
 
 
+SMALL_BLOCKS = {"q2_0", "q4_0", "q5_0", "q8_0", "iq4_nl"}       # 32 values a block (and their dot type's, Q8_0); else
+                                                                  # QK_K = 256 (and Q8_K)
+
+
+def _block(layout: str) -> int:
+    return 32 if layout.split("/")[0].removeprefix("ggml.") in SMALL_BLOCKS else 256
+
+
 def _supports(f) -> bool:
-    return ggml_type(f["gate_up"]) is not None and ggml_type(f["down"]) is not None and f["hidden"] % 256 == 0 \
-        and f["inter"] % 256 == 0
+    """Each matrix's reduction a whole number of its type's blocks: gate/up's over hidden, down's over inter (FN's 640
+    with Q2_0 down)."""
+    return ggml_type(f["gate_up"]) is not None and ggml_type(f["down"]) is not None \
+        and f["hidden"] % _block(f["gate_up"]) == 0 and f["inter"] % _block(f["down"]) == 0
 
 
 class Plugin:

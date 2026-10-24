@@ -1,0 +1,280 @@
+{
+ "name": "fn0_ft14_rtx-5090",
+ "date": "2026-10-18",
+ "gpu": "rtx-5090",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf",
+ "command": "python bench/offload_ctx.py run --name fn0_ft14_rtx-5090 --gpu 0 --model Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf --arms arms_ft_rtx-5090.json --rounds 3 --requests fn_1k4k.json --contexts 1024 4096",
+ "commit": "72e06886d4d622d7f380d6fb44a88f916f617249",
+ "method": "Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3, D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another: - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),   one request per context; - `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with   Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts   (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)   moved past it, and `--spans` picks the candidates timed (default the first 3). The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.",
+ "contexts": [
+  1024,
+  4096
+ ],
+ "ctx": 33792,
+ "output_tokens": 256,
+ "corpus": {
+  "corpus": "fn",
+  "corpus_tokens": 189707,
+  "corpus_sha256": "de504e5865358603de84312707a311d8d6397041dcbb3532cac1b03335bd9d6e"
+ },
+ "warmup": {
+  "tokens": 2048,
+  "output": 64
+ },
+ "requests": [
+  {
+   "key": "1024/0",
+   "context": 1024,
+   "start": 0
+  },
+  {
+   "key": "1024/1",
+   "context": 1024,
+   "start": 31617
+  },
+  {
+   "key": "1024/2",
+   "context": 1024,
+   "start": 63234
+  },
+  {
+   "key": "4096/0",
+   "context": 4096,
+   "start": 10539
+  },
+  {
+   "key": "4096/1",
+   "context": 4096,
+   "start": 42156
+  },
+  {
+   "key": "4096/2",
+   "context": 4096,
+   "start": 73773
+  }
+ ],
+ "arms": [
+  {
+   "name": "freetoken_auto",
+   "engine": "freetoken",
+   "flags": "--moe-cache-auto"
+  }
+ ],
+ "summary": {
+  "freetoken_auto": {
+   "1024/0": {
+    "prefill_tps": {
+     "median": 904.25,
+     "min": 900.86,
+     "max": 904.61,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 110.4,
+     "min": 110.38,
+     "max": 110.4,
+     "n": 3
+    }
+   },
+   "1024/1": {
+    "prefill_tps": {
+     "median": 910.85,
+     "min": 910.48,
+     "max": 912.22,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 112.53,
+     "min": 112.44,
+     "max": 112.66,
+     "n": 3
+    }
+   },
+   "1024/2": {
+    "prefill_tps": {
+     "median": 907.14,
+     "min": 906.95,
+     "max": 909.89,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 112.59,
+     "min": 112.49,
+     "max": 112.77,
+     "n": 3
+    }
+   },
+   "4096/0": {
+    "prefill_tps": {
+     "median": 3165.35,
+     "min": 3106.23,
+     "max": 3171.42,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 117.97,
+     "min": 117.63,
+     "max": 117.98,
+     "n": 3
+    }
+   },
+   "4096/1": {
+    "prefill_tps": {
+     "median": 3202.4,
+     "min": 3197.66,
+     "max": 3204.11,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 113.09,
+     "min": 113.01,
+     "max": 113.21,
+     "n": 3
+    }
+   },
+   "4096/2": {
+    "prefill_tps": {
+     "median": 3258.53,
+     "min": 3257.01,
+     "max": 3258.65,
+     "n": 3
+    },
+    "decode_tps": {
+     "median": 109.55,
+     "min": 109.52,
+     "max": 109.64,
+     "n": 3
+    }
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "freetoken_auto",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 904.607,
+     "decode_tps": 110.403
+    },
+    "1024/1": {
+     "prefill_tps": 910.853,
+     "decode_tps": 112.529
+    },
+    "1024/2": {
+     "prefill_tps": 909.886,
+     "decode_tps": 112.49
+    },
+    "4096/0": {
+     "prefill_tps": 3106.229,
+     "decode_tps": 117.978
+    },
+    "4096/1": {
+     "prefill_tps": 3197.66,
+     "decode_tps": 113.21
+    },
+    "4096/2": {
+     "prefill_tps": 3258.65,
+     "decode_tps": 109.523
+    }
+   },
+   "log": [
+    "ServerArgs(model_path='/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf', tp_info=DistributedInfo(rank=0, size=1), dtype=torch.bfloat16, hf_overrides={}, max_running_req=4, attention_backend='auto', moe_strategy='auto', quant",
+    "[2026-10-18|13:58:09|core|rank=0] INFO Auto-selected MoE strategy: offload",
+    "[2026-10-18|13:58:09|core|rank=0] INFO Auto-selected attention backend: qsa_sparse",
+    "[2026-10-18|13:58:13|core|rank=0] INFO MoE experts: gguf via ggml",
+    "[2026-10-18|13:58:13|core|rank=0] INFO expert banks: slow path (serial build)",
+    "[2026-10-18|13:58:20|core|rank=0] INFO --moe-cache-auto resolved moe_cache_size=10749 num_pages=128 (prefill_overlap=True)",
+    "[2026-10-18|13:58:20|core|rank=0] INFO GGUF expert banks: 48 layers, 46.8 GiB in host RAM",
+    "[2026-10-18|13:58:20|core|rank=0] INFO MoE slot pools: unified, 7 pools of 224-3359 slots (equal)"
+   ],
+   "peak_vram_mib": 30094,
+   "wall_s": 94.9
+  },
+  {
+   "round": 1,
+   "arm": "freetoken_auto",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 900.861,
+     "decode_tps": 110.398
+    },
+    "1024/1": {
+     "prefill_tps": 912.22,
+     "decode_tps": 112.44
+    },
+    "1024/2": {
+     "prefill_tps": 907.136,
+     "decode_tps": 112.767
+    },
+    "4096/0": {
+     "prefill_tps": 3171.417,
+     "decode_tps": 117.973
+    },
+    "4096/1": {
+     "prefill_tps": 3202.4,
+     "decode_tps": 113.088
+    },
+    "4096/2": {
+     "prefill_tps": 3258.534,
+     "decode_tps": 109.551
+    }
+   },
+   "log": [
+    "ServerArgs(model_path='/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf', tp_info=DistributedInfo(rank=0, size=1), dtype=torch.bfloat16, hf_overrides={}, max_running_req=4, attention_backend='auto', moe_strategy='auto', quant",
+    "[2026-10-18|13:59:33|core|rank=0] INFO Auto-selected MoE strategy: offload",
+    "[2026-10-18|13:59:33|core|rank=0] INFO Auto-selected attention backend: qsa_sparse",
+    "[2026-10-18|13:59:35|core|rank=0] INFO MoE experts: gguf via ggml",
+    "[2026-10-18|13:59:35|core|rank=0] INFO expert banks: slow path (serial build)",
+    "[2026-10-18|13:59:43|core|rank=0] INFO --moe-cache-auto resolved moe_cache_size=10749 num_pages=128 (prefill_overlap=True)",
+    "[2026-10-18|13:59:43|core|rank=0] INFO GGUF expert banks: 48 layers, 46.8 GiB in host RAM",
+    "[2026-10-18|13:59:43|core|rank=0] INFO MoE slot pools: unified, 7 pools of 224-3359 slots (equal)"
+   ],
+   "peak_vram_mib": 30094,
+   "wall_s": 76.3
+  },
+  {
+   "round": 2,
+   "arm": "freetoken_auto",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 904.251,
+     "decode_tps": 110.377
+    },
+    "1024/1": {
+     "prefill_tps": 910.483,
+     "decode_tps": 112.66
+    },
+    "1024/2": {
+     "prefill_tps": 906.953,
+     "decode_tps": 112.594
+    },
+    "4096/0": {
+     "prefill_tps": 3165.35,
+     "decode_tps": 117.63
+    },
+    "4096/1": {
+     "prefill_tps": 3204.109,
+     "decode_tps": 113.006
+    },
+    "4096/2": {
+     "prefill_tps": 3257.012,
+     "decode_tps": 109.644
+    }
+   },
+   "log": [
+    "ServerArgs(model_path='/fn-models/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.gguf', tp_info=DistributedInfo(rank=0, size=1), dtype=torch.bfloat16, hf_overrides={}, max_running_req=4, attention_backend='auto', moe_strategy='auto', quant",
+    "[2026-10-18|14:00:49|core|rank=0] INFO Auto-selected MoE strategy: offload",
+    "[2026-10-18|14:00:49|core|rank=0] INFO Auto-selected attention backend: qsa_sparse",
+    "[2026-10-18|14:00:51|core|rank=0] INFO MoE experts: gguf via ggml",
+    "[2026-10-18|14:00:51|core|rank=0] INFO expert banks: slow path (serial build)",
+    "[2026-10-18|14:00:59|core|rank=0] INFO --moe-cache-auto resolved moe_cache_size=10749 num_pages=128 (prefill_overlap=True)",
+    "[2026-10-18|14:00:59|core|rank=0] INFO GGUF expert banks: 48 layers, 46.8 GiB in host RAM",
+    "[2026-10-18|14:00:59|core|rank=0] INFO MoE slot pools: unified, 7 pools of 224-3359 slots (equal)"
+   ],
+   "peak_vram_mib": 30094,
+   "wall_s": 75.9
+  }
+ ],
+ "note": "FreeToken drops every prompt over 8,192 tokens on this file despite --max-seq-len-override 33792 (its log: 'Input sequence length 32768 exceeds 8192, request 0 is dropped'), so the 32K requests are left out: 1K and 4K only, D11's spans for those contexts"
+}

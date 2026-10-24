@@ -11,6 +11,9 @@ from holon_plugins.transforms.tail_skip import reference
 from .test_expert_io import DEVICES, ROLES, E, K, plugins  # noqa: F401
 from .test_moe_engine import KEY, _gpu_engine, _served, gpu_moe  # noqa: F401
 
+PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
+
+
 OP = "moe_route_transform.tail_skip@1"
 
 

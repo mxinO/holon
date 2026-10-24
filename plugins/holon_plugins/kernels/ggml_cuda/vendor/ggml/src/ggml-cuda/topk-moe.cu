@@ -551,13 +551,23 @@ static __device__ __forceinline__ void holon_quantize_q8_1_block(const float xi,
     }
 }
 
+// Holon: W's values as f32 (a bf16 router holds exactly its f32 values: the same products)
+static __device__ __forceinline__ float4 holon_router_w4(const float * w) { return __ldg((const float4 *) w); }
+
+static __device__ __forceinline__ float4 holon_router_w4(const nv_bfloat16 * w) {
+    const uint2 v = __ldg((const uint2 *) w);                   // W is never written: read-only
+    const float2 a = __bfloat1622float2(*(const nv_bfloat162 *) &v.x);
+    const float2 b = __bfloat1622float2(*(const nv_bfloat162 *) &v.y);
+    return make_float4(a.x, a.y, b.x, b.y);
+}
+
 static __device__ __forceinline__ float holon_router_load1(const float * x) { return *x; }
 static __device__ __forceinline__ float holon_router_load1(const nv_bfloat16 * x) { return __bfloat162float(*x); }
 
-template <int n_experts, typename src_t>
+template <int n_experts, typename src_t, typename w_t>
 __launch_bounds__(HOLON_ROUTER_WARPS * WARP_SIZE)
 __global__ void holon_moe_router(const src_t *         x,
-                                 const float *         w,
+                                 const w_t *           w,
                                  float *               logits,
                                  unsigned int *        done,
                                  float *               weights,
@@ -570,7 +580,7 @@ __global__ void holon_moe_router(const src_t *         x,
     constexpr int R = HOLON_ROUTER_ROWS;
     const int lane = threadIdx.x, q = threadIdx.y, expert = blockIdx.x;
     const int row0 = blockIdx.y * R, rows = min(R, n_rows - row0), slice = hidden / HOLON_ROUTER_WARPS;
-    const float * wq = w + (int64_t) expert * hidden + q * slice;
+    const w_t * wq = w + (int64_t) expert * hidden + q * slice;
     const src_t * xq = x + (int64_t) row0 * hidden + q * slice;
 
     float acc[R];
@@ -588,7 +598,7 @@ __global__ void holon_moe_router(const src_t *         x,
     }
 #pragma unroll 4
     for (int h = 4 * lane; h < slice; h += 4 * WARP_SIZE) {
-        const float4 wv = __ldg((const float4 *) (wq + h));      // W is never written: read-only
+        const float4 wv = holon_router_w4(wq + h);
 #pragma unroll
         for (int r = 0; r < R; r++) {
             if (r < rows) {
@@ -643,15 +653,15 @@ __global__ void holon_moe_router(const src_t *         x,
     }
 }
 
-template <typename src_t>
-static void holon_moe_router_cuda(const src_t * x, const float * w, const int n_rows, const int hidden,
+template <typename src_t, typename w_t>
+static void holon_moe_router_cuda(const src_t * x, const w_t * w, const int n_rows, const int hidden,
                                   const int n_experts, const int n_expert_used, const float clamp_val, float * logits,
                                   unsigned int * done, float * weights, int32_t * ids, block_q8_1 * xq,
                                   cudaStream_t stream) {
     const ggml_cuda_kernel_launch_params params(dim3(n_experts, (n_rows + HOLON_ROUTER_ROWS - 1) / HOLON_ROUTER_ROWS, 1),
                                                 dim3(WARP_SIZE, HOLON_ROUTER_WARPS, 1), 0, stream);
     switch (n_experts) {
-#define HOLON_ROUTER_CASE(E) case E: ggml_cuda_kernel_launch(holon_moe_router<E, src_t>, params, x, w, logits, done, \
+#define HOLON_ROUTER_CASE(E) case E: ggml_cuda_kernel_launch(holon_moe_router<E, src_t, w_t>, params, x, w, logits, done, \
                                      weights, ids, xq, n_rows, hidden, n_expert_used, clamp_val); break;
         HOLON_ROUTER_CASE(1) HOLON_ROUTER_CASE(2) HOLON_ROUTER_CASE(4) HOLON_ROUTER_CASE(8) HOLON_ROUTER_CASE(16)
         HOLON_ROUTER_CASE(32) HOLON_ROUTER_CASE(64) HOLON_ROUTER_CASE(128) HOLON_ROUTER_CASE(256)
@@ -661,18 +671,32 @@ static void holon_moe_router_cuda(const src_t * x, const float * w, const int n_
     }
 }
 
-void ggml_cuda_holon_moe_router(const void * x, const bool x_bf16, const float * w, const int n_rows,
-                                const int hidden, const int n_experts, const int n_expert_used,
-                                const float clamp_val, float * logits, unsigned int * done, float * weights,
-                                int32_t * ids, void * x_q8_1, cudaStream_t stream) {
-    GGML_ASSERT(hidden % (4 * WARP_SIZE * HOLON_ROUTER_WARPS) == 0 && n_expert_used <= n_experts &&
-                n_expert_used <= WARP_SIZE && n_rows <= HOLON_ROUTER_MAX_ROWS);
+template <typename w_t>
+static void holon_moe_router_w(const void * x, const bool x_bf16, const w_t * w, const int n_rows, const int hidden,
+                               const int n_experts, const int n_expert_used, const float clamp_val, float * logits,
+                               unsigned int * done, float * weights, int32_t * ids, void * x_q8_1,
+                               cudaStream_t stream) {
     if (x_bf16) {
         holon_moe_router_cuda((const nv_bfloat16 *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
                               logits, done, weights, ids, (block_q8_1 *) x_q8_1, stream);
     } else {
         holon_moe_router_cuda((const float *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val, logits,
                               done, weights, ids, (block_q8_1 *) x_q8_1, stream);
+    }
+}
+
+void ggml_cuda_holon_moe_router(const void * x, const bool x_bf16, const void * w, const bool w_bf16,
+                                const int n_rows, const int hidden, const int n_experts, const int n_expert_used,
+                                const float clamp_val, float * logits, unsigned int * done, float * weights,
+                                int32_t * ids, void * x_q8_1, cudaStream_t stream) {
+    GGML_ASSERT(hidden % (4 * WARP_SIZE * HOLON_ROUTER_WARPS) == 0 && n_expert_used <= n_experts &&
+                n_expert_used <= WARP_SIZE && n_rows <= HOLON_ROUTER_MAX_ROWS);
+    if (w_bf16) {
+        holon_moe_router_w(x, x_bf16, (const nv_bfloat16 *) w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
+                           logits, done, weights, ids, x_q8_1, stream);
+    } else {
+        holon_moe_router_w(x, x_bf16, (const float *) w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
+                           logits, done, weights, ids, x_q8_1, stream);
     }
     CUDA_CHECK(cudaGetLastError());
 }

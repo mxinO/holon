@@ -160,12 +160,13 @@ class Drafter(Protocol):
     AdmitsDrafts, DraftsInSubsteps, WritesAhead, SamplesDrafts."""
 
     def run(self, ctx: StepCtx, h: torch.Tensor) -> None:
-        """After every step's sample stage (prefill chunks too), inside the step's graph when captured. `h` [T, H] is
-        the target trunk's output for every token of the step; for verify rows the SeqTable already holds `n_accept`
-        and the advanced `num_computed`. Writes the drafter's own state for the step's tokens, then, for the rows that
-        sampled, `seq_table.draft_tokens[slot, :n]` (positions `num_computed[slot] + 1 + j`; with `q_support`, their
-        laws `draft_q_ids` / `draft_q[slot, :n]` too) and `n_draft[slot] = n`, n at most the step's `plan.draft_k` if
-        the drafter writes state per draft, else at most the engine's maximum.
+        """After every step's sample stage (prefill chunks too), inside the step's graph when captured. `h` [T, H] (or
+        `ModelSpec.residual`'s [T, width]) is the target trunk's output for every token of the step; for verify rows
+        the SeqTable already holds `n_accept` and the advanced `num_computed`. Writes the drafter's own state for the
+        step's tokens, then, for the rows that sampled, `seq_table.draft_tokens[slot, :n]` (positions
+        `num_computed[slot] + 1 + j`; with `q_support`, their laws `draft_q_ids` / `draft_q[slot, :n]` too) and
+        `n_draft[slot] = n`, n at most the step's `plan.draft_k` if the drafter writes state per draft, else at most the
+        engine's maximum.
         An auxiliary model run here over a verify step's rows sees them after the verifier: the core's `rewind`
         fan-out (target modules, slot objects) has already run, so rolling the aux model back is the drafter's call
         (its modules' `rewind(ctx.view(namespace))` after their forward)."""

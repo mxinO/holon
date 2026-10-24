@@ -33,12 +33,12 @@ equal to the f32 multiply it replaced (docs/m07-perf.md D11). The
   ≤ 1e-3 and only in fast-math's tie classes. sm_120: native W4A4 mmq against its own decoded activation codes (bf16
   and f32 inputs), the zeroed tail of `prepare` at `in` 768 (without it, plant M4: NaN output).
 
-Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
+Skips without a GPU; conftest builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
-import os
 import pathlib
 import subprocess
+from unittest import mock
 
 import gguf
 import numpy as np
@@ -68,6 +68,7 @@ from holon_testing.qwen3_5_files import LLAMA
 from huggingface_hub.constants import HF_HUB_CACHE
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
+PREBUILT = ("ggml_cuda",)  # CUDA extensions built if missing (conftest)
 
 INS = (768, 2304, 4096, 12288)
 OUT = 300
@@ -90,10 +91,6 @@ def sm() -> int:
     major, minor = torch.cuda.get_device_capability()
     sm = 10 * major + minor
     assert sm >= 75, "q8_1.MMQ emulates llama.cpp's MMA kernels (turing_mma_available)"
-    try:
-        extension.load(sm)
-    except extension.NotBuilt:
-        extension.build(sm, os.cpu_count())
     return sm
 
 
@@ -465,6 +462,95 @@ def test_get_rows_of_rows_narrower_than_256(ctx, name):
     for dtype in ("float32", "bfloat16"):
         got = ctx.select_kernel("qembedding@1", site="l0", dtype=dtype, **facts).impl(ctx, dtype=dtype, **facts)(ids, w)
         assert same_bits(got, ref[ids]), f"{name}: get_rows ({dtype}) differs from gguf-py"
+
+
+def test_rows_on_the_host_gather_what_the_device_gathers(ctx, tmp_path):
+    """std.tiered.rows@1 on the host (FN's PLE table, D5): a 160-wide IQ4_NL table read from its file extent into a
+    mapped host pool, and gathered across the bus bit for bit as `qembedding` gathers it on the device."""
+    import types
+
+    from holon.api import Extent, Layout, QTensor, Scheme
+    from holon.core.memory import Pool
+    from holon_std.tiered.rows import Rows
+
+    blocks = random_blocks("iq4_nl", OUT, 160, seed=11)
+    (tmp_path / "t.gguf").write_bytes(b"\0" * 100 + blocks.tobytes())
+    q = QTensor(Layout(Scheme("ggml.iq4_nl"), "gguf.native"), (OUT, 160), {"blocks": torch.from_numpy(blocks)},
+                {"blocks": Extent(str(tmp_path / "t.gguf"), 100, blocks.nbytes)})
+
+    def pool(name, *, unit_bytes, min_units, pref_units, device, mapped):
+        p = Pool(name, unit_bytes=unit_bytes, segments=1, min_units=min_units, pref_units=pref_units,
+                 tokens_per_unit=None, priority=0, device=ctx.device, host=device == "host", mapped=mapped)
+        p._set(pref_units)
+        return p
+    host = types.SimpleNamespace(select_kernel=ctx.select_kernel, fingerprint=ctx.fingerprint, device=ctx.device,
+                                 dtype=torch.bfloat16, pool=pool,
+                                 options={"plugins": {"rows.place": "t:host"}})
+    rows = Rows(host, vocab=OUT, hidden=160, name="t")
+    assert rows.adopt_weights(host, "weight", q)
+    rows.bind_kernels(host)
+    assert rows._table.device.type == "cuda" and rows.weight.numel() == 0
+    ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
+    assert same_bits(rows(ids), dequantize("iq4_nl", blocks)[ids])
+
+
+def test_rows_on_the_ssd_read_what_the_host_holds(ctx, tmp_path):
+    """std.tiered.rows@1 on the SSD (D5's fallback): each call's rows read from the file extent by cpu_task@1's copy
+    task on the I/O worker (signal, wait), gathered bit for bit as the host tier gathers them — eagerly and replayed
+    from a CUDA graph with other ids —; a row read past its id's (the `rows_off_by_one` plant) differs."""
+    import types
+
+    from holon.api import Extent, Layout, QTensor, Scheme
+    from holon.core.memory import Pool
+    from holon_std.tiered import rows as tiered_rows
+
+    blocks = random_blocks("iq4_nl", OUT, 160, seed=12)
+    (tmp_path / "t.gguf").write_bytes(b"\0" * 4000 + blocks.tobytes())      # rows across page boundaries
+    q = QTensor(Layout(Scheme("ggml.iq4_nl"), "gguf.native"), (OUT, 160), {"blocks": torch.from_numpy(blocks)},
+                {"blocks": Extent(str(tmp_path / "t.gguf"), 4000, blocks.nbytes)})
+
+    def pool(name, *, unit_bytes, min_units, pref_units, device="device", mapped=False):
+        p = Pool(name, unit_bytes=unit_bytes, segments=1, min_units=min_units, pref_units=pref_units,
+                 tokens_per_unit=None, priority=0, device=ctx.device, host=device == "host", mapped=mapped)
+        p._set(pref_units)
+        return p
+    shared, statics = {}, {}
+    ssd = types.SimpleNamespace(
+        select_kernel=ctx.select_kernel, fingerprint=ctx.fingerprint, device=ctx.device, dtype=torch.bfloat16,
+        pool=pool, shared=lambda key, make: shared.setdefault(key, make(ssd)) if key not in shared else shared[key],
+        static=lambda name, shape, dtype: statics.setdefault(name, torch.zeros(shape, dtype=dtype, device="cuda")),
+        options={"plugins": {"rows.place": "t:ssd"}, "max_step_tokens": 8, "max_seqs": 1, "max_draft_tokens": 0})
+    table = tiered_rows.Rows(ssd, vocab=OUT, hidden=160, name="t", per_token=2)
+    assert table.adopt_weights(ssd, "weight", q)
+    table.bind_kernels(ssd)
+    worker = shared["cpu_task.io"]
+    worker.before_materialize(ssd)
+    worker.after_materialize(ssd)
+    errors = shared["tiered.rows.t.ssd.errors"]
+    want = dequantize("iq4_nl", blocks)
+    try:
+        ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
+        assert same_bits(table(ids), want[ids]) and table._table is None
+        static = torch.zeros(16, dtype=torch.int64, device="cuda")
+        out = table(static)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            out = table(static)
+        for seed in range(3):
+            static.copy_(torch.randint(0, OUT, (16,), generator=torch.Generator().manual_seed(seed)))
+            graph.replay()
+            assert same_bits(out, want[static])
+        for ahead in (ids, ids + 1):                     # D5's read-ahead: the step's ids, then other ones (read again)
+            assert table.prefetch(ahead.cpu().numpy()) and same_bits(table(ids), want[ids])
+        with mock.patch.object(tiered_rows._Reads, "plant", 1):        # (not the last row: past the file's end)
+            assert not same_bits(table(ids[2:]), want[ids[2:]])
+        torch.cuda.synchronize()
+        assert int(errors.word[0]) == 0
+        with pytest.raises(ValueError, match="past the SSD read list"):
+            table(torch.zeros(17, dtype=torch.int64, device="cuda"))
+    finally:
+        worker.shutdown()
+        errors.shutdown()
 
 
 @pytest.mark.model

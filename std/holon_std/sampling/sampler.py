@@ -6,6 +6,10 @@ there is no generator state, and the step is capturable in a graph. Semantics: `
 
 Resolution: the uniform has 24 bits and the CDF is an fp32 cumulative sum, so tokens are drawn with their oracle
 probability up to about 1e-7 absolute (one fp32 step of the running sum); rarer tokens may be over- or under-drawn.
+
+Sampled rows are drawn `ROWS` rows at a time: a filtered row's sort, its softmax and its cumulative sum are per row,
+so the draws are the whole batch's, bit for bit, and the step's peak holds a chunk's vocabulary-wide temporaries, not
+every row's (a 4-row verify of 64 sequences over a 248K vocabulary sorts 256 rows: ≈ 0.75 GB of keys and indices).
 """
 from __future__ import annotations
 
@@ -14,6 +18,7 @@ import torch
 from holon.api import SampleOut, SamplingParams
 
 _M32 = 0xFFFFFFFF
+ROWS = 16                      # sampled rows per chunk (vocabulary-wide temporaries)
 
 
 def _mix32(x: torch.Tensor) -> torch.Tensor:
@@ -92,14 +97,18 @@ class Sampler:
         greedy = torch.zeros_like(logits).scatter_(-1, logits.argmax(-1, keepdim=True), 1.0)
         if self._greedy[slots].all():
             return greedy
-        t = self.temperature[rows]
-        x = logits / torch.where(t == 0, 1.0, t)[:, None]
-        filters = (self.top_k[rows], self.top_p[rows], self.min_p[rows]) if self._filtered[slots].any() else (
-            None, None, None)
-        q, order = _distribution(x, *filters)
-        if order is not None:                           # filters drop mass: renormalize what is left
-            q = torch.zeros_like(q).scatter_(-1, order, q / q.sum(-1, keepdim=True))
-        return torch.where((t == 0)[:, None], greedy, q)
+        filtered = self._filtered[slots].any()
+        out = torch.empty_like(logits)
+        for a in range(0, len(logits), ROWS):           # (a chunk of rows at a time: the same rows, bit for bit)
+            r = rows[a:a + ROWS]
+            t = self.temperature[r]
+            x = logits[a:a + ROWS] / torch.where(t == 0, 1.0, t)[:, None]
+            q, order = _distribution(x, *((self.top_k[r], self.top_p[r], self.min_p[r]) if filtered else
+                                          (None, None, None)))
+            if order is not None:                       # filters drop mass: renormalize what is left
+                q = torch.zeros_like(q).scatter_(-1, order, q / q.sum(-1, keepdim=True))
+            out[a:a + ROWS] = torch.where((t == 0)[:, None], greedy[a:a + ROWS], q)
+        return out
 
     def uniform(self, ctx, stream: int = 0) -> torch.Tensor:
         """Per logits row, the uniform of stream `stream` at the position of the token it draws."""
@@ -122,15 +131,18 @@ class Sampler:
         rows = dev.slots[dev.logits_rows]                # device: parameter rows (graph-capturable)
         tokens = logits.argmax(-1)
         if not self._greedy[slots].all():
+            filtered = self._filtered[slots].any()
+            u = uniform(self.seed[rows], dev.positions[dev.logits_index].long() + 1)   # at the token being drawn
+            drawn = torch.empty_like(tokens)
+            for a in range(0, len(logits), ROWS):       # (a chunk of rows at a time: the same draws, bit for bit)
+                r = rows[a:a + ROWS]
+                t = self.temperature[r]
+                x = logits[a:a + ROWS] / torch.where(t == 0, 1.0, t)[:, None]
+                q, order = _distribution(x, *((self.top_k[r], self.top_p[r], self.min_p[r]) if filtered else
+                                              (None, None, None)))
+                d = draw(q, u[a:a + ROWS])
+                drawn[a:a + ROWS] = d if order is None else order.gather(-1, d[:, None])[:, 0]
             t = self.temperature[rows]
-            x = logits / torch.where(t == 0, 1.0, t)[:, None]
-            filters = (self.top_k[rows], self.top_p[rows], self.min_p[rows]) if self._filtered[slots].any() else (
-                None, None, None)
-            q, order = _distribution(x, *filters)
-            positions = dev.positions[dev.logits_index].long() + 1     # the position of the token being drawn
-            drawn = draw(q, uniform(self.seed[rows], positions))
-            if order is not None:
-                drawn = order.gather(-1, drawn[:, None])[:, 0]
             tokens = torch.where(t == 0, tokens, drawn)
         k = int(self._logprobs[slots].max())
         if k < 0:

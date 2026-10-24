@@ -8,6 +8,7 @@ from torch import nn
 from . import kernels
 
 CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
+SPLIT_ROWS = 16                    # passes of at most this many tokens (decode, verify) split an offload store's call
 ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/v1-moe-prefill.md D10)
 
 
@@ -210,6 +211,11 @@ class Resident:
         self._stacks += [merged] if merged is not None else []
         return merged
 
+    def fused(self, gate_up: ExpertLinear) -> ExpertLinear:
+        gate_up.glu = "swiglu"
+        self._stacks.append(gate_up)
+        return gate_up
+
     def stack(self, down: ExpertLinear) -> ExpertLinear:
         self._stacks.append(down)
         return down
@@ -251,13 +257,15 @@ def _store(ctx, **site):
 
 
 class MoE(nn.Module):
-    """Mixture of experts: softmax top-k routing over an f32 router (`moe_router@1`, or the f32 linear and
+    """Mixture of experts: softmax top-k routing over an f32 router (held bf16 where `moe.router_dtype` asks and its
+    values allow; `moe_router@1`, or the f32 linear and
     `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
     time, or a whole pass where it declares `pass_rows` (D3′); the expert path, in f32 (design D3), a pass of the
-    store's size (whole CHUNKs)."""
+    store's size (whole CHUNKs). `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
+    up's (transformers' `gate_up_proj`; e.g. Qwen3.8-Flash-Next's MTP pack, FN D9), loaded as `gate_up`."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
-                 layer: int = 0) -> None:
+                 layer: int = 0, fused_gate_up: bool = False) -> None:
         super().__init__()
         self.layer = layer
         self._store = _store(ctx, layer=layer, experts=experts, top_k=top_k)
@@ -266,12 +274,22 @@ class MoE(nn.Module):
                              "(moe.store = std.moe.offload@1)")
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
         stack = {"experts": experts, "top_k": top_k, "device": self._store.device}
-        self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
-                                 **stack)
-        self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1, act_dtype=ctx.dtype,
-                               **stack)
+        if fused_gate_up:
+            self.gate_up = ExpertLinear(ctx, in_features=hidden, out_features=2 * inter, rows_per_token=1,
+                                        act_dtype=ctx.dtype, **stack)
+        else:
+            self.gate = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1,
+                                     act_dtype=ctx.dtype, **stack)
+            self.up = ExpertLinear(ctx, in_features=hidden, out_features=inter, rows_per_token=1,
+                                   act_dtype=ctx.dtype, **stack)
         self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
+        # an offload store's decode and verify passes run their resident entries while the misses land (`moe.split=on`;
+        # off by default: mmvq computes a null slot's entries in full, so the two passes cost twice the expert work —
+        # an RTX A5000's IQ2_XS MTP decode 68 against 73 tok/s — until it skips them)
+        self._split = hasattr(self._store, "route_split") and \
+            str(ctx.options.get("plugins", {}).get("moe.split", "off")) == "on"
+        self._pipelined = hasattr(self._store, "route_pipelined")       # (a staging step's large passes: the store's)
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
@@ -280,6 +298,11 @@ class MoE(nn.Module):
         # the router and top-k in one kernel where a provider serves them (bounded: its own f32 order), else the f32
         # linear and `moe_topk@1`
         router = topk | {"hidden": hidden, "dtype": dtype}
+        # `moe.router_dtype=bfloat16`: the router held in bf16 (half its bytes), which the checkpoint's values must be
+        # exactly (finalize_weights checks); its kernels take them as f32, the same logits
+        self._router_bf16 = str(ctx.options.get("plugins", {}).get("moe.router_dtype", "float32")) == "bfloat16"
+        if self._router_bf16:
+            router["router_dtype"] = "bfloat16"
         self._router = (ctx.select_kernel(kernels.MOE_ROUTER, site=site, **router).impl(ctx, **router)
                         if ctx.candidates(kernels.MOE_ROUTER, router) else None)
         self._topk = None if self._router else ctx.select_kernel(kernels.MOE_TOPK, site=site, **topk).impl(ctx, **topk)
@@ -290,7 +313,18 @@ class MoE(nn.Module):
                                           **combine).impl(ctx, **combine)
 
     def finalize_weights(self, ctx) -> None:
-        self._gate_up = self._store.merge(self.gate, self.up)
+        if self._router_bf16:
+            w = self.router.detach()
+            if not torch.equal(w.bfloat16().float(), w):
+                raise ValueError(f"layer {self.layer}: moe.router_dtype bfloat16, but the router's values are not "
+                                 "exactly bf16 (keep float32)")
+            torch.utils.swap_tensors(self.router, nn.Parameter(w.bfloat16(), requires_grad=False))
+        if hasattr(self, "gate_up"):
+            if not hasattr(self._store, "fused"):
+                raise ValueError(f"layer {self.layer}: {type(self._store).__name__} holds no fused gate/up stacks")
+            self._gate_up = self._store.fused(self.gate_up)
+        else:
+            self._gate_up = self._store.merge(self.gate, self.up)
         if self._gate_up is None:
             raise ValueError(f"layer {self.layer}: gate and up experts must share a layout to merge "
                              f"(gate {self.gate.layout_fact()}, up {self.up.layout_fact()})")
@@ -302,20 +336,43 @@ class MoE(nn.Module):
         if self._prepare is not None:
             return self._prepare(x, self.router, self._gate_up.kernel)
         weights, ids = (self._router(x, self.router) if self._router is not None
-                        else self._topk(nn.functional.linear(x.float(), self.router)))
+                        else self._topk(nn.functional.linear(x.float(), self.router.float())))
         return weights, ids, x[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._forward(x, None)
 
-    def add_residual(self, x: torch.Tensor, residual: torch.Tensor) -> torch.Tensor:
-        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
-        the composition (the ffn unit interface's optional member, std.blocks.prenorm)."""
-        if not hasattr(self._combine, "add"):
-            return residual + self._forward(x, None)
-        return self._forward(x, residual)
+    joins = True                             # add_residual takes a `join` (std.ffn.sum@1's side stream)
 
-    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None) -> torch.Tensor:
+    def add_residual(self, x: torch.Tensor, residual: torch.Tensor, join=None) -> torch.Tensor:
+        """`residual + self(x)`, the add in the combine's kernel where it has one (`moe_combine@1`'s `add`): bitwise
+        the composition (the ffn unit interface's optional member, std.blocks.prenorm). `join()`, given, runs just
+        before `residual` is first read (a residual computed on another stream joins there, std.ffn.sum@1)."""
+        if not hasattr(self._combine, "add"):
+            y = self._forward(x, None)
+            if join is not None:
+                join()
+            return residual + y
+        return self._forward(x, residual, join)
+
+    def _parts(self, xin, gate_up, down, part, landed, out_h, out_y, scratch) -> torch.Tensor:
+        """A pipelined pass: the entries of part −1 (resident pieces, null slots) first, then each part's as its
+        fetch lands, every call computing its own entries (the others' ids −1, their rows untouched) into one `out`
+        per stack — each row as the one call over every entry gives it (a call's rows do not depend on its others)."""
+        tokens, k = part.shape
+        if out_h is None:
+            out_h = torch.empty(tokens, k, self._gate_up.out_y, device=part.device)
+        if out_y is None:
+            out_y = torch.empty(tokens, k, self._down.out_y, device=part.device)
+        for i in range(-1, len(landed)):
+            if i >= 0:
+                landed[i]()
+            mine = part == i
+            h = self._gate_up(xin, torch.where(mine, gate_up, -1), out_h, scratch)
+            self._down(h, torch.where(mine, down, -1), out_y, scratch)
+        return out_y
+
+    def _forward(self, x: torch.Tensor, residual: torch.Tensor | None, join=None) -> torch.Tensor:
         """The router and top-k per CHUNK tokens; the expert path per pass of the store's size (whole CHUNKs, up to
         what the stacks' kernels take at their chunks' bits: the step's last partial chunk is a pass of its own, so
         every row's chunk and kernel path are a chunk's); with `residual`, its add in the combine."""
@@ -333,15 +390,33 @@ class MoE(nn.Module):
                 weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in routes), strict=True))
                 xin = xc[:, None]
             ids, weights = self._store.transform(ids, weights, a)
-            gate_up, down = self._store.route(ids, a, xc)
+            misses = landed = part = None
+            if self._split and b - a <= SPLIT_ROWS and self._store.pipelines(b - a) <= 1:   # the resident entries
+                # first, while the misses' fetch lands (not in a step whose staging is a ring of parts: it pipelines)
+                (gate_up, down), misses, landed = self._store.route_split(ids, a, xc)
+            elif self._pipelined:                     # a staging step's large pass: its misses part by part
+                (gate_up, down), part, landed = self._store.route_pipelined(ids, a, xc)
+            else:
+                gate_up, down = self._store.route(ids, a, xc)
             # D10's buffers: the step's lent tail (D11), else one scratch for both calls, allocated per pass
             out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
                 None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
-            h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
-            y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
+            if part is not None:                      # each part's entries (−1 ids: skipped) into the same buffers
+                y = self._parts(xin, gate_up, down, part, landed, out_h, out_y, scratch)
+            else:
+                h = self._gate_up(xin, gate_up, out_h, scratch)           # [t, k, inter] f32, SwiGLU applied
+                y = self._store.patch(self._down(h, down, out_y, scratch))    # (F5b: the CPU's rows in place)
+            if misses is not None:                    # then the fetched ones: each entry ran in one of the two,
+                landed()                              # its null slot's zero in the other
+                y.add_(self._down(self._gate_up(xin, misses[0], None, scratch), misses[1], None, scratch))
             if residual is None:
                 self._combine(y, weights, out[a:b])
             else:
+                if join is not None:
+                    join()
+                    join = None
                 self._combine.add(y, weights, residual[a:b], out[a:b])
+        if join is not None:                          # no pass read the residual (no tokens): joined all the same
+            join()
         self._store.finish()
         return out

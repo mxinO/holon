@@ -106,7 +106,7 @@ REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qw
                     "UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf": 8, "mmproj-F16.gguf": 1, "config.json": 1, "README.md": 1,
                     "Qwen3-8B-F16.gguf": 3, "F16/Qwen3-8B-F16-00001-of-00002.gguf": 2,
                     "F16/Qwen3-8B-F16-00002-of-00002.gguf": 2},
-         "o/one": {"Qwen3-8B-Q4_K_M.gguf": 5},
+         "o/one": {"Qwen3-8B-Q4_K_M.gguf": 5}, "o/half": {"BF16/Qwen3-8B-BF16-00001-of-00002.gguf": 9},
          "o/two": {"Qwen3-8B-Q2_K.gguf": 1, "BF16/Qwen3-8B-BF16-00001-of-00002.gguf": 2,
                    "BF16/Qwen3-8B-BF16-00002-of-00002.gguf": 2},
          "o/hf": {"config.json": 1, "model-00001-of-00002.safetensors": 7, "model-00002-of-00002.safetensors": 7,
@@ -123,7 +123,8 @@ UNREACHABLE = "the hub is unreachable (ConnectError; offline, HF_HUB_OFFLINE=1 s
     ("o/gguf:Q4_K_M", {G: ("o/gguf/Qwen3-8B-Q4_K_M.gguf", 5)}),            # the plain file, not UD-Q4_K_M
     ("o/gguf:ud-q4_k_m", {G: ("o/gguf/Qwen3-8B-UD-Q4_K_M.gguf", 6)}),
     ("o/gguf/Qwen3-8B-UD-Q8_K_XL", {G: ("o/gguf/UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf", 8)}),   # in a directory
-    ("o/gguf:BF16", {G: "o/gguf: Qwen3-8B-BF16 is split into 2 files"}),
+    ("o/gguf:BF16", {G: ("o/gguf/BF16/Qwen3-8B-BF16-00001-of-00002.gguf (2 files)", 18)}),   # a split file (D14)
+    ("o/half", {G: "o/half: Qwen3-8B-BF16 is split into 2 files, of which it has 1"}),
     ("o/gguf:F16", {G: ("o/gguf/Qwen3-8B-F16.gguf", 3)}),                    # the single file beside a split set
     ("o/gguf:Q2_K", {G: "no GGUF file tagged Q2_K in o/gguf; name one as o/gguf:<TAG> or o/gguf/<name>: Qwen3-8B-B"}),
     ("o/gguf", {G: "several GGUF files"}),               # its config.json does not make it the HF source's
@@ -188,8 +189,8 @@ def test_hub_references_are_claimed_by_one_source(tmp_path, monkeypatch, ref, wa
             continue
         assert (claim.what, claim.nbytes) == expect, name
         if name == G:
-            org, repo, path = expect[0].split("/", 2)
-            assert claim.fetch() == f"fetched {org}/{repo} {path}"
+            org, repo, path = expect[0].split(" (")[0].split("/", 2)
+            assert claim.fetch() == f"fetched {org}/{repo} {path}"            # (a split file: its first)
         else:
             files = ["config.json", "model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors",
                      "model.safetensors.index.json", "tokenizer.json"]

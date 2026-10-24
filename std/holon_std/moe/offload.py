@@ -10,17 +10,21 @@ the RAM tier holds every expert, also the RAM-short default (F11 with deferred a
 "layers": {"<layer>": [count per expert]}}`, refused on another checkpoint's files, named relative to the
 checkpoint's directory), `moe.tiers` (host tiers' Refs, comma-separated; default `std.tiered.pinned@1`), `moe.ram`
 (the RAM tier's units per class, forwarded to it: fewer than every expert makes RAM exclusive, a slower tier holding
-the rest), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or `<class>=<fraction>`, `*` for every class not
-named; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at least this many prompt tokens streams every
+the rest), `moe.cache` (cache slots per class, pinned: `<class>=<n>` or `<class>=<fraction>`, a class a name or a
+pattern — `aux.*` an MTP head's classes, `*` every class nothing else names —, a pinned class beside fill ones seeded
+first; default: fill free VRAM), `moe.ring_tokens` (D8: a step of at least this many prompt tokens streams every
 layer's missing experts through lent ring slots in passes of up to the stacks' kernels' `pass_rows` tokens; 0: never;
 default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass, no host sync; `dma`: copy
 engines, one host sync per streaming step; default `sm`), `moe.ring_lend` (what a streaming step lends: `coldest`,
 the policy's coldest whole experts, X's; `tail`, first the experts holding the last slots of the largest class arena,
 a contiguous range its expert passes take their buffers from, then the coldest: docs/v1-moe-prefill.md D10, D11;
-default `coldest`), `moe.route_transform`
+default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
+below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
+`moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
+reserving only the worst smaller step's peak; default `off`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
-dropped routes, negative ids, are dropped end to end), `moe.cpu_plan` and `moe.cpu_isa` (F5b, the CPU's share of the
-misses: `cpu.py`)."""
+dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
+the CPU's share of the misses: `cpu.py`)."""
 from __future__ import annotations
 
 import torch
@@ -46,6 +50,9 @@ def _store(ctx, experts: int, top_k: int):
                         ring_tokens=int(opts.get("moe.ring_tokens", RING_TOKENS)),
                         ring_copy=str(opts.get("moe.ring_copy", "sm")),
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
+                        stream_tokens=int(opts.get("moe.stream_tokens", 0)),
+                        pipeline=int(opts.get("moe.pipeline", 1)),
+                        lend_peak=str(opts.get("moe.lend_peak", "off")) == "on",
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
@@ -63,9 +70,11 @@ class Offload(nn.Module):
     def __init__(self, ctx, *, layer: int, experts: int, top_k: int) -> None:
         super().__init__()
         self.store = ctx.shared(KEY, lambda root: _store(root, experts, top_k))
-        if ctx is not self.store.ctx:
-            raise NotImplementedError("std.moe.offload@1: an auxiliary model's experts (an MTP layer's) need its "
-                                      "sub-steps' row kinds; not yet")
+        # An auxiliary model's layer (an MTP head's, FN D12a) is the store's next group, numbered when its stacks are
+        # added (after the target's); its passes read the step's row kinds over the step's tokens, then, in the
+        # drafter's sub-steps (one decode row per drafting sequence), decode kinds.
+        self._aux = ctx is not self.store.ctx
+        self._seen, self._main = None, 0
         policy = self.store.policy
         if (policy.resolve_variant or policy.device_state()) and _rows(ctx) > CHUNK:
             raise NotImplementedError(f"std.moe.offload@1: {self.store.policy_ref}'s state changes once per call "
@@ -74,22 +83,37 @@ class Offload(nn.Module):
         if (self.store.items, self.store.top_k) != (experts, top_k):
             raise ValueError(f"std.moe.offload@1: layer {layer} has {experts} experts top-{top_k}, the store "
                              f"{self.store.items} top-{self.store.top_k}")
-        self.layer, self._resolver, self._transform = layer, None, None
+        self.layer, self._resolver, self._transform = (None if self._aux else layer), None, None
         self._max_pass = ctx.options.get("max_step_tokens")       # a pass's most tokens (none: the kernels' pass_rows)
         opts = ctx.options.get("plugins", {})
         self._transform_name = opts.get("moe.route_transform")
         self._facts = {"experts": experts, "top_k": top_k}
         # F5b: the CPU's share, unless the split was measured on another CPU tier (S5: F5a there)
         plan, isa = plan_table(str(opts.get("moe.cpu_plan", "")), experts), str(opts.get("moe.cpu_isa", ""))
-        self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root))) \
+        self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root),
+                                                          min_tokens=int(opts.get("moe.cpu_min_tokens", 1)))) \
             if plan and isa in ("", ctx.fingerprint.cpu_isa) else None
         self._stacks, self._slot, self._pending = [], None, None
+
+    def _group(self) -> None:
+        if self.layer is None:                  # an auxiliary model's layer: after every group added so far
+            self.layer = max(self.store.groups, default=-1) + 1
+            self.store.mark_auxiliary(self.layer)
+
+    def fused(self, gate_up: ExpertLinear) -> ArenaExperts:
+        """A fused gate/up stack (per expert gate's rows then up's: the arena's layout) as pieces of the store."""
+        self._group()
+        stack = ArenaExperts(self, gate_up, "swiglu", gate_up.out_features, GATE_UP, [_extents(gate_up)])
+        gate_up.weight = gate_up.parts = None
+        self._stacks.append(stack)
+        return stack
 
     def merge(self, gate: ExpertLinear, up: ExpertLinear) -> ArenaExperts | None:
         """The gate/up stack as pieces of the store: per expert, gate's extent then up's (nothing is read or moved)."""
         if (gate.layout, gate.in_features, gate.out_features, gate.experts) != \
                 (up.layout, up.in_features, up.out_features, up.experts):
             return None
+        self._group()
         stack = ArenaExperts(self, gate, "swiglu", 2 * gate.out_features, GATE_UP,
                              [_extents(gate), _extents(up)])
         gate.weight = up.weight = gate.parts = up.parts = None
@@ -97,6 +121,7 @@ class Offload(nn.Module):
         return stack
 
     def stack(self, down: ExpertLinear) -> ArenaExperts:
+        self._group()
         stack = ArenaExperts(self, down, "none", down.out_features, DOWN, [_extents(down)])
         down.weight = down.parts = None
         self._stacks.append(stack)
@@ -105,6 +130,7 @@ class Offload(nn.Module):
     def bind_kernels(self, ctx) -> None:
         self._resolver = self.store.resolver(self.layer)
         self.store.tail_bytes.append(self._tail_bytes)           # read at materialize, its stacks' kernels bound
+        self.store.pipelining.append(lambda: self._cpu is None and all(takes_buffers(s.kernel) for s in self._stacks))
         if self._cpu is not None:
             self._slot = self._cpu.bind(ctx, *self._stacks)
         if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
@@ -133,10 +159,10 @@ class Offload(nn.Module):
         return [max((s.kernel.scratch_bytes(tokens) for s in self._stacks if takes_buffers(s.kernel)), default=0),
                 *(tokens * k * s.out_y * 4 if takes_buffers(s.kernel) else 0 for s in self._stacks)]
 
-    def _tail_bytes(self) -> int:
+    def _tail_bytes(self, tokens: int | None = None) -> int:
         """The bytes a lent tail must hold for this layer's largest pass (its stacks' `pass_rows` within the step
-        budget), each buffer at an ALIGN boundary of a range starting anywhere."""
-        tokens = min(pass_rows(self._stacks), self._max_pass or pass_rows(self._stacks))
+        budget; within a step of `tokens`, given), each buffer at an ALIGN boundary of a range starting anywhere."""
+        tokens = min(pass_rows(self._stacks), self._max_pass or pass_rows(self._stacks), tokens or 1 << 62)
         return sum(-(-n // ALIGN) * ALIGN for n in self._layout(tokens)) + ALIGN - 1
 
     def pass_buffers(self, tokens: int) -> tuple | None:
@@ -160,17 +186,59 @@ class Offload(nn.Module):
     def route(self, ids: torch.Tensor, first: int, x: torch.Tensor) -> torch.Tensor:
         """Each role's arena slots for `ids` (the step's tokens `first`…, inputs `x`), misses fetched; with F5b, a
         small pass's CPU share is published to the CPU (its entries read null slots: zeros until `patch`)."""
-        if self._cpu is None or len(ids) > self._cpu.tokens:
+        kinds = self._kinds(len(ids))
+        if self._cpu is None or not self._cpu.takes(len(ids)):
             self._pending = None
-            return self._resolver(ids, first)[0]
+            return self._resolver(ids, first, kinds=kinds)[0]
         slots, self._pending = self._resolver(ids, first, *self._cpu.args(),
-                                              before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu))
+                                              before_fetch=lambda cpu: self._cpu.publish(self._slot, x, cpu),
+                                              kinds=kinds)
         return slots
+
+    def pipelines(self, tokens: int) -> int:
+        """The store's fetch parts of a pass of `tokens` (more than one: the pass pipelines, it never splits)."""
+        return self.store.pipelines(tokens)
+
+    def route_pipelined(self, ids: torch.Tensor, first: int, x: torch.Tensor):
+        """`route` for a staging step's large pass (`store.pipelines`): (slots [R, T, k], part [T, k], landed) — each
+        entry's part (−1: every piece resident, or a null slot), the misses fetched part by part on a side stream,
+        `landed[i]()` making the current stream wait for part i —; or (slots, None, None) where the pass is not
+        pipelined (one part, F5b's share, a fetch without parts)."""
+        parts = self.store.pipelines(len(ids))
+        if parts <= 1 or (self._cpu is not None and self._cpu.takes(len(ids))) or \
+                not all(takes_buffers(s.kernel) for s in self._stacks):        # (the parts share one `out` per stack)
+            return self.route(ids, first, x), None, None
+        self._pending = None
+        out = self._resolver(ids, first, kinds=self._kinds(len(ids)), parts=parts)
+        return out if len(out) == 3 else (out[0], None, None)
+
+    def route_split(self, ids: torch.Tensor, first: int, x: torch.Tensor):
+        """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
+        join) — the fetch on a side stream that `join()` makes the current stream wait for —, or (slots, None, None)
+        where the pass does not split (F5b's CPU share: `route`'s; exclusive tiers, a resolve without it)."""
+        if self._cpu is not None and self._cpu.takes(len(ids)):
+            return self.route(ids, first, x), None, None
+        self._pending = None
+        out = self._resolver(ids, first, kinds=self._kinds(len(ids)), split=True)
+        return (out[0], out[2], out[3]) if len(out) == 4 else (out[0], None, None)
+
+    def _kinds(self, tokens: int) -> torch.Tensor | None:
+        """The row kinds of an auxiliary layer's pass: the step's (None) while its passes cover the step's tokens, then
+        decode kinds (the drafter's sub-steps). A target layer's are the step's."""
+        if not self._aux:
+            return None
+        if self._seen != self.store.step:
+            self._seen, self._main = self.store.step, 0
+        if self._main < self.store.step_tokens:
+            self._main += tokens
+            return None
+        return self.store.decode_kinds(tokens)
 
     def patch(self, y: torch.Tensor) -> torch.Tensor:
         """The experts' outputs `y` [T, k, H] of the pass `route` resolved, its CPU share's rows in place."""
         if self._pending is not None:
             self._cpu.collect(self._slot, y, self._pending)
+            self._pending = None                # (a step's tensor: none outlives it, an activation loan's least)
         return y
 
     def finish(self) -> None:
@@ -187,6 +255,8 @@ class ArenaExperts(nn.Module):
         self._store = owner.store
         self.glu, self.out, self.out_y = glu, out, out // 2 if glu == "swiglu" else out
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
+        if owner._aux:                  # an auxiliary model's pieces in classes of their own (an MTP head's: its draft
+            name = f"aux.{name}"        # sub-steps never compete with the target's layers for slots; floored whole)
         unit = sum(x[0].nbytes for x in extents)
         for e in range(like.experts):
             self.cls = owner.store.add(owner.layer, e, role, name, unit, [x[e] for x in extents])

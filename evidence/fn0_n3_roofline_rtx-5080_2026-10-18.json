@@ -1,0 +1,488 @@
+{
+ "name": "fn0_n3_roofline",
+ "date": "2026-10-20",
+ "gpu": "rtx-5080",
+ "commit": "6b05ed03213963df5dc20881746bd698b6097296",
+ "command": "python spikes/fn0/n3_roofline.py --card rtx-5080 ...",
+ "method": "**The cache per row**: \u00a77's budget at the card's lock step (the RTX 5080's lock steps 4K, lead decision; the 5090's 8K)\nless the measured non-lendable peak over \u00a77's 200 KB per token; the drafting-off rows deploy without the 0.89 GB MTP\npack, the MTP rows with it; and, for the RTX 5080, step 7's target (\u2265 8.2 GB with the pack, \u00a713).\n\n**Decode, drafting off** (per token): t = (dense bytes + GDN state + hit bytes) / BW + miss bytes / PCIe + overhead.\n- dense bytes per token: every non-expert tensor of the file but the embedding and the PLE table (GGUF headers);\n  GDN state: 36 layers x 48 x 128 x 128 fp32, read and written;\n- hit rate: Holon's `placement.lfu@1` per layer, seeded from the expert profile, replayed on Strata's own decode\n  routing (`--dump-routing`, tail skip off; it matches Strata's measured rate at Strata's cache size);\n- QSA (the 12 layers' selection and sparse attention): measured per layer in FN's step 4 on the RTX A5000 (real\n  indexer inputs, cold caches; `QSA_US`), scaled to the card by \u00d70.67 [0.55, 0.85]; 0.03 ms dense below 2,052 tokens;\n- launches: the overhead is scaled to 16 launches per layer (step 7's gate, a per-token average: <= 768 per decode\n  token); `launches_34` gives each decode cell at the composed count measured in step 3 (a 4-layer slice of the\n  IQ2_XS file, eager, sparse QSA: \u2248 34 per layer, layer-weighted over both files), `launches_37` at the band's upper end\n  (every layer at the QSA layers' count) (panel C, step 3 review);\n- BW: 85% of the card's DRAM bandwidth; PCIe and the overhead from X's two Holon rows on the RTX 5080 (Qwen3-30B-A3B\n  lfu and static at 25%: the slope of time over miss bytes gives the F5a fetch rate, the rest the per-step overhead,\n  scaled from X's ~11 to FN's 16 launches per layer).\n\n**Decode, MTP** (per verify pass of 4 rows, 3 drafts): the pass reads the dense bytes once and each distinct expert of\nits 4 tokens once \u2014 lfu replayed on 4-token window unions (one decay per pass) \u2014 plus 3 draft steps of the MTP head\n(its 0.18 GB of dense parts, the full-vocabulary head, 10 of its Q2_0 experts, and its own launch budget: 46 launches\nat the band's overhead per launch, measured in step 3) and the MTP\nhead over the pass's verify rows (0.275 ms, panel C's 0.25-0.3); a pass\nyields Strata's own recorded accepted tokens per pass in the matched row (the same pack, full head, min-p 0).\nA1 (tail skip) gains what Strata's tail skip gains between its no-approx and defaults drafting-off rows; the defaults\nMTP rows also carry Strata's suffix drafter and calibrated draft floor, which Holon does not have (a non-goal).\n\n**Prefill** (per request): Strata's phase timers (`STRATA_PREFILL_TIMING`, St prefill.cpp:2000-2012) give each phase's\nshare of its prompt time; Holon's time is Strata's gated time x the sum of share x f, f being Holon's cost per phase\nrelative to Strata's: 1.0 for the ggml mmq expert and dense GEMMs (assumes the MoE prefill track's D1-D5 and IQ1_M's\nnative loader, D1'); bands for the parts FN writes in Triton (HC in fp32 ieee, GDN, QSA); and Strata's \"dequant\"\nphase \u2014 the per-expert gather and its issue gaps, on IQ3_S too, not IQ1_M's dequantization \u2014 at 0.3 [0.1, 0.5]:\nHolon's arena mmq reads the slots in place (no gather), leaving the issue gaps. A step\nis bound below by streaming the non-resident experts its tokens route to over PCIe (at 1K the routed share from 1,024-\ntoken windows of the trace; 1.0 beyond the trace's length). The defaults rows give Holon's q8_0 KV (read in-kernel by\n`qsa_attend@1`) Strata's own int8 gain (its defaults over its no-approx prefill, where above 1).",
+ "inputs": {
+  "x_fit": {
+   "f5a_fetch_gbps": 40.32,
+   "overhead_ms_x": 1.816,
+   "overhead_ms_fn": 2.641
+  },
+  "card": {
+   "file": "IQ2_XS",
+   "dense_gb": 3.4222,
+   "expert_mb": 1.44267,
+   "bw": 816.0,
+   "head_gb": 0.338,
+   "step": 4096,
+   "cache_gb": 7.5,
+   "target_gb": 8.2
+  },
+  "cache_gb": {
+   "off": 8.299,
+   "mtp": 7.41,
+   "target_off": 9.089,
+   "target_mtp": 8.2
+  },
+  "slots_per_layer": {
+   "off": 119.8,
+   "mtp": 107.0,
+   "target_off": 131.3,
+   "target_mtp": 118.4
+  },
+  "lfu_hit_rate": {
+   "off": 0.8277,
+   "mtp": 0.716,
+   "target_off": 0.8434,
+   "target_mtp": 0.744
+  },
+  "union_experts_per_layer_per_pass": 26.94,
+  "non_lendable_peak_kb": 222.0,
+  "phase_factors": {
+   "hc read": [
+    1.5,
+    1.0,
+    2.0
+   ],
+   "gdn": [
+    1.1,
+    0.9,
+    1.5
+   ],
+   "gdn conv+gates": [
+    1.1,
+    0.9,
+    1.5
+   ],
+   "gdn recurrence": [
+    1.1,
+    0.9,
+    1.5
+   ],
+   "gdn out proj": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "qsa attn": [
+    1.2,
+    1.0,
+    1.6
+   ],
+   "qsa select": [
+    1.2,
+    1.0,
+    1.6
+   ],
+   "qsa indexer": [
+    1.2,
+    1.0,
+    1.6
+   ],
+   "dequant": [
+    0.3,
+    0.1,
+    0.5
+   ],
+   "gemm gate/up": [
+    1.0,
+    1.0,
+    1.3
+   ],
+   "gemm down": [
+    1.0,
+    1.0,
+    1.3
+   ]
+  },
+  "prefill_stream_gbps": 47.5
+ },
+ "rows": {
+  "1024": {
+   "strata": {
+    "na_off_decode": 89.71,
+    "na_mtp_decode": 131.84,
+    "accepted_per_pass": 2.84,
+    "def_off_decode": 99.29,
+    "def_mtp_decode": 153.99,
+    "na_prefill": 1622.1,
+    "def_prefill": 1548.0
+   },
+   "holon": {
+    "decode_off": {
+     "central": 92.6,
+     "low": 86.2,
+     "high": 99.9,
+     "launches_34": 72.6,
+     "launches_37": 70.1
+    },
+    "decode_mtp": {
+     "central": 115.3,
+     "low": 111.1,
+     "high": 119.9,
+     "launches_34": 102.9,
+     "launches_37": 101.1
+    },
+    "prefill": {
+     "central": 1927.4,
+     "low": 1517.6,
+     "high": 2205.2
+    },
+    "prefill_stream_cap": 2205.5,
+    "routed_nonresident_share": 0.786,
+    "q8_0_kv_gain": 1.0
+   },
+   "ratios": {
+    "noapprox_off_decode": {
+     "central": 1.032,
+     "low": 0.961,
+     "high": 1.113,
+     "launches_34": 0.809,
+     "launches_37": 0.781
+    },
+    "noapprox_mtp_decode": {
+     "central": 0.875,
+     "low": 0.843,
+     "high": 0.909,
+     "launches_34": 0.78,
+     "launches_37": 0.767
+    },
+    "noapprox_prefill": {
+     "central": 1.188,
+     "low": 0.936,
+     "high": 1.359
+    },
+    "defaults_off_decode": {
+     "central": 1.032,
+     "low": 0.961,
+     "high": 1.113,
+     "launches_34": 0.809,
+     "launches_37": 0.781
+    },
+    "defaults_mtp_decode": {
+     "central": 0.829,
+     "low": 0.799,
+     "high": 0.862,
+     "launches_34": 0.74,
+     "launches_37": 0.727
+    },
+    "defaults_prefill": {
+     "central": 1.245,
+     "low": 0.98,
+     "high": 1.425
+    },
+    "target_noapprox_off_decode": {
+     "central": 1.057,
+     "low": 0.983,
+     "high": 1.143,
+     "launches_34": 0.825,
+     "launches_37": 0.795
+    },
+    "target_noapprox_mtp_decode": {
+     "central": 0.921,
+     "low": 0.885,
+     "high": 0.959,
+     "launches_34": 0.817,
+     "launches_37": 0.802
+    }
+   },
+   "strata_phase_shares": {
+    "combine": 0.0308,
+    "dequant": 0.2849,
+    "embed+steps": 0.0029,
+    "gather": 0.0044,
+    "gdn": 0.091,
+    "gdn conv+gates": 0.0059,
+    "gdn out proj": 0.0382,
+    "gdn recurrence": 0.0279,
+    "gemm down": 0.0954,
+    "gemm gate/up": 0.2012,
+    "hc read": 0.0396,
+    "host grouping": 0.0117,
+    "ple": 0.0015,
+    "qsa attn": 0.0323,
+    "qsa indexer": 0.0,
+    "qsa proj": 0.0426,
+    "qsa select": 0.0015,
+    "router+shared": 0.0191,
+    "wait copy": 0.072
+   }
+  },
+  "4096": {
+   "strata": {
+    "na_off_decode": 89.55,
+    "na_mtp_decode": 108.8,
+    "accepted_per_pass": 2.42,
+    "def_off_decode": 96.32,
+    "def_mtp_decode": 127.2,
+    "na_prefill": 2727.3,
+    "def_prefill": 2674.4
+   },
+   "holon": {
+    "decode_off": {
+     "central": 90.0,
+     "low": 83.4,
+     "high": 97.5,
+     "launches_34": 71.0,
+     "launches_37": 68.6
+    },
+    "decode_mtp": {
+     "central": 96.6,
+     "low": 92.7,
+     "high": 100.7,
+     "launches_34": 86.4,
+     "launches_37": 84.9
+    },
+    "prefill": {
+     "central": 2704.6,
+     "low": 2132.2,
+     "high": 3091.1
+    },
+    "prefill_stream_cap": 6937.4,
+    "routed_nonresident_share": 1.0,
+    "q8_0_kv_gain": 1.0
+   },
+   "ratios": {
+    "noapprox_off_decode": {
+     "central": 1.005,
+     "low": 0.931,
+     "high": 1.089,
+     "launches_34": 0.793,
+     "launches_37": 0.766
+    },
+    "noapprox_mtp_decode": {
+     "central": 0.888,
+     "low": 0.852,
+     "high": 0.925,
+     "launches_34": 0.794,
+     "launches_37": 0.78
+    },
+    "noapprox_prefill": {
+     "central": 0.992,
+     "low": 0.782,
+     "high": 1.133
+    },
+    "defaults_off_decode": {
+     "central": 1.005,
+     "low": 0.931,
+     "high": 1.089,
+     "launches_34": 0.793,
+     "launches_37": 0.766
+    },
+    "defaults_mtp_decode": {
+     "central": 0.817,
+     "low": 0.784,
+     "high": 0.851,
+     "launches_34": 0.73,
+     "launches_37": 0.718
+    },
+    "defaults_prefill": {
+     "central": 1.011,
+     "low": 0.797,
+     "high": 1.156
+    },
+    "target_noapprox_off_decode": {
+     "central": 1.029,
+     "low": 0.952,
+     "high": 1.117,
+     "launches_34": 0.808,
+     "launches_37": 0.78
+    },
+    "target_noapprox_mtp_decode": {
+     "central": 0.934,
+     "low": 0.894,
+     "high": 0.975,
+     "launches_34": 0.83,
+     "launches_37": 0.815
+    }
+   },
+   "strata_phase_shares": {
+    "combine": 0.0703,
+    "dequant": 0.1125,
+    "embed+steps": 0.0019,
+    "gather": 0.0064,
+    "gdn": 0.0972,
+    "gdn conv+gates": 0.0134,
+    "gdn out proj": 0.0473,
+    "gdn recurrence": 0.0505,
+    "gemm down": 0.0895,
+    "gemm gate/up": 0.1714,
+    "hc read": 0.0723,
+    "host grouping": 0.0096,
+    "ple": 0.0032,
+    "qsa attn": 0.1682,
+    "qsa indexer": 0.0,
+    "qsa proj": 0.0505,
+    "qsa select": 0.007,
+    "router+shared": 0.0211,
+    "wait copy": 0.0096
+   }
+  },
+  "32768": {
+   "strata": {
+    "na_off_decode": 83.88,
+    "na_mtp_decode": 112.77,
+    "accepted_per_pass": 2.98,
+    "def_off_decode": 91.65,
+    "def_mtp_decode": 142.64,
+    "na_prefill": 3091.0,
+    "def_prefill": 3701.3
+   },
+   "holon": {
+    "decode_off": {
+     "central": 89.9,
+     "low": 83.2,
+     "high": 97.3,
+     "launches_34": 70.9,
+     "launches_37": 68.5
+    },
+    "decode_mtp": {
+     "central": 118.6,
+     "low": 113.7,
+     "high": 123.7,
+     "launches_34": 106.1,
+     "launches_37": 104.2
+    },
+    "prefill": {
+     "central": 2884.7,
+     "low": 2263.6,
+     "high": 3319.7
+    },
+    "prefill_stream_cap": 6937.4,
+    "routed_nonresident_share": 1.0,
+    "q8_0_kv_gain": 1.197
+   },
+   "ratios": {
+    "noapprox_off_decode": {
+     "central": 1.071,
+     "low": 0.992,
+     "high": 1.161,
+     "launches_34": 0.846,
+     "launches_37": 0.817
+    },
+    "noapprox_mtp_decode": {
+     "central": 1.052,
+     "low": 1.008,
+     "high": 1.097,
+     "launches_34": 0.94,
+     "launches_37": 0.924
+    },
+    "noapprox_prefill": {
+     "central": 0.933,
+     "low": 0.732,
+     "high": 1.074
+    },
+    "defaults_off_decode": {
+     "central": 1.071,
+     "low": 0.992,
+     "high": 1.161,
+     "launches_34": 0.846,
+     "launches_37": 0.817
+    },
+    "defaults_mtp_decode": {
+     "central": 0.908,
+     "low": 0.871,
+     "high": 0.947,
+     "launches_34": 0.812,
+     "launches_37": 0.798
+    },
+    "defaults_prefill": {
+     "central": 0.933,
+     "low": 0.732,
+     "high": 1.074
+    },
+    "target_noapprox_off_decode": {
+     "central": 1.097,
+     "low": 1.014,
+     "high": 1.19,
+     "launches_34": 0.861,
+     "launches_37": 0.831
+    },
+    "target_noapprox_mtp_decode": {
+     "central": 1.106,
+     "low": 1.058,
+     "high": 1.156,
+     "launches_34": 0.983,
+     "launches_37": 0.966
+    }
+   },
+   "strata_phase_shares": {
+    "combine": 0.0479,
+    "dequant": 0.0576,
+    "embed+steps": 0.0048,
+    "gather": 0.0084,
+    "gdn": 0.0965,
+    "gdn conv+gates": 0.0153,
+    "gdn out proj": 0.05,
+    "gdn recurrence": 0.0586,
+    "gemm down": 0.0765,
+    "gemm gate/up": 0.1419,
+    "hc read": 0.0814,
+    "host grouping": 0.0083,
+    "ple": 0.004,
+    "qsa attn": 0.2486,
+    "qsa indexer": 0.0001,
+    "qsa proj": 0.0528,
+    "qsa select": 0.0219,
+    "router+shared": 0.0227,
+    "wait copy": 0.0035
+   }
+  }
+ },
+ "bars": {
+  "decode": 1.0,
+  "prefill": 0.9
+ },
+ "rows_below_bar_central": [
+  "1024 defaults_mtp_decode",
+  "1024 noapprox_mtp_decode",
+  "1024 target_noapprox_mtp_decode",
+  "32768 defaults_mtp_decode",
+  "4096 defaults_mtp_decode",
+  "4096 noapprox_mtp_decode",
+  "4096 target_noapprox_mtp_decode"
+ ],
+ "rows_below_bar_at_34_launches": [
+  "1024 defaults_mtp_decode",
+  "1024 defaults_off_decode",
+  "1024 noapprox_mtp_decode",
+  "1024 noapprox_off_decode",
+  "1024 target_noapprox_mtp_decode",
+  "1024 target_noapprox_off_decode",
+  "32768 defaults_mtp_decode",
+  "32768 defaults_off_decode",
+  "32768 noapprox_mtp_decode",
+  "32768 noapprox_off_decode",
+  "32768 target_noapprox_mtp_decode",
+  "32768 target_noapprox_off_decode",
+  "4096 defaults_mtp_decode",
+  "4096 defaults_off_decode",
+  "4096 noapprox_mtp_decode",
+  "4096 noapprox_off_decode",
+  "4096 target_noapprox_mtp_decode",
+  "4096 target_noapprox_off_decode"
+ ],
+ "rows_below_bar_at_37_launches": [
+  "1024 defaults_mtp_decode",
+  "1024 defaults_off_decode",
+  "1024 noapprox_mtp_decode",
+  "1024 noapprox_off_decode",
+  "1024 target_noapprox_mtp_decode",
+  "1024 target_noapprox_off_decode",
+  "32768 defaults_mtp_decode",
+  "32768 defaults_off_decode",
+  "32768 noapprox_mtp_decode",
+  "32768 noapprox_off_decode",
+  "32768 target_noapprox_mtp_decode",
+  "32768 target_noapprox_off_decode",
+  "4096 defaults_mtp_decode",
+  "4096 defaults_off_decode",
+  "4096 noapprox_mtp_decode",
+  "4096 noapprox_off_decode",
+  "4096 target_noapprox_mtp_decode",
+  "4096 target_noapprox_off_decode"
+ ]
+}

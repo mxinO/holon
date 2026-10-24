@@ -35,25 +35,30 @@ trace = "sha256:…"                   # hash of the snapshot trace's outputs; s
 uncovered = []                       # sites whose kernel is not run-to-run deterministic
 
 [units]                              # the code that runs, plus the core as "holon"
-"std.ops" = { sem = "sha256:…", src = "sha256:…", version = "1.0.0" }
+"std.ops" = { sem = "sha256:…", src = "src2:sha256:…", version = "1.0.0" }
 
 [sites]                              # one kernel binding per site: "<site>/<op>"
 "kv/attention.paged_decode@1" = { config = { facts = { … }, props = ["deterministic", "graph_safe"] }, impl = "kernels.triton_attn" }
 ```
 
 `[units]` pins the core, the plugins of the units the model built, the kernel providers bound at its sites and the
-engine's other plugins (model, weight source, sampler, state kinds …); kernel providers loaded only as candidates
-are not pinned. `src` is sha256 over a unit directory's sorted relative paths and file contents, without hidden
-files, `__pycache__`, `*.pyc`/`*.pyo`/`*.so`, `build/`, `dist/` and `*.egg-info`: content only, so a git checkout
-and an installed copy agree. `model_id` hashes the weight files: free for hub-cache snapshots (their blobs are named
-by sha256); other checkpoint directories are read once and remembered in the user's cache (`~/.cache/holon/weights`,
-never the checkpoint), keyed by each file's device, inode, size, mtime and ctime.
+engine's other plugins (model, weight source, sampler, state kinds …); kernel providers loaded only as candidates are
+not pinned. `src` (scheme `src2`, its prefix) is sha256 over a unit directory's sorted relative paths and the contents
+of its runtime files: without hidden files, `__pycache__`, `*.pyc`/`*.pyo`/`*.so`, `build/`, `dist/`, `*.egg-info` and
+`*.md`, and the unit's own tests (top-level `tests/`, `test_*`, `conftest.py`), `docs/` and `examples/` (below the top
+level, a vendored tree's are code); a Python file counts by its syntax tree without docstrings (node types and non-empty
+fields, no positions), so comments, docstrings and formatting never outdate a lock; `sem` hashes the reference module
+the same way. Content only, so a git checkout and an installed copy agree. A lock pinning scheme 1 (a bare `sha256:…`,
+every file's bytes) is outdated until propagated. Parsing costs time: `holon serve` hashes every installed unit at its
+start, ≈ 0.75 s for 51 units against scheme 1's 0.3 s. `model_id` hashes the weight files: free for hub-cache snapshots
+(their blobs are named by sha256); other checkpoint directories are read once and remembered in the user's cache
+(`~/.cache/holon/weights`, never the checkpoint), keyed by each file's device, inode, size, mtime and ctime.
 
 ## Commands
 
 ```
 # which locks pin a changed unit: unit names, paths (every unit whose directory holds it), or a git range (units
-# whose directory tree differs); anything else is an error
+# whose `src` pin differs: comments, docstrings, tests and docs touch none); anything else is an error
 python -m holon_tools impact std.ops
 python -m holon_tools impact std/holon_std/ops/kernels.py
 python -m holon_tools impact origin/main..HEAD
@@ -89,12 +94,16 @@ then:
 A code change whose trace is byte-identical advances without a human and without L2 (owner, 2026-10-21; design
 §4.6's changed-line coverage is not recorded, and the identical trace alone is accepted). L2 runs only when the trace
 moves, against the
-golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. `--snapshot-runs 3`
+golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. A deployment whose
+quantized calls take two kernel paths (an offload store's short passes beside its long ones) gives a floor per path
+(`--floor <mmq floor> <mmvq floor>`): each call must take a path one of them emulates, and L2 must pass every
+floor's budgets. `--snapshot-runs 3`
 asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
 (`docs/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
 snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can
-never name C, so counting it would make every re-run write another lock. Core changes are seen through the core's own `holon` unit pin. Starting from another class's lock
-(no lock for this class yet), only the pins whose provider runs here are kept.
+never name C, so counting it would make every re-run write another lock. Core changes are seen through the core's
+own `holon` unit pin. Starting from another class's lock (no lock for this class yet), only the pins whose provider
+runs here are kept.
 
 `tune` builds the base plan, lists for each decode op the providers that run here and support every site, and
 benchmarks one op at a time; a pinned provider is replaced only when beaten by more than 3%, so re-tuning does not
@@ -104,10 +113,11 @@ row at 256–2048 tokens and decode steps at every row count, in relative error,
 settings are the flags', not the starting lock's: pass the lock's (as `--max-seqs 4 --max-model-len …`).
 
 The snapshot trace is the judge's (`holon_judge.snapshot.trace`): a 2048-token prompt, the same prompt extended and
-submitted once the first has finished (a prefix-cache hit), and 62 short requests with staggered lengths, so the
+submitted once the first has finished (a prefix-cache hit, its two tokens scored with top-5 logprobs, so long-context
+and chunked-prefill numerics reach the trace bits), and 62 short requests with staggered lengths, so the
 decode batch shrinks through every graph bucket up to 64; seeded sampling (n = 2 included), logprobs and prompt
 logprobs. Each run records the step widths it covered and the prefix tokens saved. On Qwen3-0.6B (RTX A5000, default
-engine settings) it is run-identical across 3 runs, covers widths 1–65 except a few in 50–60 (every bucket up to 64)
+engine settings) it is run-identical across 3 runs, covers widths 1–64 except 56, 58 and 60 (every bucket up to 64)
 and saves 2064 prefix tokens. Timings for Qwen3-0.6B on an RTX A5000: a first lock (two trace runs + L2 over v1)
 ≈ 18 s, a no-op re-run ≈ 10 s, `tune` over the five decode ops ≈ 63 s.
 

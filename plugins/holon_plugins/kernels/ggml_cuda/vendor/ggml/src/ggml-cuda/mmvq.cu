@@ -645,6 +645,26 @@ static __global__ void mul_mat_vec_q(
     channel_y  = ncols_dst == 1 && ids ? fastmodulo(channel_dst, nchannels_y) : channel_dst;
     sample_dst = blockIdx.z;
 
+    // Holon: a negative id is an entry this call skips on purpose (another pass of a pipelined expert path computes
+    // it, FN step 7): its rows are left as they are
+    if (ncols_dst == 1 && ids && !shared_expert && int32_t(channel_x) < 0) {
+        return;
+    }
+    // Holon: an offload arena's null slot (zero weights, fusion.null_slots): its entry's rows are 0 (what its zero
+    // weights give for finite activations, no bias here), so the block reads nothing and stores zeros
+    if (ncols_dst == 1 && ids && !shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
+        if (threadIdx.y == 0 && threadIdx.x < rows_per_cuda_block &&
+            (rows_per_cuda_block == 1 || uint32_t(row0 + threadIdx.x) < stride_col_dst)) {
+            const uint32_t d = sample_dst*stride_sample_dst + channel_dst*stride_channel_dst + row0 + threadIdx.x;
+            if (fusion.dst_bf16) {
+                ((nv_bfloat16 *) dst)[d] = 0.0f;
+            } else {
+                dst[d] = 0.0f;
+            }
+        }
+        return;
+    }
+
     const uint32_t sample_x    = fastdiv(sample_dst, sample_ratio);
     const uint32_t sample_y    = sample_dst;
 
@@ -940,6 +960,16 @@ static __global__ void mul_mat_vec_q_moe(
     ggml_cuda_pdl_sync();
     const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
     const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
+    if (!shared_expert && int32_t(channel_x) < 0) { // Holon: an entry skipped on purpose: its rows left as they are
+        return;
+    }
+    // Holon: a null slot's entry (fusion.null_slots): this token's rows are 0, nothing read (as mul_mat_vec_q)
+    if (!shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
+        if (threadIdx.x < c_rows_per_block && (c_rows_per_block == 1 || uint32_t(row0 + threadIdx.x) < nrows_x)) {
+            dst[channel_dst*stride_channel_dst + token_idx*stride_col_dst + row0 + threadIdx.x] = 0.0f;
+        }
+        return;
+    }
 
     const block_q8_1 * y = ((const block_q8_1 *) vy) + channel_y*stride_channel_y + token_idx*stride_col_y;
     const int kbx_offset  = channel_x*stride_channel_x + row0*stride_row_x;
@@ -1086,16 +1116,27 @@ static void mul_mat_vec_q_moe_launch(
         const int warp_size, const int nchannels_dst, cudaStream_t stream) {
 
     constexpr int rows_per_block = 2; // 2 gives best perf based on tuning
-    const int64_t nblocks_rows = (nrows_x + rows_per_block - 1) / rows_per_block;
+    // Holon: 4 rows per block without fusion (a MoE's down projection): 9-18% faster at a verify pass's 4 rows on
+    // Blackwell (RTX 5080, 5090; FN §23.8), each row's sums as before; the fused gate/up keeps 2, and so does a
+    // matrix whose rows are not a multiple of 4 (the kernel reads every row of its block)
+    constexpr int rows_per_block_plain = 4;
+    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
+                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
+    const bool plain = !has_fusion && nrows_x % rows_per_block_plain == 0;
+    const int rows = plain ? rows_per_block_plain : rows_per_block;
+    const int64_t nblocks_rows = (nrows_x + rows - 1) / rows;
     const dim3 block_nums(nblocks_rows, nchannels_dst + (fusion.shared_up != nullptr));
     const dim3 block_dims(warp_size, ncols_dst);
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, 0, stream);
 
-    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
-                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
-
     if (has_fusion) {
         ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, true>, launch_params,
+            vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
+            stride_row_x, stride_col_y, stride_col_dst,
+            stride_channel_x, stride_channel_y, stride_channel_dst,
+            ncols_dst, ids_stride);
+    } else if (plain) {
+        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block_plain, false>, launch_params,
             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
             stride_row_x, stride_col_y, stride_col_dst,
             stride_channel_x, stride_channel_y, stride_channel_dst,
@@ -1482,6 +1523,7 @@ void ggml_cuda_mul_mat_vec_q(
 
     ggml_cuda_mm_fusion_args_device fusion_local{};
     fusion_local.dst_bf16 = dst->type == GGML_TYPE_BF16;
+    fusion_local.null_slots = fusion && ids ? fusion->null_slots : 0; // Holon: an arena's null slots
 
     if (fusion) {
         const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;

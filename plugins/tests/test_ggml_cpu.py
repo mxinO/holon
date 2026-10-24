@@ -4,9 +4,9 @@ row may differ by a requantized SwiGLU value that sits at a rounding tie, which 
 other side, so the budget is tight for nine rows in ten and one such flip's size for the rest),
 and a token's row bitwise the same alone (one job, one thread) as grouped with other tokens and jobs at 1 and 7
 threads — the batch-invariance check, which catches a kernel that splits K for grouped tokens (L0's own mutation
-test); a malformed job table fails the task instead of reading past a buffer. Synthetic Q8_0 / Q4_0 experts always;
-the development vehicle's own classes (Q4_K with Q6_K or Q4_K down, UD-IQ3_XXS's) when its files are cached. Prebuild
-links each tier in its own process."""
+test); a malformed job table fails the task instead of reading past a buffer. Synthetic Q8_0 / Q4_0 experts always,
+and Q8_0 / Q2_0 (FN's down type); the development vehicle's own classes (Q4_K with Q6_K or Q4_K down, UD-IQ3_XXS's)
+and FN IQ2_XS's three (inter 640) when their files are cached. Prebuild links each tier in its own process."""
 import pathlib
 
 import gguf
@@ -18,8 +18,12 @@ from holon_std.moe import reference
 from huggingface_hub.constants import HF_HUB_CACHE
 
 VEHICLE = pathlib.Path(HF_HUB_CACHE) / "models--unsloth--Qwen3-30B-A3B-GGUF" / "snapshots"
-CASES = [("synthetic", None, None), ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 0),   # Q6_K down
-         ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 6), ("UD-IQ3_XXS", "Qwen3-30B-A3B-UD-IQ3_XXS.gguf", 0)]
+FN = pathlib.Path(HF_HUB_CACHE) / "models--ISTA-DASLab--Qwen3.8-Flash-Next-GSQ-RCO-GGUF" / "snapshots"
+CASES = [("synthetic", None, None), ("synthetic", None, "q2_0"),
+         ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 0),   # Q6_K down
+         ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 6), ("UD-IQ3_XXS", "Qwen3-30B-A3B-UD-IQ3_XXS.gguf", 0),
+         # FN's IQ2_XS (inter 640, not a multiple of 256): IQ2_S, IQ2_XXS and IQ1_M gate/up with Q2_0 down
+         *(("IQ2_XS", "IQ2_XS/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf", layer) for layer in (0, 1, 8))]
 K, T, J = 8, 8, 16                       # top-k, tokens and jobs per run
 BUDGET, FLIP = 1e-4, 2e-2               # |kernel − oracle| per row, relative to the oracle row's RMS
 
@@ -38,14 +42,23 @@ def plugin():
 
 def _experts(name: str, file: str | None, layer: int):
     """(gate/up layout, down layout, hidden, inter, gate/up units [E, bytes], down units [E, bytes])."""
-    if file is None:                                                    # 4 experts, hidden 512, inter 256
+    if file is None:                    # 4 experts, hidden 512, inter 256; down Q4_0, or `layer`'s type (Q2_0: FN's)
+        down = layer or "q4_0"
         rng = np.random.default_rng(0)
         gu = np.stack([gguf.quants.quantize(rng.standard_normal((512, 512), dtype=np.float32) * 0.05,
                                             gguf.GGMLQuantizationType.Q8_0).reshape(-1) for _ in range(4)])
-        dn = np.stack([gguf.quants.quantize(rng.standard_normal((512, 256), dtype=np.float32) * 0.05,
-                                            gguf.GGMLQuantizationType.Q4_0).reshape(-1) for _ in range(4)])
-        return "ggml.q8_0/gguf.native", "ggml.q4_0/gguf.native", 512, 256, torch.from_numpy(gu), torch.from_numpy(dn)
-    path = next(VEHICLE.glob(f"*/{file}"), None)
+        if down == "q2_0":            # random codes: ggml's quantizer (d = amax) never writes code 3 (+2), the files do
+            blocks = np.zeros((4, 512 * 256 // 64, 18), np.uint8)
+            blocks[..., :2] = (rng.uniform(0.01, 0.05, blocks.shape[:2]).astype(np.float16)).view(np.uint8).reshape(
+                *blocks.shape[:2], 2)
+            blocks[..., 2:] = rng.integers(0, 256, (*blocks.shape[:2], 16), dtype=np.uint8)
+            assert (((blocks[..., 2:, None] >> np.arange(0, 8, 2, dtype=np.uint8)) & 3) == 3).any()
+            dn = blocks.reshape(4, -1)
+        else:
+            dn = np.stack([gguf.quants.quantize(rng.standard_normal((512, 256), dtype=np.float32) * 0.05,
+                                                gguf.GGMLQuantizationType[down.upper()]).reshape(-1) for _ in range(4)])
+        return "ggml.q8_0/gguf.native", f"ggml.{down}/gguf.native", 512, 256, torch.from_numpy(gu), torch.from_numpy(dn)
+    path = next((VEHICLE if "/" not in file else FN).glob(f"*/{file}"), None)
     if path is None:
         pytest.skip(f"{file} not cached")
     t = {x.name: x for x in gguf.GGUFReader(path).tensors}

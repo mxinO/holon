@@ -27,8 +27,9 @@ an OpenAI client, an Anthropic client or Claude Code can use it directly; the de
 Other GPUs: GGUF files refuse at startup (the GGUF kernels are built for SM 86, 89 and 120 only); bf16 checkpoints
 are untested.
 
-Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`) and the Qwen3.5 hybrid (`models.qwen3_5`, which
-also serves Qwen3.8), from HF safetensors directories or GGUF files. The recommended file per card and its lock
+Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`), the Qwen3.5 hybrid (`models.qwen3_5`, which
+also serves Qwen3.8) and Qwen3.8-Flash-Next (`models.qwen4_exp`, GGUF, with its MTP head), from HF safetensors
+directories or GGUF files. The recommended file per card and its lock
 (`holon models` lists them for the card it runs on):
 
 | model file (hub repository) | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
@@ -125,7 +126,8 @@ cache, and `HF_HUB_OFFLINE=1` to serve cached models without the network (a tag 
 Offline, a hub name is found through the cache's `refs/main`, which a download writes; in a cache filled another way
 (by revision, or copied without `refs/`) serve the file's path instead,
 `<HF cache>/hub/models--unsloth--Qwen3.8-27B-GGUF/snapshots/<revision>/<file>`: it finds the same lock.
-Split GGUF files (`-00001-of-0000N.gguf`) are not supported.
+A split GGUF file (`-00001-of-0000N.gguf`) is served by its first shard's path or its stem; a hub reference
+fetches all its shards.
 
 `holon serve` listens on `127.0.0.1:8000` (`holon serve <model> --host H --port P`) and checks no API key: do not
 expose it beyond a trusted network. Its log says which lock it starts from, or why none:
@@ -229,9 +231,9 @@ lock's is warned about and that lock not used.
   an offloaded MoE's experts) starts only with `--host-memory BYTES`. Without it the start is refused with the bytes
   the pools need; a state tier's refusal names the flag and value, e.g. for `state_tier.host.bytes=16GiB`:
   `holon serve <model> --host-memory 17179869184`.
-- **Ignore the lock:** `holon serve <model> --no-lock` serves defaults and your flags. Use it if a start hangs: the
-  server retries a start that fails other than with a plugin or memory error 4 times, each up to 600 s, before falling
-  back to defaults.
+- **Ignore the lock:** `holon serve <model> --no-lock` serves defaults (`plans/defaults.toml`: the grammar processor)
+  and your flags. Use it if a start hangs: the server retries a start that fails other than with a plugin or memory
+  error 4 times, each up to 600 s, before falling back to defaults.
 - **Change or delete one key of the lock:** dict flags merge per key, and `key=` (empty value) deletes the lock's
   setting: `holon serve <model> --plugin-options kv.format=` serves the default KV format, and
   `holon serve <model> --slots logits_processor=` deselects the grammar processor.

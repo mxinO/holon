@@ -4,10 +4,10 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "unit"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.5,<2.0"            # ModelSpec.residual
 
 [resources]
-provides = ["unit.std.spec.mtp_head@1"]
+provides = ["unit.std.spec.mtp_head@1", "unit.std.spec.mtp_hc_head@1"]
 
 [properties]
 numerics = "exact"

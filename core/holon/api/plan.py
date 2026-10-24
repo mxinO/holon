@@ -15,7 +15,7 @@ from .terms import canonical_hash
 @dataclasses.dataclass(frozen=True, slots=True)
 class UnitPin:
     version: str
-    src: str                 # git tree hash of the unit directory
+    src: str                 # hash of the unit's runtime sources (holon.core.plans.src_hash)
     sem: str | None = None   # hash of reference.py + parameter schema (numeric units)
 
 

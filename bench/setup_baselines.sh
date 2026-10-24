@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Pinned baseline engines under bench/.envs/ (gitignored): one venv or build per baseline. Holon's own .venv is never
 # touched: each baseline brings its own torch stack, and run.py starts it with that venv's python.
-# Usage: bash bench/setup_baselines.sh [minisgl] [nanovllm] [llamacpp] [sglang] [freetoken] [offload]   (default: all
-# but offload)
+# Usage: bash bench/setup_baselines.sh [minisgl] [nanovllm] [llamacpp] [sglang] [freetoken] [offload] [fn]   (default:
+# all but offload and fn)
 # llamacpp, freetoken and offload compile CUDA code: run them where nvcc (CUDA 13) is on PATH. LLAMA_ARCHS overrides
 # the CUDA architectures (e.g. LLAMA_ARCHS=120a for one class).
 set -euo pipefail
@@ -21,6 +21,12 @@ FREETOKEN_COMMIT=74a387777708b9650a027494bcb37d2ab9cf2443  # 2026-10-10 (torch 2
 LLAMA_OFFLOAD=f74e2fa6a31cc33ab4ee4ae516641cfe62df3924     # upstream HEAD, 2026-10-16
 FREETOKEN_OFFLOAD=21d9578bde22840798b6063824416264fbdcdc25 # 2026-10-16
 OFFLOAD_RESOLVED_BEFORE=2026-10-17
+# FN's references (docs/v1-flash-next.md D11): llama.cpp at the commit FN cites (qwen4exp), Strata, and the ggml
+# commit Strata pins (its setup.py LLAMA_CPP_COMMIT). Both build -march=native: run `fn` on the bar cards' host class.
+LLAMA_FN=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd   # 2026-10-17
+STRATA_COMMIT=296b59d2f73c8f04a805df29c2fa97655adace78   # 2026-10-14
+STRATA_GGML=3cf03257f219afbe7334045ff7c6a06ac68c627d
+STRATA_ARCHS=${STRATA_ARCHS:-120}
 SGLANG_VERSION=0.5.21                                      # 2026-10-01 release (torch 2.13.0, CUDA 13)
 RESOLVED_BEFORE=2026-10-07   # uv --exclude-newer: dependency resolution is reproducible from this date
 RELEASE_RESOLVED_BEFORE=2026-10-14   # the same for the release design's baselines (sglang, freetoken)
@@ -75,6 +81,18 @@ for b in "${targets[@]}"; do
       EXCLUDE_NEWER=$OFFLOAD_RESOLVED_BEFORE venv freetoken-offload torch==2.14.1 setuptools wheel
       EXCLUDE_NEWER=$OFFLOAD_RESOLVED_BEFORE venv freetoken-offload --no-build-isolation -e ".envs/src/FreeToken-offload[accel]"
       b=freetoken-offload ;;
+    fn)        # llama.cpp-fn, and Strata's engine in .envs/strata/strata (its tools run from .envs/src/Strata)
+      llamacpp fn "$LLAMA_FN"
+      checkout Strata https://github.com/Niko1221/Strata.git "$STRATA_COMMIT"
+      checkout llama.cpp-strata https://github.com/ggml-org/llama.cpp.git "$STRATA_GGML"
+      envs=$(realpath .envs)
+      cmake -S "$envs/src/Strata" -B "$envs/strata" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSTRATA_ENABLE_CUDA=ON \
+        -DSTRATA_BUILD_TESTS=OFF -DCMAKE_CUDA_ARCHITECTURES="$STRATA_ARCHS" -DSTRATA_GGML_DIR="$envs/src/llama.cpp-strata" \
+        > /dev/null
+      cmake --build "$envs/strata" -j "${JOBS:-16}" --target strata > "$envs/strata.log" 2>&1 ||
+        { grep -A20 FAILED "$envs/strata.log" >&2; exit 1; }
+      echo "strata: $(git -C .envs/src/Strata rev-parse --short HEAD), $(ls -l .envs/strata/strata | awk '{print $5}') bytes"
+      continue ;;
     *) echo "unknown baseline: $b" >&2; exit 2 ;;
   esac
   echo "$b: $(.envs/"$b"/bin/python -c 'import torch; print("torch", torch.__version__)')"

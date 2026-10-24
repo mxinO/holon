@@ -1,0 +1,5281 @@
+{
+ "date": "2026-10-23",
+ "doc": "docs/v1-flash-next.md \u00a721.17",
+ "sweep_rtx-5090": {
+  "base": {
+   "config": {
+    "max_step_tokens": "6144",
+    "memory_fraction": "0.97",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.4676,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 45
+     },
+     "missed_gb": {
+      "met": 20.23,
+      "lent": 20.28,
+      "min_stage": 20.47,
+      "min_stage_absent": 20.94,
+      "min_parts": 20.28,
+      "min_parts_absent": 20.28
+     },
+     "decode_hit": 0.9262
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 274,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 15.5,
+      "lent": 16.16,
+      "min_stage": 16.89,
+      "min_stage_absent": 17.76,
+      "min_parts": 15.98,
+      "min_parts_absent": 16.16
+     },
+     "decode_hit": 0.9442
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 272
+     },
+     "missed_gb": {
+      "met": 15.08,
+      "lent": 15.8,
+      "min_stage": 16.55,
+      "min_stage_absent": 17.66,
+      "min_parts": 15.59,
+      "min_parts_absent": 15.8
+     },
+     "decode_hit": 0.9607
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2414,
+      "call2": 480,
+      "call3": 38,
+      "call4": 457
+     },
+     "missed_gb": {
+      "met": 20.31,
+      "lent": 27.7,
+      "min_ring": 27.0,
+      "min_stage": 22.88,
+      "min_stage_absent": 23.34,
+      "min_parts": 21.52,
+      "min_parts_absent": 21.63
+     },
+     "decode_hit": 0.9461
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 438,
+      "call1": 2429,
+      "call2": 327,
+      "call3": 14,
+      "call4": 192
+     },
+     "missed_gb": {
+      "met": 21.85,
+      "lent": 28.52,
+      "min_ring": 28.3,
+      "min_stage": 24.35,
+      "min_stage_absent": 24.94,
+      "min_parts": 23.01,
+      "min_parts_absent": 23.13
+     },
+     "decode_hit": 0.9478
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2507,
+      "call2": 305,
+      "call3": 40,
+      "call4": 394
+     },
+     "missed_gb": {
+      "met": 22.64,
+      "lent": 29.85,
+      "min_ring": 29.29,
+      "min_stage": 25.31,
+      "min_stage_absent": 25.86,
+      "min_parts": 23.87,
+      "min_parts_absent": 23.99
+     },
+     "decode_hit": 0.9149
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 20.99,
+      "lent": 20.99,
+      "min_ring": 20.99,
+      "min_stage": 20.99,
+      "min_stage_absent": 20.99,
+      "min_parts": 20.99,
+      "min_parts_absent": 20.99
+     },
+     "decode_hit": 0.9125
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 25.28,
+      "lent": 25.28,
+      "min_ring": 25.28,
+      "min_stage": 25.28,
+      "min_stage_absent": 25.28,
+      "min_parts": 25.28,
+      "min_parts_absent": 25.28
+     },
+     "decode_hit": 0.9071
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 24.26,
+      "lent": 24.26,
+      "min_ring": 24.26,
+      "min_stage": 24.26,
+      "min_stage_absent": 24.26,
+      "min_parts": 24.26,
+      "min_parts_absent": 24.26
+     },
+     "decode_hit": 0.9306
+    }
+   ]
+  },
+  "s4a3off": {
+   "config": {
+    "max_step_tokens": "4096",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.487,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 50
+     },
+     "missed_gb": {
+      "met": 19.59,
+      "lent": 19.65,
+      "min_stage": 19.78,
+      "min_stage_absent": 20.22,
+      "min_parts": 19.65,
+      "min_parts_absent": 19.65
+     },
+     "decode_hit": 0.9289
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 273,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 14.73,
+      "lent": 15.38,
+      "min_stage": 16.07,
+      "min_stage_absent": 16.97,
+      "min_parts": 15.21,
+      "min_parts_absent": 15.38
+     },
+     "decode_hit": 0.9465
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.26,
+      "lent": 14.98,
+      "min_stage": 15.64,
+      "min_stage_absent": 16.8,
+      "min_parts": 14.76,
+      "min_parts_absent": 14.98
+     },
+     "decode_hit": 0.9623
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2383,
+      "call2": 452,
+      "call3": 33,
+      "call4": 521
+     },
+     "missed_gb": {
+      "met": 19.41,
+      "lent": 26.79,
+      "min_ring": 26.02,
+      "min_stage": 21.89,
+      "min_stage_absent": 22.37,
+      "min_parts": 20.59,
+      "min_parts_absent": 20.71
+     },
+     "decode_hit": 0.9478
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 425,
+      "call1": 2392,
+      "call2": 319,
+      "call3": 17,
+      "call4": 198
+     },
+     "missed_gb": {
+      "met": 20.97,
+      "lent": 27.56,
+      "min_ring": 27.32,
+      "min_stage": 23.39,
+      "min_stage_absent": 23.95,
+      "min_parts": 22.05,
+      "min_parts_absent": 22.17
+     },
+     "decode_hit": 0.9484
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2469,
+      "call2": 308,
+      "call3": 26,
+      "call4": 198
+     },
+     "missed_gb": {
+      "met": 21.71,
+      "lent": 28.54,
+      "min_ring": 28.26,
+      "min_stage": 24.32,
+      "min_stage_absent": 24.87,
+      "min_parts": 22.9,
+      "min_parts_absent": 23.03
+     },
+     "decode_hit": 0.9183
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.72,
+      "lent": 18.72,
+      "min_ring": 18.72,
+      "min_stage": 18.72,
+      "min_stage_absent": 18.72,
+      "min_parts": 18.72,
+      "min_parts_absent": 18.72
+     },
+     "decode_hit": 0.917
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.56,
+      "lent": 23.56,
+      "min_ring": 23.56,
+      "min_stage": 23.56,
+      "min_stage_absent": 23.56,
+      "min_parts": 23.56,
+      "min_parts_absent": 23.56
+     },
+     "decode_hit": 0.9349
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.52,
+      "lent": 22.52,
+      "min_ring": 22.52,
+      "min_stage": 22.52,
+      "min_stage_absent": 22.52,
+      "min_parts": 22.52,
+      "min_parts_absent": 22.52
+     },
+     "decode_hit": 0.9321
+    }
+   ]
+  },
+  "s4a3on": {
+   "config": {
+    "max_step_tokens": "4096",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4971,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 142
+     },
+     "missed_gb": {
+      "met": 19.43,
+      "lent": 19.59,
+      "min_stage": 19.75,
+      "min_stage_absent": 20.13,
+      "min_parts": 19.59,
+      "min_parts_absent": 19.59
+     },
+     "decode_hit": 0.9315
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 779,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.22,
+      "lent": 15.78,
+      "min_stage": 16.41,
+      "min_stage_absent": 17.17,
+      "min_parts": 15.63,
+      "min_parts_absent": 15.78
+     },
+     "decode_hit": 0.9472
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 779,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 13.74,
+      "lent": 15.36,
+      "min_stage": 15.98,
+      "min_stage_absent": 16.87,
+      "min_parts": 15.17,
+      "min_parts_absent": 15.36
+     },
+     "decode_hit": 0.9632
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2903,
+      "call1": 2204,
+      "call2": 224,
+      "call3": 42,
+      "call4": 244
+     },
+     "missed_gb": {
+      "met": 18.81,
+      "lent": 29.22,
+      "min_ring": 28.69,
+      "min_stage": 25.71,
+      "min_stage_absent": 26.13,
+      "min_parts": 24.32,
+      "min_parts_absent": 24.42
+     },
+     "decode_hit": 0.9429
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2527,
+      "call1": 2147,
+      "call2": 316,
+      "call3": 22
+     },
+     "missed_gb": {
+      "met": 20.53,
+      "lent": 29.91,
+      "min_ring": 29.91,
+      "min_stage": 26.79,
+      "min_stage_absent": 27.24,
+      "min_parts": 25.35,
+      "min_parts_absent": 25.45
+     },
+     "decode_hit": 0.9461
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2818,
+      "call1": 2204,
+      "call2": 270,
+      "call3": 36,
+      "call4": 486
+     },
+     "missed_gb": {
+      "met": 20.74,
+      "lent": 31.49,
+      "min_ring": 30.51,
+      "min_stage": 27.48,
+      "min_stage_absent": 27.93,
+      "min_parts": 26.02,
+      "min_parts_absent": 26.13
+     },
+     "decode_hit": 0.9154
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.03,
+      "lent": 18.03,
+      "min_ring": 18.03,
+      "min_stage": 18.03,
+      "min_stage_absent": 18.03,
+      "min_parts": 18.03,
+      "min_parts_absent": 18.03
+     },
+     "decode_hit": 0.913
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.65,
+      "lent": 22.65,
+      "min_ring": 22.65,
+      "min_stage": 22.65,
+      "min_stage_absent": 22.65,
+      "min_parts": 22.65,
+      "min_parts_absent": 22.65
+     },
+     "decode_hit": 0.9313
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 21.64,
+      "lent": 21.64,
+      "min_ring": 21.64,
+      "min_stage": 21.64,
+      "min_stage_absent": 21.64,
+      "min_parts": 21.64,
+      "min_parts_absent": 21.64
+     },
+     "decode_hit": 0.9231
+    }
+   ]
+  },
+  "s4a5off": {
+   "config": {
+    "max_step_tokens": "4096",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.4842,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 48
+     },
+     "missed_gb": {
+      "met": 19.68,
+      "lent": 19.74,
+      "min_stage": 19.88,
+      "min_stage_absent": 20.33,
+      "min_parts": 19.74,
+      "min_parts_absent": 19.74
+     },
+     "decode_hit": 0.9302
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 271,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 14.84,
+      "lent": 15.48,
+      "min_stage": 16.19,
+      "min_stage_absent": 17.08,
+      "min_parts": 15.32,
+      "min_parts_absent": 15.48
+     },
+     "decode_hit": 0.9472
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 269
+     },
+     "missed_gb": {
+      "met": 14.39,
+      "lent": 15.1,
+      "min_stage": 15.8,
+      "min_stage_absent": 16.93,
+      "min_parts": 14.89,
+      "min_parts_absent": 15.1
+     },
+     "decode_hit": 0.9629
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2385,
+      "call2": 458,
+      "call3": 48,
+      "call4": 499
+     },
+     "missed_gb": {
+      "met": 19.54,
+      "lent": 26.92,
+      "min_ring": 26.16,
+      "min_stage": 22.02,
+      "min_stage_absent": 22.51,
+      "min_parts": 20.73,
+      "min_parts_absent": 20.84
+     },
+     "decode_hit": 0.9487
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 426,
+      "call1": 2402,
+      "call2": 321,
+      "call3": 18,
+      "call4": 196
+     },
+     "missed_gb": {
+      "met": 21.1,
+      "lent": 27.71,
+      "min_ring": 27.46,
+      "min_stage": 23.53,
+      "min_stage_absent": 24.09,
+      "min_parts": 22.18,
+      "min_parts_absent": 22.3
+     },
+     "decode_hit": 0.9502
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2478,
+      "call2": 296,
+      "call3": 33,
+      "call4": 196
+     },
+     "missed_gb": {
+      "met": 21.84,
+      "lent": 28.67,
+      "min_ring": 28.42,
+      "min_stage": 24.44,
+      "min_stage_absent": 25.0,
+      "min_parts": 23.03,
+      "min_parts_absent": 23.16
+     },
+     "decode_hit": 0.9198
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.84,
+      "lent": 18.84,
+      "min_ring": 18.84,
+      "min_stage": 18.84,
+      "min_stage_absent": 18.84,
+      "min_parts": 18.84,
+      "min_parts_absent": 18.84
+     },
+     "decode_hit": 0.918
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.7,
+      "lent": 23.7,
+      "min_ring": 23.7,
+      "min_stage": 23.7,
+      "min_stage_absent": 23.7,
+      "min_parts": 23.7,
+      "min_parts_absent": 23.7
+     },
+     "decode_hit": 0.9363
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.66,
+      "lent": 22.66,
+      "min_ring": 22.66,
+      "min_stage": 22.66,
+      "min_stage_absent": 22.66,
+      "min_parts": 22.66,
+      "min_parts_absent": 22.66
+     },
+     "decode_hit": 0.9336
+    }
+   ]
+  },
+  "s4a5on": {
+   "config": {
+    "max_step_tokens": "4096",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4942,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 142
+     },
+     "missed_gb": {
+      "met": 20.19,
+      "lent": 20.34,
+      "min_stage": 20.34,
+      "min_stage_absent": 20.47,
+      "min_parts": 20.34,
+      "min_parts_absent": 20.34
+     },
+     "decode_hit": 0.9323
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 779,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.33,
+      "lent": 15.9,
+      "min_stage": 16.56,
+      "min_stage_absent": 17.3,
+      "min_parts": 15.74,
+      "min_parts_absent": 15.9
+     },
+     "decode_hit": 0.948
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 779,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 13.87,
+      "lent": 15.49,
+      "min_stage": 16.12,
+      "min_stage_absent": 17.01,
+      "min_parts": 15.3,
+      "min_parts_absent": 15.49
+     },
+     "decode_hit": 0.9638
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2903,
+      "call1": 2214,
+      "call2": 240,
+      "call3": 40,
+      "call4": 242
+     },
+     "missed_gb": {
+      "met": 18.94,
+      "lent": 29.38,
+      "min_ring": 28.87,
+      "min_stage": 25.84,
+      "min_stage_absent": 26.24,
+      "min_parts": 24.45,
+      "min_parts_absent": 24.55
+     },
+     "decode_hit": 0.9441
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2520,
+      "call1": 2160,
+      "call2": 308,
+      "call3": 22,
+      "call4": 206
+     },
+     "missed_gb": {
+      "met": 20.67,
+      "lent": 30.48,
+      "min_ring": 30.05,
+      "min_stage": 26.92,
+      "min_stage_absent": 27.38,
+      "min_parts": 25.48,
+      "min_parts_absent": 25.57
+     },
+     "decode_hit": 0.9475
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2825,
+      "call1": 2214,
+      "call2": 278,
+      "call3": 36,
+      "call4": 470
+     },
+     "missed_gb": {
+      "met": 20.87,
+      "lent": 31.64,
+      "min_ring": 30.69,
+      "min_stage": 27.63,
+      "min_stage_absent": 28.08,
+      "min_parts": 26.16,
+      "min_parts_absent": 26.27
+     },
+     "decode_hit": 0.9169
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.16,
+      "lent": 18.16,
+      "min_ring": 18.16,
+      "min_stage": 18.16,
+      "min_stage_absent": 18.16,
+      "min_parts": 18.16,
+      "min_parts_absent": 18.16
+     },
+     "decode_hit": 0.9144
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.78,
+      "lent": 22.78,
+      "min_ring": 22.78,
+      "min_stage": 22.78,
+      "min_stage_absent": 22.78,
+      "min_parts": 22.78,
+      "min_parts_absent": 22.78
+     },
+     "decode_hit": 0.9329
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 21.77,
+      "lent": 21.77,
+      "min_ring": 21.77,
+      "min_stage": 21.77,
+      "min_stage_absent": 21.77,
+      "min_parts": 21.77,
+      "min_parts_absent": 21.77
+     },
+     "decode_hit": 0.925
+    }
+   ]
+  },
+  "s5a3off": {
+   "config": {
+    "max_step_tokens": "5120",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.4834,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 44
+     },
+     "missed_gb": {
+      "met": 19.71,
+      "lent": 19.76,
+      "min_stage": 19.9,
+      "min_stage_absent": 20.36,
+      "min_parts": 19.76,
+      "min_parts_absent": 19.76
+     },
+     "decode_hit": 0.9279
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 269,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 14.87,
+      "lent": 15.5,
+      "min_stage": 16.22,
+      "min_stage_absent": 17.1,
+      "min_parts": 15.34,
+      "min_parts_absent": 15.5
+     },
+     "decode_hit": 0.9458
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.42,
+      "lent": 15.13,
+      "min_stage": 15.81,
+      "min_stage_absent": 16.96,
+      "min_parts": 14.92,
+      "min_parts_absent": 15.13
+     },
+     "decode_hit": 0.9618
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2389,
+      "call2": 457,
+      "call3": 47,
+      "call4": 499
+     },
+     "missed_gb": {
+      "met": 19.57,
+      "lent": 26.97,
+      "min_ring": 26.2,
+      "min_stage": 22.07,
+      "min_stage_absent": 22.55,
+      "min_parts": 20.77,
+      "min_parts_absent": 20.88
+     },
+     "decode_hit": 0.9472
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 427,
+      "call1": 2400,
+      "call2": 321,
+      "call3": 20
+     },
+     "missed_gb": {
+      "met": 21.14,
+      "lent": 27.32,
+      "min_ring": 27.49,
+      "min_stage": 23.56,
+      "min_stage_absent": 24.12,
+      "min_parts": 22.22,
+      "min_parts_absent": 22.34
+     },
+     "decode_hit": 0.9483
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2474,
+      "call2": 306,
+      "call3": 28,
+      "call4": 196
+     },
+     "missed_gb": {
+      "met": 21.88,
+      "lent": 28.71,
+      "min_ring": 28.45,
+      "min_stage": 24.47,
+      "min_stage_absent": 25.03,
+      "min_parts": 23.06,
+      "min_parts_absent": 23.19
+     },
+     "decode_hit": 0.9173
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 19.58,
+      "lent": 19.58,
+      "min_ring": 19.58,
+      "min_stage": 19.58,
+      "min_stage_absent": 19.58,
+      "min_parts": 19.58,
+      "min_parts_absent": 19.58
+     },
+     "decode_hit": 0.9174
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 24.15,
+      "lent": 24.15,
+      "min_ring": 24.15,
+      "min_stage": 24.15,
+      "min_stage_absent": 24.15,
+      "min_parts": 24.15,
+      "min_parts_absent": 24.15
+     },
+     "decode_hit": 0.927
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.47,
+      "lent": 23.47,
+      "min_ring": 23.47,
+      "min_stage": 23.47,
+      "min_stage_absent": 23.47,
+      "min_parts": 23.47,
+      "min_parts_absent": 23.47
+     },
+     "decode_hit": 0.9157
+    }
+   ]
+  },
+  "s5a3on": {
+   "config": {
+    "max_step_tokens": "5120",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4971,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 138
+     },
+     "missed_gb": {
+      "met": 19.39,
+      "lent": 19.55,
+      "min_stage": 19.7,
+      "min_stage_absent": 20.09,
+      "min_parts": 19.55,
+      "min_parts_absent": 19.55
+     },
+     "decode_hit": 0.9316
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 762,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.22,
+      "lent": 15.76,
+      "min_stage": 16.38,
+      "min_stage_absent": 17.15,
+      "min_parts": 15.6,
+      "min_parts_absent": 15.76
+     },
+     "decode_hit": 0.9473
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 762,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 13.75,
+      "lent": 15.33,
+      "min_stage": 15.94,
+      "min_stage_absent": 16.83,
+      "min_parts": 15.14,
+      "min_parts_absent": 15.33
+     },
+     "decode_hit": 0.9632
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2832,
+      "call1": 2200,
+      "call2": 234,
+      "call3": 32,
+      "call4": 244
+     },
+     "missed_gb": {
+      "met": 18.81,
+      "lent": 29.06,
+      "min_ring": 28.53,
+      "min_stage": 25.55,
+      "min_stage_absent": 25.97,
+      "min_parts": 24.16,
+      "min_parts_absent": 24.27
+     },
+     "decode_hit": 0.9434
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2465,
+      "call1": 2143,
+      "call2": 310,
+      "call3": 24
+     },
+     "missed_gb": {
+      "met": 20.51,
+      "lent": 29.76,
+      "min_ring": 29.76,
+      "min_stage": 26.65,
+      "min_stage_absent": 27.11,
+      "min_parts": 25.21,
+      "min_parts_absent": 25.31
+     },
+     "decode_hit": 0.9464
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2761,
+      "call1": 2200,
+      "call2": 272,
+      "call3": 34,
+      "call4": 486
+     },
+     "missed_gb": {
+      "met": 20.72,
+      "lent": 31.36,
+      "min_ring": 30.37,
+      "min_stage": 27.36,
+      "min_stage_absent": 27.81,
+      "min_parts": 25.89,
+      "min_parts_absent": 26.0
+     },
+     "decode_hit": 0.9157
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.72,
+      "lent": 18.72,
+      "min_ring": 18.72,
+      "min_stage": 18.72,
+      "min_stage_absent": 18.72,
+      "min_parts": 18.72,
+      "min_parts_absent": 18.72
+     },
+     "decode_hit": 0.9107
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.05,
+      "lent": 23.05,
+      "min_ring": 23.05,
+      "min_stage": 23.05,
+      "min_stage_absent": 23.05,
+      "min_parts": 23.05,
+      "min_parts_absent": 23.05
+     },
+     "decode_hit": 0.9199
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.68,
+      "lent": 22.68,
+      "min_ring": 22.68,
+      "min_stage": 22.68,
+      "min_stage_absent": 22.68,
+      "min_parts": 22.68,
+      "min_parts_absent": 22.68
+     },
+     "decode_hit": 0.9056
+    }
+   ]
+  },
+  "s5a5off": {
+   "config": {
+    "max_step_tokens": "5120",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.4806,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 38
+     },
+     "missed_gb": {
+      "met": 20.07,
+      "lent": 20.12,
+      "min_stage": 20.17,
+      "min_stage_absent": 20.4,
+      "min_parts": 20.12,
+      "min_parts_absent": 20.12
+     },
+     "decode_hit": 0.9289
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 14.98,
+      "lent": 15.62,
+      "min_stage": 16.34,
+      "min_stage_absent": 17.23,
+      "min_parts": 15.46,
+      "min_parts_absent": 15.62
+     },
+     "decode_hit": 0.9467
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.53,
+      "lent": 15.23,
+      "min_stage": 15.94,
+      "min_stage_absent": 17.08,
+      "min_parts": 15.02,
+      "min_parts_absent": 15.23
+     },
+     "decode_hit": 0.9624
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2395,
+      "call2": 473,
+      "call3": 48,
+      "call4": 214
+     },
+     "missed_gb": {
+      "met": 19.7,
+      "lent": 26.69,
+      "min_ring": 26.36,
+      "min_stage": 22.19,
+      "min_stage_absent": 22.69,
+      "min_parts": 20.9,
+      "min_parts_absent": 21.01
+     },
+     "decode_hit": 0.949
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 454,
+      "call1": 2384,
+      "call2": 324,
+      "call3": 18
+     },
+     "missed_gb": {
+      "met": 21.22,
+      "lent": 27.42,
+      "min_ring": 27.56,
+      "min_stage": 23.67,
+      "min_stage_absent": 24.23,
+      "min_parts": 22.35,
+      "min_parts_absent": 22.47
+     },
+     "decode_hit": 0.9502
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2496,
+      "call2": 294,
+      "call3": 37,
+      "call4": 409
+     },
+     "missed_gb": {
+      "met": 22.02,
+      "lent": 29.21,
+      "min_ring": 28.63,
+      "min_stage": 24.64,
+      "min_stage_absent": 25.2,
+      "min_parts": 23.22,
+      "min_parts_absent": 23.35
+     },
+     "decode_hit": 0.9184
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 19.72,
+      "lent": 19.72,
+      "min_ring": 19.72,
+      "min_stage": 19.72,
+      "min_stage_absent": 19.72,
+      "min_parts": 19.72,
+      "min_parts_absent": 19.72
+     },
+     "decode_hit": 0.9178
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 24.29,
+      "lent": 24.29,
+      "min_ring": 24.29,
+      "min_stage": 24.29,
+      "min_stage_absent": 24.29,
+      "min_parts": 24.29,
+      "min_parts_absent": 24.29
+     },
+     "decode_hit": 0.9293
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.61,
+      "lent": 23.61,
+      "min_ring": 23.61,
+      "min_stage": 23.61,
+      "min_stage_absent": 23.61,
+      "min_parts": 23.61,
+      "min_parts_absent": 23.61
+     },
+     "decode_hit": 0.916
+    }
+   ]
+  },
+  "s5a5on": {
+   "config": {
+    "max_step_tokens": "5120",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4942,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 142
+     },
+     "missed_gb": {
+      "met": 20.14,
+      "lent": 20.3,
+      "min_stage": 20.3,
+      "min_stage_absent": 20.43,
+      "min_parts": 20.3,
+      "min_parts_absent": 20.3
+     },
+     "decode_hit": 0.9324
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 762,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.33,
+      "lent": 15.89,
+      "min_stage": 16.55,
+      "min_stage_absent": 17.29,
+      "min_parts": 15.74,
+      "min_parts_absent": 15.89
+     },
+     "decode_hit": 0.9481
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 762,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 13.87,
+      "lent": 15.47,
+      "min_stage": 16.1,
+      "min_stage_absent": 16.99,
+      "min_parts": 15.28,
+      "min_parts_absent": 15.47
+     },
+     "decode_hit": 0.9638
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2832,
+      "call1": 2206,
+      "call2": 244,
+      "call3": 28,
+      "call4": 242
+     },
+     "missed_gb": {
+      "met": 18.94,
+      "lent": 29.22,
+      "min_ring": 28.71,
+      "min_stage": 25.71,
+      "min_stage_absent": 26.11,
+      "min_parts": 24.31,
+      "min_parts_absent": 24.41
+     },
+     "decode_hit": 0.9443
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2477,
+      "call1": 2152,
+      "call2": 310,
+      "call3": 24,
+      "call4": 278
+     },
+     "missed_gb": {
+      "met": 20.61,
+      "lent": 30.48,
+      "min_ring": 29.93,
+      "min_stage": 26.79,
+      "min_stage_absent": 27.26,
+      "min_parts": 25.35,
+      "min_parts_absent": 25.45
+     },
+     "decode_hit": 0.9475
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2756,
+      "call1": 2206,
+      "call2": 284,
+      "call3": 38,
+      "call4": 470
+     },
+     "missed_gb": {
+      "met": 20.86,
+      "lent": 31.53,
+      "min_ring": 30.58,
+      "min_stage": 27.51,
+      "min_stage_absent": 27.96,
+      "min_parts": 26.04,
+      "min_parts_absent": 26.15
+     },
+     "decode_hit": 0.9171
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 18.85,
+      "lent": 18.85,
+      "min_ring": 18.85,
+      "min_stage": 18.85,
+      "min_stage_absent": 18.85,
+      "min_parts": 18.85,
+      "min_parts_absent": 18.85
+     },
+     "decode_hit": 0.912
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.19,
+      "lent": 23.19,
+      "min_ring": 23.19,
+      "min_stage": 23.19,
+      "min_stage_absent": 23.19,
+      "min_parts": 23.19,
+      "min_parts_absent": 23.19
+     },
+     "decode_hit": 0.9224
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.8,
+      "lent": 22.8,
+      "min_ring": 22.8,
+      "min_stage": 22.8,
+      "min_stage_absent": 22.8,
+      "min_parts": 22.8,
+      "min_parts_absent": 22.8
+     },
+     "decode_hit": 0.9086
+    }
+   ]
+  },
+  "s6a3off": {
+   "config": {
+    "max_step_tokens": "6144",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.479,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 42
+     },
+     "missed_gb": {
+      "met": 19.86,
+      "lent": 19.91,
+      "min_stage": 20.06,
+      "min_stage_absent": 20.54,
+      "min_parts": 19.91,
+      "min_parts_absent": 19.91
+     },
+     "decode_hit": 0.927
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 270,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 15.04,
+      "lent": 15.68,
+      "min_stage": 16.43,
+      "min_stage_absent": 17.29,
+      "min_parts": 15.5,
+      "min_parts_absent": 15.68
+     },
+     "decode_hit": 0.945
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.6,
+      "lent": 15.31,
+      "min_stage": 16.03,
+      "min_stage_absent": 17.16,
+      "min_parts": 15.09,
+      "min_parts_absent": 15.31
+     },
+     "decode_hit": 0.9612
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2397,
+      "call2": 474,
+      "call3": 43,
+      "call4": 210
+     },
+     "missed_gb": {
+      "met": 19.78,
+      "lent": 26.78,
+      "min_ring": 26.45,
+      "min_stage": 22.3,
+      "min_stage_absent": 22.78,
+      "min_parts": 20.99,
+      "min_parts_absent": 21.11
+     },
+     "decode_hit": 0.9473
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 456,
+      "call1": 2395,
+      "call2": 313,
+      "call3": 18
+     },
+     "missed_gb": {
+      "met": 21.29,
+      "lent": 27.49,
+      "min_ring": 27.63,
+      "min_stage": 23.75,
+      "min_stage_absent": 24.32,
+      "min_parts": 22.43,
+      "min_parts_absent": 22.55
+     },
+     "decode_hit": 0.9477
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2505,
+      "call2": 290,
+      "call3": 41,
+      "call4": 236
+     },
+     "missed_gb": {
+      "met": 22.09,
+      "lent": 28.92,
+      "min_ring": 28.72,
+      "min_stage": 24.71,
+      "min_stage_absent": 25.29,
+      "min_parts": 23.31,
+      "min_parts_absent": 23.44
+     },
+     "decode_hit": 0.9161
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 20.45,
+      "lent": 20.45,
+      "min_ring": 20.45,
+      "min_stage": 20.45,
+      "min_stage_absent": 20.45,
+      "min_parts": 20.45,
+      "min_parts_absent": 20.45
+     },
+     "decode_hit": 0.914
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 24.71,
+      "lent": 24.71,
+      "min_ring": 24.71,
+      "min_stage": 24.71,
+      "min_stage_absent": 24.71,
+      "min_parts": 24.71,
+      "min_parts_absent": 24.71
+     },
+     "decode_hit": 0.9088
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.72,
+      "lent": 23.72,
+      "min_ring": 23.72,
+      "min_stage": 23.72,
+      "min_stage_absent": 23.72,
+      "min_parts": 23.72,
+      "min_parts_absent": 23.72
+     },
+     "decode_hit": 0.9313
+    }
+   ]
+  },
+  "s6a3on": {
+   "config": {
+    "max_step_tokens": "6144",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.3",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4966,
+    "aux_share": 0.0042
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 140
+     },
+     "missed_gb": {
+      "met": 19.4,
+      "lent": 19.56,
+      "min_stage": 19.72,
+      "min_stage_absent": 20.11,
+      "min_parts": 19.56,
+      "min_parts_absent": 19.56
+     },
+     "decode_hit": 0.9315
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 759,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.23,
+      "lent": 15.76,
+      "min_stage": 16.38,
+      "min_stage_absent": 17.14,
+      "min_parts": 15.6,
+      "min_parts_absent": 15.76
+     },
+     "decode_hit": 0.9472
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 759,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 13.76,
+      "lent": 15.35,
+      "min_stage": 15.96,
+      "min_stage_absent": 16.85,
+      "min_parts": 15.15,
+      "min_parts_absent": 15.35
+     },
+     "decode_hit": 0.9632
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2823,
+      "call1": 2200,
+      "call2": 236,
+      "call3": 34,
+      "call4": 244
+     },
+     "missed_gb": {
+      "met": 18.83,
+      "lent": 29.07,
+      "min_ring": 28.54,
+      "min_stage": 25.56,
+      "min_stage_absent": 25.98,
+      "min_parts": 24.16,
+      "min_parts_absent": 24.27
+     },
+     "decode_hit": 0.9433
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2458,
+      "call1": 2143,
+      "call2": 308,
+      "call3": 24,
+      "call4": 206
+     },
+     "missed_gb": {
+      "met": 20.52,
+      "lent": 30.2,
+      "min_ring": 29.77,
+      "min_stage": 26.65,
+      "min_stage_absent": 27.11,
+      "min_parts": 25.22,
+      "min_parts_absent": 25.32
+     },
+     "decode_hit": 0.9459
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2753,
+      "call1": 2200,
+      "call2": 274,
+      "call3": 34,
+      "call4": 208
+     },
+     "missed_gb": {
+      "met": 20.74,
+      "lent": 30.82,
+      "min_ring": 30.38,
+      "min_stage": 27.36,
+      "min_stage_absent": 27.82,
+      "min_parts": 25.9,
+      "min_parts_absent": 26.01
+     },
+     "decode_hit": 0.9162
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 19.38,
+      "lent": 19.38,
+      "min_ring": 19.38,
+      "min_stage": 19.38,
+      "min_stage_absent": 19.38,
+      "min_parts": 19.38,
+      "min_parts_absent": 19.38
+     },
+     "decode_hit": 0.9066
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.45,
+      "lent": 23.45,
+      "min_ring": 23.45,
+      "min_stage": 23.45,
+      "min_stage_absent": 23.45,
+      "min_parts": 23.45,
+      "min_parts_absent": 23.45
+     },
+     "decode_hit": 0.9024
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.46,
+      "lent": 22.46,
+      "min_ring": 22.46,
+      "min_stage": 22.46,
+      "min_stage_absent": 22.46,
+      "min_parts": 22.46,
+      "min_parts_absent": 22.46
+     },
+     "decode_hit": 0.9178
+    }
+   ]
+  },
+  "s6a5off": {
+   "config": {
+    "max_step_tokens": "6144",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "off"
+   },
+   "summary": {
+    "cache_share": 0.4762,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 45
+     },
+     "missed_gb": {
+      "met": 20.22,
+      "lent": 20.28,
+      "min_stage": 20.33,
+      "min_stage_absent": 20.57,
+      "min_parts": 20.28,
+      "min_parts_absent": 20.28
+     },
+     "decode_hit": 0.9278
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 271,
+      "call2": 2
+     },
+     "missed_gb": {
+      "met": 15.15,
+      "lent": 15.81,
+      "min_stage": 16.56,
+      "min_stage_absent": 17.42,
+      "min_parts": 15.63,
+      "min_parts_absent": 15.81
+     },
+     "decode_hit": 0.946
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 154,
+      "call1": 268
+     },
+     "missed_gb": {
+      "met": 14.72,
+      "lent": 15.44,
+      "min_stage": 16.16,
+      "min_stage_absent": 17.3,
+      "min_parts": 15.22,
+      "min_parts_absent": 15.44
+     },
+     "decode_hit": 0.9618
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2406,
+      "call2": 471,
+      "call3": 41,
+      "call4": 208
+     },
+     "missed_gb": {
+      "met": 19.91,
+      "lent": 26.91,
+      "min_ring": 26.59,
+      "min_stage": 22.44,
+      "min_stage_absent": 22.93,
+      "min_parts": 21.13,
+      "min_parts_absent": 21.24
+     },
+     "decode_hit": 0.9482
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 455,
+      "call1": 2398,
+      "call2": 326,
+      "call3": 16,
+      "call4": 194
+     },
+     "missed_gb": {
+      "met": 21.41,
+      "lent": 28.06,
+      "min_ring": 27.77,
+      "min_stage": 23.89,
+      "min_stage_absent": 24.47,
+      "min_parts": 22.57,
+      "min_parts_absent": 22.69
+     },
+     "decode_hit": 0.9492
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 460,
+      "call1": 2511,
+      "call2": 287,
+      "call3": 44,
+      "call4": 190
+     },
+     "missed_gb": {
+      "met": 22.22,
+      "lent": 29.11,
+      "min_ring": 28.87,
+      "min_stage": 24.86,
+      "min_stage_absent": 25.43,
+      "min_parts": 23.43,
+      "min_parts_absent": 23.57
+     },
+     "decode_hit": 0.9177
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 20.57,
+      "lent": 20.57,
+      "min_ring": 20.57,
+      "min_stage": 20.57,
+      "min_stage_absent": 20.57,
+      "min_parts": 20.57,
+      "min_parts_absent": 20.57
+     },
+     "decode_hit": 0.9154
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 24.85,
+      "lent": 24.85,
+      "min_ring": 24.85,
+      "min_stage": 24.85,
+      "min_stage_absent": 24.85,
+      "min_parts": 24.85,
+      "min_parts_absent": 24.85
+     },
+     "decode_hit": 0.9098
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.85,
+      "lent": 23.85,
+      "min_ring": 23.85,
+      "min_stage": 23.85,
+      "min_stage_absent": 23.85,
+      "min_parts": 23.85,
+      "min_parts_absent": 23.85
+     },
+     "decode_hit": 0.9337
+    }
+   ]
+  },
+  "s6a5on": {
+   "config": {
+    "max_step_tokens": "6144",
+    "memory_fraction": "0.985",
+    "moe.cache": "moe.cache=aux.*=0.5",
+    "moe.lend_peak": "on"
+   },
+   "summary": {
+    "cache_share": 0.4939,
+    "aux_share": 0.007
+   },
+   "prompts": [
+    {
+     "key": "1024/0",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 141
+     },
+     "missed_gb": {
+      "met": 19.89,
+      "lent": 20.06,
+      "min_stage": 20.2,
+      "min_stage_absent": 20.44,
+      "min_parts": 20.06,
+      "min_parts_absent": 20.06
+     },
+     "decode_hit": 0.9325
+    },
+    {
+     "key": "1024/1",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 759,
+      "call1": 270
+     },
+     "missed_gb": {
+      "met": 14.34,
+      "lent": 15.9,
+      "min_stage": 16.55,
+      "min_stage_absent": 17.29,
+      "min_parts": 15.74,
+      "min_parts_absent": 15.9
+     },
+     "decode_hit": 0.9481
+    },
+    {
+     "key": "1024/2",
+     "mode": "stage",
+     "lent_experts": {
+      "tail": 759,
+      "call1": 270
+     },
+     "missed_gb": {
+      "met": 13.89,
+      "lent": 15.48,
+      "min_stage": 16.1,
+      "min_stage_absent": 17.0,
+      "min_parts": 15.28,
+      "min_parts_absent": 15.48
+     },
+     "decode_hit": 0.9638
+    },
+    {
+     "key": "4096/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2823,
+      "call1": 2210,
+      "call2": 242,
+      "call3": 26,
+      "call4": 242
+     },
+     "missed_gb": {
+      "met": 18.96,
+      "lent": 29.22,
+      "min_ring": 28.71,
+      "min_stage": 25.7,
+      "min_stage_absent": 26.11,
+      "min_parts": 24.31,
+      "min_parts_absent": 24.41
+     },
+     "decode_hit": 0.9443
+    },
+    {
+     "key": "4096/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2472,
+      "call1": 2157,
+      "call2": 306,
+      "call3": 26,
+      "call4": 204
+     },
+     "missed_gb": {
+      "met": 20.62,
+      "lent": 30.35,
+      "min_ring": 29.92,
+      "min_stage": 26.79,
+      "min_stage_absent": 27.26,
+      "min_parts": 25.35,
+      "min_parts_absent": 25.45
+     },
+     "decode_hit": 0.9477
+    },
+    {
+     "key": "4096/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 2755,
+      "call1": 2210,
+      "call2": 276,
+      "call3": 42,
+      "call4": 544
+     },
+     "missed_gb": {
+      "met": 20.86,
+      "lent": 31.64,
+      "min_ring": 30.56,
+      "min_stage": 27.5,
+      "min_stage_absent": 27.95,
+      "min_parts": 26.02,
+      "min_parts_absent": 26.14
+     },
+     "decode_hit": 0.9168
+    },
+    {
+     "key": "32768/0",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 19.51,
+      "lent": 19.51,
+      "min_ring": 19.51,
+      "min_stage": 19.51,
+      "min_stage_absent": 19.51,
+      "min_parts": 19.51,
+      "min_parts_absent": 19.51
+     },
+     "decode_hit": 0.9072
+    },
+    {
+     "key": "32768/1",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 23.57,
+      "lent": 23.57,
+      "min_ring": 23.57,
+      "min_stage": 23.57,
+      "min_stage_absent": 23.57,
+      "min_parts": 23.57,
+      "min_parts_absent": 23.57
+     },
+     "decode_hit": 0.9038
+    },
+    {
+     "key": "32768/2",
+     "mode": "ring",
+     "lent_experts": {
+      "tail": 0
+     },
+     "missed_gb": {
+      "met": 22.6,
+      "lent": 22.6,
+      "min_ring": 22.6,
+      "min_stage": 22.6,
+      "min_stage_absent": 22.6,
+      "min_parts": 22.6,
+      "min_parts_absent": 22.6
+     },
+     "decode_hit": 0.9192
+    }
+   ]
+  }
+ },
+ "sweep_table": [
+  "base       cache 0.4676 aux 0.0070 | hit 1K/4K/32K [0.944, 0.936, 0.917] | missed GB 1K/4K/32K(step 1) [17.413, 28.69, 23.51] | lent [300.333, 3651.667, 0]",
+  "s6a5off    cache 0.4762 aux 0.0070 | hit 1K/4K/32K [0.945, 0.938, 0.92] | missed GB 1K/4K/32K(step 1) [17.177, 28.027, 23.09] | lent [298, 3489, 0]",
+  "s6a3off    cache 0.4790 aux 0.0042 | hit 1K/4K/32K [0.944, 0.937, 0.918] | missed GB 1K/4K/32K(step 1) [16.967, 27.73, 22.96] | lent [296.667, 3432.667, 0]",
+  "s6a5on     cache 0.4939 aux 0.0070 | hit 1K/4K/32K [0.948, 0.936, 0.91] | missed GB 1K/4K/32K(step 1) [17.147, 30.403, 21.893] | lent [733, 5511.667, 0]",
+  "s6a3on     cache 0.4966 aux 0.0042 | hit 1K/4K/32K [0.947, 0.935, 0.909] | missed GB 1K/4K/32K(step 1) [16.89, 30.03, 21.763] | lent [731.333, 5381.667, 0]",
+  "s5a5off    cache 0.4806 aux 0.0070 | hit 1K/4K/32K [0.946, 0.939, 0.921] | missed GB 1K/4K/32K(step 1) [16.99, 27.773, 22.54] | lent [294.667, 3488.667, 0]",
+  "s5a3off    cache 0.4834 aux 0.0042 | hit 1K/4K/32K [0.945, 0.938, 0.92] | missed GB 1K/4K/32K(step 1) [16.797, 27.667, 22.4] | lent [297, 3494.667, 0]",
+  "s5a5on     cache 0.4942 aux 0.0070 | hit 1K/4K/32K [0.948, 0.936, 0.914] | missed GB 1K/4K/32K(step 1) [17.22, 30.41, 21.613] | lent [734, 5515.667, 0]",
+  "s5a3on     cache 0.4971 aux 0.0042 | hit 1K/4K/32K [0.947, 0.935, 0.912] | missed GB 1K/4K/32K(step 1) [16.88, 30.06, 21.483] | lent [732.667, 5412.333, 0]",
+  "s4a5off    cache 0.4842 aux 0.0070 | hit 1K/4K/32K [0.947, 0.94, 0.929] | missed GB 1K/4K/32K(step 1) [16.773, 27.767, 21.733] | lent [299.333, 3558.667, 0]",
+  "s4a3off    cache 0.4870 aux 0.0042 | hit 1K/4K/32K [0.946, 0.938, 0.928] | missed GB 1K/4K/32K(step 1) [16.67, 27.63, 21.6] | lent [300.333, 3553.667, 0]",
+  "s4a5on     cache 0.4942 aux 0.0070 | hit 1K/4K/32K [0.948, 0.936, 0.924] | missed GB 1K/4K/32K(step 1) [17.243, 30.5, 20.903] | lent [745.333, 5559.333, 0]",
+  "s4a3on     cache 0.4971 aux 0.0042 | hit 1K/4K/32K [0.947, 0.935, 0.922] | missed GB 1K/4K/32K(step 1) [16.91, 30.207, 20.773] | lent [745.333, 5481, 0]"
+ ],
+ "pareto_rtx-5090": {
+  "commit": "1c1f710964c1f3360057901e73bf1b20e8bfec4f",
+  "rounds": 3,
+  "table": {
+   "base": {
+    "1024": {
+     "decode_tps": 164.756,
+     "prefill_tps": 1976.505,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.868
+    },
+    "4096": {
+     "decode_tps": 156.035,
+     "prefill_tps": 5029.063,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.556
+    },
+    "32768": {
+     "decode_tps": 164.47,
+     "prefill_tps": 5795.512,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.492
+    }
+   },
+   "m985": {
+    "1024": {
+     "decode_tps": 165.804,
+     "prefill_tps": 1992.662,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.762
+    },
+    "4096": {
+     "decode_tps": 157.077,
+     "prefill_tps": 5003.621,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.437
+    },
+    "32768": {
+     "decode_tps": 166.015,
+     "prefill_tps": 5794.026,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.312
+    }
+   },
+   "s5": {
+    "1024": {
+     "decode_tps": 165.905,
+     "prefill_tps": 2006.407,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.752
+    },
+    "4096": {
+     "decode_tps": 157.375,
+     "prefill_tps": 5035.293,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.404
+    },
+    "32768": {
+     "decode_tps": 168.138,
+     "prefill_tps": 5493.366,
+     "tokens_per_pass": 3.22,
+     "ms_per_pass": 19.168
+    }
+   },
+   "s4": {
+    "1024": {
+     "decode_tps": 166.815,
+     "prefill_tps": 2023.129,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.66
+    },
+    "4096": {
+     "decode_tps": 157.832,
+     "prefill_tps": 5132.687,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.347
+    },
+    "32768": {
+     "decode_tps": 163.975,
+     "prefill_tps": 5092.734,
+     "tokens_per_pass": 3.074,
+     "ms_per_pass": 18.734
+    }
+   },
+   "s4a3": {
+    "1024": {
+     "decode_tps": 166.062,
+     "prefill_tps": 2029.405,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.736
+    },
+    "4096": {
+     "decode_tps": 156.965,
+     "prefill_tps": 5148.613,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.446
+    },
+    "32768": {
+     "decode_tps": 163.159,
+     "prefill_tps": 5107.784,
+     "tokens_per_pass": 3.074,
+     "ms_per_pass": 18.828
+    }
+   },
+   "s6a3": {
+    "1024": {
+     "decode_tps": 165.066,
+     "prefill_tps": 2004.486,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.837
+    },
+    "4096": {
+     "decode_tps": 156.227,
+     "prefill_tps": 5044.524,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.534
+    },
+    "32768": {
+     "decode_tps": 164.989,
+     "prefill_tps": 5785.18,
+     "tokens_per_pass": 3.198,
+     "ms_per_pass": 19.427
+    }
+   },
+   "s4lp": {
+    "1024": {
+     "decode_tps": 167.493,
+     "prefill_tps": 1981.891,
+     "tokens_per_pass": 2.791,
+     "ms_per_pass": 16.594
+    },
+    "4096": {
+     "decode_tps": 155.8,
+     "prefill_tps": 4816.607,
+     "tokens_per_pass": 2.72,
+     "ms_per_pass": 17.559
+    },
+    "32768": {
+     "decode_tps": 161.475,
+     "prefill_tps": 4866.968,
+     "tokens_per_pass": 3.074,
+     "ms_per_pass": 19.018
+    }
+   },
+   "strata_na_mtp": {
+    "1024": {
+     "decode_tps": 175.711,
+     "prefill_tps": 2131.96,
+     "tokens_per_pass": 2.825,
+     "ms_per_pass": 16.054,
+     "strata_verify_ms": 13.854,
+     "strata_draft_ms": 1.853
+    },
+    "4096": {
+     "decode_tps": 160.512,
+     "prefill_tps": 4539.352,
+     "tokens_per_pass": 2.653,
+     "ms_per_pass": 16.674,
+     "strata_verify_ms": 14.286,
+     "strata_draft_ms": 1.879
+    },
+    "32768": {
+     "decode_tps": 179.308,
+     "prefill_tps": 5591.617,
+     "tokens_per_pass": 3.223,
+     "ms_per_pass": 18.004,
+     "strata_verify_ms": 15.233,
+     "strata_draft_ms": 2.276
+    }
+   }
+  }
+ },
+ "pareto_arms": [
+  "pa_base",
+  "pa_m985",
+  "pa_s5",
+  "pa_s4",
+  "pa_s4a3",
+  "pa_s6a3",
+  "pa_s4lp"
+ ],
+ "fresh_rtx-5080": {
+  "commit": "1c1f710964c1f3360057901e73bf1b20e8bfec4f",
+  "rounds": 3,
+  "table": {
+   "a_dep2_off": {
+    "1024": {
+     "decode_tps": 95.713,
+     "prefill_tps": 1556.595
+    },
+    "4096": {
+     "decode_tps": 95.126,
+     "prefill_tps": 3352.453
+    },
+    "32768": {
+     "decode_tps": 88.367,
+     "prefill_tps": 3206.523
+    }
+   },
+   "b_dep2_off": {
+    "1024": {
+     "decode_tps": 95.939,
+     "prefill_tps": 1556.438
+    },
+    "4096": {
+     "decode_tps": 95.352,
+     "prefill_tps": 3352.195
+    },
+    "32768": {
+     "decode_tps": 88.585,
+     "prefill_tps": 3206.45
+    }
+   },
+   "b_dep2_mtp": {
+    "1024": {
+     "decode_tps": 121.147,
+     "prefill_tps": 1509.694,
+     "tokens_per_pass": 2.738,
+     "ms_per_pass": 22.589
+    },
+    "4096": {
+     "decode_tps": 120.27,
+     "prefill_tps": 3315.37,
+     "tokens_per_pass": 2.707,
+     "ms_per_pass": 22.436
+    },
+    "32768": {
+     "decode_tps": 116.828,
+     "prefill_tps": 3176.826,
+     "tokens_per_pass": 2.92,
+     "ms_per_pass": 25.229
+    }
+   },
+   "a_dep2_mtp": {
+    "1024": {
+     "decode_tps": 120.891,
+     "prefill_tps": 1509.604,
+     "tokens_per_pass": 2.738,
+     "ms_per_pass": 22.637
+    },
+    "4096": {
+     "decode_tps": 120.016,
+     "prefill_tps": 3314.819,
+     "tokens_per_pass": 2.707,
+     "ms_per_pass": 22.484
+    },
+    "32768": {
+     "decode_tps": 116.62,
+     "prefill_tps": 3176.588,
+     "tokens_per_pass": 2.92,
+     "ms_per_pass": 25.273
+    }
+   },
+   "b_stg_off": {
+    "1024": {
+     "decode_tps": 96.579,
+     "prefill_tps": 1640.095
+    },
+    "4096": {
+     "decode_tps": 95.358,
+     "prefill_tps": 3351.359
+    },
+    "32768": {
+     "decode_tps": 88.611,
+     "prefill_tps": 3205.119
+    }
+   },
+   "b_stg_mtp": {
+    "1024": {
+     "decode_tps": 122.039,
+     "prefill_tps": 1606.876,
+     "tokens_per_pass": 2.738,
+     "ms_per_pass": 22.426
+    },
+    "4096": {
+     "decode_tps": 120.224,
+     "prefill_tps": 3315.432,
+     "tokens_per_pass": 2.707,
+     "ms_per_pass": 22.445
+    },
+    "32768": {
+     "decode_tps": 116.712,
+     "prefill_tps": 3176.884,
+     "tokens_per_pass": 2.92,
+     "ms_per_pass": 25.255
+    }
+   },
+   "strata_na_off": {
+    "1024": {
+     "decode_tps": 89.804,
+     "prefill_tps": 1547.722,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 11.146,
+     "strata_verify_ms": 10.571,
+     "strata_draft_ms": 0.0
+    },
+    "4096": {
+     "decode_tps": 87.252,
+     "prefill_tps": 2793.355,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 11.465,
+     "strata_verify_ms": 10.901,
+     "strata_draft_ms": 0.0
+    },
+    "32768": {
+     "decode_tps": 80.576,
+     "prefill_tps": 3175.578,
+     "tokens_per_pass": 1.0,
+     "ms_per_pass": 12.414,
+     "strata_verify_ms": 11.631,
+     "strata_draft_ms": 0.0
+    }
+   },
+   "strata_na_mtp": {
+    "1024": {
+     "decode_tps": 129.359,
+     "prefill_tps": 1500.31,
+     "tokens_per_pass": 2.877,
+     "ms_per_pass": 22.31,
+     "strata_verify_ms": 19.439,
+     "strata_draft_ms": 2.36
+    },
+    "4096": {
+     "decode_tps": 106.995,
+     "prefill_tps": 2764.785,
+     "tokens_per_pass": 2.432,
+     "ms_per_pass": 22.841,
+     "strata_verify_ms": 19.754,
+     "strata_draft_ms": 2.41
+    },
+    "32768": {
+     "decode_tps": 118.955,
+     "prefill_tps": 3150.348,
+     "tokens_per_pass": 3.086,
+     "ms_per_pass": 25.982,
+     "strata_verify_ms": 22.404,
+     "strata_draft_ms": 3.061
+    }
+   }
+  }
+ },
+ "lend_min_staged_rtx-5080": {
+  "stg_mtp": [
+   {
+    "key": "1024/0",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 779,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 656588800,
+    "empties": [
+     0,
+     55,
+     55,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 779,
+     "call1": 245,
+     "call2": 12
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      779,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      108,
+      0,
+      37,
+      100,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      4,
+      6,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     110,
+     1091,
+     96,
+     106,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      868,
+      868,
+      766,
+      834,
+      0,
+      0
+     ],
+     "stage": [
+      313,
+      313,
+      263,
+      305,
+      0,
+      0
+     ],
+     "stage_absent": [
+      434,
+      434,
+      383,
+      417,
+      0,
+      0
+     ],
+     "parts": [
+      80,
+      80,
+      66,
+      78,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.803
+    },
+    "min_stage": {
+     "lent_experts": 1713,
+     "need": [
+      313,
+      0,
+      298,
+      323,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2137,
+     "need": [
+      453,
+      0,
+      457,
+      448,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 944,
+     "need": [
+      80,
+      0,
+      9,
+      76,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1036,
+     "need": [
+      110,
+      0,
+      41,
+      106,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 17.39,
+     "lent": 18.74,
+     "min_stage": 19.52,
+     "min_stage_absent": 19.99,
+     "min_parts": 18.64,
+     "min_parts_absent": 18.74
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 5744,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 23173,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 5744,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 23173,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 5744,
+       "spared_routes": 47,
+       "share": 0.008
+      },
+      "all": {
+       "missed_routes": 23173,
+       "spared_routes": 75,
+       "share": 0.003
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 5744,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 23173,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.859
+   },
+   {
+    "key": "1024/1",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 779,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 656588800,
+    "empties": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 779,
+     "call1": 298,
+     "call2": 14
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      779,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      108,
+      0,
+      90,
+      100,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      6,
+      6,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     110,
+     1091,
+     96,
+     106,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      868,
+      868,
+      764,
+      846,
+      0,
+      0
+     ],
+     "stage": [
+      332,
+      332,
+      273,
+      305,
+      0,
+      0
+     ],
+     "stage_absent": [
+      434,
+      434,
+      382,
+      423,
+      0,
+      0
+     ],
+     "parts": [
+      84,
+      84,
+      70,
+      78,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.803
+    },
+    "min_stage": {
+     "lent_experts": 1793,
+     "need": [
+      332,
+      0,
+      357,
+      325,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2192,
+     "need": [
+      456,
+      0,
+      512,
+      445,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 1007,
+     "need": [
+      84,
+      0,
+      66,
+      78,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1091,
+     "need": [
+      110,
+      0,
+      96,
+      106,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 16.17,
+     "lent": 17.53,
+     "min_stage": 18.33,
+     "min_stage_absent": 18.79,
+     "min_parts": 17.44,
+     "min_parts_absent": 17.53
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 7710,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 26622,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 7710,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 26622,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 7710,
+       "spared_routes": 41,
+       "share": 0.005
+      },
+      "all": {
+       "missed_routes": 26622,
+       "spared_routes": 73,
+       "share": 0.003
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 7710,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 26622,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.8683
+   },
+   {
+    "key": "1024/2",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 779,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 656588800,
+    "empties": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 779,
+     "call1": 298,
+     "call2": 12
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      779,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      108,
+      0,
+      90,
+      100,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      6,
+      4,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     110,
+     1089,
+     96,
+     104,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      870,
+      870,
+      766,
+      830,
+      0,
+      0
+     ],
+     "stage": [
+      317,
+      317,
+      274,
+      286,
+      0,
+      0
+     ],
+     "stage_absent": [
+      435,
+      435,
+      383,
+      415,
+      0,
+      0
+     ],
+     "parts": [
+      80,
+      80,
+      70,
+      72,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.803
+    },
+    "min_stage": {
+     "lent_experts": 1765,
+     "need": [
+      317,
+      0,
+      368,
+      301,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2184,
+     "need": [
+      451,
+      0,
+      512,
+      442,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 997,
+     "need": [
+      80,
+      0,
+      66,
+      72,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1089,
+     "need": [
+      110,
+      0,
+      96,
+      104,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 15.32,
+     "lent": 16.7,
+     "min_stage": 17.43,
+     "min_stage_absent": 17.93,
+     "min_parts": 16.61,
+     "min_parts_absent": 16.7
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 6923,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 21073,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 6923,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 21073,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 6923,
+       "spared_routes": 47,
+       "share": 0.007
+      },
+      "all": {
+       "missed_routes": 21073,
+       "spared_routes": 75,
+       "share": 0.004
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 6923,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 21073,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.876
+   },
+   {
+    "key": "4096/0",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2903,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2563481600,
+    "empties": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2903,
+     "call1": 2273,
+     "call2": 172,
+     "call3": 26,
+     "call4": 72
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2903,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      968,
+      0,
+      706,
+      792,
+      0,
+      0
+     ],
+     [
+      36,
+      0,
+      511,
+      136,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      511,
+      24,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      511,
+      72,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     1006,
+     5446,
+     513,
+     1024,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      1006,
+      1024,
+      1024,
+      968,
+      0,
+      0
+     ],
+     "stage": [
+      477,
+      492,
+      492,
+      458,
+      0,
+      0
+     ],
+     "stage_absent": [
+      503,
+      512,
+      512,
+      484,
+      0,
+      0
+     ],
+     "parts": [
+      120,
+      124,
+      124,
+      116,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.841
+    },
+    "min_ring": {
+     "lent_experts": 5376,
+     "need": [
+      1006,
+      0,
+      1024,
+      954,
+      0,
+      0
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4271,
+     "need": [
+      468,
+      0,
+      482,
+      418,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4350,
+     "need": [
+      494,
+      0,
+      512,
+      441,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3205,
+     "need": [
+      114,
+      0,
+      90,
+      98,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3223,
+     "need": [
+      122,
+      0,
+      94,
+      104,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 20.77,
+     "lent": 28.14,
+     "min_ring": 28.06,
+     "min_stage": 26.59,
+     "min_stage_absent": 26.69,
+     "min_parts": 25.27,
+     "min_parts_absent": 25.29
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 8363,
+       "spared_routes": 35,
+       "share": 0.004
+      },
+      "all": {
+       "missed_routes": 22955,
+       "spared_routes": 59,
+       "share": 0.003
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 8363,
+       "spared_routes": 545,
+       "share": 0.065
+      },
+      "all": {
+       "missed_routes": 22955,
+       "spared_routes": 916,
+       "share": 0.04
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 8363,
+       "spared_routes": 509,
+       "share": 0.061
+      },
+      "all": {
+       "missed_routes": 22955,
+       "spared_routes": 863,
+       "share": 0.038
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 8363,
+       "spared_routes": 1018,
+       "share": 0.122
+      },
+      "all": {
+       "missed_routes": 22955,
+       "spared_routes": 1729,
+       "share": 0.075
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 8363,
+       "spared_routes": 1009,
+       "share": 0.121
+      },
+      "all": {
+       "missed_routes": 22955,
+       "spared_routes": 1718,
+       "share": 0.075
+      }
+     }
+    },
+    "decode_hit": 0.8723
+   },
+   {
+    "key": "4096/1",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2903,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2563481600,
+    "empties": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2903,
+     "call1": 2273,
+     "call2": 178,
+     "call3": 26,
+     "call4": 66
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2903,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      968,
+      0,
+      706,
+      792,
+      0,
+      0
+     ],
+     [
+      38,
+      0,
+      511,
+      140,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      511,
+      26,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      511,
+      66,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     1006,
+     5446,
+     513,
+     1024,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      1006,
+      1024,
+      1024,
+      968,
+      0,
+      0
+     ],
+     "stage": [
+      481,
+      495,
+      495,
+      452,
+      0,
+      0
+     ],
+     "stage_absent": [
+      503,
+      512,
+      512,
+      484,
+      0,
+      0
+     ],
+     "parts": [
+      122,
+      124,
+      124,
+      114,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.841
+    },
+    "min_ring": {
+     "lent_experts": 5384,
+     "need": [
+      1006,
+      0,
+      1024,
+      962,
+      0,
+      0
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4260,
+     "need": [
+      467,
+      0,
+      488,
+      402,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4347,
+     "need": [
+      495,
+      0,
+      512,
+      437,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3203,
+     "need": [
+      116,
+      0,
+      88,
+      96,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3229,
+     "need": [
+      122,
+      0,
+      100,
+      104,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 21.7,
+     "lent": 29.28,
+     "min_ring": 29.2,
+     "min_stage": 27.68,
+     "min_stage_absent": 27.79,
+     "min_parts": 26.32,
+     "min_parts_absent": 26.35
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 7812,
+       "spared_routes": 29,
+       "share": 0.004
+      },
+      "all": {
+       "missed_routes": 22467,
+       "spared_routes": 44,
+       "share": 0.002
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 7812,
+       "spared_routes": 455,
+       "share": 0.058
+      },
+      "all": {
+       "missed_routes": 22467,
+       "spared_routes": 758,
+       "share": 0.034
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 7812,
+       "spared_routes": 417,
+       "share": 0.053
+      },
+      "all": {
+       "missed_routes": 22467,
+       "spared_routes": 704,
+       "share": 0.031
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 7812,
+       "spared_routes": 869,
+       "share": 0.111
+      },
+      "all": {
+       "missed_routes": 22467,
+       "spared_routes": 1457,
+       "share": 0.065
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 7812,
+       "spared_routes": 864,
+       "share": 0.111
+      },
+      "all": {
+       "missed_routes": 22467,
+       "spared_routes": 1443,
+       "share": 0.064
+      }
+     }
+    },
+    "decode_hit": 0.8948
+   },
+   {
+    "key": "4096/2",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2903,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2563481600,
+    "empties": [
+     0,
+     0,
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2903,
+     "call1": 2273,
+     "call2": 196,
+     "call3": 14
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2903,
+      0,
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      968,
+      0,
+      706,
+      792,
+      0,
+      0
+     ],
+     [
+      40,
+      0,
+      511,
+      156,
+      0,
+      0
+     ],
+     [
+      2,
+      0,
+      511,
+      12,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      511,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     1010,
+     5386,
+     513,
+     960,
+     0,
+     0
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true,
+     false,
+     false
+    ],
+    "want_now": {
+     "ring": [
+      1010,
+      1024,
+      1024,
+      960,
+      0,
+      0
+     ],
+     "stage": [
+      468,
+      488,
+      488,
+      444,
+      0,
+      0
+     ],
+     "stage_absent": [
+      505,
+      512,
+      512,
+      480,
+      0,
+      0
+     ],
+     "parts": [
+      118,
+      122,
+      122,
+      112,
+      0,
+      0
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.841
+    },
+    "min_ring": {
+     "lent_experts": 5386,
+     "need": [
+      1010,
+      0,
+      1024,
+      960,
+      0,
+      0
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4235,
+     "need": [
+      451,
+      0,
+      477,
+      404,
+      0,
+      0
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4362,
+     "need": [
+      488,
+      0,
+      512,
+      459,
+      0,
+      0
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3199,
+     "need": [
+      112,
+      0,
+      88,
+      96,
+      0,
+      0
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3231,
+     "need": [
+      122,
+      0,
+      98,
+      108,
+      0,
+      0
+     ]
+    },
+    "missed_gb": {
+     "met": 22.05,
+     "lent": 29.33,
+     "min_ring": 29.33,
+     "min_stage": 27.81,
+     "min_stage_absent": 27.96,
+     "min_parts": 26.53,
+     "min_parts_absent": 26.57
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 12237,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 22484,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 12237,
+       "spared_routes": 628,
+       "share": 0.051
+      },
+      "all": {
+       "missed_routes": 22484,
+       "spared_routes": 810,
+       "share": 0.036
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 12237,
+       "spared_routes": 576,
+       "share": 0.047
+      },
+      "all": {
+       "missed_routes": 22484,
+       "spared_routes": 741,
+       "share": 0.033
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 12237,
+       "spared_routes": 1207,
+       "share": 0.099
+      },
+      "all": {
+       "missed_routes": 22484,
+       "spared_routes": 1558,
+       "share": 0.069
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 12237,
+       "spared_routes": 1197,
+       "share": 0.098
+      },
+      "all": {
+       "missed_routes": 22484,
+       "spared_routes": 1543,
+       "share": 0.069
+      }
+     }
+    },
+    "decode_hit": 0.8568
+   }
+  ],
+  "stg_off": [
+   {
+    "key": "1024/0",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 765,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 641536000,
+    "empties": [
+     0,
+     53,
+     53,
+     0
+    ],
+    "lent_experts": {
+     "tail": 765,
+     "call1": 243,
+     "call2": 10
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      765,
+      0,
+      0,
+      0
+     ],
+     [
+      106,
+      0,
+      39,
+      98
+     ],
+     [
+      2,
+      0,
+      4,
+      4
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     108,
+     1071,
+     96,
+     102
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      852,
+      852,
+      764,
+      812
+     ],
+     "stage": [
+      308,
+      309,
+      268,
+      309
+     ],
+     "stage_absent": [
+      426,
+      426,
+      382,
+      406
+     ],
+     "parts": [
+      78,
+      78,
+      68,
+      78
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.799
+    },
+    "min_stage": {
+     "lent_experts": 1715,
+     "need": [
+      311,
+      0,
+      307,
+      332
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2106,
+     "need": [
+      446,
+      0,
+      459,
+      436
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 932,
+     "need": [
+      78,
+      0,
+      11,
+      78
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1018,
+     "need": [
+      108,
+      0,
+      43,
+      102
+     ]
+    },
+    "missed_gb": {
+     "met": 16.89,
+     "lent": 18.21,
+     "min_stage": 19.04,
+     "min_stage_absent": 19.49,
+     "min_parts": 18.12,
+     "min_parts_absent": 18.21
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 1809,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15256,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 1809,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15256,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 1809,
+       "spared_routes": 16,
+       "share": 0.009
+      },
+      "all": {
+       "missed_routes": 15256,
+       "spared_routes": 49,
+       "share": 0.003
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 1809,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15256,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.8754
+   },
+   {
+    "key": "1024/1",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 765,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 641536000,
+    "empties": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 765,
+     "call1": 294,
+     "call2": 16
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      765,
+      0,
+      0,
+      0
+     ],
+     [
+      106,
+      0,
+      90,
+      98
+     ],
+     [
+      2,
+      0,
+      8,
+      6
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     108,
+     1075,
+     98,
+     104
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      852,
+      852,
+      782,
+      822
+     ],
+     "stage": [
+      317,
+      317,
+      269,
+      299
+     ],
+     "stage_absent": [
+      426,
+      426,
+      391,
+      411
+     ],
+     "parts": [
+      80,
+      80,
+      68,
+      76
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.799
+    },
+    "min_stage": {
+     "lent_experts": 1738,
+     "need": [
+      317,
+      0,
+      352,
+      304
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2158,
+     "need": [
+      446,
+      0,
+      512,
+      435
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 987,
+     "need": [
+      80,
+      0,
+      66,
+      76
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1075,
+     "need": [
+      108,
+      0,
+      98,
+      104
+     ]
+    },
+    "missed_gb": {
+     "met": 15.58,
+     "lent": 16.91,
+     "min_stage": 17.65,
+     "min_stage_absent": 18.14,
+     "min_parts": 16.81,
+     "min_parts_absent": 16.91
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 1967,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15484,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 1967,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15484,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 1967,
+       "spared_routes": 15,
+       "share": 0.008
+      },
+      "all": {
+       "missed_routes": 15484,
+       "spared_routes": 53,
+       "share": 0.003
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 1967,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 15484,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.8735
+   },
+   {
+    "key": "1024/2",
+    "mode": "stage",
+    "tail_class": 0,
+    "tail_slots": 765,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 641536000,
+    "empties": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 765,
+     "call1": 294,
+     "call2": 12,
+     "call3": 2
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      765,
+      0,
+      0,
+      0
+     ],
+     [
+      106,
+      0,
+      90,
+      98
+     ],
+     [
+      0,
+      0,
+      8,
+      4
+     ],
+     [
+      0,
+      0,
+      2,
+      0
+     ],
+     [
+      0,
+      0,
+      0,
+      0
+     ]
+    ],
+    "held": [
+     106,
+     1073,
+     100,
+     102
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      844,
+      844,
+      790,
+      816
+     ],
+     "stage": [
+      304,
+      304,
+      280,
+      292
+     ],
+     "stage_absent": [
+      422,
+      422,
+      395,
+      408
+     ],
+     "parts": [
+      76,
+      76,
+      70,
+      74
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.799
+    },
+    "min_stage": {
+     "lent_experts": 1748,
+     "need": [
+      304,
+      0,
+      369,
+      310
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 2152,
+     "need": [
+      439,
+      0,
+      512,
+      436
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 983,
+     "need": [
+      76,
+      0,
+      68,
+      74
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 1073,
+     "need": [
+      106,
+      0,
+      100,
+      102
+     ]
+    },
+    "missed_gb": {
+     "met": 15.02,
+     "lent": 16.36,
+     "min_stage": 17.08,
+     "min_stage_absent": 17.54,
+     "min_parts": 16.26,
+     "min_parts_absent": 16.36
+    },
+    "after": {
+     "min_stage": {
+      "window": {
+       "missed_routes": 2009,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 17963,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 2009,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 17963,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 2009,
+       "spared_routes": 16,
+       "share": 0.008
+      },
+      "all": {
+       "missed_routes": 17963,
+       "spared_routes": 64,
+       "share": 0.004
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 2009,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 17963,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     }
+    },
+    "decode_hit": 0.8532
+   },
+   {
+    "key": "4096/0",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2845,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2503065600,
+    "empties": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2845,
+     "call1": 2232,
+     "call2": 166,
+     "call3": 32,
+     "call4": 96
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2845,
+      0,
+      0,
+      0
+     ],
+     [
+      940,
+      0,
+      706,
+      780
+     ],
+     [
+      48,
+      0,
+      512,
+      118
+     ],
+     [
+      2,
+      0,
+      512,
+      30
+     ],
+     [
+      0,
+      0,
+      512,
+      96
+     ]
+    ],
+    "held": [
+     990,
+     5371,
+     512,
+     1024
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      990,
+      1024,
+      1024,
+      956
+     ],
+     "stage": [
+      458,
+      492,
+      492,
+      446
+     ],
+     "stage_absent": [
+      495,
+      512,
+      512,
+      478
+     ],
+     "parts": [
+      116,
+      124,
+      124,
+      112
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.838
+    },
+    "min_ring": {
+     "lent_experts": 5283,
+     "need": [
+      990,
+      0,
+      1024,
+      936
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4165,
+     "need": [
+      442,
+      0,
+      483,
+      395
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4273,
+     "need": [
+      484,
+      0,
+      512,
+      432
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3139,
+     "need": [
+      110,
+      0,
+      90,
+      94
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3161,
+     "need": [
+      118,
+      0,
+      98,
+      100
+     ]
+    },
+    "missed_gb": {
+     "met": 19.98,
+     "lent": 27.39,
+     "min_ring": 27.28,
+     "min_stage": 25.77,
+     "min_stage_absent": 25.91,
+     "min_parts": 24.47,
+     "min_parts_absent": 24.5
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 2867,
+       "spared_routes": 27,
+       "share": 0.009
+      },
+      "all": {
+       "missed_routes": 13167,
+       "spared_routes": 65,
+       "share": 0.005
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 2867,
+       "spared_routes": 247,
+       "share": 0.086
+      },
+      "all": {
+       "missed_routes": 13167,
+       "spared_routes": 732,
+       "share": 0.056
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 2867,
+       "spared_routes": 226,
+       "share": 0.079
+      },
+      "all": {
+       "missed_routes": 13167,
+       "spared_routes": 652,
+       "share": 0.05
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 2867,
+       "spared_routes": 446,
+       "share": 0.156
+      },
+      "all": {
+       "missed_routes": 13167,
+       "spared_routes": 1367,
+       "share": 0.104
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 2867,
+       "spared_routes": 443,
+       "share": 0.155
+      },
+      "all": {
+       "missed_routes": 13167,
+       "spared_routes": 1358,
+       "share": 0.103
+      }
+     }
+    },
+    "decode_hit": 0.8924
+   },
+   {
+    "key": "4096/1",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2845,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2503065600,
+    "empties": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2845,
+     "call1": 2232,
+     "call2": 164,
+     "call3": 22,
+     "call4": 96
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2845,
+      0,
+      0,
+      0
+     ],
+     [
+      940,
+      0,
+      706,
+      780
+     ],
+     [
+      36,
+      0,
+      512,
+      128
+     ],
+     [
+      2,
+      0,
+      512,
+      20
+     ],
+     [
+      0,
+      0,
+      512,
+      96
+     ]
+    ],
+    "held": [
+     978,
+     5359,
+     512,
+     1024
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      978,
+      1024,
+      1024,
+      954
+     ],
+     "stage": [
+      470,
+      495,
+      495,
+      439
+     ],
+     "stage_absent": [
+      489,
+      512,
+      512,
+      477
+     ],
+     "parts": [
+      118,
+      124,
+      124,
+      110
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.838
+    },
+    "min_ring": {
+     "lent_experts": 5265,
+     "need": [
+      978,
+      0,
+      1024,
+      930
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4182,
+     "need": [
+      458,
+      0,
+      492,
+      387
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4276,
+     "need": [
+      479,
+      0,
+      512,
+      440
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3139,
+     "need": [
+      112,
+      0,
+      88,
+      94
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3165,
+     "need": [
+      118,
+      0,
+      100,
+      102
+     ]
+    },
+    "missed_gb": {
+     "met": 21.05,
+     "lent": 28.52,
+     "min_ring": 28.41,
+     "min_stage": 26.93,
+     "min_stage_absent": 27.05,
+     "min_parts": 25.6,
+     "min_parts_absent": 25.63
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 3134,
+       "spared_routes": 35,
+       "share": 0.011
+      },
+      "all": {
+       "missed_routes": 13763,
+       "spared_routes": 57,
+       "share": 0.004
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 3134,
+       "spared_routes": 186,
+       "share": 0.059
+      },
+      "all": {
+       "missed_routes": 13763,
+       "spared_routes": 523,
+       "share": 0.038
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 3134,
+       "spared_routes": 177,
+       "share": 0.056
+      },
+      "all": {
+       "missed_routes": 13763,
+       "spared_routes": 483,
+       "share": 0.035
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 3134,
+       "spared_routes": 362,
+       "share": 0.116
+      },
+      "all": {
+       "missed_routes": 13763,
+       "spared_routes": 1067,
+       "share": 0.078
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 3134,
+       "spared_routes": 357,
+       "share": 0.114
+      },
+      "all": {
+       "missed_routes": 13763,
+       "spared_routes": 1051,
+       "share": 0.076
+      }
+     }
+    },
+    "decode_hit": 0.8876
+   },
+   {
+    "key": "4096/2",
+    "mode": "ring",
+    "tail_class": 0,
+    "tail_slots": 2845,
+    "tail_unit_bytes": 1049600,
+    "step_loan_bytes": 2503065600,
+    "empties": [
+     0,
+     0,
+     0,
+     0
+    ],
+    "lent_experts": {
+     "tail": 2845,
+     "call1": 2232,
+     "call2": 180,
+     "call3": 24
+    },
+    "replay_matches": true,
+    "needs": [
+     [
+      2845,
+      0,
+      0,
+      0
+     ],
+     [
+      940,
+      0,
+      706,
+      780
+     ],
+     [
+      46,
+      0,
+      512,
+      134
+     ],
+     [
+      6,
+      0,
+      512,
+      18
+     ],
+     [
+      0,
+      0,
+      512,
+      0
+     ]
+    ],
+    "held": [
+     992,
+     5281,
+     512,
+     932
+    ],
+    "lending_classes": [
+     true,
+     true,
+     true,
+     true
+    ],
+    "want_now": {
+     "ring": [
+      992,
+      1024,
+      1024,
+      932
+     ],
+     "stage": [
+      451,
+      488,
+      488,
+      428
+     ],
+     "stage_absent": [
+      496,
+      512,
+      512,
+      466
+     ],
+     "parts": [
+      114,
+      122,
+      122,
+      108
+     ]
+    },
+    "tail_split": {
+     "loan_share": 0.838
+    },
+    "min_ring": {
+     "lent_experts": 5281,
+     "need": [
+      992,
+      0,
+      1024,
+      932
+     ]
+    },
+    "min_stage": {
+     "lent_experts": 4140,
+     "need": [
+      433,
+      0,
+      471,
+      391
+     ]
+    },
+    "min_stage_absent": {
+     "lent_experts": 4277,
+     "need": [
+      478,
+      0,
+      512,
+      442
+     ]
+    },
+    "min_parts": {
+     "lent_experts": 3137,
+     "need": [
+      110,
+      0,
+      88,
+      94
+     ]
+    },
+    "min_parts_absent": {
+     "lent_experts": 3163,
+     "need": [
+      118,
+      0,
+      96,
+      104
+     ]
+    },
+    "missed_gb": {
+     "met": 21.33,
+     "lent": 28.54,
+     "min_ring": 28.54,
+     "min_stage": 27.05,
+     "min_stage_absent": 27.21,
+     "min_parts": 25.81,
+     "min_parts_absent": 25.84
+    },
+    "after": {
+     "min_ring": {
+      "window": {
+       "missed_routes": 3819,
+       "spared_routes": 0,
+       "share": 0.0
+      },
+      "all": {
+       "missed_routes": 18440,
+       "spared_routes": 0,
+       "share": 0.0
+      }
+     },
+     "min_stage": {
+      "window": {
+       "missed_routes": 3819,
+       "spared_routes": 232,
+       "share": 0.061
+      },
+      "all": {
+       "missed_routes": 18440,
+       "spared_routes": 829,
+       "share": 0.045
+      }
+     },
+     "min_stage_absent": {
+      "window": {
+       "missed_routes": 3819,
+       "spared_routes": 202,
+       "share": 0.053
+      },
+      "all": {
+       "missed_routes": 18440,
+       "spared_routes": 734,
+       "share": 0.04
+      }
+     },
+     "min_parts": {
+      "window": {
+       "missed_routes": 3819,
+       "spared_routes": 446,
+       "share": 0.117
+      },
+      "all": {
+       "missed_routes": 18440,
+       "spared_routes": 1515,
+       "share": 0.082
+      }
+     },
+     "min_parts_absent": {
+      "window": {
+       "missed_routes": 3819,
+       "spared_routes": 440,
+       "share": 0.115
+      },
+      "all": {
+       "missed_routes": 18440,
+       "spared_routes": 1502,
+       "share": 0.081
+      }
+     }
+    },
+    "decode_hit": 0.8493
+   }
+  ]
+ }
+}

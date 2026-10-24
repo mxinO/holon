@@ -602,7 +602,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   where it gains ≥ 5%; prefill streaming of non-resident experts; an SSD expert tier) on additive core seams,
   closing on Qwen3-30B-A3B on the RTX 5080 vs FreeToken and llama.cpp; **K** KV and checkpoint tiers (pinned RAM /
   SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
-  table, hyper-connections; Qwen3.6-35B-A3B as its first step) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
+  table, hyper-connections; `docs/v1-flash-next.md`; after the MoE prefill track, which it depends on; Qwen3.6-35B-A3B
+  is optional later evidence for its shared-expert units, off its critical path) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
   indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
 
   **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
@@ -674,7 +675,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   the start of the GLM milestone, which needs F10 with RAM short.
 - **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
   an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
-  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them.
+  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them. FN's step 6 also
+  gives the arena store `fused` (the MTP pack's fused gate / up stacks, `std.moe@1(fused_gate_up=True)`: one piece
+  per expert, gate's rows then up's); the resident store has it since FN step 3.
+- **KV streaming for sparse-attention mixers (K4; owner: FN, its first follow-up after its close)**: Strata streams a
+  QSA layer's KV through pinned RAM from 64K contexts (`--kv-resident`, R §3.1 C4); FN's bars stop at 32K, where
+  Strata keeps KV in VRAM. Built on `std.mixers.qsa` and X's `DeviceResolver`, reading K's host copies if K's D15
+  measures that cheaper; GLM's DSA adopts it.
 - **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
   store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
   `docs/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
@@ -729,6 +736,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
     - deferred levers: D4's fused q8_1 store, attention at 4K steps, D6 on resident locks;
     - bench method: per-call A/Bs of sub-50 µs kernels swing ±1–8% between processes; read them over many
       interleaved rounds, or by SASS when the question is "unchanged".
+- **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree
+  (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
+  at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its
+  own size entry for the type ids gguf-py lacks, or the floor rises once a PyPI gguf with Q2_0 exists.
+- **MTP's stream hnorm vs llama.cpp's graph (FN step 3, deferred):** FN pins the pooled hnorm (D9) and checks it
+  against SGLang's form on the tiny pack; llama.cpp's per-stream form needs a C++ harness over `graph_mtp` at
+  `27c7a76` on the tiny GGUF. The head's `stream` parameter lands with that check, if a deployment wants LC's form.
 - **One version file:** a root `VERSION` read by every distribution at build time (hatchling's version source),
   `holon.__version__` from the installed metadata, and the plan's runtime-closure hash reading `VERSION` for the
   workspace's own packages (`uv.lock` records them as dynamic). It changes the core, so it lands with the next relock
@@ -739,7 +753,12 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   locks and needed a propagation round on four card classes for byte-identical traces. `src_hash` and the `holon`
   unit pin are frozen in ABI 1.0 and in every committed lock, so narrowing them (e.g. hashing the modules a model's
   step imports, without docstrings and comments, and leaving the frontend-facing records out) is a deliberate v1
-  change with its own lock migration.
+  change with its own lock migration. **First step built (owner, 2026-10-21; `docs/release.md` §22):** `src` scheme 2
+  leaves out tests, docs, examples and `*.md`, and hashes Python by its syntax tree without docstrings (identical
+  under Python 3.12, 3.13 and 3.14); the scheme is written as the pin's prefix, so a scheme-1 lock reads as outdated.
+  It outdates every lock once (with the snapshot trace now scoring its long prefix-hit request, re-recording every
+  snapshot) and merges just before FN's close, whose single propagation covers it. Still open: the
+  version string and response-reporting fields inside the pinned modules.
 - **The test and propagation process** (owner, 2026-10-21; `docs/release.md` §22): locks are propagated at a release
   or a milestone's close only; a code change whose 2-run trace is byte-identical advances without L2 or an approval
   (another change with an identical trace skips L2 only), a moved trace runs L2 against the recorded goldens

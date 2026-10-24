@@ -65,7 +65,7 @@ def usage(ours: torch.Tensor, ref: torch.Tensor) -> float:
 
 
 def empty_cache(units: int, kv_heads: int, head_dim: int, layout: str, dtype: torch.dtype = torch.bfloat16):
-    """One layer's pages in `layout` (`dtype`: the model dtype's), as std.mixers.gqa's `_kv_layer` views them."""
+    """One layer's pages in `layout` (`dtype`: the model dtype's), as std.mixers.gqa's `kv_layer` views them."""
     shape = (units, 2, kv_heads, PAGE, head_dim)
     if layout in (MODEL, FP8):
         return torch.zeros(shape, dtype=gqa.FP8 if layout == FP8 else dtype, device="cuda")
@@ -274,7 +274,7 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
         return gqa_unit(x, ctx)[-1]
 
     def written(seq, pos):
-        cache = gqa_unit._kv_layer()
+        cache = gqa_unit.kv_layer()
         return [c[table[seq.slot, pos // PAGE], :, :, pos % PAGE] for c in (cache if layout == Q8 else (cache,))]
 
     with torch.no_grad():

@@ -12,9 +12,10 @@ binds kernels. Then, through the engine's hooks:
   the tail (docs/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
   (`tail_bytes`);
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
-  class's pinned slots); then each class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero
-  weights, one per routing rank), `staging` slots, then the cache slots its seeded pieces fill —, the map reset to
-  the tier and the seed copied in, the policy's device state zeroed;
+  class's pinned slots: beside fill classes, a pinned class's hottest items first, so it gets them); then each
+  class's arena `[S, unit]` is laid out in the pool — `top_k` null slots (zero weights, one per routing rank),
+  `staging` slots, then the cache slots its seeded pieces fill —, the map reset to the tier and the seed copied in,
+  the policy's device state zeroed;
 - `before_launch`: the step's row kinds per token (decode and verify rows by the plan's `row_kind`, which the
   scheduler fills on every step it launches — a plan without it is refused; prefill rows the others, so a step's
   decode rows lie in its first expert pass; graph padding past them), written as far as this step's or the last
@@ -32,6 +33,7 @@ there. Every host edit carries the value it expects (a failed precondition stops
 from __future__ import annotations
 
 import dataclasses
+import fnmatch
 import functools
 import json
 import math
@@ -45,7 +47,7 @@ from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
 from .residency import LAG, ResidencyMap
-from .resolver import CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
+from .resolver import ACTIVATION_LOAN, CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
 from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
@@ -54,6 +56,10 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
+LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
+# a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
+# step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12); lent in proportion
+# to the step's prompt tokens. A step past its loan takes the rest from the device (the loan's overflow)
 
 
 @dataclasses.dataclass(eq=False)
@@ -111,7 +117,8 @@ class SlotClass:
 
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
-                 ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", policy: Ref | str = "",
+                 ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
+                 lend_peak: bool = False, pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -121,6 +128,18 @@ class TieredStore:
         # `ring_copy`: the ring's copies on the device's SMs from its own tables ("sm"), or by copy engines from the
         # tables read back once per streaming step ("dma")
         self.staging, self.prefill, self.ring_tokens = staging, max(prefill, staging), ring_tokens
+        # `stream_tokens`: a step of large passes (at least `ring_tokens` prompt tokens) streams every missing piece
+        # from this many prompt tokens; below, it stages only its passes' routed misses into its lent slots (its tail
+        # lent too)
+        self.stream_tokens = stream_tokens
+        # `pipeline` (FN step 7): a staging step's large passes fetch their misses in this many parts on a side stream,
+        # each layer's resident entries computed first, then each part's as it lands (1: one fetch, then one pass).
+        # Where every client pipelines its passes (`pipelining`), such a step lends its staging as a ring of parts
+        # (`Lent`: twice a part of a layer's most absent pieces, each part's fetch after the part two before it ran)
+        # and every pass of it pipelines (`pipelines`).
+        self.pipeline, self._parts = pipeline, 1
+        self.pipelining: list[Callable[[], bool]] = []       # per client: whether its passes always pipeline
+        self._pipelining = False
         if ring_copy not in ("sm", "dma"):
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
@@ -129,8 +148,17 @@ class TieredStore:
         if ring_lend not in ("coldest", "tail"):
             raise ValueError(f"{name}: ring_lend {ring_lend!r}: coldest or tail")
         self.ring_copy, self.ring_lend = ring_copy, ring_lend
-        self.tail_bytes: list[Callable[[], int]] = []        # the bytes the clients' passes take from a tail
+        self.tail_bytes: list[Callable[..., int]] = []       # the bytes the clients' passes take from a tail
+        #                                                      (their largest pass's; given a step's tokens, its)
+        self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
+        # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
+        # ActivationLender), so the engine reserves only the worst step that streams nothing
+        self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
+        self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
+        self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
+        self._fetch_streams: dict[bool, torch.Stream] = {}
+        self._auxiliary: set[int] = set()                   # an auxiliary model's groups (`mark_auxiliary`)
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
                 any(t.device_readable for t in self.tiers[1:]):
@@ -142,12 +170,16 @@ class TieredStore:
         self._cache, self._profile = _parse_cache(cache), profile
         self.classes: dict[str, SlotClass] = {}
         self.groups: dict[int, dict[int, SlotClass]] = {}       # group -> role -> its class
-        self.residency: ResidencyMap | None = None              # the device tables, once a resolver is asked for
+        self.residency: ResidencyMap | None = None              # the device tables, made at `before_materialize`
         self.resolvers: list[DeviceResolver] = []
+        self._watched: list[torch.Tensor] = []                  # kernels' error words watched before the tables
         tokens = max(ctx.options.get("max_step_tokens", 1),
                      ctx.options.get("max_seqs", 1) * (1 + ctx.options.get("max_draft_tokens", 0)))
         self._kinds, self._written = np.zeros(tokens, dtype=np.uint8), 0     # host side; the prefix not PADDING
         self.kinds = ctx.static(f"{name}.kinds", (tokens,), torch.uint8)
+        self._decode = ctx.static(f"{name}.decode_kinds", (tokens,), torch.uint8)    # DECODE throughout (sub-steps)
+        self._decode_set = False
+        self.step, self.step_tokens = -1, 0     # the step being launched and its tokens (`before_launch`)
         self.misses = ctx.static(f"{name}.misses", (1,), torch.int32)   # the step's most (`moe_resolve@1`)
         self.errors = ctx.static(f"{name}.errors", (1,), torch.int32)   # `moe_resolve@1`'s, zeroed each step
         self.edit_errors = ctx.static(f"{name}.edit_errors", (1,), torch.int32)   # host edits' preconditions
@@ -170,9 +202,9 @@ class TieredStore:
         """One piece: role `role` of item `item` of group `group`, in class `cls` (`unit_bytes` each), its bytes the
         concatenation of `extents`."""
         if self.residency is not None:
-            raise RuntimeError(f"{self.name}: pieces added after kernels were bound (an auxiliary model's?)")
+            raise RuntimeError(f"{self.name}: pieces added after the device tables were made (at materialize)")
         c = self.classes.setdefault(cls, SlotClass(cls, unit_bytes, self.top_k, self.staging,
-                                                   cache=self._cache.get(cls, self._cache.get("*"))))
+                                                   cache=_cache_of(self._cache, cls)))
         if c.unit_bytes != unit_bytes or sum(e.nbytes for e in extents) != unit_bytes:
             raise ValueError(f"{self.name}: class {cls} has {c.unit_bytes}-byte units, not {unit_bytes} "
                              f"({sum(e.nbytes for e in extents)} in the extents)")
@@ -182,8 +214,24 @@ class TieredStore:
         return c
 
     def resolver(self, group: int) -> DeviceResolver:
+        """Group `group`'s resolver. Its device tables come at `before_materialize` (`_tables`), when every group has
+        added its pieces: an auxiliary model's (an MTP layer's experts, FN D12a) are added after the target's kernels
+        are bound."""
+        self.resolvers.append(DeviceResolver(self.ctx, self, group, [self.groups[group][r] for r in range(self.roles)]))
+        if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
+            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
+                             f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
+        if self.residency is not None or any(self.tiers[0].holds(c.name, len(c.pieces)) < len(c.pieces)
+                                             for c in self.classes.values()):
+            self._tables()                       # exclusive tiers bind their I/O worker in the build: no later group
+        return self.resolvers[-1]
+
+    def _tables(self) -> None:
+        """The device tables of every group added, then each resolver attached to its group's."""
         if self.residency is None:
-            pinned = [c.cap for c in self.classes.values() if c.cache is not None]
+            aux = {c.name for g in self._auxiliary for c in self.groups[g].values()} - \
+                {c.name for g in self.groups if g not in self._auxiliary for c in self.groups[g].values()}
+            pinned = [c.cap for c in self.classes.values() if c.cache is not None and c.name not in aux]
             for c in self.classes.values():
                 c.held = self.tiers[0].holds(c.name, len(c.pieces))
             self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
@@ -215,8 +263,8 @@ class TieredStore:
             self.no_jobs = self.ctx.static(f"{self.name}.no_jobs", (1, 4), torch.int32)
             # The delta log, a region per group: a step's records of a group are its admissions (at most its misses,
             # E − R for R resident), its lent items (at most R) and the lent slots' returns (at most as many): 2E bound
-            # them (+ a sink row for `lend`'s scatter).
-            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 1, 3), torch.int32)
+            # them, and one more for the returned slots' marker (`Lent`; + a sink row for `lend`'s scatter).
+            log = self.ctx.static(f"{self.name}.delta", (shape[0], LOG * self.items + 2, 3), torch.int32)
             self.delta, self.n_delta = log[:, :-1], self.ctx.static(f"{self.name}.n_delta", shape[:1], torch.int32)
             self._log = log
             self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
@@ -259,16 +307,16 @@ class TieredStore:
                 self.prefetch[c.name] = self.ctx.select_kernel(
                     EXPERT_PREFETCH, site=f"std.tiered[{self.name}].{c.name}", **(facts | {"copy": self.ring_copy})
                 ).impl(self.ctx, **facts, copy=self.ring_copy)
-        g = self._order[group]
-        self.resolvers.append(DeviceResolver(self.ctx, self, g, [self.groups[group][r] for r in range(self.roles)],
-                                             {n: t[g] for n, t in self.state.items()}))
-        if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
-            raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
-                             f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
-        if self.exclusive:                       # its SSD reads: a copy task on the I/O worker, bound after materialize
-            self.reads.append(_Reads(self, g))
-            self.resolvers[-1].io_slot = self.io.bind(self.reads[-1])
-        return self.resolvers[-1]
+            for errors in self._watched:
+                self.watch(errors)
+        for r in self.resolvers:
+            if r.group is not None:
+                continue
+            g = self._order[r.group_id]
+            r.attach(g, {n: t[g] for n, t in self.state.items()})
+            if self.exclusive:                   # its SSD reads: a copy task on the I/O worker, bound after materialize
+                self.reads.append(_Reads(self, g))
+                r.io_slot = self.io.bind(self.reads[-1])
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
         """The exclusive tiers' device tables (`moe_tiers@1`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
@@ -296,7 +344,9 @@ class TieredStore:
     def watch(self, errors: torch.Tensor) -> None:
         """A kernel's error word (`linear_experts_arena@1`'s `errors`): zeroed each step, a commit that finds it set
         stops the engine."""
-        if not any(errors is t for t in self.zeroed):
+        if self.residency is None:              # before the tables: kept until `_tables`
+            self._watched.append(errors)
+        elif not any(errors is t for t in self.zeroed):
             self.telemetry[f"kernel_errors.{len(self.zeroed) - 6}"] = errors
             self.zeroed.append(errors)
 
@@ -304,6 +354,7 @@ class TieredStore:
     def before_materialize(self, ctx) -> None:
         """The tiers take their storage (the RAM tier its pool, filled when it holds every piece), the arena pool is
         requested, and under exclusive tiers the I/O tables."""
+        self._tables()
         classes = list(self.classes.values())
         self.granule = functools.reduce(math.gcd, (c.unit_bytes for c in classes))     # both pools' unit
         self._align = math.lcm(self.granule, ALIGN)
@@ -324,7 +375,11 @@ class TieredStore:
         # One fill pool, pinned or not, so both profile the same minimum and grow above the paged floor alike (a fill's
         # counts then pin exactly): its minimum caches nothing and cannot lend, so that layout stages a prefill pass
         # (after_materialize); a pinned arena short of its pinned size is refused at the first launch (before_launch).
-        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes)
+        # A layout that stages also keeps the tail's bytes for the large passes' buffers (`own_tail`), so the startup
+        # profile's worst step — on this minimum — takes them from the pool, not from the activations it measures.
+        self.tail = self._tail(lambda c: c.cap)
+        least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes) + \
+            self._own_bytes()
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
         self.arena = ctx.pool(f"{self.name}.arena", unit_bytes=self.granule, min_units=-(-least // self.granule),
                               pref_units=-(-most // self.granule), fill=True)
@@ -334,7 +389,6 @@ class TieredStore:
         self.class_table = np.array([[classes.index(self.groups[g][r]) for r in range(self.roles)]
                                      for g in self._order])
         self._class_index = torch.from_numpy(self.class_table).to(self.ctx.device)
-        self.tail = self._tail(lambda c: c.cap)
         if self.exclusive:
             piece = np.zeros(self.residency.host.shape, dtype=np.int32)
             for c in classes:
@@ -362,24 +416,55 @@ class TieredStore:
                                                         dtype=torch.int64)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
+    def decode_kinds(self, tokens: int) -> torch.Tensor:
+        """Row kinds of `tokens` decode rows (an auxiliary model's sub-step, FN D12a)."""
+        return self._decode[:tokens]
+
     def after_materialize(self, ctx) -> None:
         """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
         at the tier but for the seed, copied in; the policy's state, counts and words zeroed."""
+        self._decode_set = False                # the decode kinds are written again at the next launch
         classes = list(self.classes.values())
         size = self.arena.capacity * self.granule
         groups = list(self._order)
         # A layout lends a prefill pass's staging (D5) when every class can; else its staging slots hold that much.
+        # A class the seed leaves short of a pass's staging (one few groups share, or an auxiliary model's) is seeded
+        # that many of its hottest items first (`floors`), if its cap allows: a few cache slots more for it, where
+        # staging slots of a pass's size in every class would hold more and cache nothing.
+        # A staging layout keeps its own tail at the pool's end (`own_tail`): the large passes' buffers.
+        can_lend = self.policy.device_owned and not self.exclusive
+        # Beside fill classes, a pinned class (`cache`: an MTP head's experts, kept whole) is floored at its pins: a
+        # profile that never counted its group would otherwise seed it last, F2's few of it only.
+        pinned = {c.name: c.cap for c in classes if c.cache is not None} if self._pinned is None else {}
+        floors = dict(pinned)
+        # the classes a borrowing step lends from: the target's (an auxiliary model's layers never borrow)
+        lenders = {c.name for g in list(self._order)[:self.borrowing_groups] for c in self.groups[g].values()}
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
-            budget = _Budget(self, size - sum(c.bytes(0) for c in classes) - self._align * len(classes))
-            seed = self.policy.seed(self._profile_counts(), budget)
-            self.lending = self.policy.device_owned and not self.exclusive and \
-                all(n >= self.prefill for n in budget.taken.values())
+            keep = self._own_bytes(loan=False) if staging == self.prefill else 0
+            while True:
+                budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes),
+                                 floors)
+                seed = self.policy.seed(self._profile_counts(), budget)
+                short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
+                         and c.name not in floors and c.cap >= self.prefill and c.name in lenders}
+                if not (can_lend and staging < self.prefill and short):
+                    break
+                floors |= short
+            self.lending = can_lend and all(n >= self.prefill for c, n in budget.taken.items() if c in lenders)
+            if self.lending and self.tail:          # the tail's class must still stage a pass outside the tail: a
+                cls, n = self.tail                  # small pool (the startup profile's minimum) stages instead
+                c = classes[cls]
+                self.lending = budget.taken[c.name] - n >= self.prefill
             if self.lending or staging == self.prefill:
                 break
-        if self.lending and self.tail:                           # this layout lends: its tail can stage a pass
-            self._tail(lambda c: budget.taken[c.name])
+            floors = dict(pinned)
+        if keep and not self.lending and self._loan is not None:    # a staging layout: the step-peak loan reserved in
+            keep = self._own_bytes(loan=True)                       # its own tail, the cache that much smaller
+            budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
+            seed = self.policy.seed(self._profile_counts(), budget)
+        self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
         free, arenas, at = {}, {}, 0
@@ -388,13 +473,10 @@ class TieredStore:
             at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
             arenas[c.name] = c.slots(), c.host_view()
-        # each class's first slot a streaming step does not lend to its ring and staging: its arena's end, the tail's
-        # start in the tail's class
-        ends = [c.size for c in classes]
-        self.lend_ends = {"coldest": torch.tensor(ends, device=self.ctx.device)}
-        if self.tail:
-            ends[self.tail[0]] -= self.tail[1]
-            self.lend_ends["tail"] = torch.tensor(ends, device=self.ctx.device)
+        # each class's arena end: the first slot a streaming step does not lend to its ring and staging (a tail step
+        # takes its own tail off it, `Lent`)
+        self.lend_ends = torch.tensor([c.size for c in classes], device=self.ctx.device)
+        self.lending_classes = torch.tensor([c.name in lenders for c in classes], device=self.ctx.device)
         # −1 − tier: every piece in the RAM tier (inclusive), or on the SSD until placed (exclusive)
         self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):
@@ -414,7 +496,7 @@ class TieredStore:
         self._copies.clear()
         self.ring.fill_(-1)
         self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).expand(self.roles, -1))
-        self._mode, self.lent = None, None
+        self._mode, self.lent, self._parts = None, None, 1
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
@@ -448,7 +530,7 @@ class TieredStore:
         vram, used = set(seed), dict.fromkeys(self.classes, 0)
         host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
                                                                                         dtype=np.int32)
-        for g, i in _Budget.warm_start(self._profile_counts()):
+        for g, i in _Budget.f2(self._profile_counts()):
             role = self.groups[groups[g]]
             if (g, i) in vram or any(used[c.name] >= c.held for c in role.values()):
                 continue
@@ -480,6 +562,14 @@ class TieredStore:
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
+            self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining) and \
+                all(r.fetches_parts for r in self.resolvers)
+            if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
+                if self._own_tail is None:
+                    raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail "
+                                       "(moe.lend_peak), but this layout neither lends nor keeps a tail")
+                print(f"holon: {self.name}: this layout stages (its cache cannot lend a prompt step's staging): the "
+                      "step-peak loan (moe.lend_peak) stays reserved, in the pool's own tail")
         self._step, kinds, at = step.step, self._kinds, 0
         kinds[:self._written] = PADDING
         if step.row_kind is None:                                    # launched plans are the scheduler's
@@ -492,13 +582,37 @@ class TieredStore:
         if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
-            self._mode = "ring"
+            self._mode = "ring" if prompt >= self.stream_tokens else "stage"
         elif prompt and min(self.top_k * at, self.prefill) > self.stage.shape[1]:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
+        # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
+        self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
+            self.large_passes(at) and not self.exclusive else 1
+        self._step_tail = None
+        if self._loaned and (held := self._loan.held()):
+            raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
+                               "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
+                               "it)")
+        if self._loaned:
+            self._loan.release()
+        self._loaned = False
+        self._step_loan = 0
+        if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
+            cls, n = self.tail
+            if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
+                self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
+            need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
+            self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
+        elif self._loan is not None and self._own_tail is not None and self.large_passes(at):   # a staging layout's
+            self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))           # loan: its own tail's end
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
+        self.step, self.step_tokens = step.step, at
         writes = [(self.kinds[:reach], kinds[:reach])] * bool(reach) + self.residency.writes(step.step)
+        if not self._decode_set:                # once after each materialize (statics come back zeroed)
+            writes.append((self._decode, np.full(len(self._decode), DECODE, dtype=np.uint8)))
+            self._decode_set = True
         return writes, self._copies.pop(step.step, [])
 
     def after_commit(self, step, telemetry) -> None:
@@ -523,6 +637,7 @@ class TieredStore:
                   "lends": telemetry["lends"].numpy().copy() if mode else None}   # None: borrowed nothing
         if mode:
             self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
+            self.borrowed["partial"] = self.borrowed.get("partial", 0) + (int(telemetry["ring_ok"][0]) == 2)
         self.residency.commit(step.step, record["records"], returned=mode is not None)
         for tap in self.taps:
             tap(step, record)
@@ -532,6 +647,8 @@ class TieredStore:
     def shutdown(self) -> None:
         """The I/O worker first (its reads use the file tier's descriptors), then the tiers — unless the worker left
         its coordinator behind (still in a read past its time bound): then the descriptors stay open."""
+        if self._loan is not None:
+            self._loan.release()
         service = getattr(self.io, "service", None) if self.exclusive else None    # (a native worker's)
         if service is not None:
             service.shutdown()
@@ -554,17 +671,82 @@ class TieredStore:
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
-            self.lent = Lent(self, self._mode, self.tail if self._mode == "ring" else None)
+            self.lent = Lent(self, self._mode, self._step_tail, self._parts)
             self.lent.begin()
+
+    def lend_activations(self, peak: int) -> int:
+        """The core's ActivationLender, at the startup profile: a tail store (`lend_peak`) lends its tail steps — from
+        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`,
+        `LOAN_SLACK`) past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak`
+        is the worst step's, of `max_step_tokens`), where its device has `activation_loan@1`; 0 where it lends none."""
+        if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned
+                and self.ctx.candidates(ACTIVATION_LOAN, {})):
+            return 0
+        loan = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
+        self._loan_bytes = loan
+        try:
+            tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
+        except ValueError:                             # its class cannot hold it beside a pass's staging
+            self._loan_bytes = 0
+            print(f"holon: {self.name}: the tail's class cannot hold the step-peak loan (moe.lend_peak) beside a "
+                  "prefill pass's staging: the activations stay reserved")
+            return 0
+        self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
+        self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
+        self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
+        self.tail = tail
+        return self.ring_tokens
+
+    def activations(self, step):
+        """The core's ActivationLender, at an eager step's launch: a tail step's forward allocates from the tail's
+        last bytes, its loan's (lent with the tail at its first resolve: nothing reads the tail's experts before, they
+        are never read after); None for any other step."""
+        if self._loan is None or not self._step_loan:
+            return None
+        if self._step_tail is not None:
+            cls, n = self._step_tail
+            c = list(self.classes.values())[cls]
+            loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
+        else:                                   # a staging layout's own tail, its last bytes
+            at, n = self._own_tail
+            loan = self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n][-self._step_loan:]
+        self._loaned = True
+        return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
+
+    @property
+    def parts(self) -> int:
+        """This step's staging ring of parts (`Lent`): its parts, or 1."""
+        return self._parts
+
+    def pipelines(self, tokens: int) -> int:
+        """The fetch parts of a pass of `tokens` in this step: `pipeline` in a staging step's large passes — in every
+        pass of a step whose staging is a ring of parts (its slots hold two parts of a layer's misses at a time) —,
+        else 1."""
+        if self._parts > 1:
+            return self._parts
+        return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
+
+    def fetch_stream(self, split: bool = False) -> torch.Stream:
+        """The stream a call's fetch runs on beside the main stream (`DeviceResolver`), one per store and kind: a
+        split call's (`split`) at high priority — the hits' pass beside it has its blocks on every SM (launched early,
+        PDL), so a fetch of the default priority found no SM until they drained, ≈ 40 µs of each layer of a 5080's
+        verify pass (FN §23.8) —; a pipelined pass's parts at the default priority."""
+        if split not in self._fetch_streams:
+            self._fetch_streams[split] = torch.Stream(device=self.ctx.device, priority=-1 if split else 0)
+        return self._fetch_streams[split]
 
     def tail_view(self) -> torch.Tensor | None:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
-        to its end; None in a step that lends none."""
+        to its end; a staging layout's own tail (the pool's last bytes) in any step; else None."""
         if self.lent is None or self.lent.tail is None:
-            return None
+            if self._own_tail is None:
+                return None
+            at, n = self._own_tail              # fixed bytes of the pool, used within a step: graphs may hold them
+            return self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n - self._step_loan]
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
-        return c.slots()[c.size - n:].view(-1)
+        view = c.slots()[c.size - n:].view(-1)
+        return view[:len(view) - self._step_loan]           # (the activation loan's bytes past the passes')
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""
@@ -573,8 +755,17 @@ class TieredStore:
     def layer_done(self, g: int) -> None:
         if self.lent is not None:
             self.lent.done(g)
-            if g == len(self.groups) - 1:
+            if g == self.borrowing_groups - 1:
                 self.lent = None
+
+    def mark_auxiliary(self, group: int) -> None:
+        """`group` is an auxiliary model's (FN D12a): after the target's in the map, never borrowing (`Lent.done`)."""
+        self._auxiliary.add(group)
+
+    @property
+    def borrowing_groups(self) -> int:
+        """The groups a borrowing step lends to, first in the map: the target's."""
+        return len(self.groups) - len(self._auxiliary)
 
     # -- the policy's means -------------------------------------------------------------------------------------------
     def lend(self, need: torch.Tensor, call: int = 1) -> torch.Tensor:
@@ -636,6 +827,19 @@ class TieredStore:
         self.residency.edit(commit, map_, later=LAND)
 
     # -- helpers ------------------------------------------------------------------------------------------------------
+    def _own_bytes(self, loan: bool = True) -> int:
+        """The bytes a staging layout keeps for the large passes' buffers — and, `loan`, the step-peak loan's
+        (`moe.lend_peak`: reserved there where the cache cannot lend it, its activations at the end) —, aligned."""
+        if not self.tail:
+            return 0
+        cls, n = self.tail
+        nbytes = n * list(self.classes.values())[cls].unit_bytes - (0 if loan else self._loan_bytes)
+        return -(-nbytes // self._align) * self._align
+
+    def _step_loan_bytes(self, at: int) -> int:
+        """The loan of a step of `at` prompt tokens: its share of the worst step's, aligned (at most the worst's)."""
+        return -(-(int(self._loan_per_token * at) + LOAN_SLACK) // self._align) * self._align
+
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
         class most groups have, ties to the lower class index — and its last n slots, enough for the clients'
@@ -647,7 +851,7 @@ class TieredStore:
         first = [classes.index(self.groups[g][0]) for g in self._order]
         cls = max(sorted(set(first)), key=first.count)
         c = classes[cls]
-        n = -(-max((f() for f in self.tail_bytes), default=0) // c.unit_bytes)
+        n = -(-(max((f() for f in self.tail_bytes), default=0) + self._loan_bytes) // c.unit_bytes)
         if slots(c) - n < self.prefill:
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
@@ -680,7 +884,9 @@ class TieredStore:
     def _profile_counts(self) -> np.ndarray:
         """`profile`'s routing counts by group: a JSON file `{"checkpoint": …, "layers": {"<group>": [count per
         item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
-        refused unless it was counted on this checkpoint's files; groups it does not name count zero."""
+        refused unless it was counted on this checkpoint's files (or some of them: a profile of the target serves a
+        deployment whose auxiliary model, an MTP head, adds its own file and group); groups it does not name count
+        zero."""
         counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
             return counts
@@ -688,7 +894,8 @@ class TieredStore:
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
         data = json.loads((self.profile_dir / name).read_text())
-        if data.get("checkpoint") != self.checkpoint:
+        files = data.get("checkpoint") or []
+        if not files or any(f not in self.checkpoint for f in files):
             raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "
                              f"this checkpoint {self.checkpoint} (`holon_tools profile` writes one per file)")
         for group, row in data["layers"].items():
@@ -701,11 +908,13 @@ class TieredStore:
 
 class _Budget:
     """What a policy seeds within: the arena pool's bytes past every class's null and staging slots, each class's
-    pinned slots; an item takes a slot in each of its roles' classes."""
+    pinned slots; an item takes a slot in each of its roles' classes. `floors` (class -> items): the store's layout
+    wants that many of the class's items first (`warm_start`)."""
 
-    def __init__(self, store: TieredStore, nbytes: int) -> None:
+    def __init__(self, store: TieredStore, nbytes: int, floors: dict[str, int] | None = None) -> None:
         self.left, self.taken, self.granted = nbytes, dict.fromkeys(store.classes, 0), []
         self.classes = [list(store.groups[g].values()) for g in store._order]      # per group (in map order)
+        self.floors = floors or {}
 
     def take(self, group: int, item: int) -> bool:
         classes = self.classes[group]
@@ -718,8 +927,19 @@ class _Budget:
             self.taken[c.name] += 1
         return True
 
+    def warm_start(self, profile: np.ndarray) -> list[tuple[int, int]]:
+        """F2's order (`f2`), each floored class's first `floors[c]` items of it moved to the front."""
+        order = self.f2(profile)
+        if not self.floors:
+            return order
+        front = {}
+        for name, n in self.floors.items():
+            mine = [(g, i) for g, i in order if any(c.name == name for c in self.classes[g])]
+            front |= dict.fromkeys(mine[:n])
+        return list(front) + [x for x in order if x not in front]
+
     @staticmethod
-    def warm_start(profile: np.ndarray) -> list[tuple[int, int]]:
+    def f2(profile: np.ndarray) -> list[tuple[int, int]]:
         groups, items = profile.shape
         ranked = np.lexsort((np.broadcast_to(np.arange(items), profile.shape), -profile), axis=-1)   # per group
         floor = [(g, int(ranked[g, n])) for n in range(min(FLOOR, items)) for g in range(groups)]
@@ -762,7 +982,8 @@ class _Reads:
 
 def _parse_cache(text: str) -> dict[str, int | float]:
     """`cache`: `<class>=<slots>` items, comma-separated, a slot count or (with a point) a fraction of the class's
-    pieces; class `*` for the classes not named. Empty: every class fills free VRAM up to all its pieces."""
+    pieces; a class a name or a pattern (`aux.*`: an MTP head's classes; `*` the classes nothing else names, see
+    `_cache_of`). Empty: every class fills free VRAM up to all its pieces."""
     out = {}
     for item in filter(None, (s.strip() for s in text.split(","))):
         name, sep, value = item.partition("=")
@@ -770,3 +991,11 @@ def _parse_cache(text: str) -> dict[str, int | float]:
             raise ValueError(f"cache item {item!r}: expected <class>=<slots or fraction>")
         out[name.strip()] = float(value) if "." in value else int(value)
     return out
+
+
+def _cache_of(cache: dict[str, int | float], cls: str) -> int | float | None:
+    """Class `cls`'s pinned cache: its own item, else the first pattern (fnmatch) naming it, `*` last; None: fill."""
+    if cls in cache:
+        return cache[cls]
+    return next((v for k, v in sorted(cache.items(), key=lambda kv: kv[0] == "*") if fnmatch.fnmatchcase(cls, k)),
+                None)

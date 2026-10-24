@@ -1,0 +1,782 @@
+{
+ "name": "fn0_diag_rtx-5080",
+ "date": "2026-10-18",
+ "gpu": "rtx-5080",
+ "model": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf",
+ "command": "python bench/offload_ctx.py run --name fn0_diag_rtx-5080 --gpu 0 --model Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.gguf --arms spikes/fn0/arms_diag_rtx-5080.json --rounds 1 --requests fn_full.json --contexts 1024 4096 32768 --server llama-server --resume",
+ "commit": "0e6f5b58539b3fbc5e6342288d64f2f25cdd3871",
+ "method": "Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3, D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another: - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),   one request per context; - `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with   Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts   (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)   moved past it, and `--spans` picks the candidates timed (default the first 3). The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.",
+ "contexts": [
+  1024,
+  4096,
+  32768
+ ],
+ "ctx": 33792,
+ "output_tokens": 256,
+ "corpus": {
+  "corpus": "fn",
+  "corpus_tokens": 189707,
+  "corpus_sha256": "de504e5865358603de84312707a311d8d6397041dcbb3532cac1b03335bd9d6e"
+ },
+ "warmup": {
+  "tokens": 2048,
+  "output": 64
+ },
+ "requests": [
+  {
+   "key": "1024/0",
+   "context": 1024,
+   "start": 0
+  },
+  {
+   "key": "1024/1",
+   "context": 1024,
+   "start": 31617
+  },
+  {
+   "key": "1024/2",
+   "context": 1024,
+   "start": 63234
+  },
+  {
+   "key": "4096/0",
+   "context": 4096,
+   "start": 10539
+  },
+  {
+   "key": "4096/1",
+   "context": 4096,
+   "start": 42156
+  },
+  {
+   "key": "4096/2",
+   "context": 4096,
+   "start": 73773
+  },
+  {
+   "key": "32768/0",
+   "context": 32768,
+   "start": 21078
+  },
+  {
+   "key": "32768/1",
+   "context": 32768,
+   "start": 52695
+  },
+  {
+   "key": "32768/2",
+   "context": 32768,
+   "start": 84312
+  }
+ ],
+ "arms": [
+  {
+   "name": "strata_na_off_diag",
+   "engine": "strata",
+   "env": {
+    "STRATA_ROUTE_TAIL_SKIP": "0",
+    "STRATA_PREFILL_TIMING": "1"
+   },
+   "flags": "--pack iq2_xs --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --dump-routing routing-rtx-5080.bin --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+  }
+ ],
+ "summary": {
+  "strata_na_off_diag": {
+   "1024/0": {
+    "prefill_tps": {
+     "median": 1322.33,
+     "min": 1322.33,
+     "max": 1322.33,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 89.97,
+     "min": 89.97,
+     "max": 89.97,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.89,
+     "min": 0.89,
+     "max": 0.89,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 756.1,
+     "min": 756.1,
+     "max": 756.1,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2852.4,
+     "min": 2852.4,
+     "max": 2852.4,
+     "n": 1
+    }
+   },
+   "1024/1": {
+    "prefill_tps": {
+     "median": 1416.95,
+     "min": 1416.95,
+     "max": 1416.95,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 87.93,
+     "min": 87.93,
+     "max": 87.93,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.88,
+     "min": 0.88,
+     "max": 0.88,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 708.0,
+     "min": 708.0,
+     "max": 708.0,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2914.4,
+     "min": 2914.4,
+     "max": 2914.4,
+     "n": 1
+    }
+   },
+   "1024/2": {
+    "prefill_tps": {
+     "median": 1428.83,
+     "min": 1428.83,
+     "max": 1428.83,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 92.57,
+     "min": 92.57,
+     "max": 92.57,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.9,
+     "min": 0.9,
+     "max": 0.9,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 698.8,
+     "min": 698.8,
+     "max": 698.8,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2771.8,
+     "min": 2771.8,
+     "max": 2771.8,
+     "n": 1
+    }
+   },
+   "4096/0": {
+    "prefill_tps": {
+     "median": 2514.38,
+     "min": 2514.38,
+     "max": 2514.38,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 91.3,
+     "min": 91.3,
+     "max": 91.3,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.9,
+     "min": 0.9,
+     "max": 0.9,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 1611.2,
+     "min": 1611.2,
+     "max": 1611.2,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2810.1,
+     "min": 2810.1,
+     "max": 2810.1,
+     "n": 1
+    }
+   },
+   "4096/1": {
+    "prefill_tps": {
+     "median": 2468.32,
+     "min": 2468.32,
+     "max": 2468.32,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 88.8,
+     "min": 88.8,
+     "max": 88.8,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.89,
+     "min": 0.89,
+     "max": 0.89,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 1637.3,
+     "min": 1637.3,
+     "max": 1637.3,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2892.7,
+     "min": 2892.7,
+     "max": 2892.7,
+     "n": 1
+    }
+   },
+   "4096/2": {
+    "prefill_tps": {
+     "median": 2511.81,
+     "min": 2511.81,
+     "max": 2511.81,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 82.2,
+     "min": 82.2,
+     "max": 82.2,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.85,
+     "min": 0.85,
+     "max": 0.85,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 1615.0,
+     "min": 1615.0,
+     "max": 1615.0,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 3117.2,
+     "min": 3117.2,
+     "max": 3117.2,
+     "n": 1
+    }
+   },
+   "32768/0": {
+    "prefill_tps": {
+     "median": 2981.59,
+     "min": 2981.59,
+     "max": 2981.59,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 81.3,
+     "min": 81.3,
+     "max": 81.3,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.85,
+     "min": 0.85,
+     "max": 0.85,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 10968.8,
+     "min": 10968.8,
+     "max": 10968.8,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 3153.4,
+     "min": 3153.4,
+     "max": 3153.4,
+     "n": 1
+    }
+   },
+   "32768/1": {
+    "prefill_tps": {
+     "median": 2982.34,
+     "min": 2982.34,
+     "max": 2982.34,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 87.09,
+     "min": 87.09,
+     "max": 87.09,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.89,
+     "min": 0.89,
+     "max": 0.89,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 10966.9,
+     "min": 10966.9,
+     "max": 10966.9,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 2944.5,
+     "min": 2944.5,
+     "max": 2944.5,
+     "n": 1
+    }
+   },
+   "32768/2": {
+    "prefill_tps": {
+     "median": 2964.58,
+     "min": 2964.58,
+     "max": 2964.58,
+     "n": 1
+    },
+    "decode_tps": {
+     "median": 82.76,
+     "min": 82.76,
+     "max": 82.76,
+     "n": 1
+    },
+    "reused": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "hit_rate": {
+     "median": 0.86,
+     "min": 0.86,
+     "max": 0.86,
+     "n": 1
+    },
+    "drafts_accepted": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "drafts_offered": {
+     "median": 0,
+     "min": 0,
+     "max": 0,
+     "n": 1
+    },
+    "tokens_per_pass": {
+     "median": 1.0,
+     "min": 1.0,
+     "max": 1.0,
+     "n": 1
+    },
+    "engine_prompt_ms": {
+     "median": 11032.4,
+     "min": 11032.4,
+     "max": 11032.4,
+     "n": 1
+    },
+    "engine_decode_ms": {
+     "median": 3097.1,
+     "min": 3097.1,
+     "max": 3097.1,
+     "n": 1
+    }
+   }
+  }
+ },
+ "rows": [
+  {
+   "round": 0,
+   "arm": "strata_na_off_diag",
+   "results": {
+    "1024/0": {
+     "prefill_tps": 1322.3264,
+     "decode_tps": 89.9698,
+     "reused": 0,
+     "hit_rate": 0.8875,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 756.1,
+     "engine_decode_ms": 2852.4
+    },
+    "1024/1": {
+     "prefill_tps": 1416.951,
+     "decode_tps": 87.9283,
+     "reused": 0,
+     "hit_rate": 0.878,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 708.0,
+     "engine_decode_ms": 2914.4
+    },
+    "1024/2": {
+     "prefill_tps": 1428.8293,
+     "decode_tps": 92.5701,
+     "reused": 0,
+     "hit_rate": 0.9028,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 698.8,
+     "engine_decode_ms": 2771.8
+    },
+    "4096/0": {
+     "prefill_tps": 2514.3796,
+     "decode_tps": 91.3027,
+     "reused": 0,
+     "hit_rate": 0.9013,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 1611.2,
+     "engine_decode_ms": 2810.1
+    },
+    "4096/1": {
+     "prefill_tps": 2468.3192,
+     "decode_tps": 88.8013,
+     "reused": 0,
+     "hit_rate": 0.8925,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 1637.3,
+     "engine_decode_ms": 2892.7
+    },
+    "4096/2": {
+     "prefill_tps": 2511.8069,
+     "decode_tps": 82.2033,
+     "reused": 0,
+     "hit_rate": 0.8547,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 1615.0,
+     "engine_decode_ms": 3117.2
+    },
+    "32768/0": {
+     "prefill_tps": 2981.5889,
+     "decode_tps": 81.2962,
+     "reused": 0,
+     "hit_rate": 0.8545,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 10968.8,
+     "engine_decode_ms": 3153.4
+    },
+    "32768/1": {
+     "prefill_tps": 2982.336,
+     "decode_tps": 87.0879,
+     "reused": 0,
+     "hit_rate": 0.8885,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 10966.9,
+     "engine_decode_ms": 2944.5
+    },
+    "32768/2": {
+     "prefill_tps": 2964.5792,
+     "decode_tps": 82.7596,
+     "reused": 0,
+     "hit_rate": 0.8621,
+     "drafts_accepted": 0,
+     "drafts_offered": 0,
+     "tokens_per_pass": 1.0,
+     "engine_prompt_ms": 11032.4,
+     "engine_decode_ms": 3097.1
+    }
+   },
+   "info": {
+    "context": "33792",
+    "expert_slots": "7658",
+    "expert_cache_mib": "10504",
+    "spec": "2",
+    "mtp_max": "0",
+    "pcie_frac": "0.55",
+    "spec_min_p": "0.00",
+    "engine": "0.1.44.1"
+   },
+   "log": [
+    "prefill: the CPU share is ON by default for prompt chunks below 1024 tokens (the idle CPU takes some of the experts the GPU would stream; answers can differ slightly from 0.1.40.3, mean KL ~0.004). STRATA_PREFILL_CPU_SHARE=0 turns it off.",
+    "strata generate: 7 expert-pool workers + the host thread",
+    "strata generate: R4 hit path ON - resident experts are computed on the GPU",
+    "strata generate: expert arena read through the file cache (buffered (not Windows))",
+    "strata generate: expert arena: cudaHostRegister PORTABLE ok; MAP_HUGETLB unavailable (needed 16907 2 MiB pages, vm.nr_hugepages=0); transparent huge pages requested (MADV_HUGEPAGE)",
+    "strata generate: expert cache 7658 slots, 10.26 GiB of VRAM; policy is",
+    "strata generate: expert cache auto: 10.94 GiB free, 700 MiB reserved (+0 MiB for the draft head) -> 7293 slots",
+    "strata generate: native pack: local/fn/strata/packs/iq2_xs experts (largest blob 1.51 MB), token embedding IQ4_XS in mapped host memory (322 MiB, 0.5 s)",
+    "strata generate: pre-filled 7658 of 7658 slots from the profile in 0.3 s (40310 MB/s); slot 0 verified",
+    "strata generate: profile bench/.envs/src/Strata/data/expert-profile.bin: 24576 ranked pairs, built for 24576 slots",
+    "strata generate: the GPU computes the experts in the cache; it rounds differently from the CPU,",
+    "strata generate: token graph hit path: 7658 resident experts, decided on the device",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 0 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 0 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 26 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 210 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 0 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 13 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 3 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 152 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 3 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 86 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 5 ms, waiting for each chunk 62 ms, after each chunk (the draft layer, progress) 0 ms, PLE 506 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 6 ms, waiting for each chunk 61 ms, after each chunk (the draft layer, progress) 0 ms, PLE 389 ms",
+    "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 8 ms, waiting for each chunk 61 ms, after each chunk (the draft layer, progress) 0 ms, PLE 297 ms",
+    "strata serve: decode expert cache hit rate: 85.4% (95848 hits / 112173 lookups); 10707 more read by the GPU over PCIe or from another GPU (8.7% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 85.5% (95939 hits / 112252 lookups); 10628 more read by the GPU over PCIe or from another GPU (8.6% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 86.2% (97319 hits / 112882 lookups); 9998 more read by the GPU over PCIe or from another GPU (8.1% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 87.8% (100377 hits / 114331 lookups); 8549 more read by the GPU over PCIe or from another GPU (7.0% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 88.8% (102197 hits / 115024 lookups); 7856 more read by the GPU over PCIe or from another GPU (6.4% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 88.8% (102353 hits / 115324 lookups); 7556 more read by the GPU over PCIe or from another GPU (6.1% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 89.3% (103255 hits / 115686 lookups); 7194 more read by the GPU over PCIe or from another GPU (5.9% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 89.9% (26120 hits / 29052 lookups); 1668 more read by the GPU over PCIe or from another GPU (5.4% of all 30720 routed)",
+    "strata serve: decode expert cache hit rate: 90.1% (104971 hits / 116469 lookups); 6411 more read by the GPU over PCIe or from another GPU (5.2% of all 122880 routed)",
+    "strata serve: decode expert cache hit rate: 90.3% (105182 hits / 116503 lookups); 6377 more read by the GPU over PCIe or from another GPU (5.2% of all 122880 routed)",
+    "strata serve: the prompt path borrows 3128 CUDA0 cache slots (4.18 GiB)"
+   ],
+   "peak_vram_mib": 15520,
+   "wall_s": 79.8
+  }
+ ],
+ "prefill_timing": [
+  "strata prefill timing: 2047 tokens, GPU timeline 3170 ms, wall 3170 ms, host staging 44 ms: embed+steps 1 (0.0%) hc read 154 (4.9%) gdn 2215 (69.9%) qsa proj 47 (1.5%) qsa indexer 0 (0.0%) qsa select 2 (0.1%) qsa attn 87 (2.7%) router+shared 20 (0.6%) host grouping 11 (0.4%) gather 5 (0.2%) wait copy 14 (0.4%) dequant 182 (5.7%) gemm gate/up 208 (6.6%) gemm down 103 (3.2%) combine 28 (0.9%) ple 3 (0.1%) gdn conv+gates 10 (0.3%) gdn recurrence 39 (1.2%) gdn out proj 42 (1.3%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 0 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 0 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 731 ms, wall 731 ms, host staging 73 ms: embed+steps 2 (0.2%) hc read 27 (3.7%) gdn 62 (8.5%) qsa proj 29 (4.0%) qsa indexer 0 (0.0%) qsa select 1 (0.1%) qsa attn 22 (3.0%) router+shared 14 (1.9%) host grouping 35 (4.8%) gather 3 (0.4%) wait copy 55 (7.5%) dequant 203 (27.8%) gemm gate/up 139 (19.0%) gemm down 67 (9.1%) combine 20 (2.8%) ple 1 (0.2%) gdn conv+gates 4 (0.6%) gdn recurrence 19 (2.7%) gdn out proj 26 (3.6%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 0 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 683 ms, wall 683 ms, host staging 99 ms: embed+steps 2 (0.3%) hc read 27 (4.0%) gdn 62 (9.1%) qsa proj 29 (4.3%) qsa indexer 0 (0.0%) qsa select 1 (0.1%) qsa attn 22 (3.3%) router+shared 13 (2.0%) host grouping 6 (0.9%) gather 3 (0.4%) wait copy 49 (7.1%) dequant 194 (28.4%) gemm gate/up 137 (20.1%) gemm down 65 (9.6%) combine 21 (3.1%) ple 1 (0.2%) gdn conv+gates 4 (0.7%) gdn recurrence 19 (2.8%) gdn out proj 26 (3.9%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 13 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 674 ms, wall 674 ms, host staging 123 ms: embed+steps 2 (0.2%) hc read 27 (4.0%) gdn 62 (9.2%) qsa proj 29 (4.3%) qsa indexer 0 (0.0%) qsa select 1 (0.1%) qsa attn 22 (3.3%) router+shared 13 (2.0%) host grouping 8 (1.1%) gather 3 (0.4%) wait copy 46 (6.8%) dequant 188 (28.0%) gemm gate/up 135 (20.0%) gemm down 64 (9.5%) combine 22 (3.2%) ple 1 (0.2%) gdn conv+gates 4 (0.7%) gdn recurrence 19 (2.9%) gdn out proj 26 (3.9%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 1 ms, waiting for each chunk 7 ms, after each chunk (the draft layer, progress) 0 ms, PLE 26 ms",
+  "strata prefill timing: 4095 tokens, GPU timeline 1559 ms, wall 1559 ms, host staging 169 ms: embed+steps 3 (0.2%) hc read 113 (7.2%) gdn 152 (9.7%) qsa proj 79 (5.0%) qsa indexer 0 (0.0%) qsa select 11 (0.7%) qsa attn 262 (16.8%) router+shared 33 (2.1%) host grouping 15 (1.0%) gather 10 (0.6%) wait copy 15 (1.0%) dequant 176 (11.3%) gemm gate/up 264 (16.9%) gemm down 138 (8.9%) combine 110 (7.0%) ple 5 (0.4%) gdn conv+gates 21 (1.4%) gdn recurrence 79 (5.1%) gdn out proj 74 (4.7%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 3 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 86 ms",
+  "strata prefill timing: 4095 tokens, GPU timeline 1584 ms, wall 1584 ms, host staging 216 ms: embed+steps 3 (0.2%) hc read 113 (7.1%) gdn 151 (9.6%) qsa proj 79 (5.0%) qsa indexer 0 (0.0%) qsa select 11 (0.7%) qsa attn 263 (16.6%) router+shared 33 (2.1%) host grouping 19 (1.2%) gather 10 (0.6%) wait copy 16 (1.0%) dequant 186 (11.7%) gemm gate/up 268 (16.9%) gemm down 140 (8.8%) combine 114 (7.2%) ple 5 (0.3%) gdn conv+gates 21 (1.3%) gdn recurrence 79 (5.0%) gdn out proj 74 (4.7%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 3 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 152 ms",
+  "strata prefill timing: 4095 tokens, GPU timeline 1563 ms, wall 1563 ms, host staging 262 ms: embed+steps 2 (0.1%) hc read 113 (7.2%) gdn 152 (9.7%) qsa proj 79 (5.0%) qsa indexer 0 (0.0%) qsa select 11 (0.7%) qsa attn 263 (16.8%) router+shared 33 (2.1%) host grouping 15 (1.0%) gather 10 (0.6%) wait copy 15 (1.0%) dequant 176 (11.2%) gemm gate/up 268 (17.1%) gemm down 140 (9.0%) combine 107 (6.9%) ple 5 (0.3%) gdn conv+gates 21 (1.3%) gdn recurrence 80 (5.1%) gdn out proj 74 (4.7%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 10 ms, after each chunk (the draft layer, progress) 0 ms, PLE 210 ms",
+  "strata prefill timing: 32767 tokens, GPU timeline 10880 ms, wall 10880 ms, host staging 449 ms: embed+steps 52 (0.5%) hc read 886 (8.1%) gdn 1050 (9.6%) qsa proj 574 (5.3%) qsa indexer 1 (0.0%) qsa select 238 (2.2%) qsa attn 2704 (24.8%) router+shared 247 (2.3%) host grouping 89 (0.8%) gather 91 (0.8%) wait copy 42 (0.4%) dequant 627 (5.8%) gemm gate/up 1540 (14.2%) gemm down 832 (7.6%) combine 516 (4.7%) ple 43 (0.4%) gdn conv+gates 167 (1.5%) gdn recurrence 638 (5.9%) gdn out proj 544 (5.0%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 8 ms, waiting for each chunk 61 ms, after each chunk (the draft layer, progress) 0 ms, PLE 297 ms",
+  "strata prefill timing: 32767 tokens, GPU timeline 10878 ms, wall 10878 ms, host staging 634 ms: embed+steps 52 (0.5%) hc read 886 (8.1%) gdn 1050 (9.6%) qsa proj 574 (5.3%) qsa indexer 1 (0.0%) qsa select 238 (2.2%) qsa attn 2705 (24.9%) router+shared 247 (2.3%) host grouping 95 (0.9%) gather 91 (0.8%) wait copy 33 (0.3%) dequant 626 (5.8%) gemm gate/up 1544 (14.2%) gemm down 823 (7.6%) combine 521 (4.8%) ple 43 (0.4%) gdn conv+gates 167 (1.5%) gdn recurrence 638 (5.9%) gdn out proj 544 (5.0%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 6 ms, waiting for each chunk 61 ms, after each chunk (the draft layer, progress) 0 ms, PLE 389 ms",
+  "strata prefill timing: 32767 tokens, GPU timeline 10944 ms, wall 10944 ms, host staging 823 ms: embed+steps 41 (0.4%) hc read 885 (8.1%) gdn 1051 (9.6%) qsa proj 575 (5.3%) qsa indexer 1 (0.0%) qsa select 240 (2.2%) qsa attn 2708 (24.7%) router+shared 247 (2.3%) host grouping 90 (0.8%) gather 91 (0.8%) wait copy 38 (0.3%) dequant 640 (5.8%) gemm gate/up 1560 (14.3%) gemm down 843 (7.7%) combine 542 (5.0%) ple 43 (0.4%) gdn conv+gates 168 (1.5%) gdn recurrence 638 (5.8%) gdn out proj 545 (5.0%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 5 ms, waiting for each chunk 62 ms, after each chunk (the draft layer, progress) 0 ms, PLE 506 ms"
+ ],
+ "routing_trace": {
+  "decode_tokens": 2368,
+  "lfu_replay_hit_rate_by_slots_per_layer": {
+   "64": 0.7109,
+   "96": 0.7858,
+   "108": 0.8078,
+   "114": 0.8181,
+   "128": 0.8393,
+   "160": 0.878,
+   "218": 0.9234,
+   "240": 0.9354,
+   "275": 0.951
+  },
+  "command": "python spikes/fn0/routing.py <routing-rtx-5080.bin> --slots 64 96 108 114 128 160 218 240 275 --profile <Strata data/expert-profile.bin>"
+ }
+}

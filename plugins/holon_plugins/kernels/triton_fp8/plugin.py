@@ -1,6 +1,8 @@
-"""Our Triton FP8 matmuls as the `qlinear@2` kernel for `fp8_e4m3/hf` weights with 128 × 128 block scales (op
+"""Our Triton matmuls: FP8 ones as the `qlinear@2` kernel for `fp8_e4m3/hf` weights with 128 × 128 block scales (op
 contract: std.ops; docs/m06-lowp.md D12, §4.6, §4.7), on sm ≥ 89 (e4m3 `tl.dot`; below it the decode kernel would run,
 the prefill one would not: FP8 there is v1). Dense only: expert stacks stay on the reference provider.
+
+A dense weight's few-row matmul as `linear_rows@1` (`rows.py`; std.ops: a verify pass's rows), on sm ≥ 80.
 
 Paths by row count, each in its own activation mode (`config["act"]`, D3): `decode` up to 16 rows, W8A16 split-K
 (the activations as given, `bf16`); `prefill` above, W8A8 (`fp8`: e4m3 per row and 128 columns). Calls are counted
@@ -13,7 +15,7 @@ import collections
 import torch
 from holon.api import Constraint, KernelSpec, QTensor
 
-from . import kernel
+from . import kernel, rows
 
 OP = "qlinear"
 ACT = {"decode": "bf16", "prefill": "fp8"}
@@ -52,8 +54,23 @@ def _supports(f: dict) -> bool:
             and f["act_quant"] in ACT_QUANT)
 
 
+class LinearRows:
+    """`linear_rows@1` (std.ops): a dense weight's few-row matmul (`rows.py`)."""
+
+    def __init__(self, ctx, **facts) -> None:
+        pass
+
+    def __call__(self, x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+        return rows.linear_rows(x, weight)
+
+
 class Plugin:
     def register(self, regs) -> None:
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.triton_fp8", impl=QLinear,
                                         requires=Constraint(sm_min=89), supports=_supports,
                                         props=frozenset({"graph_safe", "deterministic"}), config={"act": ACT}))
+        regs.kernels.add("linear_rows", KernelSpec(
+            op="linear_rows", provider="kernels.triton_fp8", impl=LinearRows, requires=Constraint(sm_min=80),
+            supports=lambda f: f["in"] % rows.BK == 0 and rows.OUT_MIN <= f["out"] <= rows.OUT_MAX
+            and f["dtype"] in ("bfloat16", "float16"),
+            props=frozenset({"graph_safe", "deterministic"})))

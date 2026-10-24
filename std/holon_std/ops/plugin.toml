@@ -18,6 +18,7 @@ provides = [
     "op.rope@1",
     "op.qlinear@2",
     "op.qlinear_glu@1",
+    "op.linear_rows@1",
     "op.qembedding@1",
 ]
 

@@ -1,7 +1,7 @@
 """L0 for the Gated DeltaNet kernels (docs/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
-`kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm`, selected through the build context, on Qwen3.8-27B's
-shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2, 8192 channels), Dk = Dv = 128,
-K = 4, in both v-head orders, plus a small shape at head dim 64.
+`kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm` (with FN's sigmoid `out_gate` too), selected through the
+build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2,
+8192 channels), Dk = Dv = 128, K = 4, in both v-head orders, plus a small shape at head dim 64.
 
 - Batches mix lengths around the 64-token chunk (1, 2, 63, 64, 65, 200, 1000), rows with and without has_init, slot 0
   and the last slot, and a zero-token row. Every unit starts poisoned with NaN except those of has_init rows and of
@@ -265,6 +265,25 @@ def test_delta_rule_aligned_split_and_repeat_are_bitwise(order):
         pools = [torch.zeros(2, hv, d, d, device="cuda") + 0.01 for _ in range(2)]
         outs = [run_batch(kernel, x1, g, p, lens, init, [0]) for p in pools]
         assert torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1])
+    # the recurrent path reads column views of wider rows (the projections' and conv's) in place: the same bits
+    x4 = rows(x, 0, 4)
+    wide = {n: torch.cat([v.reshape(4, -1), torch.full_like(v.reshape(4, -1), float("nan"))], 1) for n, v in x4.items()}
+    views = {n: wide[n][:, :x4[n][0].numel()].view(x4[n].shape) for n in x4}
+    pools = [torch.zeros(4, hv, d, d, device="cuda") + 0.01 for _ in range(2)]
+    outs = [run_batch(kernel, y, g, p, [1] * 4, [True] * 4, [0, 1, 2, 3])
+            for y, p in ((x4, pools[0]), (views, pools[1]))]
+    assert not views["q"].is_contiguous() and torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1])
+    # … and per-token rows of several tokens (a verify pass's, its rewind's replays) step their views token by token
+    for lens in ([4], [2, 3], [1, 4, 2]):
+        t, xs = sum(lens), rows(x, 0, sum(lens))
+        wide = {n: torch.cat([v.reshape(t, -1), torch.full_like(v.reshape(t, -1), float("nan"))], 1)
+                for n, v in xs.items()}
+        views = {n: wide[n][:, :xs[n][0].numel()].view(xs[n].shape) for n in xs}
+        pools = [torch.zeros(len(lens), hv, d, d, device="cuda") + 0.01 for _ in range(2)]
+        outs = [kernel(kernel.plan(lens, per_token=True), y["q"], y["k"], y["v"], y["a"], y["b"], g["a_log"],
+                       g["dt_bias"], p, dev(list(range(len(lens)))), dev([True] * len(lens), torch.bool))
+                for y, p in ((xs, pools[0]), (views, pools[1]))]
+        assert torch.equal(outs[0], outs[1]) and torch.equal(pools[0], pools[1]), lens
 
 
 def test_delta_rule_never_syncs():
@@ -408,14 +427,17 @@ def test_conv1d_many_rows_and_kernel_sizes(kernel):
 # --- gated_rmsnorm -------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
-@pytest.mark.parametrize(("t", "h", "d"), [(0, 48, 128), (37, 48, 128), (300, 32, 128), (5, 6, 64)])
-def test_gated_rmsnorm_matches_the_oracle(t, h, d, dtype):
-    norm = select("gated_rmsnorm@1", dim=d, eps=EPS, dtype=str(dtype).removeprefix("torch."))
+@pytest.mark.parametrize(("t", "h", "d", "gate"), [(0, 48, 128, "silu"), (37, 48, 128, "silu"), (300, 32, 128, "silu"),
+                                                  (5, 6, 64, "silu"), (37, 48, 128, "sigmoid")])  # FN's GDN (D8)
+def test_gated_rmsnorm_matches_the_oracle(t, h, d, gate, dtype):
+    facts = {"dim": d, "eps": EPS, "dtype": str(dtype).removeprefix("torch.")} | (
+        {"out_gate": gate} if gate != "silu" else {})
+    norm = select("gated_rmsnorm@1", **facts)
     o = (torch.randn(t, h, d, device="cuda") * 3).to(dtype)
     zw = torch.randn(t, h + 1, d, device="cuda").to(dtype)                    # z as a strided view
     z, w = zw[:, 1:], (1 + 0.2 * torch.randn(d, device="cuda")).to(dtype)
     for weight in (w, w.float()):                               # an f32 weight: the product stays in f32
-        got, want = norm(o, z, weight), ref.gated_rmsnorm(o, z, weight, EPS)
+        got, want = norm(o, z, weight), ref.gated_rmsnorm(o, z, weight, EPS, gate)
         r = l0.check(got, want, dtype, d)
         assert r.passed, r
         print(f"gated_rmsnorm {t}x{h}x{d} {dtype} weight {weight.dtype}: usage {r.usage:.3f}")
@@ -501,6 +523,56 @@ def test_a_snapshot_is_the_final_state_of_a_split_there(order):
         _call(kernel, rows(x, lo, lo + offset + 64), g, late, [offset + 64], [init[row]], [slots[row]])
         assert not torch.equal(payload[unit], late[slots[row]])
         assert not torch.equal(payload[unit], split[slots[row]].bfloat16().float())   # plant: fla's bf16 `h`
+
+
+@pytest.mark.parametrize("lens, snaps, subs", [
+    ([1100], [], 5), ([1100], [(0, 384, 1)], 5), ([1100], [(0, 512, 1)], 5), ([1100], [(0, 640, 1)], 5),
+    ([700, 0, 450, 90], [(0, 512, 0), (2, 192, 1)], 3 + 2 + 1),       # two prompts' chunks and a short row in one step
+    ([100, 100, 100, 100, 30], [(1, 64, 0)], 3),                      # short rows packed: 2 + 2 + 1 (four chunks a call)
+])
+def test_a_step_in_sub_chunks_is_one_call(lens, snaps, subs, monkeypatch):
+    """A step past SUB_TOKENS runs in calls of at most SUB_TOKENS tokens — short rows packed, a long row in sub-chunks
+    from the state the one before left (FN §23.3, §22.9): its outputs, final states and snapshots — inside a sub-chunk
+    (384, 640, 192), at one's start (512), in a packed row (64) — are bitwise one call's (SUB_TOKENS 256 here)."""
+    from holon_plugins.kernels.fla import plugin as fla
+    hk, hv, d = SHAPES["qwen3.8-27b"]
+    n = len(lens)
+    init, slots = [r % 2 == 0 for r in range(n)], [2 + r for r in range(n)]
+    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(sum(lens), hk, hv, d), gates(hv)
+    pool, warm = warm_states(x, g, "grouped", UNITS)
+    for s in slots:
+        pool[s] = warm
+    runs = []
+    for sub in (1 << 20, 256):
+        monkeypatch.setattr(fla, "SUB_TOKENS", sub)
+        state, payload = pool.clone(), torch.full((2, hv, d, d), float("nan"), device="cuda")
+        runs.append((_call(kernel, x, g, state, lens, init, slots, snaps, payload), state, payload))
+    assert len(kernel.plan(lens, snaps).subs) == subs
+    (o0, s0, p0), (o1, s1, p1) = runs
+    assert torch.equal(o0, o1) and torch.equal(s0.nan_to_num(), s1.nan_to_num())       # (untouched units: NaN)
+    assert torch.equal(p0.nan_to_num(), p1.nan_to_num())
+    assert all(not p1[unit].isnan().any() for _, _, unit in snaps)
+
+
+def test_a_step_of_two_rows_peaks_no_higher_than_one_row():
+    """The startup profile measures a one-row prompt step (its rows of at most max_model_len): a step of the same
+    tokens in two rows must not need more of the chunked rule's temporaries, or a deployment serving two prompts at
+    once runs past its reserve (the RTX 5090's exact.py run did, at 64 sequences)."""
+    hk, hv, d = SHAPES["qwen3.8-27b"]
+    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(4096, hk, hv, d), gates(hv)
+    pool, _ = warm_states(x, g, "grouped", UNITS)
+    peaks = []
+    for lens in ([4096], [2048, 2048], [3000, 1096]):
+        state = pool.clone()
+        h = kernel.plan(lens)
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        base = torch.cuda.memory_allocated()
+        kernel(h, x["q"], x["k"], x["v"], x["a"], x["b"], g["a_log"], g["dt_bias"], state,
+               dev(list(range(len(lens)))), dev([False] * len(lens), torch.bool))
+        torch.cuda.synchronize()
+        peaks.append(torch.cuda.max_memory_allocated() - base)
+    assert max(peaks[1:]) <= peaks[0], peaks
 
 
 def test_snapshots_must_fall_inside_their_row_on_a_chunk():

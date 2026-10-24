@@ -4,11 +4,12 @@
   trunk's output itself, which a drafter and prompt logprobs read again after it). Facts: dim, eps, offset, dtype.
 - `add_rmsnorm@1`: instance `(x, residual, weight) -> (normed, residual + x)`; may update `x` and `residual` in
   place (callers pass tensors they no longer need). Facts as rmsnorm.
-- `rope@1`: instance `(q [T, Hq, D], k [T, Hk, D], positions [T]) -> (q, k)`, neox (half-split) rotation of the
-  first `rotary_dim` dims; may rotate in place. Facts: head_dim, rotary_dim, theta, max_positions, dtype. An instance
-  may name the table it rotates with, `cos_sin`: a static buffer (`BuildCtx.static`) [max_positions, rotary_dim]
-  float32 holding, per position p, cos(p · θ_i) for i < rotary_dim / 2, then sin(p · θ_i), θ_i = theta^(−2i /
-  rotary_dim) (the reference's angles); fused kernels read it (the unit's `fusion_facts`, docs/m07-perf.md D3).
+- `rope@1`: instance `(q [T, Hq, D], k [T, Hk, D], positions [T]) -> (q, k)`, neox (half-split) rotation of the first
+  `rotary_dim` dims; may rotate in place; Hk may be 0 (only q rotated). Facts: head_dim, rotary_dim, theta,
+  max_positions, dtype. An instance may name the table it rotates with, `cos_sin`: a static buffer (`BuildCtx.static`)
+  [max_positions, rotary_dim] float32 holding, per position p, cos(p · θ_i) for i < rotary_dim / 2, then sin(p · θ_i),
+  θ_i = theta^(−2i / rotary_dim) (the reference's angles); fused kernels read it (the unit's `fusion_facts`,
+  docs/m07-perf.md D3).
 - `qlinear@2`: instance `(x [T, in], parts) -> y [T, out]` with `y = x @ W.T`, `W` the dequantized weight of the
   layout and `parts` its tensors by role, as `QTensor.parts` (`{"blocks": [out, row_bytes] uint8}` for ggml layouts);
   any `T` ≥ 0; `x` of `act_dtype`, `y` of `out_dtype`. Facts: layout (`"<scheme elem>/<layout name>"` as adopted,
@@ -35,10 +36,17 @@
   rounds both halves to `out_dtype` first (docs/m07-perf.md D6).
 - `qembedding@1`: instance `(ids [T] int64, blocks [vocab, row_bytes] uint8) -> [T, hidden]`: rows of the
   dequantized table, of `dtype`. Facts: layout, vocab, hidden, dtype.
+- `linear_rows@1`: instance `(x [T, in], weight [out, in]) -> y [T, out]` with `y = x @ weight.T` for a dense weight
+  and a few rows (2 ≤ T ≤ `ROWS_MAX`: a verify pass's), `x`, `weight` and `y` of `dtype`, from float32 sums rounded
+  once, in a fixed order (deterministic). Facts: in, out, dtype (a provider may serve only some, e.g. narrow
+  outputs). Where an instance is bound, a dense `linear` unit
+  without bias calls it for such rows (cuBLAS runs a 4-row GEMM of a GDN layer's a/b projection in ≈ 15 µs, its
+  one-row GEMV in ≈ 3; FN §23.8).
 Kernel instances are stateless across steps and safe to call inside CUDA graphs.
 """
 from __future__ import annotations
 
 RMSNORM, ADD_RMSNORM, ROPE = "rmsnorm@1", "add_rmsnorm@1", "rope@1"
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear@2", "qlinear_glu@1", "qembedding@1"
+LINEAR_ROWS, ROWS_MAX = "linear_rows@1", 16
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized weights (`a16` is not offered for them)

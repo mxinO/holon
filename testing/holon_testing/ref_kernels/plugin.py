@@ -1,7 +1,7 @@
 from holon.api import Constraint, KernelSpec
 from holon_std.moe.reference import Q8_0_DOT, Q8_K_DOT
 
-from .kernels import BY_OP, PagedAttention
+from .kernels import BY_OP, PagedAttention, QsaAttend
 
 KV_LAYOUTS = ("kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0")    # every KV layout the paged reference reads
 # Weight layouts the references read, by scheme: ggml blocks as stored (dequantized by gguf-py), HF quantized weights
@@ -24,7 +24,7 @@ def _reads(schemes: set[str]):
 class Plugin:
     def register(self, regs) -> None:
         for op, impl in BY_OP.items():
-            paged = impl is PagedAttention
+            paged = impl in (PagedAttention, QsaAttend)
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="testing.ref_kernels", impl=impl, requires=Constraint(devices=frozenset({"cpu"})),
                 supports=(lambda f: f["layout"] in KV_LAYOUTS) if paged else

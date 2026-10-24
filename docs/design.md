@@ -52,7 +52,7 @@ to host-side policies and live tunables).
 | D5 | Self-improvement is an **optional capability** for capable agents and explicit user intent (e.g. a strong agent served by Holon). The engine itself ships best-known, human-tuned defaults and never depends on it. When used, auto-promotion is limited to policy/kernel/tunable scope under the judge; core, judge, ABI and `approx` numerics need a human (§10.5). |
 | D6 | References (mini-sglang, nano-vllm, vLLM Model Runner V2, SGLang, FreeToken, Strata) are studied, not copied: control-plane code is our own plugin-native implementation. Only kernels may be borrowed, under §5.6. |
 | D7 | Hardware: development on RTX A5000s (sm_86). Consumer performance evidence on consumer desktop machines — RTX 5080 16 GB and RTX 5090 32 GB (sm_120), RTX 4090 (sm_89). Optional Blackwell workstation (RTX PRO 6000 96 GB, sm_120) for sm_120 kernel work and large-memory tasks. Datacenter path (H100, GB200) later. Shared test machines are used through one persistent container per machine: builds, tests and benchmarks run inside it repeatedly rather than as many short batch jobs. |
-| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its core needs return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). **As built** (`docs/v1-offload.md`): the offload program is four milestones — X expert offload, K KV and checkpoint tiers, FN Qwen3.8-Flash-Next, GLM GLM-5.3-Flash —; X added the seams S0–S5 (ABI 1.2) and the scheduler's row kinds (1.3) and no slot; K added the slots `tier` and `eviction_policy` with its seams KS1–KS5 (ABI 1.4, `docs/v1-kv-tiers.md` §4: residency in the prefix index, promotion and load gating, stores and staging payloads, the tier's attach and identity, the victim policy) and no hit cost, load future or per-layer event (K D9, D7, D12); Pool resize (VMM) is X's second wave. |
+| D8 | Expert caching/offload arrives in v1. Built in M0: the device SeqTable, MemOps (publish / adopt), BLOCKED requests and `drain`; spiked only: the stream-memop CPU handshake (S6). Its core needs return as additive ABI minors, each a reviewed core change (invariant 9; owner, 2026-10-15). **As built** (`docs/v1-offload.md`): the offload program is four milestones — X expert offload, K KV and checkpoint tiers, FN Qwen3.8-Flash-Next, GLM GLM-5.3-Flash —; X added the seams S0–S5 (ABI 1.2) and the scheduler's row kinds (1.3) and no slot; K added the slots `tier` and `eviction_policy` with its seams KS1–KS5 (ABI 1.4, `docs/v1-kv-tiers.md` §4: residency in the prefix index, promotion and load gating, stores and staging payloads, the tier's attach and identity, the victim policy) and no hit cost, load future or per-layer event (K D9, D7, D12); FN added C1–C3 (ABI 1.5, `docs/v1-flash-next.md` §4: the residual's shape, block-declared state, `unit_class`) and the step-peak loan's `ActivationLender` (§21.6); Pool resize (VMM) is X's second wave. |
 | D9 | Quantization priority follows the deployment target. Consumer/edge GPUs: llama.cpp GGUF sub-4-bit formats (k-quants, i-quants, e.g. `unsloth/Qwen3.8-27B-GGUF`) — v0. HF-ecosystem GPTQ/AWQ INT4 and FP8 — v1. NVFP4/MXFP4, which mainly serve large-memory datacenter GPUs — v2. |
 
 ---
@@ -305,9 +305,11 @@ from the weight source (`<hub id or directory name>@<16 hex of config + weight f
 `holon`) and every plugin whose code runs (the units built, the kernels bound, model, weight source, sampler, state
 kinds …; not kernel providers loaded only as candidates), one `[sites]` binding per kernel site (`<site>/<op>` →
 provider, facts, props, launch config) and `[engine]`, the EngineConfig settings that shape outputs (memory budgets
-are per host and not recorded). `src` is sha256 over a unit directory's sorted relative paths and contents (no hidden
-files, caches or build products), so a checkout and an installed copy agree; `sem` is sha256 of the manifest's
-reference module. Lock files are canonical TOML (`[deploy]`, `[engine]`, `[snapshot]`, then `[units]`/`[sites]` one
+are per host and not recorded). `src` is sha256 over a unit directory's sorted relative paths and the contents of its
+runtime files (no hidden files, caches, build products, tests, docs or examples; Python by its syntax tree without
+docstrings, so comments never outdate a lock; scheme `src2`, written as its prefix), so a checkout and an installed
+copy agree; `sem` is sha256 of the manifest's reference module. Lock files are canonical TOML (`[deploy]`, `[engine]`,
+`[snapshot]`, then `[units]`/`[sites]` one
 sorted line per entry, so a changed binding is one changed line) carrying a `digest` of the whole content and the
 `plan_id`, both re-checked on read, so a hand edit fails to load; `sm` is recorded for the same-SM preference. A
 lock whose plan has uncovered sites and no run-identical trace records no snapshot. Snapshots are stored by content
@@ -331,7 +333,10 @@ approvals, and the `isolation-check` CI job.
   KS1–KS5 (`docs/v1-kv-tiers.md` §4: the slots `tier` and `eviction_policy`; `BlockRecord`, `Fence`, `Stream`,
   `Load`, `TierCtx`, `StateTier`, `EntryView`, `EvictionPolicy`; `Payload.tentative`, `SeqView.branch_at`,
   `Seq.branch_at`, `SeqView.matched`, `Seq.matched`, `Pool.segments`, `Option.planned` and the optional
-  `KeepsTentatives`). `holon.api.ABI` is the version;
+  `KeepsTentatives`), and 1.5 with milestone FN's seams (`docs/v1-flash-next.md` §4, §21.6: `ModelSpec.residual` and
+  `Residual` for a trunk whose residual stream is not `[T, hidden]`; state declared by `ModelSpec.block` over all
+  layers; `BuildCtx.unit_class`; the optional `ActivationLender`, a shared object lending a step's activations).
+  `holon.api.ABI` is the version;
   every manifest declares the range it works with (`core_abi = ">=1.0,<2.0"`), checked before anything else when the
   manifest is read. `core/abi.txt` lists the frozen surface (`holon.api`'s names and signatures, dataclass fields in
   order, Protocol members marked required or optional, `SLOTS`, `EngineConfig`, the `BuildCtx.options` keys, the
@@ -369,8 +374,8 @@ separate `reference.py` holding its oracle.
 
 | Field | Meaning |
 |---|---|
-| `src` | git tree hash of the unit's directory |
-| `sem` | hash of `reference.py` + parameter schema — the unit's *semantic identity* |
+| `src` | hash of the unit's runtime files, Python by its syntax tree without docstrings (scheme `src2`, §4.4) |
+| `sem` | hash of `reference.py` (by its syntax tree) + parameter schema — the unit's *semantic identity* |
 | `iface@major` | interface version; minors are additive only |
 
 - Unit code imports only `holon.api`, its own package and declared third-party libraries; other units are
@@ -457,7 +462,9 @@ class ModelSpec:
                                      # a fused group (qkv, gate/up) is legal only if all members share one
                                      # source Layout — mixed-type GGUF files ("UD" builds) fall back to separate
                                      # GEMMs per site, and bindings may differ per layer
-    block: Ref                       # residual wiring unit, e.g. Ref("std.blocks.prenorm@1")
+    block: Ref                       # residual wiring unit, e.g. Ref("std.blocks.prenorm@1"); it may declare
+                                     # state over all layers, as a mixer does (ABI 1.5)
+    residual: Residual | None        # the trunk's stream when not [T, hidden] in the model dtype (ABI 1.5)
     norm: Ref; lm_head: Ref          # final norm, output head
     weights: WeightMap               # checkpoint layout, e.g. hf_weights("qwen3_5", root="model.language_model")
 ```
@@ -1361,6 +1368,7 @@ milestone measures how small the core diff is.
 | KV and checkpoint offload (RAM/SSD) | milestone K (`docs/v1-kv-tiers.md`): `std.state_tier` (slot `tier`) with SSD `Level`s; `evict.root_pin` (slot `eviction_policy`); checkpoint policies of `std.state.recurrent` | KS1–KS5 (ABI 1.4): residency in the PrefixIndex, promotion and load gating, stores and staging payloads, the tier's attach and identity, the victim policy; S1 step hooks, S2 host pools |
 | KVMem-style bounded window | `windowed_retrieval` StateKind, HostPlannedResolver, re-RoPE prepare kernel | StateKind emits positions; namespace |
 | Expert cache / offload (v1, milestone X) | `std.moe.offload@1` over `std.tiered` (DeviceResolver, pinned RAM and `O_DIRECT` SSD tiers); placement policies (`placement.*`), tiers (`tiers.*`), route transforms (`transforms.*`, `approx`); `kernels.expert_io` (resolve, gather, prefetch), `kernels.cpu_task` and `kernels.ggml_cpu` (CPU miss compute) | S0 shared objects, S1 step hooks, S2 host pools and async MemOps, S3 fill pools, S4 weight extents, S5 CPU facts (ABI 1.2), row kinds (1.3); planned: VMM resize (X's second wave) |
+| Hyper-connection streams, sparse (QSA) attention, PLE (v1, milestone FN) | `models.qwen4_exp`; `std.hyper`, `std.mixers.qsa`, `std.spec.mtp_head`, `drafters.mtp`; `kernels.hc_triton`, `kernels.qsa_triton`, `kernels.ple_triton`; the offload store's step-peak loan | C1–C3 (ABI 1.5): `ModelSpec.residual`, block-declared state, `unit_class`; `ActivationLender` |
 | Quant formats | weight-source dialect, scheme, layout, kernels (`prepare`) | kernel registry, per-slice `adopt_weights` |
 | Linear attention (GDN, KDA, Mamba2) | mixer + `Slot` state (`draft_slots`), page-boundary checkpoints (in v0 the recurrent state kind's options; checkpoint policy and codec slots planned) | fixed-point prefix hits, device Rewindable |
 | DeepSeek sparse attention / V4 compressed KV | `dsa_mla` mixer: MLA `Paged` + indexer `Paged(page_group)` + compressed `Paged(tokens_per_unit)` | `page_group`, `tokens_per_unit`, `alignment` |

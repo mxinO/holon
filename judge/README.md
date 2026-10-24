@@ -34,7 +34,8 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge l2 --model Qwen/Qwen3-0.6B --pr
     --golden judge/goldens/qwen3-0.6b/v1-fp32.safetensors \
     --floor judge/goldens/qwen3-0.6b/v1-bfloat16-floor.safetensors [--save cand.safetensors] [--json result.json]
 # any two recordings (e.g. a saved candidate)
-python -m holon_judge compare --golden <golden> --candidate <recording> [--floor <floor>] [--json <file>]
+python -m holon_judge compare --golden <golden> --candidate <recording> [--floor <floor>...] [--json <file>]
+# (several floors: one per kernel path the candidate's calls take, e.g. mmq and mmvq; every floor's budgets apply)
 python -m holon_judge snapshot-diff a.json b.json
 ```
 

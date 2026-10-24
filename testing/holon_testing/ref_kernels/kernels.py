@@ -7,9 +7,12 @@ from __future__ import annotations
 import gguf
 import numpy as np
 import torch
+from holon_plugins.models.qwen4_exp import reference as ple
 from holon_std.ffn import reference as ffn
+from holon_std.hyper import reference as hyper
 from holon_std.mixers.gdn import reference as gdn
 from holon_std.mixers.gqa import reference as gqa
+from holon_std.mixers.qsa import reference as qsa
 from holon_std.moe import reference as moe
 from holon_std.moe.kernels import CHUNK
 from holon_std.ops import reference as ops
@@ -377,11 +380,11 @@ class GatedDeltaRule:
 
 
 class GatedRMSNorm:
-    def __init__(self, ctx, *, dim: int, eps: float, dtype: str) -> None:
-        self.eps = eps
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu") -> None:
+        self.eps, self.out_gate = eps, out_gate
 
     def __call__(self, o, z, weight):
-        return gdn.gated_rmsnorm(o, z, weight, self.eps)
+        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate)
 
 
 class GDNRewind:
@@ -390,6 +393,65 @@ class GDNRewind:
 
     def __call__(self, state, window, x, a, b, slots, accepted, width):
         gdn.gdn_rewind(state, window, x, a, b, slots, accepted, width)
+
+
+class HcMix:
+    def __init__(self, ctx, *, streams: int, hidden: int, rank: int, eps: float, dtype: str, inject: bool) -> None:
+        self.streams, self.eps, self.dtype = streams, eps, getattr(torch, dtype)
+
+    def __call__(self, r, norm, down, up, inject, y_prev=None, w_prev=None):
+        return hyper.hc_gr_mix(r, norm, down, up, inject, y_prev, w_prev, self.streams, self.eps, self.dtype)
+
+
+class HcCombine:
+    def __init__(self, ctx, *, streams: int, hidden: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, r, y, w):
+        hyper.hc_gr_combine(r, y, w)
+
+
+class QsaIndex:
+    def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, rotary_dim: int, max_positions: int,
+                 eps: float, dtype: str) -> None:
+        self.ratio, self.eps = ratio, eps
+
+    def __call__(self, k, raw, pooled, table, seq, positions, weight, cos_sin):
+        qsa.qsa_index(k, raw, pooled, table, seq, positions, weight, cos_sin, self.ratio, self.eps)
+
+
+class QsaSelect:
+    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int) -> None:
+        self.ratio, self.budget = ratio, budget
+
+    def __call__(self, q, pooled, table, seq, positions):
+        return qsa.qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget)
+
+
+class QsaAttend:
+    def __init__(self, ctx, *, heads: int, kv_heads: int, head_dim: int, ratio: int, width: int, page: int,
+                 layout: str, q_dtype: str, kv_dtype: str) -> None:
+        self.ratio = ratio
+
+    def __call__(self, q, kv, blocks, table, seq, positions, gate=None):
+        return qsa.qsa_attend(q, kv, blocks, table, seq, positions, gate, self.ratio)
+
+
+class PleRows:
+    def __init__(self, ctx, *, ngram: int, heads_per_ngram: int, eos: int) -> None:
+        self.facts = ngram, heads_per_ngram, eos
+
+    def __call__(self, ids, history, slots, query_start, has_init, multipliers, sizes, offsets):
+        return ple.ple_rows(ids, history, slots, query_start, has_init, multipliers, sizes, offsets, *self.facts)
+
+
+class PleBlock:
+    def __init__(self, ctx, *, streams: int, hidden: int, kernel: int, dilation: int, eps: float, dtype: str) -> None:
+        self.streams, self.dilation, self.eps = streams, dilation, eps
+
+    def __call__(self, key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init):
+        return ple.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init,
+                             self.streams, self.dilation, self.eps)
 
 
 BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul": SiluMul,
@@ -401,4 +463,6 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "expert_fetch": ExpertFetch, "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
          "moe_patch_rows": MoePatchRows, "moe_tiers": MoeTiers,
          "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
-         "gdn_rewind": GDNRewind, "kv_write": KvWrite}
+         "gdn_rewind": GDNRewind, "kv_write": KvWrite, "hc_gr_mix": HcMix, "hc_gr_combine": HcCombine,
+         "qsa_index": QsaIndex, "qsa_select": QsaSelect, "qsa_attend": QsaAttend, "qwen4_exp.ple_rows": PleRows,
+         "qwen4_exp.ple_block": PleBlock}

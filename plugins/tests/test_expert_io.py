@@ -36,6 +36,7 @@ from holon_std.moe.kernels import (
 
 E, K, ROLES = 128, 8, 2
 pytestmark = pytest.mark.l0
+PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
 VARIANTS = {"lfu": ("score",), "lru": ("last", "clock")}
 
@@ -237,6 +238,22 @@ def test_resolve_variants_match_their_oracles(plugins, device, policy, sources, 
             row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
             assert want["fetch"][r, 1, row].item() == source[r]                  # gathered straight into its slot
     assert len(admitted) == len(records)
+    if getattr(resolve, "splits", False):     # `split`: the same call, the fetched entries' slots apart
+        dev = {name: t.clone().to(device) for name, t in (case | state | {"stage": stage}).items()}
+        words = [torch.zeros(1, dtype=torch.int32, device=device) for _ in range(2)]
+        delta, n_delta = _log(capacity, 2, device)
+        hits, _, _, _, miss = resolve(dev["ids"], dev["kinds"], dev["residency"], dev["host"], dev["limits"],
+                                      dev["counts"], torch.zeros(E, dtype=torch.int32, device=device), dev["ring"],
+                                      dev["stage"], dev["empty"], dev["n_empty"], *words, delta, n_delta, 3, plan,
+                                      jobs, split=True, **{n: dev[n] for n in state})
+        null = torch.arange(K, dtype=torch.int32).expand(ROLES, tokens, K)
+        hits, miss = hits.cpu(), miss.cpu()
+        assert ((hits == null) | (miss == null)).all()
+        assert torch.equal(torch.where(miss != null, miss, hits), want["slots"])
+        for r in range(ROLES):                # the misses' slots are the fetch's destinations, the hits' never
+            dst = set(want["fetch"][r, 1, :int(want["n_fetch"][r])].tolist())
+            assert set(miss[r][miss[r] != null[r]].tolist()) <= dst
+            assert not set(hits[r].flatten().tolist()) & (dst - {-1})
 
 
 def _lfu_call(plugins, device: str, ids, kinds, resident: dict[int, int], score: dict[int, float]) -> dict:
@@ -343,6 +360,25 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, dst)
     assert torch.equal(dst.cpu(), want)
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
+    if hasattr(fetch_, "gather_roles"):         # both roles in one launch: each its own list, units and slots
+        dst2 = torch.randint(0, 256, (K + staging + 30, unit + 16), dtype=torch.uint8, generator=g)
+        data2 = torch.randint(0, 256, (10, unit + 16), dtype=torch.uint8, generator=g)
+        units2 = torch.tensor([[3, 8, 1, 4, 6, 9], [K + 2, K, K + 7, K + 9, K + 1, K + 6]], dtype=torch.int32)
+        want2 = reference.expert_fetch(units2, 6, data2, dst2.clone())
+        first = reference.expert_fetch(units, 2, data, dst.cpu())
+        d2 = dst2.to(device)
+        fetch_.gather_roles(torch.stack([units, units2]).to(device), torch.tensor([2, 6], dtype=torch.int32,
+                            device=device), [src, data2.to(device)], [dst, d2])
+        assert torch.equal(dst.cpu(), first) and torch.equal(d2.cpu(), want2)
+        if getattr(fetch_, "parts", False):    # a pipelined pass's fetch, part by part: the same slots in the end
+            d2 = torch.zeros_like(dst2).to(device)
+            for i in range(4):
+                fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                    [data2.to(device)], [d2], part=i, parts=4)
+                if i == 1:                     # parts of ⌈6 / 4⌉ = 2 entries: the first two parts, four of them
+                    assert torch.equal(d2[units2[1, :4].long()].cpu(), data2[units2[0, :4].long()])
+                    assert not d2[units2[1, 4:].long()].any()
+            assert torch.equal(d2[units2[1].long()].cpu(), data2[units2[0].long()])
 
 
 def test_prefetch_is_selected_for_its_copy_mode():

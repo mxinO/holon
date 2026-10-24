@@ -3588,9 +3588,10 @@ process, which replaces §6's per-change propagation and the release's re-checks
 - **Propagation runs at a release or a milestone's close only**, one round covering everything merged since; between
   rounds a merge may outdate locks (`holon serve` then says so and serves another class's current lock or the
   defaults). A release tag is always propagated. A change lists the locks it outdates (`holon_tools impact
-  <base>..HEAD`). **Open (for the owner):** the defaults select no grammar processor, which every lock does, so
-  between rounds `main` refuses structured outputs (`response_format`, strict tools) with a 400 on a model whose
-  locks are all outdated — the real-client smoke met it (it now selects the processor itself).
+  <base>..HEAD`). The defaults take `plans/defaults.toml` (by hand, checked by `check_locks.py`), which selects the
+  grammar processor every lock selects (lead, 2026-10-21): without it, structured outputs (`response_format`,
+  strict tools) failed with a 400 between rounds on a model whose locks were all outdated, as the real-client smoke
+  found.
 - **A byte-identical trace advances a code change without a human.** `propagate` runs the snapshot trace twice; when
   only code pins changed (`commit`, `uv_lock`, units), both runs are identical and equal to the predecessor lock's
   trace, and no uncovered site changed, it appends the lock without L2 and without an approval. Any other change (engine
@@ -3599,6 +3600,11 @@ process, which replaces §6's per-change propagation and the release's re-checks
   against the goldens and floors already recorded — never a new fp32 or CPU golden — and takes one approval.
   `--snapshot-runs 3` asks for a third identical run, for race-prone features (it replaces the separate `holon_judge
   snapshot --runs 3`, which stays available).
+- **Locks pin only output-affecting code** (`src` scheme 2, `tools/README.md`): comments, docstrings, formatting,
+  tests, docs and examples never outdate a lock, in `src` or `sem`. The same change scores the snapshot trace's long
+  prefix-hit request (two tokens, top-5 logprobs: its prefill and one decode step at ≈ 2,065 tokens of context), so
+  long-context and chunked-prefill numerics reach the trace bits; every snapshot re-records once, in the round that
+  re-pins scheme 2.
 
 **Checks.**
 
@@ -3613,6 +3619,7 @@ process, which replaces §6's per-change propagation and the release's re-checks
 | release bars (`bench/bars.py`) | 3 rounds |
 | perf smoke (`bench/perf_smoke.py`) | per change: batch-1 decode against main's build, 3 ABBA rounds on one card, each arm asserted to import its own tree, clock-screened (2.3 min on an RTX A5000 with Qwen3-8B Q4_K_M) |
 | real-client smoke (`bench/client_smoke.py`) | at each merge: `holon serve` on a small locked model driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes (under a minute on an RTX A5000 with Qwen3-8B Q4_K_M; a planted Anthropic `stop_reason` bug fails it) |
+| tiny-model proofs that need another environment (FN's acceptance 1(a): `models.qwen4_exp` against HF's `qwen4_exp`) | at a release, and for a change to `models.qwen4_exp`, its std units or kernels: in the golden venv (transformers 5.19.0), `python -m holon_testing.qwen4exp_files --out <dir> --llama <llama.cpp 27c7a76> --strata <Strata 296b59d>`, then `pytest plugins/tests/test_fn_oracles.py judge/tests/test_golden_qwen4exp.py` there (`FN_LLAMA_CPP` set) and `FN_TINY_GGUF=<dir>/tiny-qwen4exp-f32.gguf pytest plugins/tests/test_qwen4_exp_cpu.py` in the dev env; elsewhere they skip with a warning naming this |
 
 **pytest.** A dev run (`pytest`) leaves out the tests marked `slow` (over ≈ 8 s: spawned servers, conversions,
 end-to-end CLIs, bounded and tier judges) and `model` (a real checkpoint from the Hugging Face cache); the pre-merge

@@ -1,0 +1,17 @@
+[plugin]
+name = "testing.toy_streams"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "drafter"
+license = "Apache-2.0"
+core_abi = ">=1.5,<2.0"
+
+[resources]
+provides = ["drafter.toy_streams@1", "unit.toy.wide_embed@1", "unit.toy.wide_norm@1", "unit.toy.wide_block@1",
+            "unit.toy.planned_block@1", "unit.toy.running_sum@1"]
+
+[properties]
+numerics = "exact"
+
+[dependencies]
+python = ["torch"]

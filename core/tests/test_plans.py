@@ -22,13 +22,23 @@ def test_src_hash_is_content_only(tmp_path):
     (unit / "a.py").write_text("x = 1\n")
     (unit / "sub" / "b.py").write_text("y = 2\n")
     first = plans.src_hash(unit)
-    assert first.startswith("sha256:")
-    # caches, build products and hidden files are not source
+    assert first.startswith("src2:sha256:")
+    # caches, build products, hidden files and *.md are not source, nor the unit's own tests, docs and examples
     for junk in ("__pycache__/a.cpython-312.pyc", "build/lib/a.py", "x.egg-info/PKG-INFO", ".hidden/f", "k.so",
-                 "sub/c.pyc"):
+                 "sub/c.pyc", "sub/notes.md", "tests/t.py", "test_b.py", "conftest.py", "docs/d.txt", "examples/e.py",
+                 "README.md"):
         (unit / junk).parent.mkdir(parents=True, exist_ok=True)
         (unit / junk).write_text("junk")
     assert plans.src_hash(unit) == first
+    (unit / "sub" / "tests").mkdir()                       # below the top level (a vendored tree's), they are code
+    (unit / "sub" / "tests" / "t.py").write_text("z = 1\n")
+    assert plans.src_hash(unit) != first
+    shutil.rmtree(unit / "sub" / "tests")
+    (unit / "a.py").write_text("def f(:\n")                # a file that does not parse counts by its bytes
+    broken = plans.src_hash(unit)
+    (unit / "a.py").write_text("def f(: \n")
+    assert plans.src_hash(unit) != broken
+    (unit / "a.py").write_text("x = 1\n")
     copy = tmp_path / "installed" / "unit"                 # an installed copy elsewhere hashes the same
     shutil.copytree(unit, copy)
     assert plans.src_hash(copy) == first
@@ -38,6 +48,23 @@ def test_src_hash_is_content_only(tmp_path):
     assert plans.src_hash(unit) == first
     (unit / "sub" / "b.py").rename(unit / "b.py")           # paths count, not only contents
     assert plans.src_hash(unit) != first
+
+
+@pytest.mark.parametrize("edit, same", [
+    ('"""Module."""\nclass C:  # why\n    """Doc."""\n    x = 1\n'
+     'def f(a):\n    "Doc."\n    return (a +\n            1)\n', True),
+    ("class C:\n    x = 1\ndef f(a):\n    return a + 2\n", False),
+    ("class C:\n    x = 1\n    'not a docstring'\ndef f(a):\n    return a + 1\n", False),
+])
+def test_python_src_is_its_syntax_tree_without_docstrings(tmp_path, edit, same):
+    """Comments, docstrings and formatting never outdate a lock, in `src` or in `sem` (the reference module); code
+    does."""
+    (tmp_path / "u.py").write_text("class C:\n    x = 1\ndef f(a):\n    return a + 1\n")
+    unit = types.SimpleNamespace(path=tmp_path, manifest=types.SimpleNamespace(version="1", reference="u"))
+    first = plans.unit_pin(unit)
+    (tmp_path / "u.py").write_text(edit)
+    pin = plans.unit_pin(unit)
+    assert (pin.src == first.src) is same and (pin.sem == first.sem) is same
 
 
 # -- `holon serve` from the lock (release design D2) -----------------------------------------------------------------
@@ -57,10 +84,12 @@ def _lock(root, model_id, cls="rtx-4090/cu130-torch2.11", src="s1", sm=89):
 def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, case):
     """Found by the build alone (the file downloaded under another name); flags over the lock, dict flags per key and
     `key=` deleting one; the lock's pins as preferences; defaults first in the history, at SERVE_MAX_SEQS and the
-    model's `auto` length; a history that cannot be read is warned about and defaults serve. `holon models` shows the
+    model's `auto` length, with `defaults.toml`'s settings under the flags; a history that cannot be read is warned
+    about and defaults serve. `holon models` shows the
     same verdict per model, and a repository reference names the one model under it locked for this card (an existing
     local path stays a path)."""
     written = None
+    (tmp_path / "defaults.toml").write_text('slots = { logits_processor = "toy" }\nmax_seqs = 2\n')
     if case != "none":
         written = _lock(tmp_path, f"org/repo/Qwen3-8B-Q4_K_M@{BUILD}", **{
             "borrowed": {"cls": "rtx-5080/cu130-torch2.11", "sm": 120}, "outdated": {"src": "s0"}}.get(case, {}))
@@ -96,11 +125,11 @@ def test_serve_starts_from_the_lock_of_its_build(tmp_path, capsys, monkeypatch, 
         return
     flags = {"plugin_options": {"b": "", "c": "3"}, "kernels": {"rope": "x"}, "max_seqs": 4} if case == "flags" else {}
     model = types.SimpleNamespace(trained_context=lambda cfg, kind: cfg["n"]) if case == "none" else object()
-    history = cli.serve_history("m", flags, found, cli.auto_context(model, source))
+    history = cli.serve_history("m", flags, found, cli.auto_context(model, source), cli.serve_defaults(tmp_path))
     defaults = history[0][0]
     assert history[0][1] is None and defaults.clamp_context and defaults.kernel_preferences == {}
     assert defaults.max_model_len == (1000 if case == "none" else cli.AUTO_CONTEXT)
-    assert defaults.max_seqs == (4 if case == "flags" else cli.SERVE_MAX_SEQS)
+    assert defaults.max_seqs == (4 if case == "flags" else 2) and defaults.slots == {"logits_processor": "toy"}
     if case in ("outdated", "none"):                            # an outdated lock is a missing one (design §4.4)
         assert found is None and len(history) == 1
         return

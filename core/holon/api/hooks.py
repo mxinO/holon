@@ -9,6 +9,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
+    import contextlib
+
     import numpy as np
     import torch
 
@@ -42,13 +44,15 @@ class AdoptsWeights(Protocol):
 class DeclaresState(Protocol):
     @classmethod
     def state_specs(cls, params: Mapping[str, Any], layers: tuple[int, ...], ctx: BuildCtx) -> list[StateSpec]:
-        """The state the mixer keeps for `layers`; without it, none."""
+        """The state the mixer keeps for `layers`; without it, none. The target's block may declare it too, over all
+        layers (`ModelSpec.block`); only the target's mixers and block, and auxiliary models' mixers, are bound."""
 
 
 class PlansState(Protocol):
     @classmethod
     def planner(cls, params: Mapping[str, Any], specs: list[StateSpec], ctx: BuildCtx) -> Planner:
-        """The group's planner (without it, the core's `Pages`). With the deployment option `planner.device_lens` (a
+        """The group's planner (without it, the core's `Pages`, whose steps no CUDA graph captures; a block's Slot
+        state must have one). With the deployment option `planner.device_lens` (a
         drafter's sub-steps) every batch it plans has its lengths on the device only: it must choose kernels that read
         them there, or declare `needs_host_lens` (the build then fails)."""
 
@@ -197,6 +201,18 @@ class EditsBeforeLaunch(Protocol):
         stream order. It returns them and enqueues no device work itself: what consumes the writes runs in the forward
         (e.g. a unit's apply kernel). An edit decided at the commit of step c applies at launch c + 2 on every path: a
         commit always precedes the launch two steps after it."""
+
+
+class ActivationLender(Protocol):
+    def lend_activations(self, peak: int) -> int:
+        """Once, at the startup profile, with the activation peak of the worst-case step (`max_step_tokens` prompt
+        tokens): the prompt tokens from which the object lends a step's activations `peak` bytes of its own memory (0:
+        none). The engine then reserves only the peak of the worst step below that size."""
+
+    def activations(self, step: BatchPlan) -> contextlib.AbstractContextManager | None:
+        """At an eager step's launch (after `before_launch`): a context its forward runs in, every device allocation
+        of the launching thread from the loan, or None where the step does not borrow. Nothing allocated in it may
+        outlive the step: the lender checks that at its next launch, and raises."""
 
 
 class ObservesCommits(Protocol):

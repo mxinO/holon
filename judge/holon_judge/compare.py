@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from collections.abc import Sequence
 
 import torch
 
@@ -85,6 +86,8 @@ class Result:
     failures: tuple[str, ...] = ()
     dppl_vs_floor: tuple[float, float] | None = None   # the candidate's ΔPPL against the floor, its SE
     drafter: dict | None = None    # the L0-drafter rule's numbers (`compare_drafter`): its verdict replaces L2's
+    others: tuple[tuple[str, Metrics, Budgets, tuple[float, float]], ...] = ()   # floors past the first: (path, …)
+    floor_path: str | None = None  # with several floors, the first one's path (its rows say which)
 
     @property
     def passed(self) -> bool | None:
@@ -100,16 +103,24 @@ class Result:
                f"{'KL max':>9s} {'ΔPPL ± SE':>17s} {'missing':>7s}"
         rows = [head, _row("overall", self.overall)]
         if self.floor is not None:
-            rows.append(_row("floor", self.floor))
+            rows.append(_row(f"floor {self.floor_path}" if self.floor_path else "floor", self.floor))
         if self.dppl_vs_floor is not None:
             d, se = self.dppl_vs_floor
-            rows.append(f"{'vs floor':10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} "
-                        f"{f'{d:+.3%} ± {se:.3%}':>17s}")
+            vs = "vs " + (self.floor_path or "floor")
+            rows.append(f"{vs:10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} {f'{d:+.3%} ± {se:.3%}':>17s}")
         if self.budgets is not None:
             b = self.budgets
             rows.append(f"{'budget':10s} {'':6s} {'≥' + format(b.top1_min, '.3%'):>8s} {'':10s} "
                         f"{'≤' + format(b.kl_p50_max, '.2e'):>9s} {'≤' + format(b.kl_p99_max, '.2e'):>9s} "
                         f"{'':9s} {'≤' + format(b.dppl_max, '.3%'):>17s}")
+        for path, m, b, (d, se) in self.others:
+            rows += [_row(f"floor {path}", m), f"{'vs ' + path:10s} {'':6s} {'':8s} {'':10s} {'':9s} {'':9s} {'':9s} "
+                     f"{f'{d:+.3%} ± {se:.3%}':>17s}",
+                     f"{'budget':10s} {'':6s} {'≥' + format(b.top1_min, '.3%'):>8s} {'':10s} "
+                     f"{'≤' + format(b.kl_p50_max, '.2e'):>9s} {'≤' + format(b.kl_p99_max, '.2e'):>9s} "
+                     f"{'':9s} {'≤' + format(b.dppl_max, '.3%'):>17s}"]
+        if self.others:
+            rows.append("calls: " + ", ".join(f"{k} {n}" for k, n in (self.candidate.get("calls") or {}).items()))
         rows += [_row(name, m) for name, m in self.categories.items()]
         if (d := self.drafter) is not None:
             rows += [f"L0-drafter (§5, §12): {d['n_confident']} of {d['n']} positions confident (top-1 margin > "
@@ -212,12 +223,8 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     LM head's calls (`head_calls`) may take either path — its rows are the prompt-logprob slices and the sampled
     rows, not the step's — but must take the floor's mode. A recording made before M0.6 counted expert calls by path
     (`expert_calls`), all q8_1."""
-    if floor.get("kv") != cand.get("kv"):
-        return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
-                f"{cand.get('kv') or 'the model dtype'}"]
-    if floor.get("cpu_split") != cand.get("cpu_split"):     # F5b: the floor is path-aware for exactly that split
-        return [f"the floor's CPU split is {floor.get('cpu_split') or 'none'}, the candidate's "
-                f"{cand.get('cpu_split') or 'none'}"]
+    if settings := _setting_failures(floor, cand):
+        return settings
     if not floor.get("q8_1"):                    # A16: the floor quantizes no activations, so no call may either
         counted = [*(cand.get("calls") or {}).items(), *(cand.get("head_calls") or {}).items()]
         return [f"{n} calls on {k}, the floor quantizes no activations (bf16 only)" for k, n in counted
@@ -241,6 +248,38 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
         for k, n in (cand.get("head_calls") or {}).items() if n and k.split("/")[1] != want.split("/")[1]]
 
 
+def _setting_failures(floor: dict, cand: dict) -> list[str]:
+    """The settings a floor emulates whatever its path: the KV format and F5b's CPU split."""
+    if floor.get("kv") != cand.get("kv"):
+        return [f"the floor's KV format is {floor.get('kv') or 'the model dtype'}, the candidate's "
+                f"{cand.get('kv') or 'the model dtype'}"]
+    if floor.get("cpu_split") != cand.get("cpu_split"):     # F5b: the floor is path-aware for exactly that split
+        return [f"the floor's CPU split is {floor.get('cpu_split') or 'none'}, the candidate's "
+                f"{cand.get('cpu_split') or 'none'}"]
+    return []
+
+
+def _paths_failures(floors: list[dict], cand: dict) -> list[str]:
+    """Several floors, each emulating one kernel path (`q8_1` mmq or mmvq) in one activation mode: a deployment whose
+    calls take both (an offload store's short passes beside its long ones) is checked against each of them
+    (`compare`), so every counted call must take a path one of them emulates, in their mode, and some must."""
+    if any(f.get("q8_1") not in ("mmq", "mmvq") for f in floors):
+        return ["several floors: each must emulate one kernel path (q8_1 mmq or mmvq)"]
+    if len({f["q8_1"] for f in floors}) < len(floors):
+        return ["several floors of one kernel path: one floor per path"]
+    if len(modes := {f.get("act") or "q8_1" for f in floors}) > 1:
+        return [f"several floors in different modes: {sorted(modes)}"]
+    mode = modes.pop()
+    covered = sorted({f"{f['q8_1']}/{mode}" for f in floors})
+    failures = list(dict.fromkeys(m for f in floors for m in _setting_failures(f, cand)))
+    calls = cand.get("calls") or {f"{path}/q8_1": n for path, n in (cand.get("expert_calls") or {}).items()}
+    return failures + ([] if any(calls.get(c) for c in covered) else [f"no calls counted on {', '.join(covered)}"]) + [
+        f"{n} calls on {k}, no floor emulates it ({', '.join(covered)})" for k, n in calls.items()
+        if n and k not in covered] + [
+        f"{n} LM-head calls on {k}, the floors' mode is {mode}"
+        for k, n in (cand.get("head_calls") or {}).items() if n and k.split("/")[1] != mode]
+
+
 def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[float, float]:
     """The candidate's perplexity change against the floor's at the same positions, exp(mean(NLL_c − NLL_f)) − 1,
     and its standard error with sequences as clusters (the ratio estimator `_summarize` uses for ΔPPL)."""
@@ -254,23 +293,33 @@ def paired_dppl(golden: Recording, cand: Recording, floor: Recording) -> tuple[f
     return math.expm1(mean), se * math.exp(mean)
 
 
-def compare(golden: Recording, cand: Recording, floor: Recording | None = None,
+def compare(golden: Recording, cand: Recording, floor: Recording | Sequence[Recording] | None = None,
             ceiling: float | None = None) -> Result:
     """The L2 check. Without a floor only the metrics are reported; with one, budgets and a verdict: the path and mode
-    check first (a run scored against another mode's floor fails whatever its numbers), then the budgets. `ceiling`:
-    Tier A's sanity ceiling on KL p99 (fp32 throughout, M0.2 §4.6), also checked."""
+    check first (a run scored against another mode's floor fails whatever its numbers), then the budgets. Several
+    floors, each of one kernel path (`_paths_failures`), judge a deployment whose calls take those paths: it must pass
+    every floor's budgets (the first one's in the result's floor fields, the others' in `others`). `ceiling`: Tier A's
+    sanity ceiling on KL p99 (fp32 throughout, M0.2 §4.6), also checked."""
+    floors = [floor] if isinstance(floor, Recording) else list(floor or ())
     overall, categories = metrics(golden, cand)
-    floor_m = budgets = paired = None
+    judged = []
+    for f in floors:
+        f_m, paired = metrics(golden, f)[0], paired_dppl(golden, cand, f)
+        budgets = Budgets.from_floor(f_m, paired[1])
+        judged.append((f.meta.get("q8_1") or "-", f_m, budgets, paired))
     failures: list[str] = []
-    if floor is not None:
-        floor_m = metrics(golden, floor)[0]
-        paired = paired_dppl(golden, cand, floor)
-        budgets = Budgets.from_floor(floor_m, paired[1])
-        failures = _path_failures(floor.meta, cand.meta) + budgets.failures(overall, paired[0])
+    if len(floors) == 1:
+        failures = _path_failures(floors[0].meta, cand.meta)
+    elif floors:
+        failures = _paths_failures([f.meta for f in floors], cand.meta)
+    for path, _, budgets, paired in judged:
+        failures += [m if len(floors) == 1 else f"against the {path} floor: {m}"
+                     for m in budgets.failures(overall, paired[0])]
     if ceiling is not None and overall.kl_p99 > ceiling:
         failures.append(f"KL p99 {overall.kl_p99:.3e} > the sanity ceiling {ceiling:.0e}")
-    return Result(_provenance(golden), _provenance(cand), overall, categories, floor_m, budgets, tuple(failures),
-                  paired)
+    first = judged[0][1:] if judged else (None, None, None)
+    return Result(_provenance(golden), _provenance(cand), overall, categories, first[0], first[1], tuple(failures),
+                  first[2], others=tuple(judged[1:]), floor_path=judged[0][0] if len(judged) > 1 else None)
 
 
 def _logit_shift(golden: Recording, floor: Recording) -> torch.Tensor:

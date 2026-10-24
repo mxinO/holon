@@ -474,10 +474,13 @@ class QEmbedding:
 
 
 class LinearExperts(_Matmul):
-    def __init__(self, ext: Extension, act: dict[str, str], ctx, **facts) -> None:
+    def __init__(self, ext: Extension, act: dict[str, str], ctx, arena: bool = False, **facts) -> None:
         super().__init__(ext, act, ctx, facts)
         self.ext, self.rows_per_token = ext, facts["rows_per_token"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
+        # over an arena, slots below top_k are null slots (zero weights, std.moe.kernels): mmvq stores their entries'
+        # zeros without reading them (a pass of the resident entries, or of the fetched ones, costs its own work only)
+        self.null_slots = self.top_k if arena else 0
         self.out_y = self.out // 2 if self.swiglu else self.out
         # llama.cpp's choice per chunk from its token count (fixed per graph bucket): mmvq with ids, else mmq
         self.mmvq_tokens = max((n for n in range(1, 9) if self.lib.use_mmvq_id(self.device, self.type, n)), default=0)
@@ -494,13 +497,15 @@ class LinearExperts(_Matmul):
         # a device int32 word, or'd with ID_ERRORS bits by every mmq call with ids (the rows a violation names are not
         # computed; mmvq with ids does not check), one per build context, zero until a violation; the reader zeroes it
         self.errors = ctx.static("ggml_cuda.id_errors", (1,), torch.int32)
-        # The persistent id workspace holds every call's id maps and q8_1 activations, up to `pass_rows` rows: one per
-        # `in` (the 5080 offload lock's prefill pays 0.2% when a call's come from a buffer gate/up and down share, the
-        # caller's `scratch`, or a fresh one: docs/v1-moe-prefill.md §10 L3-2). Its size depends on in, k (the id maps,
-        # the activations per slot), E (expert_bounds) and the rows: all four name it.
+        # The persistent id workspace holds the mmvq calls' id maps and q8_1 activations (up to `mmvq_tokens` rows): one
+        # per `in`. An mmq call's take a part of the caller's `scratch` past gate/up's output (an offload store's lent
+        # tail in a streaming step: FN step 7, its 4,096-row workspaces were 120 MiB of statics), or a fresh buffer:
+        # docs/v1-moe-prefill.md §10 L3-2 measured that at 0.2% of the 5080 offload lock's prefill. Its size depends
+        # on in, k (the id maps, the activations per slot), E (expert_bounds) and the rows: all four name it.
+        rows = max(1, self.mmvq_tokens)
         self.workspace = ctx.workspace(
-            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={self.pass_rows}]",
-            self.lib.workspace_bytes_id(self.device, self.k, self.pass_rows, self.top_k, self.slots))
+            f"ggml_cuda.id[in={self.k},top_k={self.top_k},experts={self.experts},rows={rows}]",
+            self.lib.workspace_bytes_id(self.device, self.k, rows, self.top_k, self.slots))
         self.f32 = self._f32_workspace(ctx, self.pass_rows * facts["rows_per_token"], facts["act_dtype"])
         # prepared inputs (`MoeRouter.route_prepare`): QLinear's buffer for this `in`, the same generations
         self.q8_1 = ctx.workspace(f"ggml_cuda.q8_1[in={self.k}]", q8_1_bytes(MMVQ_MAX, self.k))
@@ -531,8 +536,26 @@ class LinearExperts(_Matmul):
     def scratch_bytes(self, tokens: int) -> int:
         """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/v1-moe-prefill.md D10): its mmq
         launches' transient, one launch at a time: gate/up's f32 output before our SwiGLU (none where D4's store
-        applies SwiGLU; the id maps and q8_1 rows are the persistent workspace's); 0 where it runs mmvq only."""
-        return self._gate_up_bytes(self._mmq_rows(tokens))
+        applies SwiGLU), then the launch's id maps and q8_1 rows; 0 where it runs mmvq only."""
+        rows = self._mmq_rows(tokens)
+        return self._gate_up_bytes(rows) + self._id_bytes(rows)
+
+    def _id_bytes(self, rows: int) -> int:
+        """An mmq launch's id workspace of `rows` rows (0: none)."""
+        if not rows:
+            return 0
+        nbytes = self.lib.workspace_bytes_id(self.device, self.k, rows, self.top_k, self.slots)
+        return -(-nbytes // POOL_ALIGN) * POOL_ALIGN
+
+    def _id_workspace(self, tokens: int, scratch: torch.Tensor | None) -> torch.Tensor | None:
+        """The mmq launches' id workspace: `scratch` past gate/up's output, or a fresh buffer (None: mmvq only)."""
+        rows = self._mmq_rows(tokens)
+        if not (nbytes := self._id_bytes(rows)):
+            return None
+        at = self._gate_up_bytes(rows)
+        if scratch is not None and scratch.numel() >= at + nbytes:
+            return scratch[at:at + nbytes]
+        return torch.empty(nbytes, dtype=torch.uint8, device=self.workspace.device)
 
     def _gate_up_bytes(self, rows: int) -> int:
         return -(-rows * self.top_k * self.out * 4 // POOL_ALIGN) * POOL_ALIGN if self.swiglu and not self.glu_store \
@@ -585,43 +608,46 @@ class LinearExperts(_Matmul):
             if tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), x, ids, y, self.swiglu, gate_scale,
-                                 up_scale, self.workspace, xq=xq)
+                                 up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
             return y
         self._check_buffers(x, tokens, out, scratch)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
         gate_up = self._gate_up_out(tokens, x.device, scratch)
+        ws = self._id_workspace(tokens, scratch)
         for start, end in calls(tokens, self.pass_rows):
             xs, ids_c, ys = x[start:end], ids[start:end], y[start:end]
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
-                                 gate_scale, up_scale, self.workspace, xq=xq)
+                                 gate_scale, up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
                 continue
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
-                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, ws, self.slots, self.errors,
                                 self.ids_j_tokens)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
             if self.glu_store:
-                self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, self.workspace, self.slots, self.errors,
+                self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, ws, self.slots, self.errors,
                                     gate_scale, up_scale, self.ids_j_tokens)
                 continue
-            self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], self.workspace, self.slots,
+            self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], ws, self.slots,
                             self.errors, self.ids_j_tokens)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
 
     @staticmethod
     def _scale_slots(y: torch.Tensor, scale: torch.Tensor, ids: torch.Tensor) -> None:
-        """y [T, k, out] *= the scale of each slot's expert (a device gather: graph-safe)."""
-        y.mul_(scale[ids][..., None])
+        """y [T, k, out] *= the scale of each slot's expert (a device gather: graph-safe); a −1 entry's row × 1, so
+        untouched (the contract: rows another call of the pass wrote)."""
+        y.mul_(torch.where(ids >= 0, scale[ids.clamp_min(0)], 1.0)[..., None])
 
     def _swiglu(self, gate_up: torch.Tensor, y: torch.Tensor, gate_scale, up_scale, ids: torch.Tensor) -> None:
-        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any)."""
-        self.lib.swiglu(gate_up, y, gate_scale, up_scale, None if up_scale is None else ids.view(-1))
+        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any); rows of −1
+        entries untouched."""
+        self.lib.swiglu(gate_up, y, gate_scale, up_scale, ids.reshape(-1))
 
 
 class MoeTopk:
@@ -650,7 +676,7 @@ class MoeRouter:
     workspace, its tile counters a static buffer each call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
-                 dtype: str) -> None:
+                 dtype: str, router_dtype: str = "float32") -> None:
         self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
         self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize)
         self.rows = self.lib.moe_router_rows()
@@ -666,7 +692,7 @@ class MoeRouter:
         if len(x) >= CHUNK and self.prefill:
             return self.topk(self._logits(x, router))
         if not 0 < len(x) <= self.rows:
-            return self.topk(torch.nn.functional.linear(x.float(), router))
+            return self.topk(torch.nn.functional.linear(x.float(), router.float()))
         x = x.contiguous()
         if x.data_ptr() % 16:                                # the kernel's vector loads
             x = x.clone()
@@ -741,7 +767,8 @@ def _supports_moe_topk(f: dict) -> bool:
 
 
 def _supports_moe_router(f: dict) -> bool:
-    return _supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+    return (_supports_moe_topk(f) and f["top_k"] <= 32 and f["hidden"] % 512 == 0 and f["dtype"] in DTYPES
+            and f.get("router_dtype", "float32") in ("float32", "bfloat16"))
 
 
 def _supports_moe_combine(f: dict) -> bool:
@@ -764,7 +791,8 @@ class Plugin:
             for op, impl, supports in ((QLINEAR, QLinear, _supports_qlinear),
                                        (QLINEAR_GLU, QLinearGlu, _supports_qlinear_glu),
                                        (LINEAR_EXPERTS, LinearExperts, _supports_linear_experts),
-                                       (LINEAR_EXPERTS_ARENA, LinearExperts, _supports_linear_experts)):
+                                       (LINEAR_EXPERTS_ARENA, functools.partial(LinearExperts, arena=True),
+                                        _supports_linear_experts)):
                 add(op, functools.partial(impl, ext, act),
                     functools.partial(supports, act_quant=act_quant, types=types), sms, priority, act)
         add(QEMBEDDING, functools.partial(QEmbedding, ext), _supports_qembedding)

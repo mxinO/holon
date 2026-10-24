@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 from holon.api import Binding, Lock, Plan, UnitPin
+from holon.core import plans
 from holon_tools import impact, locks
 from holon_tools.__main__ import main
 
@@ -39,6 +40,14 @@ def test_names_paths_and_ranges(repo):
     assert impact.changed_units([str(repo / "core")], dirs, repo) == {"holon"}
     assert impact.changed_units([str(repo / ".git")], dirs, repo) == set()               # exists, in no unit
     assert impact.changed_units(["HEAD.."], dirs, repo) == set()
+    # a range compares `src` pins, read from git as from a checkout: comments and docs touch no unit
+    (repo / "std/a/x.py").write_text("x = 1  # why\n")
+    (repo / "std/a/README.md").write_text("doc\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "three")
+    assert impact.changed_units(["HEAD~1..HEAD"], dirs, repo) == set()
+    assert impact.changed_units(["HEAD~2..HEAD"], dirs, repo) == {"kern.b", "outside"}
+    assert impact._src(repo, "HEAD", repo / "std") == plans.src_hash(repo / "std")
     with pytest.raises(ValueError, match="unknown revision"):
         impact.changed_units(["nope..HEAD"], dirs, repo)
     with pytest.raises(ValueError, match="not an installed unit"):

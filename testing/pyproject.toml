@@ -4,7 +4,9 @@ version = "0.1.1"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Test-only plugins for Holon (installed in the development environment, never with Holon)"
-dependencies = ["holonlm", "holonlm-std", "gguf", "safetensors", "transformers",
+dependencies = ["holonlm", "holonlm-std", "holonlm-judge",  # qwen4exp_files: the judge's tie rule (FN D2)
+                "holonlm-plugins",  # ref_kernels: models.qwen4_exp's PLE oracles (D13′: in the model plugin)
+                "gguf", "safetensors", "transformers",
                 "compressed-tensors==0.17.0"]  # hf_quant_files: its fixtures quantized by its own code (M0.6)
 
 [project.entry-points."holon.plugins"]
@@ -12,6 +14,7 @@ dependencies = ["holonlm", "holonlm-std", "gguf", "safetensors", "transformers",
 "testing.gguf_dense" = "holon_testing.gguf_dense"
 "testing.toy_mask" = "holon_testing.toy_mask"
 "testing.toy_tier" = "holon_testing.toy_tier"
+"testing.toy_streams" = "holon_testing.toy_streams"
 
 [build-system]
 requires = ["hatchling"]

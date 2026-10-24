@@ -106,6 +106,227 @@ def replay_off_by_one() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def qsa_select_shift(decode_only: bool) -> Iterator[None]:
+    """QSA (docs/v1-flash-next.md §6.3): every selected complete block b read as its successor b + 1 (still complete;
+    the open block kept), in every sparse step, or with `decode_only` in decode and verify steps only (prefill rows
+    right: L2's teacher-forced prompts never see it, the decode-divergence gate must). Reports how often it fired,
+    eagerly and in graph captures (a captured shift fires on every replay)."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.QSA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        plan = getattr(getattr(ctx, "batch", None), "plan", None)
+        decode = plan is not None and bool(((plan.n_query == 1) | (plan.n_logits == plan.n_query)).all())
+        if decode_only and not decode or getattr(self, "_idx", None) is None:
+            return forward(self, x, ctx)
+        select, ratio = self._select, self.ratio
+
+        def shifted(q, pooled, table, seq, positions):
+            blocks = select(q, pooled, table, seq, positions)
+            complete = ((positions + 1) // ratio).to(blocks.dtype)[:, None]
+            fired[_when()] += 1
+            return torch.where((blocks >= 0) & (blocks < complete), torch.minimum(blocks + 1, complete - 1), blocks)
+        self._select = shifted
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self._select = select
+    with mock.patch.object(units.QSA, "forward", planted):
+        yield
+    print(f"plant qsa-{'decode-' if decode_only else ''}select-shift fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def qsa_pool_rope_last() -> Iterator[None]:
+    """QSA (docs/v1-flash-next.md §6.3): every pooled key rotated at its block's last position ratio·b + ratio − 1, not
+    its first (`qsa_index@1` handed the rope table from row ratio − 1 on). Reports how often it fired."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.QSA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        index = self._index
+
+        def late(k, raw, pooled, table, seq, positions, weight, cos_sin):
+            fired[_when()] += 1
+            index(k, raw, pooled, table, seq, positions, weight, cos_sin[self.ratio - 1:])
+        self._index = late
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self._index = index
+    with mock.patch.object(units.QSA, "forward", planted):
+        yield
+    print(f"plant qsa-pool-rope-last fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def hc_inject_unscaled() -> Iterator[None]:
+    """The gated residual (§6.3): its combine weights 2σ(norm(R)·injectᵀ) without the 1/n (the mix kernel handed
+    n · inject). Reports how often it fired."""
+    from holon_std.hyper import units
+
+    mix, fired = units._HC.mix, collections.Counter()
+
+    def planted(self, r, y_prev=None, w_prev=None):
+        if self.inject is None:
+            return mix(self, r, y_prev, w_prev)
+        fired[_when()] += 1
+        return self._mix(r, self.norm, self.down, self.up, self.inject * self.inject.shape[0], y_prev, w_prev)
+    with mock.patch.object(units._HC, "mix", planted):
+        yield
+    print(f"plant hc-inject-unscaled fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ple_state_not_carried() -> Iterator[None]:
+    """PLE (§6.3): its conv window read as zeros at every prompt chunk's start (`has_init` False for the block on prompt
+    steps; the n-gram history still carried) — chunked prefill differs from one-shot. Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import units
+
+    run, fired = units.PLE._run, collections.Counter()
+
+    def planted(self, r, ids, history, state, slots, query_start, has_init):
+        if len(ids) <= len(slots) * 4:                      # decode and verify steps (at most 1 + 3 rows each)
+            return run(self, r, ids, history, state, slots, query_start, has_init)
+        fired[_when()] += 1
+        block = self._block
+        self._block = lambda *a: block(*a[:-1], torch.zeros_like(a[-1]))
+        try:
+            return run(self, r, ids, history, state, slots, query_start, has_init)
+        finally:
+            self._block = block
+    with mock.patch.object(units.PLE, "_run", planted):
+        yield
+    print(f"plant ple-state-not-carried fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ple_state_bf16() -> Iterator[None]:
+    """PLE (§6.3): its conv history stored in bf16 (the window rounded after every step's block, eagerly and in graph
+    captures). Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import units
+
+    run, fired = units.PLE._run, collections.Counter()
+
+    def planted(self, r, ids, history, state, slots, query_start, has_init):
+        c = run(self, r, ids, history, state, slots, query_start, has_init)
+        fired[_when()] += 1
+        index = slots.long()
+        state[index] = state[index].bfloat16().float()
+        return c
+    with mock.patch.object(units.PLE, "_run", planted):
+        yield
+    print(f"plant ple-state-bf16 fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def shexp_gate_off() -> Iterator[None]:
+    """The shared expert (§6.3, D7): ungated (`swiglu(x)`, its σ(gate · x) dropped), eagerly and in graph captures.
+    Reports how often it fired."""
+    from holon_std.ffn import units
+
+    fired = collections.Counter()
+
+    def planted(self, x):
+        fired[_when()] += 1
+        return units.SwiGLU.forward(self, x)
+    with mock.patch.object(units.GatedSwiGLU, "forward", planted):
+        yield
+    print(f"plant shexp-gate-off fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def mtp_stream0() -> Iterator[None]:
+    """The MTP head (§6.3): its input reads the trunk's stream 0 for every stream (fc_hidden over stream 0 n times) —
+    the drafts worse, the verified outputs unchanged. Reports how often it fired."""
+    from holon_std.spec.mtp_head import units
+
+    input_, fired = units.MTPHCHead._input, collections.Counter()
+
+    def planted(self, embedded, r):
+        fired[_when()] += 1
+        h = self.hidden
+        return input_(self, embedded, r[:, :h].repeat(1, self.n))
+    with mock.patch.object(units.MTPHCHead, "_input", planted):
+        yield
+    print(f"plant mtp-stream0 fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def linear_rows_swap() -> Iterator[None]:
+    """`linear_rows@1` (FN §23.8, a dense weight's 2-16-row matmul): its first two output rows swapped, eagerly and in
+    graph captures — verify passes and short prompt steps only (one-row decode steps never bind it). Gate (c)'s
+    MTP-vs-plain pair must fail it (§22.8). Reports how often it fired."""
+    from holon_plugins.kernels.triton_fp8 import plugin
+
+    call, fired = plugin.LinearRows.__call__, collections.Counter()
+
+    def planted(self, x, weight):
+        fired[_when()] += 1
+        y = call(self, x, weight)
+        return torch.cat([y[1:2], y[:1], y[2:]])            # (device ops only: capturable)
+    with mock.patch.object(plugin.LinearRows, "__call__", planted):
+        yield
+    print(f"plant linear-rows-swap fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def rows_off_by_one() -> Iterator[None]:
+    """The PLE table's SSD tier (§6.3, D5): every row read one row past its id's (`std.tiered.rows@1`'s read list), in
+    eager steps and graph captures alike; the RAM-vs-SSD identity fails (spikes/fn7/ple_ssd.py, the GPU unit test)."""
+    from holon_std.tiered import rows
+    with mock.patch.object(rows._Reads, "plant", 1):
+        yield
+
+
+@contextlib.contextmanager
+def aux_row_padding() -> Iterator[None]:
+    """MTP experts in the offload store (§6.3, acceptance 4): the drafter's sub-steps' first row marked PADDING, so its
+    routes read the null slot (zero weights) — the offload snapshot with MTP experts in the store differs from the
+    all-resident one. Reports how often it fired."""
+    from holon_std.tiered import store
+
+    kinds, fired = store.TieredStore.decode_kinds, collections.Counter()
+
+    def planted(self, tokens):
+        out = kinds(self, tokens).clone()
+        out[:1] = store.PADDING
+        fired["sub-steps"] += 1
+        return out
+    with mock.patch.object(store.TieredStore, "decode_kinds", planted):
+        yield
+    print(f"plant aux-row-padding fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ple_gate_no_sqrt() -> Iterator[None]:
+    """PLE (§6.3): its gate σ(u) without the signed √: the unit's `qwen4_exp.ple_block@1` instance replaced by the
+    oracle (torch, on the unit's device) with that gate, in eager steps (L2's); graph captures keep the kernel.
+    Reports how often it fired."""
+    from holon_plugins.models.qwen4_exp import reference, units
+
+    init, fired = units.PLE.__init__, collections.Counter()
+
+    def planted(self, ctx, **params):
+        init(self, ctx, **params)
+        streams, eps, dilation = self.n, self.eps, self.window // (params.get("kernel", 4) - 1)
+        kernel = self._block
+
+        def block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init):
+            if torch.cuda.is_available() and torch.cuda.is_current_stream_capturing():
+                return kernel(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start, has_init)
+            fired["eager"] += 1                        # (the oracle syncs: graph captures keep the kernel)
+            return reference.ple_block(key, value, r, w_key, w_query, w_conv, conv, state, slots, query_start,
+                                       has_init, streams, dilation, eps)
+        self._block = block
+    with mock.patch.object(units.PLE, "__init__", planted), mock.patch.object(reference, "_gate", torch.sigmoid):
+        yield
+    print(f"plant ple-gate-no-sqrt fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def verify_writes_state() -> Iterator[None]:
     """Speculation on a recurrent mixer: a verify row's delta rule writes its final state over the live one (no
     sink), so the replay starts from the state after every draft, rejected ones included. Reports how often it fired:
@@ -302,7 +523,7 @@ def qk_rope_kv_decode_position() -> Iterator[None]:
     rows are right. Reports how many decode calls it changed (graph captures included: the + 1 is captured)."""
     from holon_std.mixers.gqa import units
 
-    project, fired = units.GQA._project_and_write, collections.Counter()
+    project, fired = units.GQA.project_and_write, collections.Counter()
 
     def planted(self, x, ctx, kv):
         fused = self._fused
@@ -314,7 +535,7 @@ def qk_rope_kv_decode_position() -> Iterator[None]:
             return project(self, x, ctx, kv)
         finally:
             self._fused = fused
-    with mock.patch.object(units.GQA, "_project_and_write", planted):
+    with mock.patch.object(units.GQA, "project_and_write", planted):
         yield
     print(f"plant qk-rope-kv-decode-position fired: {dict(fired)}", file=sys.stderr)
 
@@ -1766,6 +1987,12 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "lent-slot-still-mapped": lent_slot_still_mapped, "tail-unmap-undone": tail_unmap_undone,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
+    # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
+    "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
+    "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
+    "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
+    "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
+    "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

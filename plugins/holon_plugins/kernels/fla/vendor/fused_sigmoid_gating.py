@@ -7,6 +7,8 @@
 # the following copyright notice:
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 
+import math
+
 import torch
 
 import triton
@@ -43,6 +45,11 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     has_init,  # Holon: [N] per-sequence has-initial-state flags (or None: every sequence has one)
     out_indices,  # Holon: [N] the unit each sequence's final state goes to, once, after its last token (or None)
     scale,
+    stride_q,  # Holon: the token (row) strides of q, k, v, a and b, in elements: views of a wider row read in place
+    stride_k,
+    stride_v,
+    stride_a,
+    stride_b,
     N: tl.int64,  # num of sequences
     T: tl.int64,  # num of tokens
     B: tl.constexpr,
@@ -88,19 +95,19 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     o_k = i_k * BK + tl.arange(0, BK)
     o_v = i_v * BV + tl.arange(0, BV)
 
-    p_q = q + (bos * H + i_h) * K + o_k
-    p_k = k + (bos * H + i_h) * K + o_k
-    p_v = v + (bos * HV + i_hv) * V + o_v
+    p_q = q + bos * stride_q + i_h * K + o_k
+    p_k = k + bos * stride_k + i_h * K + o_k
+    p_v = v + bos * stride_v + i_hv * V + o_v
 
     p_A_log = A_log + i_hv
     if not IS_KDA:
-        p_a = a + bos * HV + i_hv
+        p_a = a + bos * stride_a + i_hv
         p_dt_bias = dt_bias + i_hv
     else:
-        p_a = a + (bos * HV + i_hv) * K + o_k
+        p_a = a + bos * stride_a + i_hv * K + o_k
         p_dt_bias = dt_bias + i_hv * K + o_k
 
-    p_b = b + bos * HV + i_hv
+    p_b = b + bos * stride_b + i_hv
     p_o = o + ((i_k * all + bos) * HV + i_hv) * V + o_v
 
     mask_k = o_k < K
@@ -183,12 +190,12 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
             tl.store(p_ht, b_h.to(p_ht.dtype.element_ty), mask=mask_h)
 
         # Update pointers for next timestep
-        p_q += H * K
-        p_k += H * K
+        p_q += stride_q
+        p_k += stride_k
         p_o += HV * V
-        p_v += HV * V
-        p_b += HV
-        p_a += HV
+        p_v += stride_v
+        p_b += stride_b
+        p_a += stride_a
 
     if STORE_FINAL_ONCE:  # Holon: one store per sequence, after its last token, where out_indices says (< 0: none)
         out_idx = tl.load(out_indices + i_n).to(tl.int64)
@@ -260,17 +267,21 @@ def fused_sigmoid_gating_delta_rule_update(
     else:
         stride_indices_seq, stride_indices_tok = ssm_state_indices.stride()
 
+    # Holon: q, k, v, a and b read in place where each token's row is contiguous and the tokens evenly strided (views
+    # of the projection's or the conv's wider rows); a copy otherwise
+    (q, stride_q), (k, stride_k), (v, stride_v) = (_rows(x, 2) for x in (q, k, v))
+    (a, stride_a), (b, stride_b) = (_rows(x, 2 if is_kda else 1) for x in (a, b))
     grid = (NK, NV, N * HV)
     fused_sigmoid_gating_delta_rule_update_kernel[grid](
         A_log=A_log,
-        a=a.contiguous(),
-        b=b.contiguous(),
+        a=a,
+        b=b,
         dt_bias=dt_bias,
         beta=beta,
         threshold=threshold,
-        q=q.contiguous(),
-        k=k.contiguous(),
-        v=v.contiguous(),
+        q=q,
+        k=k,
+        v=v,
         o=o,
         h0=initial_state,
         ht=final_state,
@@ -280,6 +291,11 @@ def fused_sigmoid_gating_delta_rule_update(
         has_init=has_initial_state,
         out_indices=out_indices,
         scale=scale,
+        stride_q=stride_q,
+        stride_k=stride_k,
+        stride_v=stride_v,
+        stride_a=stride_a,
+        stride_b=stride_b,
         N=N,
         T=T,
         B=B,
@@ -302,3 +318,17 @@ def fused_sigmoid_gating_delta_rule_update(
     )
     o = o.squeeze(0)
     return o, final_state
+
+
+def _rows(x: torch.Tensor, inner: int) -> tuple[torch.Tensor, int]:
+    """Holon: `x` [..., tokens, *inner dims] and its token stride, in place where the inner dims are contiguous and the
+    leading ones step evenly by the token stride (a column slice of wider rows); else a contiguous copy."""
+    dims = x.shape[x.dim() - inner:]
+    dense = all(x.stride(x.dim() - 1 - i) == math.prod(dims[len(dims) - i:]) for i in range(inner))
+    row = x.stride(x.dim() - inner - 1) if x.dim() > inner else math.prod(dims)
+    lead = all(x.shape[i] == 1 or x.stride(i) == row * math.prod(x.shape[i + 1:x.dim() - inner])
+               for i in range(x.dim() - inner - 1))
+    if not (dense and lead):
+        x = x.contiguous()
+        row = math.prod(dims)
+    return x, row

@@ -1,11 +1,20 @@
 diff -ruN a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
 --- a/ggml/src/ggml-cuda/common.cuh
 +++ b/ggml/src/ggml-cuda/common.cuh
-@@ -1587,8 +1587,16 @@
+@@ -1574,6 +1574,7 @@
+     const ggml_tensor * shared_up = nullptr;
+     const ggml_tensor * shared_gate = nullptr;
+     ggml_tensor * shared_dst = nullptr;
++    int32_t null_slots = 0; // Holon: ids below this name an offload arena's null slots (zero weights): not computed
+ };
+ struct ggml_cuda_mm_fusion_args_device {
+     const void * x_bias = nullptr;
+@@ -1587,8 +1588,17 @@
      const void * shared_gate = nullptr;
      float * shared_dst = nullptr;
      uint32_t shared_stride_col_dst = 0;
 +    bool dst_bf16 = false; // Holon: mul_mat_vec_q stores bf16 instead of f32 (dst is passed as void *)
++    int32_t null_slots = 0; // Holon: an entry whose id is below this (a null slot: zero weights) stores 0, reads nothing
  };
  
 +// Holon: a * b in f32 without flushing subnormals (fast math would), as the f32 multiply by NVFP4's scale2 that a
@@ -18,7 +27,7 @@ diff -ruN a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
  struct ggml_cuda_kernel_launch_params {
      dim3 block_nums;
      dim3 block_dims;
-@@ -1698,7 +1706,7 @@
+@@ -1698,7 +1708,7 @@
  #if defined(GGML_CUDA_USE_PDL)
  
      static const bool env_pdl_enabled = []() {
@@ -30,7 +39,7 @@ diff -ruN a/ggml/src/ggml-cuda/common.cuh b/ggml/src/ggml-cuda/common.cuh
 diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 --- a/ggml/src/ggml-cuda/mmid.cu
 +++ b/ggml/src/ggml-cuda/mmid.cu
-@@ -1,179 +1,391 @@
+@@ -1,179 +1,395 @@
  #include "common.cuh"
  #include "mmid.cuh"
  
@@ -52,7 +61,8 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +// Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
 +// ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
 +// included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
-+// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none):
++// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none) — but a negative id is a pair the call skips on
++// purpose (a pass of a pipelined expert path computes its own entries: FN step 7), listed last, no error:
 +// - per slot (ggml_cuda_mm_ids_per_slot: the launch lists every slot, a small scan): one warp per slot scanning every
 +//   pair, as ggml's; z is the slot;
 +// - compact: one block radix-sorts the pairs, keys `slot << pair_bits | pair` sorted on the slot bits (stable), and
@@ -113,12 +123,14 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +
 +    int nex_prev = 0;   // pairs before this block's (this lane's share)
 +    int it_compact = 0; // this block's pairs
++    bool past = false;  // an id past the slots (a negative one is skipped on purpose)
 +    for (int p0 = 0; p0 < n_pairs; p0 += WARP_SIZE) {
 +        const int p = p0 + lane;
 +        const int id = p < n_pairs ? ids[(p / n_expert_used)*si1 + p % n_expert_used] : INT_MAX;
 +        const bool valid = 0 <= id && id < n_experts;
 +        const bool mine = p < n_pairs && (expert < n_experts ? id == expert : !valid);
 +        nex_prev += valid && id < expert;
++        past = past || (p < n_pairs && id >= n_experts);
 +        const unsigned ballot = __ballot_sync(0xFFFFFFFF, mine);
 +        if (mine) {
 +            pairs_mm_ids_helper[it_compact + __popc(ballot & lanes_below)] = p;
@@ -126,6 +138,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +        it_compact += __popc(ballot);
 +    }
 +    nex_prev = warp_reduce_sum<WARP_SIZE>(nex_prev);
++    past = __any_sync(0xFFFFFFFF, past);
 +    __syncwarp();
  
 -    extern __shared__ char data_mm_ids_helper[];
@@ -145,7 +158,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +        if (it_compact > max_cols) {
 +            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_COLUMNS);
 +        }
-+    } else if (it_compact > 0) {
++    } else if (past) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
 +    }
 +}
@@ -183,6 +196,9 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +        const int i = tid*items + q;
 +        const int id = i < n_pairs ? ids[(i / n_expert_used)*si1 + i % n_expert_used] : n_experts;
 +        keys[q] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
++        if (i < n_pairs && id >= n_experts) {
++            mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
++        }
 +    }
 +    if (tid == 0) {
 +        n_valid = n_pairs;
@@ -256,9 +272,6 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    }
 +    if (tid == 0 && n_active > n_z) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
-+    }
-+    if (tid == 0 && n_valid < n_pairs) {
-+        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
 +    }
 +}
  
@@ -358,13 +371,16 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +
 +static __global__ void mm_ids_device_keys(
 +        const int32_t * __restrict__ ids, uint32_t * __restrict__ keys, int * __restrict__ n_valid, const int n_experts,
-+        const int n_pairs, const int pair_bits, const int n_expert_used, const int si1) {
++        const int n_pairs, const int pair_bits, const int n_expert_used, const int si1, int32_t * __restrict__ errors) {
 +    const int i = blockIdx.x*blockDim.x + threadIdx.x;
 +    if (i >= n_pairs) {
          return;
      }
 +    const int id = ids[(i / n_expert_used)*si1 + i % n_expert_used];
 +    keys[i] = uint32_t(0 <= id && id < n_experts ? id : n_experts) << pair_bits | i;
++    if (id >= n_experts) {
++        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
++    }
 +    if (i == 0) {
 +        *n_valid = n_pairs;
 +    }
@@ -435,9 +451,6 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    if (tid == 0 && n_active > n_z) {
 +        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_SLOTS);
 +    }
-+    if (tid == 0 && n_valid < n_pairs) {
-+        mm_ids_error(errors, GGML_CUDA_MM_IDS_ERR_RANGE);
-+    }
  }
  
 -template <int n_expert_used_template>
@@ -466,7 +479,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +    mm_ids_scratch s = mm_ids_scratch_layout((char *) scratch, n_pairs);
 +    const int threads = 256;
 +    const int blocks = (n_pairs + threads - 1) / threads;
-+    mm_ids_device_keys<<<blocks, threads, 0, stream>>>(ids, s.keys_in, s.n_valid, n_experts, n_pairs, pair_bits, n_expert_used, si1);
++    mm_ids_device_keys<<<blocks, threads, 0, stream>>>(ids, s.keys_in, s.n_valid, n_experts, n_pairs, pair_bits, n_expert_used, si1, errors);
 +    CUDA_CHECK(cub::DeviceRadixSort::SortKeys(s.temp, s.temp_bytes, s.keys_in, s.keys_out, n_pairs, pair_bits,
 +                                              pair_bits + slot_bits, stream));
 +    mm_ids_device_rows<<<blocks, threads, 0, stream>>>(s.keys_out, s.heads, s.n_valid, ids_src1, ids_dst, n_experts, n_pairs,
@@ -2431,7 +2444,34 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      constexpr int qk  = ggml_cuda_type_traits<type>::qk;
      constexpr int qi  = ggml_cuda_type_traits<type>::qi;
-@@ -711,6 +714,15 @@
+@@ -642,6 +645,26 @@
+     channel_y  = ncols_dst == 1 && ids ? fastmodulo(channel_dst, nchannels_y) : channel_dst;
+     sample_dst = blockIdx.z;
+ 
++    // Holon: a negative id is an entry this call skips on purpose (another pass of a pipelined expert path computes
++    // it, FN step 7): its rows are left as they are
++    if (ncols_dst == 1 && ids && !shared_expert && int32_t(channel_x) < 0) {
++        return;
++    }
++    // Holon: an offload arena's null slot (zero weights, fusion.null_slots): its entry's rows are 0 (what its zero
++    // weights give for finite activations, no bias here), so the block reads nothing and stores zeros
++    if (ncols_dst == 1 && ids && !shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
++        if (threadIdx.y == 0 && threadIdx.x < rows_per_cuda_block &&
++            (rows_per_cuda_block == 1 || uint32_t(row0 + threadIdx.x) < stride_col_dst)) {
++            const uint32_t d = sample_dst*stride_sample_dst + channel_dst*stride_channel_dst + row0 + threadIdx.x;
++            if (fusion.dst_bf16) {
++                ((nv_bfloat16 *) dst)[d] = 0.0f;
++            } else {
++                dst[d] = 0.0f;
++            }
++        }
++        return;
++    }
++
+     const uint32_t sample_x    = fastdiv(sample_dst, sample_ratio);
+     const uint32_t sample_y    = sample_dst;
+ 
+@@ -711,6 +734,15 @@
          }
      }
  
@@ -2447,7 +2487,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      // partial sum for each thread
      float tmp[ncols_dst][rows_per_cuda_block] = {{0.0f}};
      float tmp_gate[ncols_dst][rows_per_cuda_block] = {{0.0f}};
-@@ -782,7 +794,7 @@
+@@ -782,7 +814,7 @@
          return;
      }
  
@@ -2456,7 +2496,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      // sum up partial sums and write back result
  #pragma unroll
-@@ -837,7 +849,16 @@
+@@ -837,7 +869,16 @@
                          }
                      }
                  }
@@ -2474,7 +2514,24 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              }
          }
      }
-@@ -1022,7 +1043,7 @@
+@@ -919,6 +960,16 @@
+     ggml_cuda_pdl_sync();
+     const uint32_t channel_x = shared_expert ? 0 : ids[channel_dst + token_idx * ids_stride];
+     const uint32_t channel_y = fastmodulo(channel_dst, nchannels_y);
++    if (!shared_expert && int32_t(channel_x) < 0) { // Holon: an entry skipped on purpose: its rows left as they are
++        return;
++    }
++    // Holon: a null slot's entry (fusion.null_slots): this token's rows are 0, nothing read (as mul_mat_vec_q)
++    if (!shared_expert && channel_x < uint32_t(fusion.null_slots) && fusion.x_bias == nullptr) {
++        if (threadIdx.x < c_rows_per_block && (c_rows_per_block == 1 || uint32_t(row0 + threadIdx.x) < nrows_x)) {
++            dst[channel_dst*stride_channel_dst + token_idx*stride_col_dst + row0 + threadIdx.x] = 0.0f;
++        }
++        return;
++    }
+ 
+     const block_q8_1 * y = ((const block_q8_1 *) vy) + channel_y*stride_channel_y + token_idx*stride_col_y;
+     const int kbx_offset  = channel_x*stride_channel_x + row0*stride_row_x;
+@@ -1022,7 +1073,7 @@
  
  template<ggml_type type, int c_ncols_dst, bool small_k = false, bool halve_iters = false>
  static void mul_mat_vec_q_switch_fusion(
@@ -2483,7 +2540,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const uint32_t ncols_x, const uint3 nchannels_y, const uint32_t stride_row_x, const uint32_t stride_col_y,
          const uint32_t stride_col_dst, const uint3 channel_ratio, const uint32_t stride_channel_x,
          const uint32_t stride_channel_y, const uint32_t stride_channel_dst, const uint3 sample_ratio,
-@@ -1043,7 +1064,10 @@
+@@ -1043,7 +1094,10 @@
          }
      }
  
@@ -2495,7 +2552,43 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
      ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters>, launch_params,
-@@ -1087,7 +1111,7 @@
+@@ -1062,20 +1116,31 @@
+         const int warp_size, const int nchannels_dst, cudaStream_t stream) {
+ 
+     constexpr int rows_per_block = 2; // 2 gives best perf based on tuning
+-    const int64_t nblocks_rows = (nrows_x + rows_per_block - 1) / rows_per_block;
++    // Holon: 4 rows per block without fusion (a MoE's down projection): 9-18% faster at a verify pass's 4 rows on
++    // Blackwell (RTX 5080, 5090; FN §23.8), each row's sums as before; the fused gate/up keeps 2, and so does a
++    // matrix whose rows are not a multiple of 4 (the kernel reads every row of its block)
++    constexpr int rows_per_block_plain = 4;
++    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
++                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
++    const bool plain = !has_fusion && nrows_x % rows_per_block_plain == 0;
++    const int rows = plain ? rows_per_block_plain : rows_per_block;
++    const int64_t nblocks_rows = (nrows_x + rows - 1) / rows;
+     const dim3 block_nums(nblocks_rows, nchannels_dst + (fusion.shared_up != nullptr));
+     const dim3 block_dims(warp_size, ncols_dst);
+     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, 0, stream);
+ 
+-    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
+-                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
+-
+     if (has_fusion) {
+         ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, true>, launch_params,
+             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
+             stride_row_x, stride_col_y, stride_col_dst,
+             stride_channel_x, stride_channel_y, stride_channel_dst,
+             ncols_dst, ids_stride);
++    } else if (plain) {
++        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block_plain, false>, launch_params,
++            vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
++            stride_row_x, stride_col_y, stride_col_dst,
++            stride_channel_x, stride_channel_y, stride_channel_dst,
++            ncols_dst, ids_stride);
+     } else {
+         ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, false>, launch_params,
+             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
+@@ -1087,7 +1152,7 @@
  
  template <ggml_type type>
  static void mul_mat_vec_q_switch_ncols_dst(
@@ -2504,7 +2597,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1178,7 +1202,7 @@
+@@ -1178,7 +1243,7 @@
      if (has_ids && ncols_dst > 1) {
          // Multi-token MUL_MAT_ID path - dedicated MoE kernel
          mul_mat_vec_q_moe_launch<type>(
@@ -2513,7 +2606,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              stride_row_x, stride_col_y, stride_col_dst,
              stride_channel_x, stride_channel_y, stride_channel_dst,
              ncols_dst, ids_stride, warp_size, nchannels_dst, stream);
-@@ -1279,7 +1303,7 @@
+@@ -1279,7 +1344,7 @@
      }
  }
  static void mul_mat_vec_q_switch_type(
@@ -2522,7 +2615,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1434,8 +1458,9 @@
+@@ -1434,8 +1499,9 @@
  void ggml_cuda_mul_mat_vec_q(
          ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
          const ggml_cuda_mm_fusion_args_host * fusion) {
@@ -2534,7 +2627,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      GGML_ASSERT(!ids || ids->type  == GGML_TYPE_I32); // Optional, used for batched GGML_MUL_MAT_ID.
  
      GGML_TENSOR_BINARY_OP_LOCALS;
-@@ -1453,16 +1478,15 @@
+@@ -1453,16 +1519,16 @@
  
      GGML_ASSERT(!ids || ne12 <= MMVQ_MAX_BATCH_SIZE);
  
@@ -2544,6 +2637,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      ggml_cuda_mm_fusion_args_device fusion_local{};
 +    fusion_local.dst_bf16 = dst->type == GGML_TYPE_BF16;
++    fusion_local.null_slots = fusion && ids ? fusion->null_slots : 0; // Holon: an arena's null slots
  
      if (fusion) {
          const int cc = ggml_cuda_info().devices[ggml_cuda_get_device()].cc;
@@ -2553,7 +2647,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          // Scale fusion is only allowed for NVFP4 currently as the cost of checking this at run-time in the prologue is
          // non-negligible for some models such as gpt-oss-20b
          GGML_ASSERT((fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4);
-@@ -1528,13 +1552,17 @@
+@@ -1528,13 +1594,17 @@
      }
  
      const int64_t ne10_padded = GGML_PAD(ne10, MATRIX_ROW_PADDING);
@@ -2574,7 +2668,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const int64_t s01 = src0->nb[1] / ts_src0;
      const int64_t s11 = ne10_padded / QK8_1;
-@@ -1559,7 +1587,7 @@
+@@ -1559,7 +1629,7 @@
      const int64_t ids_stride = ids ? ids->nb[1] / ggml_type_size(ids->type) : 0;
  
      mul_mat_vec_q_switch_type(
@@ -2903,7 +2997,7 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
  
      const int n_expert_used = weights->ne[1];
  
-@@ -445,3 +445,234 @@
+@@ -445,3 +445,258 @@
  
      return true;
  }
@@ -3013,13 +3107,23 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 +    }
 +}
 +
++// Holon: W's values as f32 (a bf16 router holds exactly its f32 values: the same products)
++static __device__ __forceinline__ float4 holon_router_w4(const float * w) { return __ldg((const float4 *) w); }
++
++static __device__ __forceinline__ float4 holon_router_w4(const nv_bfloat16 * w) {
++    const uint2 v = __ldg((const uint2 *) w);                   // W is never written: read-only
++    const float2 a = __bfloat1622float2(*(const nv_bfloat162 *) &v.x);
++    const float2 b = __bfloat1622float2(*(const nv_bfloat162 *) &v.y);
++    return make_float4(a.x, a.y, b.x, b.y);
++}
++
 +static __device__ __forceinline__ float holon_router_load1(const float * x) { return *x; }
 +static __device__ __forceinline__ float holon_router_load1(const nv_bfloat16 * x) { return __bfloat162float(*x); }
 +
-+template <int n_experts, typename src_t>
++template <int n_experts, typename src_t, typename w_t>
 +__launch_bounds__(HOLON_ROUTER_WARPS * WARP_SIZE)
 +__global__ void holon_moe_router(const src_t *         x,
-+                                 const float *         w,
++                                 const w_t *           w,
 +                                 float *               logits,
 +                                 unsigned int *        done,
 +                                 float *               weights,
@@ -3032,7 +3136,7 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 +    constexpr int R = HOLON_ROUTER_ROWS;
 +    const int lane = threadIdx.x, q = threadIdx.y, expert = blockIdx.x;
 +    const int row0 = blockIdx.y * R, rows = min(R, n_rows - row0), slice = hidden / HOLON_ROUTER_WARPS;
-+    const float * wq = w + (int64_t) expert * hidden + q * slice;
++    const w_t * wq = w + (int64_t) expert * hidden + q * slice;
 +    const src_t * xq = x + (int64_t) row0 * hidden + q * slice;
 +
 +    float acc[R];
@@ -3050,7 +3154,7 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 +    }
 +#pragma unroll 4
 +    for (int h = 4 * lane; h < slice; h += 4 * WARP_SIZE) {
-+        const float4 wv = __ldg((const float4 *) (wq + h));      // W is never written: read-only
++        const float4 wv = holon_router_w4(wq + h);
 +#pragma unroll
 +        for (int r = 0; r < R; r++) {
 +            if (r < rows) {
@@ -3105,15 +3209,15 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 +    }
 +}
 +
-+template <typename src_t>
-+static void holon_moe_router_cuda(const src_t * x, const float * w, const int n_rows, const int hidden,
++template <typename src_t, typename w_t>
++static void holon_moe_router_cuda(const src_t * x, const w_t * w, const int n_rows, const int hidden,
 +                                  const int n_experts, const int n_expert_used, const float clamp_val, float * logits,
 +                                  unsigned int * done, float * weights, int32_t * ids, block_q8_1 * xq,
 +                                  cudaStream_t stream) {
 +    const ggml_cuda_kernel_launch_params params(dim3(n_experts, (n_rows + HOLON_ROUTER_ROWS - 1) / HOLON_ROUTER_ROWS, 1),
 +                                                dim3(WARP_SIZE, HOLON_ROUTER_WARPS, 1), 0, stream);
 +    switch (n_experts) {
-+#define HOLON_ROUTER_CASE(E) case E: ggml_cuda_kernel_launch(holon_moe_router<E, src_t>, params, x, w, logits, done, \
++#define HOLON_ROUTER_CASE(E) case E: ggml_cuda_kernel_launch(holon_moe_router<E, src_t, w_t>, params, x, w, logits, done, \
 +                                     weights, ids, xq, n_rows, hidden, n_expert_used, clamp_val); break;
 +        HOLON_ROUTER_CASE(1) HOLON_ROUTER_CASE(2) HOLON_ROUTER_CASE(4) HOLON_ROUTER_CASE(8) HOLON_ROUTER_CASE(16)
 +        HOLON_ROUTER_CASE(32) HOLON_ROUTER_CASE(64) HOLON_ROUTER_CASE(128) HOLON_ROUTER_CASE(256)
@@ -3123,18 +3227,32 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
 +    }
 +}
 +
-+void ggml_cuda_holon_moe_router(const void * x, const bool x_bf16, const float * w, const int n_rows,
-+                                const int hidden, const int n_experts, const int n_expert_used,
-+                                const float clamp_val, float * logits, unsigned int * done, float * weights,
-+                                int32_t * ids, void * x_q8_1, cudaStream_t stream) {
-+    GGML_ASSERT(hidden % (4 * WARP_SIZE * HOLON_ROUTER_WARPS) == 0 && n_expert_used <= n_experts &&
-+                n_expert_used <= WARP_SIZE && n_rows <= HOLON_ROUTER_MAX_ROWS);
++template <typename w_t>
++static void holon_moe_router_w(const void * x, const bool x_bf16, const w_t * w, const int n_rows, const int hidden,
++                               const int n_experts, const int n_expert_used, const float clamp_val, float * logits,
++                               unsigned int * done, float * weights, int32_t * ids, void * x_q8_1,
++                               cudaStream_t stream) {
 +    if (x_bf16) {
 +        holon_moe_router_cuda((const nv_bfloat16 *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
 +                              logits, done, weights, ids, (block_q8_1 *) x_q8_1, stream);
 +    } else {
 +        holon_moe_router_cuda((const float *) x, w, n_rows, hidden, n_experts, n_expert_used, clamp_val, logits,
 +                              done, weights, ids, (block_q8_1 *) x_q8_1, stream);
++    }
++}
++
++void ggml_cuda_holon_moe_router(const void * x, const bool x_bf16, const void * w, const bool w_bf16,
++                                const int n_rows, const int hidden, const int n_experts, const int n_expert_used,
++                                const float clamp_val, float * logits, unsigned int * done, float * weights,
++                                int32_t * ids, void * x_q8_1, cudaStream_t stream) {
++    GGML_ASSERT(hidden % (4 * WARP_SIZE * HOLON_ROUTER_WARPS) == 0 && n_expert_used <= n_experts &&
++                n_expert_used <= WARP_SIZE && n_rows <= HOLON_ROUTER_MAX_ROWS);
++    if (w_bf16) {
++        holon_moe_router_w(x, x_bf16, (const nv_bfloat16 *) w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
++                           logits, done, weights, ids, x_q8_1, stream);
++    } else {
++        holon_moe_router_w(x, x_bf16, (const float *) w, n_rows, hidden, n_experts, n_expert_used, clamp_val,
++                           logits, done, weights, ids, x_q8_1, stream);
 +    }
 +    CUDA_CHECK(cudaGetLastError());
 +}
@@ -3155,6 +3273,6 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cuh b/ggml/src/ggml-cuda/topk-moe.cuh
 +#define HOLON_ROUTER_ROWS 4
 +#define HOLON_ROUTER_MAX_ROWS 16
 +
-+void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const float * w, int n_rows, int hidden, int n_experts,
-+                                int n_expert_used, float clamp_val, float * logits, unsigned int * done,
++void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const void * w, bool w_bf16, int n_rows, int hidden,
++                                int n_experts, int n_expert_used, float clamp_val, float * logits, unsigned int * done,
 +                                float * weights, int32_t * ids, void * x_q8_1, cudaStream_t stream);

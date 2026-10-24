@@ -1,0 +1,359 @@
+{
+ "date": "2026-10-23",
+ "doc": "docs/v1-flash-next.md \u00a721.14",
+ "prompt_bytes_5090_1k": [
+  {
+   "key": "1024/0",
+   "routed_gb": 36.542592,
+   "cache_met_share": 0.396,
+   "lent_experts": 308,
+   "capacity_share": 0.4784,
+   "missed_gb": {
+    "met_less_lent": 21.34,
+    "met": 20.79,
+    "met_filled": 17.59,
+    "met_filled_less_lent": 18.14,
+    "profile_same_bytes": 20.81,
+    "profile_0.54": 15.1
+   }
+  },
+  {
+   "key": "1024/1",
+   "routed_gb": 34.7484928,
+   "cache_met_share": 0.3953,
+   "lent_experts": 253,
+   "capacity_share": 0.4784,
+   "missed_gb": {
+    "met_less_lent": 19.66,
+    "met": 19.24,
+    "met_filled": 16.16,
+    "met_filled_less_lent": 16.58,
+    "profile_same_bytes": 19.35,
+    "profile_0.54": 13.73
+   }
+  },
+  {
+   "key": "1024/2",
+   "routed_gb": 33.7794304,
+   "cache_met_share": 0.42,
+   "lent_experts": 1023,
+   "capacity_share": 0.4784,
+   "missed_gb": {
+    "met_less_lent": 18.71,
+    "met": 17.1,
+    "met_filled": 15.08,
+    "met_filled_less_lent": 16.69,
+    "profile_same_bytes": 17.53,
+    "profile_0.54": 13.04
+   }
+  }
+ ],
+ "benches": {
+  "s7_s6_rtx-5090": {
+   "commit": "4e3d8e7ea37f630eb4868c74be80c5f11010f697",
+   "rounds": 3,
+   "table": {
+    "cur_off": {
+     "1024": {
+      "decode_tps": 129.205,
+      "prefill_tps": 1953.134
+     },
+     "4096": {
+      "decode_tps": 125.652,
+      "prefill_tps": 5674.745
+     },
+     "32768": {
+      "decode_tps": 115.005,
+      "prefill_tps": 6400.799
+     }
+    },
+    "cur_mtp": {
+     "1024": {
+      "decode_tps": 162.895,
+      "prefill_tps": 1921.865,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 17.063
+     },
+     "4096": {
+      "decode_tps": 156.359,
+      "prefill_tps": 5476.984,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 17.512
+     },
+     "32768": {
+      "decode_tps": 161.862,
+      "prefill_tps": 6334.835,
+      "tokens_per_pass": 3.074,
+      "ms_per_pass": 18.979
+     }
+    },
+    "s6_off": {
+     "1024": {
+      "decode_tps": 129.819,
+      "prefill_tps": 1974.837
+     },
+     "4096": {
+      "decode_tps": 126.211,
+      "prefill_tps": 5763.441
+     },
+     "32768": {
+      "decode_tps": 117.858,
+      "prefill_tps": 6078.553
+     }
+    },
+    "s6_mtp": {
+     "1024": {
+      "decode_tps": 164.172,
+      "prefill_tps": 1938.273,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 16.93
+     },
+     "4096": {
+      "decode_tps": 157.579,
+      "prefill_tps": 5513.117,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 17.373
+     },
+     "32768": {
+      "decode_tps": 166.629,
+      "prefill_tps": 6000.644,
+      "tokens_per_pass": 3.198,
+      "ms_per_pass": 19.236
+     }
+    },
+    "s6lp_off": {
+     "1024": {
+      "decode_tps": 129.494,
+      "prefill_tps": 1969.699
+     },
+     "4096": {
+      "decode_tps": 123.746,
+      "prefill_tps": 5296.9
+     },
+     "32768": {
+      "decode_tps": 114.249,
+      "prefill_tps": 5855.501
+     }
+    },
+    "s6lp_mtp": {
+     "1024": {
+      "decode_tps": 164.908,
+      "prefill_tps": 1925.838,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 16.857
+     },
+     "4096": {
+      "decode_tps": 155.374,
+      "prefill_tps": 5071.088,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 17.601
+     },
+     "32768": {
+      "decode_tps": 161.155,
+      "prefill_tps": 4247.363,
+      "tokens_per_pass": 3.198,
+      "ms_per_pass": 19.875
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "decode_tps": 111.456,
+      "prefill_tps": 2289.421,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 8.988,
+      "strata_verify_ms": 8.686,
+      "strata_draft_ms": 0.0
+     },
+     "4096": {
+      "decode_tps": 109.096,
+      "prefill_tps": 4763.573,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 9.174,
+      "strata_verify_ms": 8.867,
+      "strata_draft_ms": 0.0
+     },
+     "32768": {
+      "decode_tps": 104.426,
+      "prefill_tps": 5852.998,
+      "tokens_per_pass": 1.0,
+      "ms_per_pass": 9.593,
+      "strata_verify_ms": 9.201,
+      "strata_draft_ms": 0.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "decode_tps": 173.447,
+      "prefill_tps": 2225.687,
+      "tokens_per_pass": 2.777,
+      "ms_per_pass": 15.982,
+      "strata_verify_ms": 13.786,
+      "strata_draft_ms": 1.857
+     },
+     "4096": {
+      "decode_tps": 162.522,
+      "prefill_tps": 4726.34,
+      "tokens_per_pass": 2.71,
+      "ms_per_pass": 16.851,
+      "strata_verify_ms": 14.424,
+      "strata_draft_ms": 1.882
+     },
+     "32768": {
+      "decode_tps": 183.862,
+      "prefill_tps": 5816.06,
+      "tokens_per_pass": 3.271,
+      "ms_per_pass": 17.79,
+      "strata_verify_ms": 15.027,
+      "strata_draft_ms": 2.299
+     }
+    }
+   }
+  }
+ },
+ "cached_5090": {
+  "8K_off": 0.4784,
+  "8K_mtp": 0.4608,
+  "6K_off": 0.4859,
+  "6K_mtp": 0.4683,
+  "6K_lp_off": 0.5036,
+  "6K_lp_mtp": 0.4857
+ },
+ "after_prompt": {
+  "rtx-5080": {
+   "lp_1024": [
+    {
+     "lent_experts": 2848,
+     "missed_routes": 8145,
+     "distinct": 6302,
+     "repeat_routes": 61,
+     "lent_share": 0.197,
+     "prompt_top1000_share": 0.164,
+     "prompt_top2000_share": 0.265,
+     "prompt_top3000_share": 0.353
+    },
+    {
+     "lent_experts": 2874,
+     "missed_routes": 7290,
+     "distinct": 5297,
+     "repeat_routes": 457,
+     "lent_share": 0.198,
+     "prompt_top1000_share": 0.176,
+     "prompt_top2000_share": 0.3,
+     "prompt_top3000_share": 0.403
+    }
+   ],
+   "cold_1024": [
+    {
+     "lent_experts": 2386,
+     "missed_routes": 8114,
+     "distinct": 6265,
+     "repeat_routes": 68,
+     "lent_share": 0.168,
+     "prompt_top1000_share": 0.164,
+     "prompt_top2000_share": 0.264,
+     "prompt_top3000_share": 0.352
+    },
+    {
+     "lent_experts": 2416,
+     "missed_routes": 7303,
+     "distinct": 5228,
+     "repeat_routes": 560,
+     "lent_share": 0.166,
+     "prompt_top1000_share": 0.178,
+     "prompt_top2000_share": 0.303,
+     "prompt_top3000_share": 0.403
+    }
+   ],
+   "lp_4096": [
+    {
+     "lent_experts": 5407,
+     "missed_routes": 8375,
+     "distinct": 6559,
+     "repeat_routes": 51,
+     "lent_share": 0.358,
+     "prompt_top1000_share": 0.088,
+     "prompt_top2000_share": 0.174,
+     "prompt_top3000_share": 0.255
+    },
+    {
+     "lent_experts": 5315,
+     "missed_routes": 9300,
+     "distinct": 7258,
+     "repeat_routes": 270,
+     "lent_share": 0.378,
+     "prompt_top1000_share": 0.135,
+     "prompt_top2000_share": 0.237,
+     "prompt_top3000_share": 0.326
+    }
+   ],
+   "cold_4096": [
+    {
+     "lent_experts": 2392,
+     "missed_routes": 7506,
+     "distinct": 5902,
+     "repeat_routes": 74,
+     "lent_share": 0.178,
+     "prompt_top1000_share": 0.097,
+     "prompt_top2000_share": 0.185,
+     "prompt_top3000_share": 0.271
+    },
+    {
+     "lent_experts": 2336,
+     "missed_routes": 8675,
+     "distinct": 6256,
+     "repeat_routes": 849,
+     "lent_share": 0.179,
+     "prompt_top1000_share": 0.144,
+     "prompt_top2000_share": 0.255,
+     "prompt_top3000_share": 0.35
+    }
+   ]
+  },
+  "rtx-5090": {
+   "cur_1024": [
+    {
+     "lent_experts": 2393,
+     "missed_routes": 5137,
+     "distinct": 3912,
+     "repeat_routes": 0,
+     "lent_share": 0.23,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    },
+    {
+     "lent_experts": 2153,
+     "missed_routes": 4440,
+     "distinct": 3402,
+     "repeat_routes": 0,
+     "lent_share": 0.25,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    }
+   ],
+   "s6lp_1024": [
+    {
+     "lent_experts": 2552,
+     "missed_routes": 5151,
+     "distinct": 3924,
+     "repeat_routes": 0,
+     "lent_share": 0.243,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    },
+    {
+     "lent_experts": 2309,
+     "missed_routes": 4565,
+     "distinct": 3492,
+     "repeat_routes": 0,
+     "lent_share": 0.277,
+     "prompt_top1000_share": 0.0,
+     "prompt_top2000_share": 0.0,
+     "prompt_top3000_share": 0.0
+    }
+   ]
+  }
+ }
+}

@@ -5,7 +5,8 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
   `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
   unspecified weights. Facts: experts, top_k, renormalize.
-- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32) -> (weights [T, k] f32, ids [T, k] int32)`: the
+- `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32, or bf16 under the fact router_dtype = bfloat16 —
+  its values, exactly) -> (weights [T, k] f32, ids [T, k] int32)`: the
   router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
   from x's exact f32 values, in an order the provider fixes (deterministic; it may depend on the call's row count, as a
   linear's kernel path does), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
@@ -64,7 +65,8 @@ then `staging` slots, then cache slots.
   a consumer that does not know the handle reads instead). It may expose `pass_rows` as @2's (the same promise, at the
   bits of its `CHUNK`-row calls over the same slots). An instance has `errors`, a device int32 word [1] its
   calls or violation bits into (zero: none; bits are the provider's), which the caller zeroes. Same results as @2
-  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena).
+  over the stack those slots hold: the oracle is @2's (`reference.linear_experts`, over the arena). An entry on a null
+  slot may get its rows of 0 without the slot being read (its zero weights' product, for finite activations).
 
 - `moe_resolve@1`: instance `(ids [T, k] int32, kinds [T] uint8, residency [E, R] int32, host [E, R] int32, limits [R]
   int32, counts [E] int32, routed [E] int32, ring [E, R] int32, stage [R, F] int32, empty [R, P] int32, n_empty [1]
@@ -98,6 +100,10 @@ then `staging` slots, then cache slots.
   then row 1 + i = (expert, `host[e, 0]`, `host[e, 1]`, n_tok, its entries t·k + j ascending). A call without the
   CPU's share passes a zero `plan` (and a table of its own); the caller sizes `jobs` for its calls with a share (T ≤
   T', c ≤ J): past it `errors[0]` |= `JOBS` and the table's contents are unspecified.
+- Optional `split` (an instance with `splits = True`): `split=True` also returns `miss_slots` [R, T, k] — each entry
+  whose piece the call fetches (staged or admitted) reads its slot there and its null slot j in `slots`, every other
+  entry the reverse — so a caller can run the entries already resident while the fetch lands (FN step 7: the hits
+  first), the two passes' outputs summing to the one pass's (a null slot's output is zero).
 - Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's
@@ -130,13 +136,24 @@ then `staging` slots, then cache slots.
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
-  device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging.
+  device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. Optional member
+  `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
+  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True`
+  also takes `part, parts` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a
+  pipelined pass's fetch, part by part). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as
+  they are in `out` (a pipelined pass computes each part's entries into one `out`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
   src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits
   until key's copies have landed (each key waited for once). Facts: unit_bytes, copy — the copy list's placement an
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
+
+- `activation_loan@1` (FN step 7: a tail step's activations from its lent tail, the core's ActivationLender): an
+  instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
+  `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
+  — `held() -> int`, the bytes allocated in it still alive, and `release()`: the range free again (nothing held). An
+  allocation the range cannot hold fails.
 
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's
@@ -206,7 +223,7 @@ from __future__ import annotations
 MOE_TOPK, LINEAR_EXPERTS, MOE_COMBINE = "moe_topk@1", "linear_experts@2", "moe_combine@1"
 MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
-EXPERT_PREFETCH = "expert_prefetch@1"
+EXPERT_PREFETCH, ACTIVATION_LOAN = "expert_prefetch@1", "activation_loan@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
 MOE_TIERS = "moe_tiers@1"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds

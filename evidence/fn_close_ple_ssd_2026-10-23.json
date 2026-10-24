@@ -1,0 +1,191 @@
+{
+ "date": "2026-10-23",
+ "doc": "docs/v1-flash-next.md \u00a722.1",
+ "identity": {
+  "rtx-5080": {
+   "host": {
+    "tok_s": [
+     34.12,
+     36.06,
+     32.38
+    ]
+   },
+   "ssd": {
+    "tok_s": [
+     26.91,
+     30.7,
+     27.97
+    ]
+   },
+   "plant": {
+    "tok_s": [
+     29.81,
+     32.92,
+     26.87
+    ]
+   },
+   "identical": true,
+   "plant_differs": true
+  },
+  "rtx-5090": {
+   "host": {
+    "tok_s": [
+     43.27,
+     46.46,
+     39.61
+    ]
+   },
+   "ssd": {
+    "tok_s": [
+     31.93,
+     38.16,
+     33.14
+    ]
+   },
+   "plant": {
+    "tok_s": [
+     27.31,
+     38.62,
+     29.39
+    ]
+   },
+   "identical": true,
+   "plant_differs": true
+  },
+  "rtx-a5000": {
+   "host": {
+    "tok_s": [
+     14.38,
+     14.78,
+     14.63
+    ]
+   },
+   "ssd": {
+    "tok_s": [
+     8.11,
+     10.88,
+     10.41
+    ]
+   },
+   "plant": {
+    "tok_s": [
+     8.94,
+     10.79,
+     10.9
+    ]
+   },
+   "identical": true,
+   "plant_differs": true
+  }
+ },
+ "cost": {
+  "rtx-5080": {
+   "commit": "d0cf51d511b7db4c90007d7380204c5f03acbf68",
+   "rounds": 3,
+   "table": {
+    "fin_mtp": {
+     "1024": {
+      "decode_tps": 120.793,
+      "prefill_tps": 1585.044,
+      "tokens_per_pass": 2.738,
+      "ms_per_pass": 22.658
+     },
+     "4096": {
+      "decode_tps": 118.967,
+      "prefill_tps": 3254.693,
+      "tokens_per_pass": 2.707,
+      "ms_per_pass": 22.682
+     }
+    },
+    "fin_mtp_ssd": {
+     "1024": {
+      "decode_tps": 109.911,
+      "prefill_tps": 838.807,
+      "tokens_per_pass": 2.738,
+      "ms_per_pass": 24.903
+     },
+     "4096": {
+      "decode_tps": 108.187,
+      "prefill_tps": 1152.236,
+      "tokens_per_pass": 2.707,
+      "ms_per_pass": 24.946
+     }
+    },
+    "fin_off": {
+     "1024": {
+      "decode_tps": 95.84,
+      "prefill_tps": 1625.058
+     },
+     "4096": {
+      "decode_tps": 94.581,
+      "prefill_tps": 3295.174
+     }
+    },
+    "fin_off_ssd": {
+     "1024": {
+      "decode_tps": 90.857,
+      "prefill_tps": 850.083
+     },
+     "4096": {
+      "decode_tps": 89.738,
+      "prefill_tps": 1154.504
+     }
+    }
+   }
+  },
+  "rtx-5090": {
+   "commit": "d0cf51d511b7db4c90007d7380204c5f03acbf68",
+   "rounds": 3,
+   "table": {
+    "fin_mtp": {
+     "1024": {
+      "decode_tps": 166.544,
+      "prefill_tps": 2078.062,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 16.689
+     },
+     "4096": {
+      "decode_tps": 158.027,
+      "prefill_tps": 5495.506,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 17.322
+     }
+    },
+    "fin_mtp_ssd": {
+     "1024": {
+      "decode_tps": 147.186,
+      "prefill_tps": 944.844,
+      "tokens_per_pass": 2.791,
+      "ms_per_pass": 18.887
+     },
+     "4096": {
+      "decode_tps": 140.133,
+      "prefill_tps": 1324.054,
+      "tokens_per_pass": 2.72,
+      "ms_per_pass": 19.51
+     }
+    },
+    "fin_off": {
+     "1024": {
+      "decode_tps": 132.163,
+      "prefill_tps": 2134.342
+     },
+     "4096": {
+      "decode_tps": 126.797,
+      "prefill_tps": 5811.907
+     }
+    },
+    "fin_off_ssd": {
+     "1024": {
+      "decode_tps": 121.602,
+      "prefill_tps": 951.666
+     },
+     "4096": {
+      "decode_tps": 116.91,
+      "prefill_tps": 1342.674
+     }
+    }
+   }
+  }
+ }
+}

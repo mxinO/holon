@@ -52,6 +52,30 @@ def test_floor_level_noise_passes_and_a_shift_fails(case):
     assert "FAIL" in shifted.table() and shifted.to_json()["passed"] is False
 
 
+def test_a_run_on_two_paths_passes_only_against_both_paths_floors(case):
+    """An offload deployment's calls take mmq and mmvq (its short passes): judged by a floor per path, each call on a
+    path one of them emulates and the run within every floor's budgets — a loose floor alone does not pass it."""
+    lens, logits, targets, noise = case
+    g = _recording(logits, targets, lens)
+    loose, tight = _recording(noise(0.2), targets, lens), _recording(noise(0.02), targets, lens)
+    loose.meta |= {"q8_1": "mmq"}
+    tight.meta |= {"q8_1": "mmvq"}
+    close, far = _recording(noise(0.02), targets, lens), _recording(noise(0.1), targets, lens)
+    for run in (close, far):
+        run.meta["calls"] = {"mmq/q8_1": 40, "mmvq/q8_1": 3}
+    assert compare(g, close, [loose]).failures == ("3 calls on mmvq/q8_1, the floor emulates mmq/q8_1",)
+    both = compare(g, close, [loose, tight])
+    assert both.passed and [path for path, *_ in both.others] == ["mmvq"]
+    assert "calls: mmq/q8_1 40, mmvq/q8_1 3" in both.table() and "floor mmq" in both.table()
+    r = compare(g, far, [loose, tight])
+    assert r.passed is False and r.failures and all(f.startswith("against the mmvq floor: ") for f in r.failures)
+    far.meta["calls"] = {"mmq/q8_1": 40, "mmvq/q8_1": 3, "mmq/fp4": 2}           # a path no floor emulates
+    assert "2 calls on mmq/fp4, no floor emulates it (mmq/q8_1, mmvq/q8_1)" in compare(g, far, [loose, tight]).failures
+    assert compare(g, close, [loose, loose]).failures == ("several floors of one kernel path: one floor per path",)
+    tight.meta["act"] = "fp4"                                                     # floors of two modes
+    assert compare(g, close, [loose, tight]).failures[0] == "several floors in different modes: ['fp4', 'q8_1']"
+
+
 def test_bucketed_kl_is_a_tight_lower_bound(case):
     lens, logits, targets, noise = case
     cand_logits = noise(0.1)

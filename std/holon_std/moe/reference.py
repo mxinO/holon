@@ -2,6 +2,8 @@
 applied per (token, slot), the slot-ordered combine. fp32 throughout, as the op contracts specify."""
 from __future__ import annotations
 
+import contextlib
+
 import torch
 
 CLAMP = 6.1e-5            # llama.cpp's guard on the top-k sum (never reached by softmax: the sum is ≥ k/E)
@@ -263,7 +265,7 @@ def cpu_experts(jobs: torch.Tensor, x: torch.Tensor, gate_up: torch.Tensor, down
 
 
 # ggml-cpu's activation type per weight type (`type_traits_cpu[...].vec_dot_type`) for the types the CPU path serves
-Q8_0_DOT = {"q4_0", "q5_0", "q8_0", "iq4_nl"}
+Q8_0_DOT = {"q2_0", "q4_0", "q5_0", "q8_0", "iq4_nl"}
 Q8_K_DOT = {"q2_k", "q3_k", "q4_k", "q5_k", "q6_k", "iq1_s", "iq1_m", "iq2_xxs", "iq2_xs", "iq2_s", "iq3_xxs", "iq3_s",
             "iq4_xs"}
 
@@ -342,6 +344,23 @@ def copy_task(roles) -> None:
                     data = bytes(buf[offset - lo:offset - lo + nbytes])
                 units[unit, at:at + nbytes] = torch.frombuffer(bytearray(data), dtype=torch.uint8)
                 at += nbytes
+
+
+class ActivationLoan:
+    """The `activation_loan@1` oracle's terms, where no device allocator is lent: `use` places nothing (the step
+    allocates as it would), `held` is 0."""
+
+    def __init__(self, ctx=None) -> None:
+        pass
+
+    def use(self, range_: torch.Tensor) -> contextlib.AbstractContextManager:
+        return contextlib.nullcontext()
+
+    def held(self) -> int:
+        return 0
+
+    def release(self) -> None:
+        pass
 
 
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor) -> torch.Tensor:

@@ -1,0 +1,23 @@
+[plugin]
+name = "kernels.hc_triton"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]
+provides = ["kernel.hc_gr_mix@1", "kernel.hc_gr_combine@1"]
+requires = ["op.hc_gr_mix@1", "op.hc_gr_combine@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]
+
+[options]
+"hc.prefill" = { help = "hc_gr_mix's prefill projections: sgemm (float32 products, IEEE sums) or bf16x3 (three bf16 tensor-core products of the activation's exact split, float32 accumulation)", default = "sgemm" }

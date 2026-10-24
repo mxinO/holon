@@ -1,4 +1,4 @@
-abi 1.4
+abi 1.5
 
 # holon.api
 dataclass Abort
@@ -34,6 +34,7 @@ dataclass BlockRecord frozen
   #4 payloads: Mapping[str, Payload]
 protocol BuildCtx() required, implemented by core
   unit(self, ref: 'Ref', **site: 'Any') -> 'Unit'
+  unit_class(self, ref: 'Ref') -> 'Any'
   select_kernel(self, op: 'str', *, site: 'str', **facts: 'Any') -> 'KernelSpec'
   candidates(self, op: 'str', facts: 'dict[str, Any]') -> 'list[KernelSpec]'
   state(self, spec_name: 'str', layer: 'int') -> 'tuple[StateSpec, Pool] | None'
@@ -214,6 +215,7 @@ dataclass ModelSpec frozen
   #5 norm: Ref
   #6 lm_head: Ref
   #7 weights: WeightMap
+  #8 residual: Residual | None = None
 dataclass Option frozen
   #0 help: str
   #1 default: str | None = None
@@ -291,6 +293,9 @@ protocol Registry() required, implemented by core
   add(self, key: 'str', value: 'T') -> 'None'
   get(self, key: 'str') -> 'T'
 class RequestError(ValueError)
+dataclass Residual frozen
+  #0 width: int
+  #1 dtype: str
 dataclass Resolved frozen
   #0 what: str
   #1 nbytes: int | None
@@ -506,6 +511,9 @@ def sequence_seed(seed: 'int', index: 'int') -> 'int'
 def to_term(obj: 'Any') -> 'Any'
 
 # holon.api.hooks (optional)
+protocol ActivationLender() optional, implemented by plugins
+  lend_activations(self, peak: 'int') -> 'int'
+  activations(self, step: 'BatchPlan') -> 'contextlib.AbstractContextManager | None'
 protocol AdmitsDrafts() optional, implemented by plugins
   admit(self, slot: 'int', tokens: 'list[int]') -> 'None'
 protocol AdoptsWeights() optional, implemented by plugins

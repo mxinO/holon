@@ -141,7 +141,7 @@ def _widths(meta: dict) -> str:
 class L2Inputs:
     prompts: PromptSet
     golden: pathlib.Path
-    floor: pathlib.Path
+    floors: tuple[pathlib.Path, ...]      # one per kernel path the deployment takes (judge `compare`)
 
 
 class EngineChecks:
@@ -181,7 +181,8 @@ class EngineChecks:
         need = max(len(p.ids) for p in prompts.prompts) + 1
         engine = self._fresh(dataclasses.replace(self.config, max_model_len=max(self.config.max_model_len, need)))
         meta = model_meta(pathlib.Path(self.config.model)) | {"dtype": str(self.config.dtype).removeprefix("torch.")}
-        result = compare(golden, score(engine, prompts, golden.k, meta), Recording.load(self.inputs.floor))
+        floors = [Recording.load(f) for f in self.inputs.floors]
+        result = compare(golden, score(engine, prompts, golden.k, meta), floors)
         return bool(result.passed), result.table()
 
     def _fresh(self, config: EngineConfig) -> Engine:

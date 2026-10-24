@@ -99,16 +99,18 @@ def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
     return torch.cuda.max_memory_allocated(device) - before
 
 
-def reserved_growth(device: torch.device, fn: Callable[[], object]) -> int:
-    """Bytes the allocator still reserves after `fn()` beyond before it (e.g. a CUDA-graph pool `fn` creates)."""
+def reserved_growth(device: torch.device, fn: Callable[[], object], copies: int = 1) -> int:
+    """Bytes the allocator still reserves after `fn()` beyond before it (e.g. a CUDA-graph pool `fn` creates), and
+    `copies` times what the device keeps for it outside the allocator (e.g. its graphs' instantiated execs)."""
     _cuda(device, "reserved memory")
     synchronize(device)
     torch.cuda.empty_cache()
-    before = torch.cuda.memory_reserved(device)
+    before, free = torch.cuda.memory_reserved(device), torch.cuda.mem_get_info(device)[0]
     fn()
     synchronize(device)
     torch.cuda.empty_cache()                 # only what `fn` keeps (live graph pools are not released)
-    return torch.cuda.memory_reserved(device) - before
+    reserved = torch.cuda.memory_reserved(device) - before
+    return reserved + copies * max(free - torch.cuda.mem_get_info(device)[0] - reserved, 0)
 
 
 def release_cache(device: torch.device) -> None:
@@ -131,12 +133,14 @@ def host_memory(nbytes: int, device: torch.device, mapped: bool) -> torch.Tensor
     """Exactly `nbytes` of host memory in whole pages (an anonymous map), page-locked for CUDA by registering it — not
     torch's pinned allocator, which rounds up to a power of two —, with `mapped` also addressable by kernels
     (`device_alias`). Plain memory off CUDA. It is unregistered and unmapped with the last tensor viewing it. The map is
-    private (never shared with a child process). Page-locking took ≈ 0.33 s per GiB on the RTX A5000 development host
-    with 4 KiB pages, and 2–8 s per GiB with `madvise(MADV_HUGEPAGE)` (compaction), so huge pages are not asked for;
-    re-measure on the bar cards (step 0)."""
+    private (never shared with a child process). On CUDA it asks for transparent huge pages (`MADV_HUGEPAGE`): the
+    link reads them faster, kernels' zero-copy reads ≈ 4% and copy-engine DMA ≈ 13% on an RTX 5090, and they page-lock
+    4× faster (0.06 s per GiB there, 0.26 with 4 KiB pages; FN §23.6). Where the kernel cannot find huge pages it falls
+    back to small ones."""
     region = _Pinned(-1, nbytes, flags=mmap.MAP_PRIVATE)                # anonymous: fileno -1
     out = torch.frombuffer(region, dtype=torch.uint8)                    # its views keep the map alive
     if device.type == "cuda":
+        region.madvise(mmap.MADV_HUGEPAGE)                               # before registering faults the pages in
         _check(torch.cuda.cudart().cudaHostRegister(out.data_ptr(), nbytes, 1 | 2 * mapped),  # portable, mapped
                "cudaHostRegister")
         region.registered = out.data_ptr()

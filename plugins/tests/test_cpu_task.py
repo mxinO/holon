@@ -10,6 +10,7 @@ import torch
 from holon.core import platform
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
+PREBUILT = ("cpu_task",)  # CUDA extensions built if missing (conftest)
 
 LINE = 64
 
@@ -18,10 +19,7 @@ LINE = 64
 def lib():
     from holon_plugins.kernels.cpu_task import extension
 
-    try:
-        return extension.load(platform.fingerprint(torch.device("cuda")).sm)
-    except extension.NotBuilt as e:
-        pytest.skip(str(e))
+    return extension.load(platform.fingerprint(torch.device("cuda")).sm)
 
 
 def _worker(lib, probes, memop=False, timeout=5.0, threads=3):

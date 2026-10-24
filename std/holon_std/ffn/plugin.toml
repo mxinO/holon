@@ -9,6 +9,8 @@ core_abi = ">=1.0,<2.0"
 [resources]
 provides = [
     "unit.std.ffn.swiglu@1",
+    "unit.std.ffn.gated_swiglu@1",
+    "unit.std.ffn.sum@1",
     "op.silu_mul@1",
 ]
 
@@ -17,3 +19,6 @@ numerics = "exact"
 
 [reference]
 module = "reference"
+
+[options]
+"ffn.fork" = { help = "on CUDA, std.ffn.sum@1's later parts (a shared expert) on a side stream beside the first (the routed experts), joined at its combine: on or off", default = "on" }

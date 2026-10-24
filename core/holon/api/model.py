@@ -55,7 +55,21 @@ class WeightMap:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class Residual:
+    """The trunk's residual stream when it is not `[T, hidden]` in the engine's dtype (e.g. hyper-connection streams):
+    what `embed` returns, every block takes and returns, taps and `Drafter.run` see, and the final `norm` reads (it
+    returns `[T, hidden]` for `lm_head`)."""
+
+    width: int
+    dtype: str                          # a torch dtype's name, e.g. "float32"
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class ModelSpec:
+    """`block`'s class may declare state over all layers, with the same `state_specs(params, layers, ctx)` and
+    `planner(params, specs, ctx)` hooks as a mixer's (e.g. a composite block forwarding a wrapped unit's, found with
+    `BuildCtx.unit_class`); there, a group of `Slot` state without a planner is refused."""
+
     hidden: int
     vocab: int
     layers: tuple[LayerDecl, ...]
@@ -64,12 +78,14 @@ class ModelSpec:
     norm: Ref
     lm_head: Ref
     weights: WeightMap
+    residual: Residual | None = None    # None: [T, hidden] in the engine's dtype
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class AuxSpec:
     """A model built beside the target for a plugin (e.g. a draft head): `unit` builds it, given `layers` (numbered
-    from 0 within it; their mixers' state is bound under the aux model's namespace); `weights` loads it."""
+    from 0 within it; their mixers' state is bound under the aux model's namespace — only theirs: unlike the target's
+    `ModelSpec.block`, an aux unit declares none); `weights` loads it."""
 
     unit: Ref
     layers: tuple[LayerDecl, ...]
@@ -85,6 +101,10 @@ class BuildCtx(Protocol):
     options: Mapping[str, Any]   # deployment options units may read (e.g. "page_size"); unknown keys → defaults
 
     def unit(self, ref: Ref, **site: Any) -> Unit: ...
+
+    def unit_class(self, ref: Ref) -> Any:
+        """The registered class (factory) serving `ref`, without building it: a composite unit forwards the
+        `state_specs` / `planner` of a unit it wraps by Ref, without importing it."""
 
     def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
         """The kernel for versioned `op` (e.g. "attention.paged_decode@1") given canonical `facts` (shapes,
@@ -141,10 +161,11 @@ class BuildCtx(Protocol):
 
     def tap(self, layer: int, consume: Callable[[torch.Tensor, StepCtx], None]) -> None:
         """Have the target's trunk call `consume(h, ctx)` every step with its residual stream after layer `layer` (h
-        [T, H], every token of the step: the next layer's input, before its norm), inside the step's graph when it is
-        captured (engine builds: a drafter registers its taps while it is built). `h` is valid during the call only
-        (the next layer may reuse it): the consumer keeps what it needs in its own static buffers — a copy, or an fp32
-        accumulation — allocated with `static` at build time, sized for a step's most tokens."""
+        [T, H], or `ModelSpec.residual`'s [T, width]; every token of the step: the next layer's input, before its norm),
+        inside the step's graph when it is captured (engine builds: a drafter registers its taps while it is built).
+        `h` is valid during the call only (the next layer may reuse it): the consumer keeps what it needs in its own
+        static buffers — a copy, or an fp32 accumulation — allocated with `static` at build time, sized for a step's
+        most tokens."""
 
 
 class Unit(Protocol):

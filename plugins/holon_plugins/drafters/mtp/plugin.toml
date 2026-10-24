@@ -4,7 +4,11 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "drafter"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.5,<2.0"            # ModelSpec.residual
 
 [resources]
 provides = ["drafter.mtp@1"]
+
+[options]   # the EngineConfig.plugin_options keys this plugin reads
+"mtp.path" = { help = "the head's weights in a file of their own (default: the target checkpoint's)" }
+"mtp.front" = { help = "the step's tokens through the head's state writes only where it has them (write_kv: no attention, FFN or output), else its whole forward: on or off", default = "on" }

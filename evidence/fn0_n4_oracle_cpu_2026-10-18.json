@@ -1,0 +1,312 @@
+{
+ "name": "fn0_n4_oracle",
+ "date": "2026-10-18",
+ "device": "cpu",
+ "threads": 32,
+ "torch": "2.11.0+cu130",
+ "transformers": "5.19.0",
+ "model": "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002",
+ "prompt": "recall-32k",
+ "tokens": 31878,
+ "command": "python spikes/fn0/n4_oracle.py --prompt recall-32k --threads 32",
+ "status": "done",
+ "layers": [
+  {
+   "layer": 0,
+   "type": "linear_attention",
+   "s": 180.5,
+   "rss_gb": 32.19
+  },
+  {
+   "layer": 1,
+   "type": "linear_attention",
+   "s": 192.6,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 2,
+   "type": "linear_attention",
+   "s": 100.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 3,
+   "type": "indexed_attention",
+   "s": 173.7,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 4,
+   "type": "linear_attention",
+   "s": 93.5,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 5,
+   "type": "linear_attention",
+   "s": 97.5,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 6,
+   "type": "linear_attention",
+   "s": 87.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 7,
+   "type": "indexed_attention",
+   "s": 175.4,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 8,
+   "type": "linear_attention",
+   "s": 88.3,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 9,
+   "type": "linear_attention",
+   "s": 113.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 10,
+   "type": "linear_attention",
+   "s": 96.0,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 11,
+   "type": "indexed_attention",
+   "s": 165.1,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 12,
+   "type": "linear_attention",
+   "s": 88.6,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 13,
+   "type": "linear_attention",
+   "s": 86.5,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 14,
+   "type": "linear_attention",
+   "s": 82.0,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 15,
+   "type": "indexed_attention",
+   "s": 167.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 16,
+   "type": "linear_attention",
+   "s": 83.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 17,
+   "type": "linear_attention",
+   "s": 89.5,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 18,
+   "type": "linear_attention",
+   "s": 88.7,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 19,
+   "type": "indexed_attention",
+   "s": 164.2,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 20,
+   "type": "linear_attention",
+   "s": 83.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 21,
+   "type": "linear_attention",
+   "s": 85.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 22,
+   "type": "linear_attention",
+   "s": 82.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 23,
+   "type": "indexed_attention",
+   "s": 189.7,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 24,
+   "type": "linear_attention",
+   "s": 87.6,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 25,
+   "type": "linear_attention",
+   "s": 89.1,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 26,
+   "type": "linear_attention",
+   "s": 85.6,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 27,
+   "type": "indexed_attention",
+   "s": 163.6,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 28,
+   "type": "linear_attention",
+   "s": 92.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 29,
+   "type": "linear_attention",
+   "s": 81.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 30,
+   "type": "linear_attention",
+   "s": 86.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 31,
+   "type": "indexed_attention",
+   "s": 188.3,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 32,
+   "type": "linear_attention",
+   "s": 81.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 33,
+   "type": "linear_attention",
+   "s": 82.0,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 34,
+   "type": "linear_attention",
+   "s": 81.2,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 35,
+   "type": "indexed_attention",
+   "s": 171.3,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 36,
+   "type": "linear_attention",
+   "s": 85.5,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 37,
+   "type": "linear_attention",
+   "s": 75.3,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 38,
+   "type": "linear_attention",
+   "s": 82.1,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 39,
+   "type": "indexed_attention",
+   "s": 175.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 40,
+   "type": "linear_attention",
+   "s": 85.1,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 41,
+   "type": "linear_attention",
+   "s": 84.0,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 42,
+   "type": "linear_attention",
+   "s": 89.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 43,
+   "type": "indexed_attention",
+   "s": 220.8,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 44,
+   "type": "linear_attention",
+   "s": 88.3,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 45,
+   "type": "linear_attention",
+   "s": 85.2,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 46,
+   "type": "linear_attention",
+   "s": 83.9,
+   "rss_gb": 47.12
+  },
+  {
+   "layer": 47,
+   "type": "indexed_attention",
+   "s": 161.6,
+   "rss_gb": 47.12
+  }
+ ],
+ "indexer_ties": {
+  "queries": 382500,
+  "sparse": 357924,
+  "boundary_ties": 57
+ },
+ "peak_rss_gb": 47.12,
+ "wall_s": 5446.8,
+ "target_lp_mean": -2.7482,
+ "total_s": 5504.2
+}

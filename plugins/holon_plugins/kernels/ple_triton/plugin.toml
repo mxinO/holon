@@ -1,0 +1,20 @@
+[plugin]
+name = "kernels.ple_triton"
+version = "1.0.0"
+entry = "plugin:Plugin"
+slot = "kernel"
+license = "Apache-2.0"
+core_abi = ">=1.0,<2.0"
+
+[resources]
+provides = ["kernel.qwen4_exp.ple_rows@1", "kernel.qwen4_exp.ple_block@1"]
+requires = ["op.qwen4_exp.ple_rows@1", "op.qwen4_exp.ple_block@1"]
+
+[properties]
+numerics = "bounded"
+
+[dependencies]
+python = ["triton"]
+
+[support]
+platforms = ["cuda"]

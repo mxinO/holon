@@ -196,6 +196,7 @@ class Linear(nn.Module):
         self._q: _Quantized | None = None
         self.parts: dict[str, torch.Tensor] | None = None            # a quantized weight's, by role
         self._glu: str | None = None                                  # a merged gate/up's activation (use_glu)
+        self._rows = None                                             # a dense weight's `linear_rows@1`, if any
 
     def _quantized(self, layout) -> _Quantized:
         dtype = _dtype(self._ctx.dtype)
@@ -211,11 +212,19 @@ class Linear(nn.Module):
     def bind_kernels(self, ctx) -> None:
         if self._q is not None and self.weight is not None:          # not merged away
             self.parts = self._q.bind(self.parts, (self.out_features, self.in_features), self.weight, self._glu)
+        elif self._q is None and self.weight is not None and self.bias is None:     # a few rows' kernel, if any
+            facts = {"in": self.in_features, "out": self.out_features, "dtype": _dtype(self.weight.dtype)}
+            if ctx.candidates(kernels.LINEAR_ROWS, facts):
+                self._rows = _kernel(ctx, kernels.LINEAR_ROWS, f"std.ops.linear[{self.out_features}x"
+                                     f"{self.in_features}]", **facts)
 
     def forward(self, x) -> torch.Tensor:
         """`x`, or a `prepare_input` handle of it (from this or any other linear)."""
         if self._q is None:
-            return nn.functional.linear(_tensor(x), self.weight, self.bias)
+            x = _tensor(x)
+            if self._rows is not None and x.dim() == 2 and 2 <= len(x) <= kernels.ROWS_MAX:
+                return self._rows(x, self.weight)
+            return nn.functional.linear(x, self.weight, self.bias)
         y = self._q(x, self.parts)
         return y if self.bias is None else y + self.bias
 

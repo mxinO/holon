@@ -56,7 +56,7 @@ class BuildContext:
         self.sealed = False                        # the engine has run their first hooks: no new ones
         self.cpu_kernels = False               # a selected kernel runs on the CPU's tier: the lock class names it
 
-    def unit_factory(self, ref: Ref) -> Any:
+    def unit_class(self, ref: Ref) -> Any:
         """The registered factory (usually the unit class) serving `ref`, loading its plugin if needed."""
         plugin = self.plugins.provider("unit", ref)
         self.plugins.load(plugin)
@@ -64,7 +64,7 @@ class BuildContext:
         return self.plugins.regs.units.get(ref.name)
 
     def unit(self, ref: Ref, **site: Any) -> nn.Module:
-        return self.unit_factory(ref)(self, **dict(ref.params), **site)
+        return self.unit_class(ref)(self, **dict(ref.params), **site)
 
     def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
         key = (op, tuple(sorted(facts.items())))
@@ -171,11 +171,11 @@ class ChildContext:
         self.fingerprint = parent.fingerprint
         self.options = parent.options | (options or {})
 
-    def unit_factory(self, ref: Ref) -> Any:
-        return self.parent.unit_factory(ref)
+    def unit_class(self, ref: Ref) -> Any:
+        return self.parent.unit_class(ref)
 
     def unit(self, ref: Ref, **site: Any) -> nn.Module:
-        return self.parent.unit_factory(ref)(self, **dict(ref.params), **site)       # nested units see the child too
+        return self.parent.unit_class(ref)(self, **dict(ref.params), **site)       # nested units see the child too
 
     def select_kernel(self, op: str, *, site: str, **facts: Any) -> KernelSpec:
         return self.parent.select_kernel(op, site=f"{self.namespace}.{site}", **facts)
@@ -276,14 +276,18 @@ class Model(nn.Module):
         self.norm = ctx.unit(spec.norm, dim=spec.hidden)
         self.lm_head = ctx.unit(spec.lm_head, vocab=spec.vocab, hidden=spec.hidden, embed=self.embed)
         self.taps = ctx.taps               # filled after the build, by a drafter (`BuildCtx.tap`)
+        r = spec.residual                  # the trunk's width and dtype (`ModelSpec.residual`)
+        if r and not isinstance(getattr(torch, r.dtype, None), torch.dtype):
+            raise PluginError(f"ModelSpec.residual: {r.dtype!r} is not a torch dtype")
+        self.residual = (r.width, getattr(torch, r.dtype)) if r else (spec.hidden, ctx.dtype)
 
     def forward(self, ctx: StepCtx) -> torch.Tensor:
         """Logits of the step's `logits_index` rows."""
         return self.head(self.trunk(ctx)[ctx.batch.dev.logits_index])
 
     def trunk(self, ctx: StepCtx) -> torch.Tensor:
-        """Final hidden states of every token of the step, before the norm; the residual stream after each tapped
-        layer goes to its consumers on the way."""
+        """Final hidden states of every token of the step, before the norm ([T, width] of `residual`); the residual
+        stream after each tapped layer goes to its consumers on the way."""
         h = self.embed(ctx.batch.dev.input_ids)
         for i, layer in enumerate(self.layers):
             h = layer(h, ctx)

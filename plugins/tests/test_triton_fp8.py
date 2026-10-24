@@ -11,6 +11,8 @@ emulations, on random e4m3 bytes (every finite code, subnormals and ±448 includ
   bf16 activations, T ≤ 16) or W8A8 (activations as `fp8_act`, T > 16) in f64, and the call counted on that path
   and mode. Below sm_89 only the decode path runs (FP8 there is v1).
 - CUDA graphs replay bitwise like eager calls on both paths, and calls are run-to-run identical.
+- `linear_rows@1` (bf16, 2 to 16 rows; a GDN a/b projection's shape and the narrowest served): `l0.check` against
+  its f64 product, run-to-run identical, and a graph replay bitwise like the eager call.
 """
 import pytest
 import torch
@@ -19,7 +21,7 @@ from holon.core.build import BuildContext
 from holon.core.plugins import PluginSet, discover
 from holon_judge import l0, modes
 from holon_plugins.kernels.triton_fp8 import kernel
-from holon_plugins.kernels.triton_fp8.plugin import QLinear
+from holon_plugins.kernels.triton_fp8.plugin import LinearRows, QLinear
 from holon_std.weights.hf import reference as hf
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
@@ -127,3 +129,29 @@ def test_graphs_and_run_to_run(ctx):
         x.copy_(activations(t, k, 8))
         g.replay()
         assert torch.equal(captured, lin(x, parts))
+
+
+@pytest.mark.parametrize("out", [96, 16, 17, 255])               # (odd widths: the column mask)
+def test_linear_rows(out):
+    """Within the L0 budget and within one bf16 ulp of the float64 product, rounded; a row's bits do not depend on
+    the call's other rows; a weight read with its row stride (rows of a wider merged weight) as a dense one; graphs."""
+    k, rows = 2560, LinearRows(None, **{"in": 2560, "out": out, "dtype": "bfloat16"})
+    w = (torch.randn(out, k, generator=torch.Generator().manual_seed(out)) / k ** 0.5).bfloat16().cuda()
+    wide = torch.cat([w, torch.full((out, 7), float("nan"), dtype=w.dtype, device="cuda")], 1)[:, :k]  # strided rows
+    for t in (2, 4, 9, 16):
+        x = torch.randn(t, k, generator=torch.Generator().manual_seed(t)).bfloat16().cuda()
+        y = rows(x, w)
+        assert y.dtype == torch.bfloat16 and torch.equal(y, rows(x, w)) and torch.equal(y, rows(x, wide))
+        exact = x.double() @ w.double().T
+        report = l0.check(y, exact, torch.bfloat16, k)
+        assert report.passed, f"linear_rows {t}x{k} @ {out}: {report}"
+        ulp = torch.ldexp(torch.ones_like(exact), torch.frexp(exact.bfloat16().double())[1] - 8)   # bf16's spacing
+        assert ((y.double() - exact).abs() <= ulp).all(), f"linear_rows {t}x{k} @ {out}: past one ulp"
+        assert torch.equal(rows(x[1:2].expand(2, k).contiguous(), w)[0], y[1]), "a row's bits depend on the call"
+    g = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(g):
+        captured = rows(x, w)
+    g.replay()
+    assert torch.equal(captured, rows(x, w))
+    with pytest.raises(ValueError, match="dense rows"):
+        rows(x, w.t().contiguous().t())

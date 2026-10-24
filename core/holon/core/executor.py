@@ -7,6 +7,7 @@ host copies of the step's results and the event that says they have landed.
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 from typing import Any
 
@@ -23,6 +24,7 @@ from .memory import Copies, Ledger, run_mem_ops
 from .state import StateManager
 
 PROMPT_LOGPROB_CHUNK = 256     # rows of full-vocabulary logits materialized at once for prompt logprobs
+LOGPROB_F32_ROWS = 64          # of them, rows taken to f32 log-probabilities at once (row-wise: the same bits)
 BUCKETS = (1, 2, 4, 8, 16, 24, 32, 48, 64, 96, 128, 192, 256)      # decode batch sizes captured as graphs
 
 # Sampler variants captured at startup: greedy, sampled, sampled with filters (logprob steps run eagerly).
@@ -106,11 +108,12 @@ def _last_tokens(qstart: np.ndarray, n_logits: np.ndarray) -> np.ndarray:
     return ends - n_logits.repeat(n_logits) + (np.arange(len(ends)) - first)
 
 
-def profile_rows(cfg: Any) -> list[int]:
-    """The rows of the worst-case step `state_memory` profiles: `max_step_tokens` prompt tokens in rows of at most
-    `max_model_len`, at most `max_seqs` of them."""
-    rows = [cfg.max_model_len] * (cfg.max_step_tokens // cfg.max_model_len)
-    return [r for r in (rows + [cfg.max_step_tokens % cfg.max_model_len])[:cfg.max_seqs] if r]
+def profile_rows(cfg: Any, tokens: int = 0) -> list[int]:
+    """The rows of the worst-case step `state_memory` profiles: `tokens` (default `max_step_tokens`) prompt tokens in
+    rows of at most `max_model_len`, at most `max_seqs` of them."""
+    tokens = tokens or cfg.max_step_tokens
+    rows = [cfg.max_model_len] * (tokens // cfg.max_model_len)
+    return [r for r in (rows + [tokens % cfg.max_model_len])[:cfg.max_seqs] if r]
 
 
 class Executor:
@@ -181,6 +184,7 @@ class Executor:
         self.copies = Copies(device, self.pools)               # MemOps with `after` or `lands_by`
         self.writes = Writes(device)                           # what shared objects write before a launch
         self._before = [o.before_launch for o in shared if hasattr(o, "before_launch")]
+        self._lenders = [o for o in shared if hasattr(o, "lend_activations")]
         self._observers = [o for o in shared if hasattr(o, "after_commit")]
         self._telemetry: list[dict[str, tuple[torch.Tensor, list[torch.Tensor]]]] | None = None   # at first launch
 
@@ -203,23 +207,32 @@ class Executor:
     def state_memory(self, ledger: Ledger, fraction: float) -> int:
         """Bytes for the state pools: `fraction` of the free memory, minus the activation peak of a worst-case step
         (`max_step_tokens` prompt tokens in rows of at most `max_model_len`, each sampled) run on minimum-size pools,
-        and minus the graphs' private pool."""
-        n = np.array(profile_rows(self.cfg), dtype=np.int32)
-        plan = host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
-                         np.zeros(int(n.sum()), dtype=np.int64))
+        and minus the graphs' private pool. Where a shared object lends the steps from some size their activations
+        (`lend_activations`, told the worst step's peak), the worst step below that size (at least an eager step of
+        every slot's decode or verify rows) is the one reserved."""
         ledger.materialize(None)
         self.state.reset_padding()
         with torch.no_grad():
-            peak = platform.peak_memory(self.device, lambda: self._worst_step(plan))
+            peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan()))
+            lends = min((t for o in self._lenders if (t := o.lend_activations(peak))), default=0)
+            small = max(lends - 1, self.cfg.max_seqs * (1 + self.cfg.max_draft_tokens))   # (eager decode rows too)
+            if lends and small < self.cfg.max_step_tokens:
+                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(small)))
             if self.graphs is not None:
                 # Captured largest bucket first, the smaller ones reuse its blocks, so the pool is what the largest
-                # bucket's variants leave reserved.
+                # bucket's variants leave reserved; every bucket's execs take the device memory the largest's do.
                 graphs, self.graphs = self.graphs, platform.Graphs(self.device)
                 peak += platform.reserved_growth(self.device, lambda: [
-                    self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()])
+                    self._graph_step(self.buckets[-1], *variant) for variant in self._graph_variants()],
+                    len(self.buckets))
                 self.graphs = graphs                     # the profile's graphs go before the free memory is read
         ledger.free()
         return int(platform.free_memory(self.device) * fraction) - peak
+
+    def _profile_plan(self, tokens: int = 0) -> BatchPlan:
+        n = np.array(profile_rows(self.cfg, tokens), dtype=np.int32)
+        return host_plan(0, np.arange(len(n), dtype=np.int32), np.zeros_like(n), n, np.ones_like(n),
+                         np.zeros(int(n.sum()), dtype=np.int64))
 
     def _worst_step(self, plan: BatchPlan) -> None:
         """The largest prefill, a prompt-logprob chunk, a filtered sampling step over every slot with logprobs,
@@ -230,7 +243,11 @@ class Executor:
         ctx = self._context(plan)
         self._prepare(ctx)
         h = self.model.trunk(ctx)
-        self.model.head(h[:PROMPT_LOGPROB_CHUNK]).float().log_softmax(-1)
+        width, dtype = self.model.residual
+        if h.shape[1:] != (width,) or h.dtype != dtype:     # what taps and the drafter are built for (below)
+            raise ValueError(f"the trunk returns [T, {h.shape[1]}] {h.dtype}, not the [T, {width}] {dtype} the model "
+                             "declares (ModelSpec.residual)")
+        self.model.head(h[:PROMPT_LOGPROB_CHUNK])[:LOGPROB_F32_ROWS].float().log_softmax(-1)
         if self.drafter is not None:                 # its pass over the step's tokens
             self._run_drafter(ctx, h)
         del h
@@ -263,7 +280,7 @@ class Executor:
             self.verifier.verify(torch.zeros(int(width.sum()), self.vocab, device=self.device), ctx)
             for rewind in self.rewinders:
                 rewind(ctx)
-            self._run_drafter(ctx, torch.zeros(int(width.sum()), self.model.spec.hidden, dtype=self.cfg.dtype,
+            self._run_drafter(ctx, torch.zeros(int(width.sum()), self.model.residual[0], dtype=self.model.residual[1],
                                                device=self.device))
         if self.processor is not None:
             r = n * (1 + self.cfg.max_draft_tokens)
@@ -349,22 +366,24 @@ class Executor:
         if key is not None:
             sampled, accepts = self.graphs.run(key, lambda: self._decode(ctx))   # verify, rewind, drafter included
         else:
-            self._prepare(ctx)
-            h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
-            # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
-            logits = self._logits(ctx, h) if n_sampled else None
-            if prompt is not None:
-                recorded = self._prompt_logprobs(h, plan, prompt)
-            if (plan.n_logits > 1).any():           # verify rows
-                out, accepts = self.verifier.verify(logits, ctx)
-                sampled = self._store(ctx, out.tokens, accepts)
-                for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
-                    rewind(ctx)
-            elif plan.n_logits.any():
-                out = self.sampler.sample(logits, ctx)
-                sampled = self._store(ctx, out.tokens)
-            if self.drafter is not None:
-                self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
+            loan = next((c for o in self._lenders if (c := o.activations(plan)) is not None), None)
+            with loan or contextlib.nullcontext():          # its activations a shared object's loan (if any)
+                self._prepare(ctx)
+                h = self.model.trunk(ctx)               # always: chunks without sampled rows still write their state
+                # The head only when a row samples: a step of mid-prompt chunks has no logits rows at all.
+                logits = self._logits(ctx, h) if n_sampled else None
+                if prompt is not None:
+                    recorded = self._prompt_logprobs(h, plan, prompt)
+                if (plan.n_logits > 1).any():           # verify rows
+                    out, accepts = self.verifier.verify(logits, ctx)
+                    sampled = self._store(ctx, out.tokens, accepts)
+                    for rewind in self.rewinders:       # past the rejected drafts, before anything drafts from it
+                        rewind(ctx)
+                elif plan.n_logits.any():
+                    out = self.sampler.sample(logits, ctx)
+                    sampled = self._store(ctx, out.tokens)
+                if self.drafter is not None:
+                    self._run_drafter(ctx, h)           # its state for this step's tokens, then the next step's drafts
         run_mem_ops(mem_ops, self.pools, "post_sample")
         draft_tokens = None
         if sampled is not None and self.drafter is not None:
@@ -611,12 +630,16 @@ class Executor:
         for r in prompt:
             acc, base = Logprobs([], [], []), int(qstart[r.row])
             for a in range(r.first, r.end, chunk):
-                b = min(a + chunk, r.end)
-                lp = self.model.head(h[base + a: base + b]).float().log_softmax(-1)
-                target = torch.as_tensor(r.targets[a - r.first: b - r.first], device=lp.device)
-                top = lp.topk(r.k)
-                acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
-                acc.top_ids += top.indices.tolist()
-                acc.top += top.values.tolist()
+                logits = self.model.head(h[base + a: base + min(a + chunk, r.end)])
+                for c in range(a, min(a + chunk, r.end), LOGPROB_F32_ROWS):
+                    b = min(c + LOGPROB_F32_ROWS, a + chunk, r.end)
+                    lp = logits[c - a: b - a].float().log_softmax(-1)
+                    target = torch.as_tensor(r.targets[c - r.first: b - r.first], device=lp.device)
+                    top = lp.topk(r.k)
+                    acc.token += lp.gather(-1, target[:, None])[:, 0].tolist()
+                    acc.top_ids += top.indices.tolist()
+                    acc.top += top.values.tolist()
+                    del lp, top                     # (each piece freed before the next: the profile's peak)
+                del logits
             out.append(acc)
         return out

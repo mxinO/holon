@@ -2,7 +2,12 @@
 model plugin declares as `draft_head("mtp")`, built as the auxiliary model "mtp" (its KV under `mtp.kv`).
 
 Pairing (llama.cpp's): the head's row at position p takes the token at p and the target's final-norm hidden of p − 1,
-so every head KV entry depends only on tokens ≤ p and prefix-cached pages share safely. After each step `run`:
+so every head KV entry depends only on tokens ≤ p and prefix-cached pages share safely. A head whose `carries` is
+"residual" (e.g. `std.spec.mtp_hc_head@1`, FN D9) takes the trunk's residual itself (`ModelSpec.residual`'s width and
+dtype) instead of its final norm, returns its own, and maps it for the `lm_head` by its `out`; its token embedding is
+the target embed's `inner` when it wraps one (`std.hyper.expand@1`'s, before the repeat into streams). The head's
+weights are the target checkpoint's, or with the plugin option `mtp.path` a file of their own (e.g. Strata's MTP
+pack). After each step `run`:
 
 1. runs the head over every token of the step (its KV), each token paired with its predecessor's hidden — inside the
    step, the previous row; for a row's first token, the hidden carried from the slot's last step if it was the
@@ -26,15 +31,26 @@ class Plugin:
         spec = target.draft_head(NAMESPACE)
         if spec is None:
             raise ValueError("drafters.mtp: the target's checkpoint declares no MTP draft head")
-        return MTPDrafter(ctx, target, ctx.aux_model(NAMESPACE, spec, target.tensors()))
+        path = ctx.options.get("plugins", {}).get("mtp.path")
+        tensors = ctx.weight_source(path).tensors() if path else target.tensors()
+        return MTPDrafter(ctx, target, ctx.aux_model(NAMESPACE, spec, tensors))
 
 
 class MTPDrafter:
     def __init__(self, ctx, target, head) -> None:
         self.head = head
         self.embed, self.norm, self.lm_head = (target.shared(n) for n in ("embed", "norm", "lm_head"))
-        slots, hidden = ctx.options["max_seqs"] + 1, target.spec.hidden
-        self.carry = ctx.static("drafter.mtp.carry", (slots, hidden), ctx.dtype)      # per slot: a hidden ...
+        self.residual = getattr(head, "carries", "norm") == "residual"
+        self.out = head.out if self.residual else (lambda x: x)
+        if self.residual:
+            self.embed = getattr(self.embed, "inner", self.embed)
+        r = target.spec.residual
+        width, dtype = ((r.width, getattr(torch, r.dtype)) if self.residual and r is not None
+                        else (target.spec.hidden, ctx.dtype))
+        slots = ctx.options["max_seqs"] + 1
+        self.dtype = ctx.dtype                      # what the head's predecessor hiddens are cast to
+        self.front = str(ctx.options.get("plugins", {}).get("mtp.front", "on")) != "off"
+        self.carry = ctx.static("drafter.mtp.carry", (slots, width), dtype)          # per slot: a hidden ...
         self.carry_at = ctx.static("drafter.mtp.carry_at", (slots,), torch.int64)    # ... and its position
         self.carry_at.fill_(-1)
 
@@ -50,14 +66,20 @@ class MTPDrafter:
     def run(self, ctx, h: torch.Tensor) -> None:
         dev, table, plan = ctx.batch.dev, ctx.seq_table, ctx.batch.plan
         view = ctx.view(NAMESPACE)
-        hn = self.norm(h)                                                # the lm_head input of every step token
+        hn = h if self.residual else self.norm(h)                        # what the head takes, of every step token
         first = dev.query_start[:-1]
         slots = dev.slots
-        prev = hn.roll(1, 0)                                             # each token's predecessor in its row …
+        # each token's predecessor in its row, in the model's dtype (the head casts it so first: half a float32
+        # residual's bytes in a prompt step's peak) …
+        prev = torch.empty(hn.shape, dtype=self.dtype, device=hn.device)
+        prev[1:] = hn[:-1]
         start = dev.positions[first]                                     # a request's first token carries nothing
         carried = self.carry[slots] * ((self.carry_at[slots] == start - 1) & (start > 0))[:, None]
         prev[first] = carried.to(prev.dtype)                             # … or the slot's carried hidden
-        self.head(self.embed(dev.input_ids), prev, view)                 # the head's KV for the step's tokens
+        # the head's KV for the step's tokens: its state writes only where the head has them (nothing reads its output
+        # here), else its whole forward; `mtp.front=off` runs the whole forward
+        write = getattr(self.head, "write_kv", None) if self.front else None
+        (write or self.head)(self.embed(dev.input_ids), prev, view)
         verify = bool((plan.n_logits > 1).any())
         last = first + table.n_accept[slots] if verify else dev.query_start[1:] - 1
         self.carry[slots] = hn[last]
@@ -71,6 +93,6 @@ class MTPDrafter:
         for i in range(k):
             sub = view.substep(1, i)
             x = self.head(self.embed(token), x, sub)
-            token = self.lm_head(x).argmax(-1)
+            token = self.lm_head(self.out(x)).argmax(-1)
             table.draft_tokens[sampled, i] = token
         table.n_draft.index_fill_(0, sampled, k)

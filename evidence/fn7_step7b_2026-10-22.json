@@ -1,0 +1,788 @@
+{
+ "date": "2026-10-22",
+ "doc": "docs/v1-flash-next.md \u00a721.6",
+ "benches": {
+  "s7_g_rtx-5080": {
+   "commit": "79855e3f523731d6dc2730d7231b64ff545fe69b",
+   "gpu": "rtx-5080",
+   "arms": {
+    "v3_off": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v3_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "s3_off": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on",
+    "s3_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on",
+    "strata_na_off": "--pack iq2_xs --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97",
+    "strata_na_mtp": "--pack iq2_xs --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp rt --spec 4 --spec-min-p 0 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+   },
+   "table": {
+    "v3_off": {
+     "1024": {
+      "prefill_tps": 1570.313,
+      "decode_tps": 93.34,
+      "hit_rate_all": 0.853
+     },
+     "4096": {
+      "prefill_tps": 3326.2,
+      "decode_tps": 93.303,
+      "hit_rate_all": 0.87
+     },
+     "32768": {
+      "prefill_tps": 3167.053,
+      "decode_tps": 86.953,
+      "hit_rate_all": 0.85
+     }
+    },
+    "v3_mtp": {
+     "1024": {
+      "prefill_tps": 1526.977,
+      "decode_tps": 110.113,
+      "hit_rate_all": 0.843,
+      "tokens_per_pass": 2.72
+     },
+     "4096": {
+      "prefill_tps": 3279.63,
+      "decode_tps": 111.587,
+      "hit_rate_all": 0.857,
+      "tokens_per_pass": 2.743
+     },
+     "32768": {
+      "prefill_tps": 3135.173,
+      "decode_tps": 108.87,
+      "hit_rate_all": 0.813,
+      "tokens_per_pass": 2.923
+     }
+    },
+    "s3_off": {
+     "1024": {
+      "prefill_tps": 1570.053,
+      "decode_tps": 93.39,
+      "hit_rate_all": 0.853
+     },
+     "4096": {
+      "prefill_tps": 3325.567,
+      "decode_tps": 93.153,
+      "hit_rate_all": 0.87
+     },
+     "32768": {
+      "prefill_tps": 3167.65,
+      "decode_tps": 87.02,
+      "hit_rate_all": 0.85
+     }
+    },
+    "s3_mtp": {
+     "1024": {
+      "prefill_tps": 1528.297,
+      "decode_tps": 111.477,
+      "hit_rate_all": 0.843,
+      "tokens_per_pass": 2.72
+     },
+     "4096": {
+      "prefill_tps": 3278.837,
+      "decode_tps": 112.743,
+      "hit_rate_all": 0.857,
+      "tokens_per_pass": 2.743
+     },
+     "32768": {
+      "prefill_tps": 3135.1,
+      "decode_tps": 109.993,
+      "hit_rate_all": 0.813,
+      "tokens_per_pass": 2.923
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "prefill_tps": 1527.61,
+      "decode_tps": 89.353,
+      "hit_rate_all": 0.837,
+      "tokens_per_pass": 1.0
+     },
+     "4096": {
+      "prefill_tps": 2725.09,
+      "decode_tps": 86.877,
+      "hit_rate_all": 0.83,
+      "tokens_per_pass": 1.0
+     },
+     "32768": {
+      "prefill_tps": 3117.333,
+      "decode_tps": 80.463,
+      "hit_rate_all": 0.783,
+      "tokens_per_pass": 1.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "prefill_tps": 1486.643,
+      "decode_tps": 127.937,
+      "hit_rate_all": 0.833,
+      "tokens_per_pass": 2.877
+     },
+     "4096": {
+      "prefill_tps": 2702.633,
+      "decode_tps": 105.663,
+      "hit_rate_all": 0.83,
+      "tokens_per_pass": 2.433
+     },
+     "32768": {
+      "prefill_tps": 3094.093,
+      "decode_tps": 117.77,
+      "hit_rate_all": 0.77,
+      "tokens_per_pass": 3.087
+     }
+    }
+   }
+  },
+  "s7_g_rtx-5090": {
+   "commit": "79855e3f523731d6dc2730d7231b64ff545fe69b",
+   "gpu": "rtx-5090",
+   "arms": {
+    "v3_off": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v3_mtp": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "s3_off": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on",
+    "s3_mtp": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.split=on",
+    "st_off": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048",
+    "strata_na_off": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97",
+    "strata_na_mtp": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp rt --spec 4 --spec-min-p 0 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+   },
+   "table": {
+    "v3_off": {
+     "1024": {
+      "prefill_tps": 1364.013,
+      "decode_tps": 126.767,
+      "hit_rate_all": 0.93
+     },
+     "4096": {
+      "prefill_tps": 5130.21,
+      "decode_tps": 124.27,
+      "hit_rate_all": 0.933
+     },
+     "32768": {
+      "prefill_tps": 6195.647,
+      "decode_tps": 113.627,
+      "hit_rate_all": 0.92
+     }
+    },
+    "v3_mtp": {
+     "1024": {
+      "prefill_tps": 1341.113,
+      "decode_tps": 153.833,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 2.83
+     },
+     "4096": {
+      "prefill_tps": 4986.983,
+      "decode_tps": 144.813,
+      "hit_rate_all": 0.92,
+      "tokens_per_pass": 2.673
+     },
+     "32768": {
+      "prefill_tps": 6169.637,
+      "decode_tps": 152.953,
+      "hit_rate_all": 0.913,
+      "tokens_per_pass": 3.1
+     }
+    },
+    "s3_off": {
+     "1024": {
+      "prefill_tps": 1363.01,
+      "decode_tps": 124.37,
+      "hit_rate_all": 0.93
+     },
+     "4096": {
+      "prefill_tps": 5129.043,
+      "decode_tps": 122.1,
+      "hit_rate_all": 0.933
+     },
+     "32768": {
+      "prefill_tps": 6192.607,
+      "decode_tps": 112.173,
+      "hit_rate_all": 0.92
+     }
+    },
+    "s3_mtp": {
+     "1024": {
+      "prefill_tps": 1339.077,
+      "decode_tps": 154.907,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 2.83
+     },
+     "4096": {
+      "prefill_tps": 4990.443,
+      "decode_tps": 145.78,
+      "hit_rate_all": 0.92,
+      "tokens_per_pass": 2.673
+     },
+     "32768": {
+      "prefill_tps": 6164.283,
+      "decode_tps": 154.46,
+      "hit_rate_all": 0.913,
+      "tokens_per_pass": 3.1
+     }
+    },
+    "st_off": {
+     "1024": {
+      "prefill_tps": 1709.91,
+      "decode_tps": 127.81,
+      "hit_rate_all": 0.933
+     },
+     "4096": {
+      "prefill_tps": 5136.263,
+      "decode_tps": 124.207,
+      "hit_rate_all": 0.933
+     },
+     "32768": {
+      "prefill_tps": 6195.187,
+      "decode_tps": 113.587,
+      "hit_rate_all": 0.92
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "prefill_tps": 2211.37,
+      "decode_tps": 115.577,
+      "hit_rate_all": 0.927,
+      "tokens_per_pass": 1.0
+     },
+     "4096": {
+      "prefill_tps": 4620.703,
+      "decode_tps": 110.147,
+      "hit_rate_all": 0.92,
+      "tokens_per_pass": 1.0
+     },
+     "32768": {
+      "prefill_tps": 5670.293,
+      "decode_tps": 106.57,
+      "hit_rate_all": 0.907,
+      "tokens_per_pass": 1.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "prefill_tps": 2148.12,
+      "decode_tps": 177.213,
+      "hit_rate_all": 0.937,
+      "tokens_per_pass": 2.777
+     },
+     "4096": {
+      "prefill_tps": 4594.177,
+      "decode_tps": 166.03,
+      "hit_rate_all": 0.93,
+      "tokens_per_pass": 2.707
+     },
+     "32768": {
+      "prefill_tps": 5632.873,
+      "decode_tps": 187.82,
+      "hit_rate_all": 0.927,
+      "tokens_per_pass": 3.27
+     }
+    }
+   }
+  },
+  "s7_f5bv_rtx-5080": {
+   "commit": "79855e3f523731d6dc2730d7231b64ff545fe69b",
+   "gpu": "rtx-5080",
+   "arms": {
+    "v3_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "vs_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.cpu_plan=0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,10,10,10 moe.cpu_isa=x86-avx512 cpu_task.threads=6 moe.cpu_min_tokens=2"
+   },
+   "table": {
+    "v3_mtp": {
+     "1024": {
+      "prefill_tps": 1528.3,
+      "decode_tps": 110.137,
+      "hit_rate_all": 0.843,
+      "tokens_per_pass": 2.72
+     },
+     "4096": {
+      "prefill_tps": 3282.203,
+      "decode_tps": 111.593,
+      "hit_rate_all": 0.857,
+      "tokens_per_pass": 2.743
+     },
+     "32768": {
+      "prefill_tps": 3137.033,
+      "decode_tps": 108.883,
+      "hit_rate_all": 0.813,
+      "tokens_per_pass": 2.923
+     }
+    },
+    "vs_mtp": {
+     "1024": {
+      "prefill_tps": 1525.45,
+      "decode_tps": 110.76,
+      "hit_rate_all": 0.827,
+      "tokens_per_pass": 2.873
+     },
+     "4096": {
+      "prefill_tps": 3280.79,
+      "decode_tps": 96.707,
+      "hit_rate_all": 0.837,
+      "tokens_per_pass": 2.497
+     },
+     "32768": {
+      "prefill_tps": 3141.07,
+      "decode_tps": 102.34,
+      "hit_rate_all": 0.797,
+      "tokens_per_pass": 2.893
+     }
+    }
+   }
+  },
+  "s7_j_rtx-5080": {
+   "commit": "19ac32130ca5394aff309f53956dab9a01492d18",
+   "gpu": "rtx-5080",
+   "arms": {
+    "v3_off": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v3_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v4_off": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on",
+    "v4_mtp": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on moe.split=on",
+    "strata_na_off": "--pack iq2_xs --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97",
+    "strata_na_mtp": "--pack iq2_xs --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp rt --spec 4 --spec-min-p 0 --suffix-draft 0 --pcie-frac 0.55 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97"
+   },
+   "table": {
+    "v3_off": {
+     "1024": {
+      "prefill_tps": 1572.88,
+      "decode_tps": 93.35,
+      "hit_rate_all": 0.853
+     },
+     "4096": {
+      "prefill_tps": 3284.447,
+      "decode_tps": 93.26,
+      "hit_rate_all": 0.87
+     },
+     "32768": {
+      "prefill_tps": 3128.817,
+      "decode_tps": 86.87,
+      "hit_rate_all": 0.853
+     }
+    },
+    "v3_mtp": {
+     "1024": {
+      "prefill_tps": 1530.343,
+      "decode_tps": 110.54,
+      "hit_rate_all": 0.847,
+      "tokens_per_pass": 2.72
+     },
+     "4096": {
+      "prefill_tps": 3239.81,
+      "decode_tps": 111.97,
+      "hit_rate_all": 0.857,
+      "tokens_per_pass": 2.743
+     },
+     "32768": {
+      "prefill_tps": 3096.337,
+      "decode_tps": 109.243,
+      "hit_rate_all": 0.817,
+      "tokens_per_pass": 2.923
+     }
+    },
+    "v4_off": {
+     "1024": {
+      "prefill_tps": 1369.62,
+      "decode_tps": 94.15,
+      "hit_rate_all": 0.863
+     },
+     "4096": {
+      "prefill_tps": 3266.03,
+      "decode_tps": 93.917,
+      "hit_rate_all": 0.877
+     },
+     "32768": {
+      "prefill_tps": 3113.16,
+      "decode_tps": 87.22,
+      "hit_rate_all": 0.857
+     }
+    },
+    "v4_mtp": {
+     "1024": {
+      "prefill_tps": 1337.963,
+      "decode_tps": 113.383,
+      "hit_rate_all": 0.853,
+      "tokens_per_pass": 2.72
+     },
+     "4096": {
+      "prefill_tps": 3217.903,
+      "decode_tps": 114.33,
+      "hit_rate_all": 0.863,
+      "tokens_per_pass": 2.743
+     },
+     "32768": {
+      "prefill_tps": 3077.1,
+      "decode_tps": 111.327,
+      "hit_rate_all": 0.823,
+      "tokens_per_pass": 2.923
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "prefill_tps": 1612.053,
+      "decode_tps": 90.613,
+      "hit_rate_all": 0.83,
+      "tokens_per_pass": 1.0
+     },
+     "4096": {
+      "prefill_tps": 2720.873,
+      "decode_tps": 89.95,
+      "hit_rate_all": 0.84,
+      "tokens_per_pass": 1.0
+     },
+     "32768": {
+      "prefill_tps": 3079.48,
+      "decode_tps": 83.553,
+      "hit_rate_all": 0.793,
+      "tokens_per_pass": 1.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "prefill_tps": 1571.51,
+      "decode_tps": 124.887,
+      "hit_rate_all": 0.837,
+      "tokens_per_pass": 2.74
+     },
+     "4096": {
+      "prefill_tps": 2703.37,
+      "decode_tps": 115.047,
+      "hit_rate_all": 0.847,
+      "tokens_per_pass": 2.543
+     },
+     "32768": {
+      "prefill_tps": 3063.133,
+      "decode_tps": 110.81,
+      "hit_rate_all": 0.76,
+      "tokens_per_pass": 2.933
+     }
+    }
+   }
+  },
+  "s7_j_rtx-5090": {
+   "commit": "19ac32130ca5394aff309f53956dab9a01492d18",
+   "gpu": "rtx-5090",
+   "arms": {
+    "v3_off": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v3_mtp": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3",
+    "v4_off": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on",
+    "v4_mtp": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=mtp-q2_0.gguf moe.ring_copy=dma moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on moe.split=on",
+    "strata_na_off": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --spec 2 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97",
+    "strata_na_mtp": "--pack iq3_s --expert-profile expert-profile.bin --expert-cache auto --prefill auto --kv fp16 --ple-io ram --mtp rt --spec 4 --spec-min-p 0 --suffix-draft 0 --adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97"
+   },
+   "table": {
+    "v3_off": {
+     "1024": {
+      "prefill_tps": 1362.727,
+      "decode_tps": 125.54,
+      "hit_rate_all": 0.93
+     },
+     "4096": {
+      "prefill_tps": 5101.313,
+      "decode_tps": 122.897,
+      "hit_rate_all": 0.933
+     },
+     "32768": {
+      "prefill_tps": 6102.703,
+      "decode_tps": 112.43,
+      "hit_rate_all": 0.92
+     }
+    },
+    "v3_mtp": {
+     "1024": {
+      "prefill_tps": 1339.927,
+      "decode_tps": 152.57,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 2.83
+     },
+     "4096": {
+      "prefill_tps": 4953.51,
+      "decode_tps": 143.567,
+      "hit_rate_all": 0.92,
+      "tokens_per_pass": 2.673
+     },
+     "32768": {
+      "prefill_tps": 6088.147,
+      "decode_tps": 151.497,
+      "hit_rate_all": 0.913,
+      "tokens_per_pass": 3.1
+     }
+    },
+    "v4_mtp": {
+     "1024": {
+      "prefill_tps": 1494.4,
+      "decode_tps": 152.743,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 2.83
+     },
+     "4096": {
+      "prefill_tps": 4465.52,
+      "decode_tps": 142.267,
+      "hit_rate_all": 0.92,
+      "tokens_per_pass": 2.673
+     },
+     "32768": {
+      "prefill_tps": 6057.047,
+      "decode_tps": 150.093,
+      "hit_rate_all": 0.9,
+      "tokens_per_pass": 3.1
+     }
+    },
+    "strata_na_off": {
+     "1024": {
+      "prefill_tps": 2183.86,
+      "decode_tps": 111.297,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 1.0
+     },
+     "4096": {
+      "prefill_tps": 4543.58,
+      "decode_tps": 109.29,
+      "hit_rate_all": 0.923,
+      "tokens_per_pass": 1.0
+     },
+     "32768": {
+      "prefill_tps": 5576.423,
+      "decode_tps": 109.747,
+      "hit_rate_all": 0.927,
+      "tokens_per_pass": 1.0
+     }
+    },
+    "strata_na_mtp": {
+     "1024": {
+      "prefill_tps": 2128.583,
+      "decode_tps": 174.847,
+      "hit_rate_all": 0.937,
+      "tokens_per_pass": 2.777
+     },
+     "4096": {
+      "prefill_tps": 4506.04,
+      "decode_tps": 162.697,
+      "hit_rate_all": 0.93,
+      "tokens_per_pass": 2.707
+     },
+     "32768": {
+      "prefill_tps": 5540.923,
+      "decode_tps": 184.197,
+      "hit_rate_all": 0.927,
+      "tokens_per_pass": 3.27
+     }
+    },
+    "v4_off": {
+     "1024": {
+      "prefill_tps": 1513.17,
+      "decode_tps": 122.197,
+      "hit_rate_all": 0.93
+     },
+     "4096": {
+      "prefill_tps": 4590.82,
+      "decode_tps": 118.4,
+      "hit_rate_all": 0.927
+     },
+     "32768": {
+      "prefill_tps": 5989.84,
+      "decode_tps": 108.27,
+      "hit_rate_all": 0.91
+     }
+    }
+   }
+  }
+ },
+ "f5b_verify_split_5080": {
+  "f5a": 110.74410533955768,
+  "threads_at_half": {
+   "2": 68.49587897436413,
+   "4": 99.6397951353262,
+   "6": 110.14769881404503
+  },
+  "shares": {
+   "0.25": 114.13100349442826,
+   "0.4": 108.79301471668137,
+   "0.5": 110.14769881404503,
+   "0.6": 113.62987934884812,
+   "0.75": 100.9319068193234,
+   "1.0": 55.99895841928563
+  },
+  "best": {
+   "share": 0.25,
+   "threads": 6
+  },
+  "gain": 0.030583100964930443,
+  "taken": false,
+  "options": {
+   "moe.cpu_plan": "0,1,1,1,1,2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,10,10,10",
+   "moe.cpu_isa": "x86-avx512",
+   "cpu_task.threads": "6"
+  },
+  "taken_by_tune": {}
+ },
+ "cached_v4": {
+  "rtx-5080": [
+   {
+    "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on",
+    "lending": true,
+    "cached_bytes": 9952486400,
+    "cached_fraction": 0.2807,
+    "vram_reserved": 15414067200,
+    "vram_total": 16707092480
+   },
+   {
+    "flags": "--memory-fraction 0.97 --max-step-tokens 4096 --host-memory 70000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on moe.split=on",
+    "lending": true,
+    "cached_bytes": 9430297600,
+    "cached_fraction": 0.2608,
+    "vram_reserved": 15372124160,
+    "vram_total": 16707092480
+   }
+  ],
+  "rtx-5090": [
+   {
+    "flags": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on",
+    "lending": true,
+    "cached_bytes": 25083776000,
+    "cached_fraction": 0.4988,
+    "vram_reserved": 31652315136,
+    "vram_total": 33766572032
+   },
+   {
+    "flags": "--memory-fraction 0.97 --max-step-tokens 8192 --host-memory 86000000000 --max-draft-tokens 3 --slots drafter=drafters.mtp draft_policy=std.spec.fixed_k verifier=std.spec.greedy --plugin-options moe.store=std.moe.offload@1 moe.ring_lend=tail ggml_cuda.pass_rows=4096 rows.place=ple:host,token_embd:host moe.placement.profile=Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S-00001-of-00002.profile.json spec.k=3 mtp.path=local/fn/strata/mtp/mtp-q2_0.gguf moe.ring_copy=dma  moe.router_dtype=bfloat16 hc.prefill=bf16x3 moe.stream_tokens=2048 moe.lend_peak=on moe.split=on",
+    "lending": true,
+    "cached_bytes": 24429516800,
+    "cached_fraction": 0.479,
+    "vram_reserved": 31589400576,
+    "vram_total": 33766572032
+   }
+  ]
+ },
+ "verify_miss_rows_a5000_16gb": {
+  "hist": {
+   "1": 33758,
+   "2": 3963,
+   "3": 732,
+   "4": 239
+  },
+  "mean_tokens": 1.159,
+  "missed_per_pass": 251.2,
+  "passes": 154,
+  "rows_per_pass": 1950.0
+ },
+ "pregate_a5000": {
+  "passes": 83,
+  "k": 10,
+  "T4_w10": {
+   "recall": 0.635,
+   "pred_per_layer": 0.99,
+   "miss_recall": 0.532,
+   "fetched_vs_missed": 1.79,
+   "missed_per_layer": 2.5
+  },
+  "T4_w20": {
+   "recall": 0.805,
+   "pred_per_layer": 1.89,
+   "miss_recall": 0.748,
+   "fetched_vs_missed": 5.18,
+   "missed_per_layer": 2.5
+  },
+  "T4_w30": {
+   "recall": 0.866,
+   "pred_per_layer": 2.71,
+   "miss_recall": 0.829,
+   "fetched_vs_missed": 9.18,
+   "missed_per_layer": 2.5
+  }
+ },
+ "prefill_1k_5090": {
+  "ring": {
+   "wall_ms": [
+    701.641
+   ],
+   "missed": {
+    "units": 10223,
+    "bytes": 21085184000,
+    "steps": 1,
+    "absent_bytes": 31652812800
+   },
+   "fetch": {
+    "ms_per_step": 12.522,
+    "mib_per_step": 20108.4,
+    "units_per_step": 10223.0,
+    "gbs": 1683.9
+   },
+   "gpu_ms_per_step": 864.3456
+  },
+  "stage": {
+   "wall_ms": [
+    854.154
+   ],
+   "missed": {
+    "units": 9363,
+    "bytes": 19297894400,
+    "steps": 1,
+    "absent_bytes": 29345280000
+   },
+   "fetch": {
+    "ms_per_step": 639.812,
+    "mib_per_step": 18403.91,
+    "units_per_step": 9363.0,
+    "gbs": 30.2
+   },
+   "gpu_ms_per_step": 856.266
+  },
+  "stream": {
+   "wall_ms": [
+    590.615
+   ],
+   "missed": {
+    "units": 9460,
+    "bytes": 19482803200,
+    "steps": 1,
+    "absent_bytes": 29557145600
+   },
+   "fetch": {
+    "ms_per_step": 414.1286,
+    "mib_per_step": 18580.25,
+    "units_per_step": 9460.0,
+    "gbs": 47.0
+   },
+   "gpu_ms_per_step": 589.3578
+  },
+  "v4": {
+   "wall_ms": [
+    617.252
+   ],
+   "missed": {
+    "units": 10138,
+    "bytes": 20763417600,
+    "steps": 1,
+    "absent_bytes": 31287987200
+   },
+   "fetch": {
+    "ms_per_step": 441.3213,
+    "mib_per_step": 19801.54,
+    "units_per_step": 10138.0,
+    "gbs": 47.0
+   },
+   "gpu_ms_per_step": 616.6451
+  }
+ },
+ "h2d_5090": {
+  "holon_ring": [
+   {
+    "at_s": 0.0,
+    "wall_ms": 685.2,
+    "copies": 118,
+    "h2d_mb": 30761.6,
+    "copy_busy_ms": 659.7,
+    "gbs_busy": 46.6,
+    "kernel_busy_ms": 187.5,
+    "overlap_ms": 166.0,
+    "mean_copy_kb": 260691.2
+   }
+  ]
+ },
+ "strata_1k_timing": [
+  "strata prefill timing: 2047 tokens, GPU timeline 848 ms, wall 848 ms, host staging 80 ms: embed+steps 1 (0.1%) hc read 156 (18.4%) gdn 148 (17.5%) qsa proj 26 (3.0%) qsa indexer 0 (0.0%) qsa select 2 (0.2%) qsa attn 42 (5.0%) router+shared 12 (1.5%) host grouping 27 (3.2%) gather 4 (0.5%) wait copy 10 (1.2%) dequant 137 (16.2%) gemm gate/up 129 (15.2%) gemm down 68 (8.0%) combine 17 (2.0%) ple 1 (0.2%) gdn conv+gates 6 (0.7%) gdn recurrence 35 (4.2%) gdn out proj 24 (2.9%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 0 ms, waiting for each chunk 3 ms, after each chunk (the draft layer, progress) 0 ms, PLE 0 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 503 ms, wall 503 ms, host staging 125 ms: embed+steps 2 (0.4%) hc read 14 (2.7%) gdn 38 (7.5%) qsa proj 17 (3.4%) qsa indexer 0 (0.0%) qsa select 1 (0.2%) qsa attn 11 (2.2%) router+shared 13 (2.6%) host grouping 9 (1.7%) gather 2 (0.4%) wait copy 51 (10.1%) dequant 181 (36.0%) gemm gate/up 73 (14.5%) gemm down 39 (7.8%) combine 15 (2.9%) ple 1 (0.1%) gdn conv+gates 3 (0.5%) gdn recurrence 18 (3.5%) gdn out proj 16 (3.1%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 4 ms, after each chunk (the draft layer, progress) 0 ms, PLE 10 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 499 ms, wall 499 ms, host staging 171 ms: embed+steps 2 (0.4%) hc read 14 (2.8%) gdn 38 (7.6%) qsa proj 17 (3.5%) qsa indexer 0 (0.0%) qsa select 1 (0.2%) qsa attn 11 (2.3%) router+shared 10 (1.9%) host grouping 11 (2.2%) gather 2 (0.4%) wait copy 50 (10.1%) dequant 179 (36.0%) gemm gate/up 73 (14.6%) gemm down 39 (7.8%) combine 15 (3.0%) ple 1 (0.1%) gdn conv+gates 3 (0.5%) gdn recurrence 18 (3.5%) gdn out proj 16 (3.2%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 3 ms, after each chunk (the draft layer, progress) 0 ms, PLE 19 ms",
+  "strata prefill timing: 1023 tokens, GPU timeline 474 ms, wall 474 ms, host staging 220 ms: embed+steps 2 (0.4%) hc read 14 (2.9%) gdn 38 (8.0%) qsa proj 17 (3.6%) qsa indexer 0 (0.0%) qsa select 1 (0.2%) qsa attn 11 (2.4%) router+shared 10 (2.1%) host grouping 15 (3.1%) gather 2 (0.5%) wait copy 33 (6.9%) dequant 167 (35.3%) gemm gate/up 74 (15.6%) gemm down 38 (7.9%) combine 16 (3.4%) ple 1 (0.1%) gdn conv+gates 3 (0.6%) gdn recurrence 18 (3.7%) gdn out proj 16 (3.3%)",
+  "strata prefill timing: host: chunk setup (PLE rows, the expert stream plan) 2 ms, waiting for each chunk 1 ms, after each chunk (the draft layer, progress) 0 ms, PLE 29 ms"
+ ]
+}
