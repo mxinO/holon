@@ -41,6 +41,11 @@ def qlinear(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     return x.float() @ weight.float().T
 
 
+def linear_rows(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """The `linear_rows@1` oracle: `x @ weight.T` in fp32, rounded once to `x`'s dtype."""
+    return (x.float() @ weight.float().T).to(x.dtype)
+
+
 def qlinear_glu(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
     """The `qlinear_glu@1` oracle (glu "swiglu"): `silu(x @ Wg.T) · (x @ Wu.T)` in fp32 from the merged `weight`
     [2·inter, in] (gate's rows, then up's)."""

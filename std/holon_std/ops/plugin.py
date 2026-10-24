@@ -9,6 +9,6 @@ class Plugin:
             regs.units.add(f"std.ops.{name}", cls)
         for target, oracle in ((kernels.RMSNORM, ref.rmsnorm), (kernels.ADD_RMSNORM, ref.add_rmsnorm),
                                (kernels.ROPE, ref.rope_neox), (kernels.QLINEAR, ref.qlinear),
-                               (kernels.QLINEAR_GLU, ref.qlinear_glu),
+                               (kernels.QLINEAR_GLU, ref.qlinear_glu), (kernels.LINEAR_ROWS, ref.linear_rows),
                                (kernels.QEMBEDDING, ref.qembedding)):
             regs.ops.add(target.split("@")[0], oracle)

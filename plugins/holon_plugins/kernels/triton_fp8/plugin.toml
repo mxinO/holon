@@ -7,8 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
 [resources]
-provides = ["kernel.qlinear@2"]
-requires = ["op.qlinear@2"]
+provides = ["kernel.qlinear@2", "kernel.linear_rows@1"]
+requires = ["op.qlinear@2", "op.linear_rows@1"]
 
 [properties]
 numerics = "bounded"

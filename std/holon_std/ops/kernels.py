@@ -36,10 +36,17 @@
   rounds both halves to `out_dtype` first (docs/m07-perf.md D6).
 - `qembedding@1`: instance `(ids [T] int64, blocks [vocab, row_bytes] uint8) -> [T, hidden]`: rows of the
   dequantized table, of `dtype`. Facts: layout, vocab, hidden, dtype.
+- `linear_rows@1`: instance `(x [T, in], weight [out, in]) -> y [T, out]` with `y = x @ weight.T` for a dense weight
+  and a few rows (2 ≤ T ≤ `ROWS_MAX`: a verify pass's), `x`, `weight` and `y` of `dtype`, from float32 sums rounded
+  once, in a fixed order (deterministic). Facts: in, out, dtype (a provider may serve only some, e.g. narrow
+  outputs). Where an instance is bound, a dense `linear` unit
+  without bias calls it for such rows (cuBLAS runs a 4-row GEMM of a GDN layer's a/b projection in ≈ 15 µs, its
+  one-row GEMV in ≈ 3; FN §23.8).
 Kernel instances are stateless across steps and safe to call inside CUDA graphs.
 """
 from __future__ import annotations
 
 RMSNORM, ADD_RMSNORM, ROPE = "rmsnorm@1", "add_rmsnorm@1", "rope@1"
 QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear@2", "qlinear_glu@1", "qembedding@1"
+LINEAR_ROWS, ROWS_MAX = "linear_rows@1", 16
 ACT_QUANT = ("a4", "a8")            # `act_quant` of quantized weights (`a16` is not offered for them)
