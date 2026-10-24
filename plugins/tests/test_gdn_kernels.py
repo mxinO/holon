@@ -514,28 +514,53 @@ def test_a_snapshot_is_the_final_state_of_a_split_there(order):
         assert not torch.equal(payload[unit], split[slots[row]].bfloat16().float())   # plant: fla's bf16 `h`
 
 
-@pytest.mark.parametrize("snap", [None, 384, 512, 640])
-def test_one_row_in_sub_chunks_is_one_call(snap, monkeypatch):
-    """A one-row step past SUB_TOKENS runs in sub-chunks, each from the state the one before left (FN §23.3): its
-    outputs, final state and snapshot — inside a sub-chunk (384, 640) or at one's start (512) — are bitwise one call's
-    (SUB_TOKENS 256 here: 1,100 tokens in five)."""
+@pytest.mark.parametrize("lens, snaps, subs", [
+    ([1100], [], 5), ([1100], [(0, 384, 1)], 5), ([1100], [(0, 512, 1)], 5), ([1100], [(0, 640, 1)], 5),
+    ([700, 0, 450, 90], [(0, 512, 0), (2, 192, 1)], 3 + 2 + 1),       # two prompts' chunks and a short row in one step
+])
+def test_a_step_in_sub_chunks_is_one_call(lens, snaps, subs, monkeypatch):
+    """A step past SUB_TOKENS runs row by row, each row in sub-chunks from the state the one before left (FN §23.3):
+    its outputs, final states and snapshots — inside a sub-chunk (384, 640, 192) or at one's start (512) — are
+    bitwise one call's, for one row or several (SUB_TOKENS 256 here)."""
     from holon_plugins.kernels.fla import plugin as fla
     hk, hv, d = SHAPES["qwen3.8-27b"]
-    lens, init, slots = [1100], [True], [2]
-    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(1100, hk, hv, d), gates(hv)
+    n = len(lens)
+    init, slots = [r % 2 == 0 for r in range(n)], [2 + r for r in range(n)]
+    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(sum(lens), hk, hv, d), gates(hv)
     pool, warm = warm_states(x, g, "grouped", UNITS)
-    pool[2] = warm
-    snaps = [(0, snap, 1)] if snap else []
+    for s in slots:
+        pool[s] = warm
     runs = []
     for sub in (1 << 20, 256):
         monkeypatch.setattr(fla, "SUB_TOKENS", sub)
         state, payload = pool.clone(), torch.full((2, hv, d, d), float("nan"), device="cuda")
         runs.append((_call(kernel, x, g, state, lens, init, slots, snaps, payload), state, payload))
-    assert kernel.plan(lens, snaps).subs is not None and len(kernel.plan(lens, snaps).subs) == 5
+    assert len(kernel.plan(lens, snaps).subs) == subs
     (o0, s0, p0), (o1, s1, p1) = runs
     assert torch.equal(o0, o1) and torch.equal(s0.nan_to_num(), s1.nan_to_num())       # (untouched units: NaN)
     assert torch.equal(p0.nan_to_num(), p1.nan_to_num())
-    assert snap is None or not p1[1].isnan().any()
+    assert all(not p1[unit].isnan().any() for _, _, unit in snaps)
+
+
+def test_a_step_of_two_rows_peaks_no_higher_than_one_row():
+    """The startup profile measures a one-row prompt step (its rows of at most max_model_len): a step of the same
+    tokens in two rows must not need more of the chunked rule's temporaries, or a deployment serving two prompts at
+    once runs past its reserve (the RTX 5090's exact.py run did, at 64 sequences)."""
+    hk, hv, d = SHAPES["qwen3.8-27b"]
+    kernel, x, g = gdn("qwen3.8-27b", "grouped"), tokens(4096, hk, hv, d), gates(hv)
+    pool, _ = warm_states(x, g, "grouped", UNITS)
+    peaks = []
+    for lens in ([4096], [2048, 2048], [3000, 1096]):
+        state = pool.clone()
+        h = kernel.plan(lens)
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        base = torch.cuda.memory_allocated()
+        kernel(h, x["q"], x["k"], x["v"], x["a"], x["b"], g["a_log"], g["dt_bias"], state,
+               dev(list(range(len(lens)))), dev([False] * len(lens), torch.bool))
+        torch.cuda.synchronize()
+        peaks.append(torch.cuda.max_memory_allocated() - base)
+    assert max(peaks[1:]) <= peaks[0], peaks
 
 
 def test_snapshots_must_fall_inside_their_row_on_a_chunk():
