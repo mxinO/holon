@@ -28,6 +28,7 @@ import dataclasses
 import hashlib
 import os
 import pathlib
+import warnings
 
 import pytest
 import torch
@@ -36,7 +37,12 @@ from holon.core.engine import Engine, EngineConfig
 from holon_testing import qwen4exp_files as q
 
 GGUF = os.environ.get("FN_TINY_GGUF")
-pytestmark = pytest.mark.skipif(GGUF is None, reason="needs FN_TINY_GGUF (the tiny model's GGUF)")
+SKIP = ("FN's tiny-model proof (acceptance 1(a)) did not run: set FN_TINY_GGUF to the tiny GGUF that `python -m "
+        "holon_testing.qwen4exp_files --out <dir> --llama <llama.cpp 27c7a76> --strata <Strata 296b59d>` builds in "
+        "the golden venv (docs/release.md §22)")
+if GGUF is None:
+    warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
+pytestmark = pytest.mark.skipif(GGUF is None, reason=SKIP)
 CHUNKS = (128, 7, 10, 13)                   # one-shot, then chunked prefill (10: a step ending at 20 tokens)
 DECODE = SamplingParams(temperature=0.0, max_tokens=q.DECODE, ignore_eos=True)
 PROMPT_LP = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True, prompt_logprobs=1)

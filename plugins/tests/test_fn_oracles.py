@@ -17,14 +17,18 @@ model dtype (the contracts' choice, docs/v1-flash-next.md D4, D6), so in float32
 Skips without transformers' qwen4_exp.
 """
 import math
+import warnings
 
 import pytest
 import torch
 import transformers
 from holon_judge import l0
 
-pytestmark = pytest.mark.skipif(not hasattr(transformers, "Qwen4ExpTextConfig"),
-                                reason="needs transformers with qwen4_exp (the golden venv)")
+SKIP = ("FN's op oracles against HF (acceptance 1(a)) did not run: they need transformers with qwen4_exp (5.19.0, "
+        "the golden venv): run `pytest plugins/tests/test_fn_oracles.py` there (docs/release.md §22)")
+if not hasattr(transformers, "Qwen4ExpTextConfig"):
+    warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
+pytestmark = pytest.mark.skipif(not hasattr(transformers, "Qwen4ExpTextConfig"), reason=SKIP)
 
 L, EPS = 150, 1e-6
 

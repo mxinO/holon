@@ -3619,6 +3619,7 @@ process, which replaces §6's per-change propagation and the release's re-checks
 | release bars (`bench/bars.py`) | 3 rounds |
 | perf smoke (`bench/perf_smoke.py`) | per change: batch-1 decode against main's build, 3 ABBA rounds on one card, each arm asserted to import its own tree, clock-screened (2.3 min on an RTX A5000 with Qwen3-8B Q4_K_M) |
 | real-client smoke (`bench/client_smoke.py`) | at each merge: `holon serve` on a small locked model driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes (under a minute on an RTX A5000 with Qwen3-8B Q4_K_M; a planted Anthropic `stop_reason` bug fails it) |
+| tiny-model proofs that need another environment (FN's acceptance 1(a): `models.qwen4_exp` against HF's `qwen4_exp`) | at a release, and for a change to `models.qwen4_exp`, its std units or kernels: in the golden venv (transformers 5.19.0), `python -m holon_testing.qwen4exp_files --out <dir> --llama <llama.cpp 27c7a76> --strata <Strata 296b59d>`, then `pytest plugins/tests/test_fn_oracles.py judge/tests/test_golden_qwen4exp.py` there (`FN_LLAMA_CPP` set) and `FN_TINY_GGUF=<dir>/tiny-qwen4exp-f32.gguf pytest plugins/tests/test_qwen4_exp_cpu.py` in the dev env; elsewhere they skip with a warning naming this |
 
 **pytest.** A dev run (`pytest`) leaves out the tests marked `slow` (over ≈ 8 s: spawned servers, conversions,
 end-to-end CLIs, bounded and tier judges) and `model` (a real checkpoint from the Hugging Face cache); the pre-merge
