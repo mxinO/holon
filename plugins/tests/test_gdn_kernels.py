@@ -528,7 +528,7 @@ def test_a_snapshot_is_the_final_state_of_a_split_there(order):
 @pytest.mark.parametrize("lens, snaps, subs", [
     ([1100], [], 5), ([1100], [(0, 384, 1)], 5), ([1100], [(0, 512, 1)], 5), ([1100], [(0, 640, 1)], 5),
     ([700, 0, 450, 90], [(0, 512, 0), (2, 192, 1)], 3 + 2 + 1),       # two prompts' chunks and a short row in one step
-    ([100, 100, 100, 100, 30], [(1, 64, 0)], 3),                      # short rows packed: 2 + 2 + 1 (four chunks a call)
+    ([100, 100, 100, 100, 30], [(1, 64, 0)], 3),                  # short rows packed: 2 + 2 + 1 (four chunks a call)
 ])
 def test_a_step_in_sub_chunks_is_one_call(lens, snaps, subs, monkeypatch):
     """A step past SUB_TOKENS runs in calls of at most SUB_TOKENS tokens — short rows packed, a long row in sub-chunks
