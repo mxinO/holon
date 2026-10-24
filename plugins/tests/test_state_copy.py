@@ -1,6 +1,6 @@
 """kernels.state_copy (L0): std.state_tier's `state_copy@1` moves rows of the K chunk sizes between a device pool and a
 mapped host pool's device view, both directions and both paths, scattered rows with a consecutive run, against the
-oracle bitwise, and an empty list. Builds the module (prebuild) into the user cache if it is missing."""
+oracle bitwise, and an empty list."""
 import pytest
 import torch
 from holon.core import platform
@@ -10,19 +10,8 @@ from holon_std.state_tier import reference
 from holon_std.state_tier.kernels import STATE_COPY
 
 pytestmark = pytest.mark.l0
+PREBUILT = ("state_copy",)  # CUDA extensions built if missing (conftest)
 
-
-@pytest.fixture(scope="module", autouse=True)
-def built() -> None:
-    """The engine never compiles (`extension.load` names the prebuild), so the test builds a missing module first."""
-    if not torch.cuda.is_available():
-        return
-    from holon_plugins.kernels.state_copy import extension
-    major, minor = torch.cuda.get_device_capability()
-    try:
-        extension.load(10 * major + minor)
-    except extension.NotBuilt:
-        extension.build(10 * major + minor)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")

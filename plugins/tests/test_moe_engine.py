@@ -27,6 +27,9 @@ from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausal
 
 from .test_engine import _hf_greedy
 
+PREBUILT = ("ggml_cuda", "expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
+
+
 Q = gguf.GGMLQuantizationType
 GREEDY = SamplingParams(temperature=0.0, max_tokens=12, ignore_eos=True)
 

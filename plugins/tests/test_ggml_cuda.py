@@ -33,10 +33,9 @@ equal to the f32 multiply it replaced (docs/m07-perf.md D11). The
   ≤ 1e-3 and only in fast-math's tie classes. sm_120: native W4A4 mmq against its own decoded activation codes (bf16
   and f32 inputs), the zeroed tail of `prepare` at `in` 768 (without it, plant M4: NaN output).
 
-Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
+Skips without a GPU; conftest builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
-import os
 import pathlib
 import subprocess
 from unittest import mock
@@ -69,6 +68,7 @@ from holon_testing.qwen3_5_files import LLAMA
 from huggingface_hub.constants import HF_HUB_CACHE
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
+PREBUILT = ("ggml_cuda",)  # CUDA extensions built if missing (conftest)
 
 INS = (768, 2304, 4096, 12288)
 OUT = 300
@@ -91,10 +91,6 @@ def sm() -> int:
     major, minor = torch.cuda.get_device_capability()
     sm = 10 * major + minor
     assert sm >= 75, "q8_1.MMQ emulates llama.cpp's MMA kernels (turing_mma_available)"
-    try:
-        extension.load(sm)
-    except extension.NotBuilt:
-        extension.build(sm, os.cpu_count())
     return sm
 
 

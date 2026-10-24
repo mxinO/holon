@@ -34,7 +34,7 @@ from holon_std.mixers.qsa import reference as ref
 
 from .test_attention_kv_quant import empty_cache, fp8_device, usage
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 PAGE, SLOTS, RATIO, BUDGET = 16, 8, 4, 2048          # Qwen3.8-Flash-Next's indexer: 4-token blocks, 2,048 tokens
 HI, DK, ROT, THETA = 4, 128, 64, 1e7

@@ -8,6 +8,9 @@ import torch
 
 from .test_moe_engine import KEY, Q, _engine, _gguf_and_dense, _gpu_engine, _served, gpu_moe, tiny_moe  # noqa: F401
 
+PREBUILT = ("expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
+
+
 TIERS = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
          "moe.tiers": "std.tiered.pinned@1,tiers.pagecache@1"}
 

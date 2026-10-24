@@ -36,6 +36,7 @@ from holon_std.moe.kernels import (
 
 E, K, ROLES = 128, 8, 2
 pytestmark = pytest.mark.l0
+PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
 DEVICES = ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU"))]
 VARIANTS = {"lfu": ("score",), "lru": ("last", "clock"), "budget": ("score",)}
 

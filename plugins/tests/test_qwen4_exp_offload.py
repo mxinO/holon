@@ -15,6 +15,7 @@ import torch
 GGUF, MTP = os.environ.get("FN_GGUF"), os.environ.get("FN_MTP")
 pytestmark = pytest.mark.skipif(GGUF is None or MTP is None or not torch.cuda.is_available(),
                                 reason="needs FN_GGUF, FN_MTP and a GPU")
+PREBUILT = ("ggml_cuda", "expert_io")  # CUDA extensions built if missing (conftest)
 
 
 def test_sixty_four_sequences_at_097_fit():

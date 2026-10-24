@@ -30,6 +30,9 @@ from holon_testing.ref_kernels import kernels as ref_kernels
 from safetensors.torch import load_file, save_file
 from transformers import AutoModelForCausalLM
 
+PREBUILT = ("ggml_cuda",)  # CUDA extensions built if missing (conftest)
+
+
 CASES = [(d, moe) for moe in (False, True) for d in hq.DIALECTS]
 ELEM = {"fp8": "fp8_e4m3", "ct-fp8": "fp8_e4m3", "ct-nvfp4": "nvfp4", "modelopt": "nvfp4", "ct-mxfp4": "mxfp4",
         "quark": "mxfp4"}

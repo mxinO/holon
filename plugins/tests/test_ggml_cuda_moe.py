@@ -40,11 +40,10 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   SwiGLU) fail them. sm_120, `quant.act = a4`: native W4A4 mmq with ids against the f64 product of its own decoded
   activation codes, gate/up (bf16, one row per token) and down (f32, one per slot).
 
-Skips without a GPU; builds the extension (prebuild) into the user cache if it is missing.
+Skips without a GPU; conftest builds the extension (prebuild) into the user cache if it is missing.
 """
 import dataclasses
 import math
-import os
 import re
 import types
 from unittest import mock
@@ -90,6 +89,7 @@ from .test_ggml_cuda import (
 )
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
+PREBUILT = ("ggml_cuda",)  # CUDA extensions built if missing (conftest)
 
 E, K = 32, 8                    # the type sweep's stacks (E = 128, Qwen3-30B-A3B's, for routings and graphs)
 EQ = 128
@@ -104,10 +104,6 @@ def sm() -> int:
     major, minor = torch.cuda.get_device_capability()
     sm = 10 * major + minor
     assert sm >= 75, "q8_1.MMQ emulates llama.cpp's MMA kernels (turing_mma_available)"
-    try:
-        extension.load(sm)
-    except extension.NotBuilt:
-        extension.build(sm, os.cpu_count())
     return sm
 
 

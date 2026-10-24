@@ -33,7 +33,7 @@ from holon_plugins.models.qwen4_exp import reference as ple
 from holon_std.hyper import kernels as hc_kernels
 from holon_std.hyper import reference as hc
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 STREAMS, HIDDEN, RANK, EPS = 4, 2560, 320, 1e-6
 NGRAM, HEADS_PER, EOS, VOCAB = 3, 8, 248044, 248320
