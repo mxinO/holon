@@ -101,7 +101,7 @@ class DeviceResolver:
         self._prepared = False
         if split:                                # the fetch on a side stream; the hits' passes run meanwhile
             main = torch.accelerator.current_stream(ids.device)
-            side = store.fetch_stream()
+            side = store.fetch_stream(split=True)
             side.wait_stream(main)
             with side:
                 self._gather(fetch, n)

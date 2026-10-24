@@ -166,7 +166,7 @@ class TieredStore:
         self.later_copy, self._later_stream = later_copy, None
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
-        self._fetch_stream: torch.Stream | None = None
+        self._fetch_streams: dict[bool, torch.Stream] = {}
         self._auxiliary: set[int] = set()                   # an auxiliary model's groups (`mark_auxiliary`)
         self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
@@ -737,13 +737,14 @@ class TieredStore:
             return self._parts
         return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
-    def fetch_stream(self) -> torch.Stream:
-        """The stream a split call's fetch runs on (`DeviceResolver`, `split`), one per store. High priority: the
-        hits' pass beside it has its blocks on every SM (launched early, PDL), so a fetch of the default priority found
-        no SM until they drained, ≈ 40 µs of each layer of a 5080's verify pass (FN §23.8)."""
-        if self._fetch_stream is None:
-            self._fetch_stream = torch.Stream(device=self.ctx.device, priority=-1)
-        return self._fetch_stream
+    def fetch_stream(self, split: bool = False) -> torch.Stream:
+        """The stream a call's fetch runs on beside the main stream (`DeviceResolver`), one per store and kind: a
+        split call's (`split`) at high priority — the hits' pass beside it has its blocks on every SM (launched early,
+        PDL), so a fetch of the default priority found no SM until they drained, ≈ 40 µs of each layer of a 5080's
+        verify pass (FN §23.8) —; a pipelined pass's parts at the default priority."""
+        if split not in self._fetch_streams:
+            self._fetch_streams[split] = torch.Stream(device=self.ctx.device, priority=-1 if split else 0)
+        return self._fetch_streams[split]
 
     def tail_view(self) -> torch.Tensor | None:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
