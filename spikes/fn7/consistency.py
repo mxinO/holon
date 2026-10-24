@@ -135,6 +135,7 @@ def main() -> None:
     ap.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
     ap.add_argument("--prefill-step", type=int, default=0, help="the reference's step (default: whole prompts)")
     ap.add_argument("--out", required=True)
+    ap.add_argument("--parts", default="decode,chunked,mtp", help="the pairs to run (a plant: its pair)")
     a = ap.parse_args()
     from holon_judge import planted
     from holon_judge.recording import PromptSet
@@ -148,11 +149,16 @@ def main() -> None:
     out = {"name": "fn7_consistency", "date": datetime.date.today().isoformat(), "gpu": torch.cuda.get_device_name(),
            "model": pathlib.Path(a.model).name, "plant": a.plant, "prompts": PROMPTS, "bars": BARS, "commit": commit}
     with planted.PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        prefill = scored(a, prompts, a.prefill_step or a.max_len)
-        out["decode"] = compare(prefill, scored(a, prompts, 1))
-        out["chunked"] = compare(prefill, scored(a, prompts, 250))
-        out["mtp"] = mtp_vs_plain(a, chats)
-    out["pass"] = all(out[k]["pass"] for k in ("decode", "chunked", "mtp"))
+        parts = a.parts.split(",")
+        if "decode" in parts or "chunked" in parts:
+            prefill = scored(a, prompts, a.prefill_step or a.max_len)
+        if "decode" in parts:
+            out["decode"] = compare(prefill, scored(a, prompts, 1))
+        if "chunked" in parts:
+            out["chunked"] = compare(prefill, scored(a, prompts, 250))
+        if "mtp" in parts:
+            out["mtp"] = mtp_vs_plain(a, chats)
+    out["pass"] = all(out[k]["pass"] for k in parts)
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps({k: (v if not isinstance(v, dict) else {x: y for x, y in v.items() if x != "prompts"})
                       for k, v in out.items()}, indent=1))
