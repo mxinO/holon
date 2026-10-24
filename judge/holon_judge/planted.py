@@ -266,7 +266,7 @@ def linear_rows_swap() -> Iterator[None]:
     def planted(self, x, weight):
         fired[_when()] += 1
         y = call(self, x, weight)
-        return y[torch.tensor([1, 0, *range(2, len(y))], device=y.device)]
+        return torch.cat([y[1:2], y[:1], y[2:]])            # (device ops only: capturable)
     with mock.patch.object(plugin.LinearRows, "__call__", planted):
         yield
     print(f"plant linear-rows-swap fired: {dict(fired)}", file=sys.stderr)
