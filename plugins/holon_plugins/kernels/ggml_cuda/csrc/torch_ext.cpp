@@ -250,11 +250,14 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check_f32(x, "x");
         check_f32(y, "y");
         TORCH_CHECK(rows > 0, "no rows");
-        TORCH_CHECK(!gate_scale == !ids && !up_scale == !ids, "swiglu: gate and up scales with the rows' ids, or none");
+        TORCH_CHECK(!gate_scale == !up_scale && (!gate_scale || ids), "swiglu: gate and up scales together, with the "
+                    "rows' ids");
         const float * gs = nullptr, * us = nullptr;
-        if (ids) {
+        if (ids) {                                                 // rows of −1 entries are skipped
             check(*ids, y, {rows}, "ids");                         // [tokens, k], one expert per row, flattened
             TORCH_CHECK(ids->scalar_type() == at::kInt, "ids: int32");
+        }
+        if (gate_scale) {
             TORCH_CHECK(gate_scale->numel() == up_scale->numel(), "gate_scale, up_scale: one value per expert each");
             gs = scale(gate_scale, y, gate_scale->numel(), "gate_scale");
             us = scale(up_scale, y, up_scale->numel(), "up_scale");

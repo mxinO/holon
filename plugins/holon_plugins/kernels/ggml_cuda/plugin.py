@@ -640,12 +640,14 @@ class LinearExperts(_Matmul):
 
     @staticmethod
     def _scale_slots(y: torch.Tensor, scale: torch.Tensor, ids: torch.Tensor) -> None:
-        """y [T, k, out] *= the scale of each slot's expert (a device gather: graph-safe)."""
-        y.mul_(scale[ids][..., None])
+        """y [T, k, out] *= the scale of each slot's expert (a device gather: graph-safe); a −1 entry's row × 1, so
+        untouched (the contract: rows another call of the pass wrote)."""
+        y.mul_(torch.where(ids >= 0, scale[ids.clamp_min(0)], 1.0)[..., None])
 
     def _swiglu(self, gate_up: torch.Tensor, y: torch.Tensor, gate_scale, up_scale, ids: torch.Tensor) -> None:
-        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any)."""
-        self.lib.swiglu(gate_up, y, gate_scale, up_scale, None if up_scale is None else ids.view(-1))
+        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any); rows of −1
+        entries untouched."""
+        self.lib.swiglu(gate_up, y, gate_scale, up_scale, ids.reshape(-1))
 
 
 class MoeTopk:

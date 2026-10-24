@@ -2552,17 +2552,19 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, nbytes_shared, stream);
      ggml_cuda_kernel_launch(mul_mat_vec_q<type, c_ncols_dst, false, small_k, halve_iters>, launch_params,
-@@ -1062,14 +1116,17 @@
+@@ -1062,20 +1116,31 @@
          const int warp_size, const int nchannels_dst, cudaStream_t stream) {
  
      constexpr int rows_per_block = 2; // 2 gives best perf based on tuning
 -    const int64_t nblocks_rows = (nrows_x + rows_per_block - 1) / rows_per_block;
 +    // Holon: 4 rows per block without fusion (a MoE's down projection): 9-18% faster at a verify pass's 4 rows on
-+    // Blackwell (RTX 5080, 5090; FN §23.8), each row's sums as before; the fused gate/up keeps 2
++    // Blackwell (RTX 5080, 5090; FN §23.8), each row's sums as before; the fused gate/up keeps 2, and so does a
++    // matrix whose rows are not a multiple of 4 (the kernel reads every row of its block)
 +    constexpr int rows_per_block_plain = 4;
 +    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
 +                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
-+    const int rows = has_fusion ? rows_per_block : rows_per_block_plain;
++    const bool plain = !has_fusion && nrows_x % rows_per_block_plain == 0;
++    const int rows = plain ? rows_per_block_plain : rows_per_block;
 +    const int64_t nblocks_rows = (nrows_x + rows - 1) / rows;
      const dim3 block_nums(nblocks_rows, nchannels_dst + (fusion.shared_up != nullptr));
      const dim3 block_dims(warp_size, ncols_dst);
@@ -2574,16 +2576,19 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      if (has_fusion) {
          ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, true>, launch_params,
              vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
-@@ -1077,7 +1134,7 @@
-             stride_channel_x, stride_channel_y, stride_channel_dst,
-             ncols_dst, ids_stride);
-     } else {
--        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, false>, launch_params,
-+        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block_plain, false>, launch_params,
-             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
              stride_row_x, stride_col_y, stride_col_dst,
              stride_channel_x, stride_channel_y, stride_channel_dst,
-@@ -1087,7 +1144,7 @@
+             ncols_dst, ids_stride);
++    } else if (plain) {
++        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block_plain, false>, launch_params,
++            vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
++            stride_row_x, stride_col_y, stride_col_dst,
++            stride_channel_x, stride_channel_y, stride_channel_dst,
++            ncols_dst, ids_stride);
+     } else {
+         ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, false>, launch_params,
+             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
+@@ -1087,7 +1152,7 @@
  
  template <ggml_type type>
  static void mul_mat_vec_q_switch_ncols_dst(
@@ -2592,7 +2597,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1178,7 +1235,7 @@
+@@ -1178,7 +1243,7 @@
      if (has_ids && ncols_dst > 1) {
          // Multi-token MUL_MAT_ID path - dedicated MoE kernel
          mul_mat_vec_q_moe_launch<type>(
@@ -2601,7 +2606,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
              stride_row_x, stride_col_y, stride_col_dst,
              stride_channel_x, stride_channel_y, stride_channel_dst,
              ncols_dst, ids_stride, warp_size, nchannels_dst, stream);
-@@ -1279,7 +1336,7 @@
+@@ -1279,7 +1344,7 @@
      }
  }
  static void mul_mat_vec_q_switch_type(
@@ -2610,7 +2615,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          const int ncols_x, const int nrows_x, const int ncols_dst,
          const int stride_row_x, const int stride_col_y, const int stride_col_dst,
          const int nchannels_x, const int nchannels_y, const int nchannels_dst,
-@@ -1434,8 +1491,9 @@
+@@ -1434,8 +1499,9 @@
  void ggml_cuda_mul_mat_vec_q(
          ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
          const ggml_cuda_mm_fusion_args_host * fusion) {
@@ -2622,7 +2627,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
      GGML_ASSERT(!ids || ids->type  == GGML_TYPE_I32); // Optional, used for batched GGML_MUL_MAT_ID.
  
      GGML_TENSOR_BINARY_OP_LOCALS;
-@@ -1453,16 +1511,16 @@
+@@ -1453,16 +1519,16 @@
  
      GGML_ASSERT(!ids || ne12 <= MMVQ_MAX_BATCH_SIZE);
  
@@ -2642,7 +2647,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
          // Scale fusion is only allowed for NVFP4 currently as the cost of checking this at run-time in the prologue is
          // non-negligible for some models such as gpt-oss-20b
          GGML_ASSERT((fusion->x_scale == nullptr && fusion->gate_scale == nullptr) || src0->type == GGML_TYPE_NVFP4);
-@@ -1528,13 +1586,17 @@
+@@ -1528,13 +1594,17 @@
      }
  
      const int64_t ne10_padded = GGML_PAD(ne10, MATRIX_ROW_PADDING);
@@ -2663,7 +2668,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
  
      const int64_t s01 = src0->nb[1] / ts_src0;
      const int64_t s11 = ne10_padded / QK8_1;
-@@ -1559,7 +1621,7 @@
+@@ -1559,7 +1629,7 @@
      const int64_t ids_stride = ids ? ids->nb[1] / ggml_type_size(ids->type) : 0;
  
      mul_mat_vec_q_switch_type(

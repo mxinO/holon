@@ -229,8 +229,13 @@ __global__ void swiglu_f32(const float * __restrict__ x, const float * __restric
     float gate = row[i%n], up = row[n + i%n];
     if (ids) {
         const int32_t e = ids[i/n];
-        up *= up_scale[e];
-        gate *= gate_scale[e];
+        if (e < 0) {                                   // an entry the call skips: its row untouched (the contract)
+            return;
+        }
+        if (up_scale) {
+            up *= up_scale[e];
+            gate *= gate_scale[e];
+        }
     }
     y[i] = up * ggml_cuda_op_silu_single(gate);
 }
