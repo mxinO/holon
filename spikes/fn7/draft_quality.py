@@ -16,7 +16,8 @@ import shlex
 import subprocess
 import sys
 
-import torch
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")   # (the forced tokens' buffer is made
+import torch  # noqa: E402                                                         # before the engine sets it)
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 NO_EOS = 0x7FFFFFFF
