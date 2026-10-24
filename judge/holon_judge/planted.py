@@ -180,6 +180,34 @@ def hc_inject_unscaled() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def rows_off_by_one() -> Iterator[None]:
+    """The PLE table's SSD tier (§6.3, D5): every row read one row past its id's (`std.tiered.rows@1`'s read list), in
+    eager steps and graph captures alike; the RAM-vs-SSD identity fails (spikes/fn7/ple_ssd.py, the GPU unit test)."""
+    from holon_std.tiered import rows
+    with mock.patch.object(rows._Reads, "plant", 1):
+        yield
+
+
+@contextlib.contextmanager
+def aux_row_padding() -> Iterator[None]:
+    """MTP experts in the offload store (§6.3, acceptance 4): the drafter's sub-steps' first row marked PADDING, so its
+    routes read the null slot (zero weights) — the offload snapshot with MTP experts in the store differs from the
+    all-resident one. Reports how often it fired."""
+    from holon_std.tiered import store
+
+    kinds, fired = store.TieredStore.decode_kinds, collections.Counter()
+
+    def planted(self, tokens):
+        out = kinds(self, tokens).clone()
+        out[:1] = store.PADDING
+        fired["sub-steps"] += 1
+        return out
+    with mock.patch.object(store.TieredStore, "decode_kinds", planted):
+        yield
+    print(f"plant aux-row-padding fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def ple_gate_no_sqrt() -> Iterator[None]:
     """PLE (§6.3): its gate σ(u) without the signed √: the unit's `qwen4_exp.ple_block@1` instance replaced by the
     oracle (torch, on the unit's device) with that gate, in eager steps (L2's); graph captures keep the kernel.
@@ -1862,7 +1890,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
     "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
     "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
-    "ple_gate_no_sqrt": ple_gate_no_sqrt,
+    "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

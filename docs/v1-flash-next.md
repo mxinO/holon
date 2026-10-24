@@ -3319,3 +3319,45 @@ experts against Holon's 48.1%):
 - `moe.lend_peak` on the 5090.
 
 Speed work for FN stops here. Evidence: `evidence/fn7_step7k_2026-10-23.json`.
+
+## 22. FN's close (2026-10-23; the lead's approved plan: the PLE SSD tier, plants and exactness, gates (c) and (d), locks)
+
+### 22.1 The PLE SSD tier (D5)
+
+**Built** (d0cf51d, std): `rows.place=<name>:ssd`.
+- The table stays in its checkpoint file.
+- Each call writes its ids' file offsets into a read list in mapped host memory, then signals `cpu_task@1`'s I/O
+  worker inside the graph and waits.
+- The worker's copy task reads every row with `O_DIRECT` (the row's aligned pages through a bounce buffer, so the page
+  cache keeps no copy).
+- The rows read are gathered by the same `qembedding@1` kernel as the RAM tier's, so they are byte for byte the RAM
+  tier's.
+- The read list holds `per_token` rows a token (16 for the PLE) of the engine's largest step. An I/O error stops the
+  engine at the step's commit.
+- **Not built as D5 drew it:** the prompt rows' host read-ahead in `before_launch`. Prefill and decode rows both take
+  the in-graph path (the cost is below).
+
+**Checks:**
+- The GPU unit test: eager and graph-replayed, bitwise the host tier, the plant differing.
+- **RAM vs SSD byte-identical** on each card's MTP deployment, the final flags (`spikes/fn7/ple_ssd.py`): the bench
+  plan's warm-up and two 1K prompts, 128 greedy tokens each through the decode graphs and MTP, with top-5 logprobs.
+  The token ids and logprob bits are identical on the RTX 5080, the RTX 5090 and the A5000.
+- The plant `rows_off_by_one` (every row read one past its id's; `holon_judge.planted`) differs on all three.
+
+**Its cost** (1 round, each card's final deployments, the SSD tier against RAM on the node's NVMe):
+
+| | 5080 1K | 5080 4K | 5090 1K | 5090 4K |
+|---|---|---|---|---|
+| Decode, plain / MTP | −5.2% / −9.0% | −5.1% / −9.1% | −8.0% / −11.6% | −7.8% / −11.3% |
+| Prefill, plain / MTP | −48% / −47% | −65% / −65% | −55% / −55% | −77% / −76% |
+
+- An MTP pass gains ≈ 2.2 ms (its 4 verify rows and the drafter's sub-steps, 16 rows a token each).
+- A prompt reads 16 rows a token, one `pread` each on the I/O worker's 2 threads: 65K reads for a 4K prompt, which
+  binds on their latency.
+- What would cut it, not built: D5's read-ahead (deduplicated, sorted, overlapping the step before) and more I/O
+  threads (`cpu_task.io_threads`, a lock setting).
+- The tier is the fallback for a desktop that cannot hold the 28.8 GB table in RAM. Both bar cards' deployments keep
+  the RAM tier.
+- Strata's `--ple-io direct` was not paired in this measurement.
+
+Evidence: `evidence/fn_close_ple_ssd_2026-10-23.json`.
