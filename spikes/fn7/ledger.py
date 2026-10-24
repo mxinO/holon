@@ -1,0 +1,88 @@
+"""FN's speed round A–B: a deployment's VRAM ledger at a given `max_seqs` — parameters and buffers per component, the
+ledger's device pools (the experts' arena, the state pools), the startup profile's reserve (the worst step's live peak
+as measured, the allocator's reserved growth over that same step: its segments, and the graphs' pool with the device
+memory their execs keep), the step-peak loan, the cached share of the target's and the head's expert bytes, what is
+left free after startup, and the CUDA context. Usage: ledger.py <model> '<engine flags>' [--seqs 1 4 8 16]
+[--max-len 33792]"""
+from __future__ import annotations
+
+import argparse
+import collections
+import gc
+import json
+import pathlib
+import sys
+
+import torch
+
+ROOT = pathlib.Path(__file__).resolve().parents[2]
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("model")
+    ap.add_argument("flags")
+    ap.add_argument("--seqs", type=int, nargs="+", default=[1])
+    ap.add_argument("--max-len", type=int, default=33792)
+    a = ap.parse_args()
+    sys.path.insert(0, str(ROOT / "spikes/fn6"))
+    from _engine import STORE, engine
+    from holon.core import platform
+    from vram import component
+
+    peak, growth = platform.peak_memory, platform.reserved_growth
+    for seqs in a.seqs:
+        seen = {"peaks": [], "graphs": None}
+
+        def peak_(device, fn, seen=seen):
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            reserved = torch.cuda.memory_reserved(device)
+            out = peak(device, fn)
+            seen["peaks"].append({"live": out, "reserved_growth": torch.cuda.memory_reserved(device) - reserved})
+            return out
+
+        def growth_(device, fn, copies=1, seen=seen):
+            seen["graphs"] = {"reserve": growth(device, fn, copies), "buckets": copies}
+            return seen["graphs"]["reserve"]
+        platform.peak_memory, platform.reserved_growth = peak_, growth_
+        free0, total = torch.cuda.mem_get_info()
+        e = engine(a.model, a.flags, max_seqs=seqs, max_model_len=a.max_len)
+        platform.peak_memory, platform.reserved_growth = peak, growth
+        per, ptrs = collections.Counter(), set()
+        aux = getattr(e.ctx, "aux", None)
+        modules = [("", e.executor.model)] + [(f"mtp.{ns}.", m) for ns, m in (aux.modules if aux is not None else [])]
+        for prefix, mod in modules:
+            for name, t in list(mod.named_parameters()) + list(mod.named_buffers()):
+                if t.device.type == "cuda" and t.data_ptr() not in ptrs:
+                    ptrs.add(t.data_ptr())
+                    per[component(prefix + name)] += t.numel() * t.element_size()
+        pools = {p.name: p.unit_bytes * p.capacity for p in e.ledger.pools.values() if not p.host and p.capacity}
+        s = e.ctx.shared_objects.get(STORE)
+        share = {}
+        if s is not None:
+            for aux_ in (False, True):
+                cls = [c for c in s.classes.values() if c.name.startswith("aux.") == aux_]
+                share["head" if aux_ else "target"] = round(
+                    sum((c.size - c.null - c.staging) * c.unit_bytes for c in cls) /
+                    max(sum(len(c.pieces) * c.unit_bytes for c in cls), 1), 4)
+        statics = sum(b.numel() * b.element_size() for b in getattr(e.ctx, "_buffers", {}).values() if b.is_cuda)
+        torch.cuda.synchronize()
+        free, _ = torch.cuda.mem_get_info()
+        out = {"max_seqs": seqs, "total": total, "free_before": free0, "free_after_startup": free,
+               "params_and_buffers": dict(per.most_common()), "params_total": sum(per.values()),
+               "statics_total": statics, "pools": pools, "pools_total": sum(pools.values()),
+               "profile": seen, "loan_bytes": getattr(s, "_loan_bytes", 0) if s else 0,
+               "lending": getattr(s, "lending", None), "own_tail": getattr(s, "_own_tail", None),
+               "cached_share": share, "allocated": torch.cuda.memory_allocated(),
+               "reserved": torch.cuda.memory_reserved(),
+               "outside_torch": total - free - torch.cuda.memory_reserved()}
+        print(json.dumps(out), flush=True)
+        e.close()
+        del e, s
+        gc.collect()
+        torch.cuda.empty_cache()
+
+
+if __name__ == "__main__":
+    main()

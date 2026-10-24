@@ -2167,6 +2167,8 @@ Before the lending fixes: decode 0.92 / 0.98 / 0.88, prefill 0.67 / 0.46 / 0.41,
   **Lead's recommendation, pending the owner (2026-10-22):** judge the clause on degenerate rates pooled across the
   cards, with `code-08` / `code-12` treated as path chance. Pooled over the three cards' runs, Holon 5 / 216 (2.3%;
   7 / 288 with the 5080's F5b-on run) and Strata 5 / 216 (2.3%): equal. The bar text stays until the owner answers.
+  **Owner's ruling (2026-10-24):** Holon-only degenerate items are variance, judged on pooled rates (the degenerate
+  clause is met when Holon's pooled rate does not exceed Strata's).
 
 ### 20.4 The RTX 5080 decode step per component
 
@@ -3320,6 +3322,10 @@ experts against Holon's 48.1%):
 
 Speed work for FN stops here. Evidence: `evidence/fn7_step7k_2026-10-23.json`.
 
+**Owner's ruling (2026-10-24):** the speed bars stay "Holon ≥ Strata", MTP-matched decode included, judged in tok/s;
+the per-pass rate × pooled acceptance is reported, not a substitute. FN's speed work is reopened (a round after the
+close's plants run; locks and propagation wait for it, so the locks propagate once).
+
 ## 22. FN's close (2026-10-23; the lead's approved plan: the PLE SSD tier, plants and exactness, gates (c) and (d), locks)
 
 ### 22.1 The PLE SSD tier (D5)
@@ -3426,3 +3432,58 @@ sequences ran out of memory in the snapshot trace. Found by `exact.py` at the cl
   snapshot trace (with `FN_GGUF` and `FN_MTP`; on the A5000: passes, 3 min). Without the core fix it fails in the
   trunk, and without the sampler fix in the sort.
 - The run is run-identical ×2 (`exact.py`).
+
+### 22.3 Offload exactness (acceptance 4)
+
+`spikes/fn7/exact.py` records the snapshot trace (`holon_judge.snapshot`) under named configurations of one
+deployment and diffs each against the first run of the first configuration. The trace is an 8K prompt, its
+prefix-hit extension, and 62 short requests through every graph bucket, with logprobs and seeded sampling. Each
+configuration gets a fresh engine on the same state budget, the MTP head drafting, and a plant must differ:
+
+| Where | Configurations | Result |
+|---|---|---|
+| RTX PRO 6000, IQ2_XS, MTP | all-resident ×3; the offload store capped (`moe.cache=*=0.15`, F11, the MTP experts in the store, tail lending) | **run-identical ×3, the offload store byte-identical to all-resident**; `aux_row_padding` differs |
+| RTX 5090, the final MTP deployment | the deployment ×3; a capped cache (`*=0.05`); the ring's copies on SMs (`moe.ring_copy=sm`); staging unpipelined (`moe.pipeline=1`) | **run-identical ×3, cross-placement identical ×3**; `aux_row_padding` differs |
+| RTX 5080, the final MTP deployment (2 sequences, `--memory-fraction 0.9`) | the same four | **run-identical ×3, cross-placement identical ×3**; `aux_row_padding` differs |
+| All three GPUs | the PLE table in RAM and on the SSD (§22.1) | byte-identical; `rows_off_by_one` differs |
+
+**The 5080's sequence limit, for its lock.**
+- At the default 64 sequences the 5080's MTP deployment does not start: the startup profile itself runs out of
+  memory capturing the 64-row verify graphs (16 GB).
+- At 16 sequences, with a 16K context, its cache is too small to lend a prompt step's staging. `moe.lend_peak`'s
+  loan was then refused at the first launch (the store's guard). Now (cf787395, the lead's call) the decision is made
+  at build: a layout that stages keeps the loan in its own tail (the cache that much smaller), and a tail class too
+  small to hold it drops it (the worst step's peak reserved). Both are logged, bitwise, and tested on the toy GPU
+  model.
+- It serves 1–2 sequences: the bench's 1 and gate (c)'s; 2 for the trace above, at `--memory-fraction 0.9`. At 0.97,
+  a second engine in the same process found less free memory than the first had measured.
+- The lock sets `max_seqs` on the 5080.
+
+F5b is not used by any deployment, so its bound against the path-aware floor does not apply.
+
+### 22.4 Gates (c) and (d) on the final deployments
+
+- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, the 4 `v1-long` prompts, 49,596 positions, the
+  deployed MTP pack, 5346d3a). Each card's drafting-off deployment flags; the MTP pair adds the head. **Both pass:**
+
+  | Pair | 5080 KL mean / p50 / p99 | 5090 KL mean / p50 / p99 |
+  |---|---|---|
+  | decode (1-token steps) vs prefill | 0.025 / 0.0018 / 0.36 | 0.031 / 0.0027 / 0.45 |
+  | chunked (250) vs one-shot | 0.022 / 0.0016 / 0.33 | 0.030 / 0.0029 / 0.45 |
+  | MTP vs plain (to each first difference) | 0.0020 / – / 0.023 | 0.0044 / – / 0.063 |
+
+  - **The 5080's gate engines run without `moe.lend_peak`.** Its 1-token and 250-token step engines lend nothing (a
+    step below `ring_tokens`), and with 2 sequences at a 20K context the layout stages, so the loan's reserved
+    activations are refused at the first launch (the store's guard).
+  - The loan moves no bits (§21.12). The lock keeps the 5080's `max_step_tokens` at 4096 with the loan on.
+- **(d) The 72-item task set** (greedy, thinking on, 8,192 new tokens; Holon on the drafting-off deployment, 5346d3a;
+  Strata's no-approx answers of step 6 on the same card and file):
+
+  | Card | Holon | Strata | Degenerate: Holon | Degenerate: Strata | Bar |
+  |---|---|---|---|---|---|
+  | RTX 5080 (IQ2_XS) | **70** / 72 | 70 / 72 | `code-08`, `code-12` | none | score passes; the degenerate clause fails as measured |
+  | RTX 5090 (IQ3_S) | **72** / 72 | 70 / 72 | 1 (shared with Strata's) | 2 | passes |
+
+  - The 5080's two degenerate answers are the same two items as in §20.3.
+  - **Under the owner's ruling (2026-10-24, §20.3): the 5080's (d) passes** — score 70 = 70, and the pooled degenerate
+    rates are equal. The 5090's passes.
