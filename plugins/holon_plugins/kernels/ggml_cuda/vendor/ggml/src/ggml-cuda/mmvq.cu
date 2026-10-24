@@ -1144,13 +1144,16 @@ static void mul_mat_vec_q_moe_launch(
         const int warp_size, const int nchannels_dst, cudaStream_t stream) {
 
     constexpr int rows_per_block = 2; // 2 gives best perf based on tuning
-    const int64_t nblocks_rows = (nrows_x + rows_per_block - 1) / rows_per_block;
+    // Holon: 4 rows per block without fusion (a MoE's down projection): 9-18% faster at a verify pass's 4 rows on
+    // Blackwell (RTX 5080, 5090; FN §23.8), each row's sums as before; the fused gate/up keeps 2
+    constexpr int rows_per_block_plain = 4;
+    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
+                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
+    const int rows = has_fusion ? rows_per_block : rows_per_block_plain;
+    const int64_t nblocks_rows = (nrows_x + rows - 1) / rows;
     const dim3 block_nums(nblocks_rows, nchannels_dst + (fusion.shared_up != nullptr));
     const dim3 block_dims(warp_size, ncols_dst);
     const ggml_cuda_kernel_launch_params launch_params = ggml_cuda_kernel_launch_params(block_nums, block_dims, 0, stream);
-
-    const bool has_fusion = fusion.gate != nullptr || fusion.x_bias != nullptr || fusion.gate_bias != nullptr ||
-                            fusion.x_scale != nullptr || fusion.gate_scale != nullptr;
 
     if (has_fusion) {
         ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, true>, launch_params,
@@ -1159,7 +1162,7 @@ static void mul_mat_vec_q_moe_launch(
             stride_channel_x, stride_channel_y, stride_channel_dst,
             ncols_dst, ids_stride);
     } else {
-        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block, false>, launch_params,
+        ggml_cuda_kernel_launch(mul_mat_vec_q_moe<type, rows_per_block_plain, false>, launch_params,
             vx, vy, ids, fusion, dst, ncols_x, nchannels_y, nrows_x,
             stride_row_x, stride_col_y, stride_col_dst,
             stride_channel_x, stride_channel_y, stride_channel_dst,
