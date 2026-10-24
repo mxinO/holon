@@ -978,10 +978,17 @@ def qwen35_gate_one_block() -> Iterator[None]:
     """The attention output gate split as q's whole block, then the gate's (not per head)."""
     from holon_std.mixers.gqa import units
 
-    def planted(self, q, t):
-        q, gate = q.split(self.heads * self.head_dim, dim=-1)
-        return q.contiguous(), gate.reshape(t, self.heads, self.head_dim)
-    with mock.patch.object(units.GQA, "_split_gate", planted):
+    projections = units.GQA._projections
+
+    def planted(self, x):
+        q, k, v = projections(self, x)
+        if self.gated:            # each head's [queries, gate] taken from the block split instead
+            t, width = q.shape[0], self.heads * self.head_dim
+            flat = q.reshape(t, 2 * width)
+            q = torch.cat([flat[:, :width].reshape(t, self.heads, self.head_dim),
+                           flat[:, width:].reshape(t, self.heads, self.head_dim)], dim=-1)
+        return q, k, v
+    with mock.patch.object(units.GQA, "_projections", planted):
         yield
 
 
@@ -1034,8 +1041,8 @@ def payload_one_block_early() -> Iterator[None]:
 
     register = state.StateManager.register
 
-    def planted(self, seq, spec, at, payload):
-        register(self, seq, spec, at - self.index.block, payload)
+    def planted(self, seq, spec, at, payload, done=None):
+        register(self, seq, spec, at - self.index.block, payload, done)
     with mock.patch.object(state.StateManager, "register", planted):
         yield
 

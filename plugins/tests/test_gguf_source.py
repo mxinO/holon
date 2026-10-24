@@ -28,7 +28,7 @@ def hf_tok():
     return AutoTokenizer.from_pretrained(HF)
 
 
-@pytest.fixture(scope="module", params=[f.name for f in FILES] if HF else [None])
+@pytest.fixture(scope="module", params=[pytest.param(f.name, marks=pytest.mark.model) for f in FILES] if HF else [None])
 def source(request):            # every test of the source needs it: they skip without the cached files
     if request.param is None:
         pytest.skip("needs the cached Qwen3-8B GGUF files and HF model")

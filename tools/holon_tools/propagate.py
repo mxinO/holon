@@ -1,14 +1,18 @@
 """`propagate`: carry a model's lock to the code checked out now, by one of the outcomes of design §4.6.
 
     unchanged  the closure is what the lock pins (only the commit differs): nothing to write
-    approve    judge L2 vs the reference passes: the new lock (and its snapshot) needs one approval
+    advance    only code pins changed (`commit`, `uv_lock`, `unit:*`), the snapshot trace is byte-identical to the
+               lock's and no uncovered site changed: appended without a human, and without L2
+    approve    the trace moved, an uncovered site changed, or a first lock: judge L2 vs the recorded golden passes;
+               the new lock (and its snapshot) needs one approval. A byte-identical trace with more than code changed
+               (engine settings, site bindings, sources, the recipe, another class's lock) skips L2 but still needs
+               the approval: an identical trace says nothing about, e.g., a pool's margin at a new length
     fail       L2 fails, or the new snapshot trace is not run-identical although every kernel claims determinism
-    advance    only with `allow_advance`: the snapshot trace is byte-identical to the lock's and no uncovered site
-               changed — appended without a human
 
-Auto-advance also needs changed-line coverage (every changed line in the model's closure ran during the trace,
-design §4.6), which is not recorded yet; until it is, a byte-identical trace is evidence for the approval, and
-advancing without it is an explicit opt-in.
+The trace runs `runs` times (2; 3 for race-prone features) and every run must be identical. Design §4.6 also asks for
+changed-line coverage before an advance; it is not recorded, and the owner accepted the byte-identical trace alone
+(2026-10-21: in practice it caught what L2 caught). L2 scores against goldens recorded before; propagation never
+records one.
 
 A plan with uncovered sites (kernels that are not run-to-run deterministic) may have no run-identical snapshot; its
 lock then records none, and every change to it goes through L2 and approval (design §7.10).
@@ -64,23 +68,29 @@ class Checks(Protocol):
         """The judge's bounded check against the reference: (passed, report)."""
 
 
+CODE = {"commit", "uv_lock"}       # with the `unit:*` pins, the plan keys a byte-identical trace may advance
+
+
 def trace_hash(snap: Snapshot) -> str:
     return canonical_hash({"streams": snap.streams, "steps": snap.steps})
 
 
-def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | None = None,
-           allow_advance: bool = False) -> Outcome:
+def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | None = None, runs: int = 2
+           ) -> Outcome:
     """The outcome for a model whose newest lock is `current` (None: a new model; its first lock always needs an
-    approval). `previous` is `current`'s stored snapshot, used only to locate a divergence."""
+    approval), the snapshot trace run `runs` times. `previous` is `current`'s stored snapshot, used only to locate a
+    divergence."""
     plan = checks.plan()
     changes = plans.diff(current.plan, plan) if current else {}
     if current is not None and changes.keys() <= {"commit"}:
         return Outcome("unchanged", changes, [f"closure unchanged since commit {current.plan.commit}"])
-    first, again = checks.snapshot(), checks.snapshot()
+    first, *again = (checks.snapshot() for _ in range(runs))
     racy = locks.uncovered(plan)
-    if (unstable := snapshot.diff(first, again)) and not racy:
+    if (unstable := next(filter(None, (snapshot.diff(first, s) for s in again)), None)) and not racy:
         return Outcome("fail", changes, [f"snapshot trace is not run-identical: {unstable}"])
     lock = Lock(plan, None if unstable else trace_hash(first), racy, sm)
+    covered = (f"trace covered step widths {_widths(first.meta)}, prefix tokens saved "
+               f"{first.meta.get('tokens_saved', '-')}")
     if unstable:
         evidence = [f"snapshot trace is not run-identical ({unstable}), with uncovered sites {list(racy)}"]
     elif current is None:
@@ -89,14 +99,13 @@ def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | N
         evidence = [f"snapshot trace differs from the lock's: {_divergence(previous, first)}"]
     elif touched := _touched(current, plan, changes):
         evidence = [f"snapshot trace identical, but uncovered sites changed: {touched}"]
-    elif allow_advance:
-        return Outcome("advance", changes, ["snapshot trace byte-identical"], lock, first)
+    elif settings := sorted(k for k in changes if k not in CODE and not k.startswith("unit:")):
+        return Outcome("approve", changes, [f"snapshot trace byte-identical, but not only code changed: {settings} "
+                                            "(an approval; no L2)", covered], lock, first)
     else:
-        evidence = ["snapshot trace byte-identical (auto-advance awaits changed-line coverage)"]
-    evidence.append(f"trace covered step widths {_widths(first.meta)}, prefix tokens saved "
-                    f"{first.meta.get('tokens_saved', '-')}")
+        return Outcome("advance", changes, ["snapshot trace byte-identical", covered], lock, first)
     passed, report = checks.l2()
-    return Outcome("approve" if passed else "fail", changes, [*evidence, report], lock if passed else None,
+    return Outcome("approve" if passed else "fail", changes, [*evidence, covered, report], lock if passed else None,
                    None if unstable else first)
 
 
@@ -167,7 +176,7 @@ class EngineChecks:
 
     def l2(self) -> tuple[bool, str]:
         if self.inputs is None:
-            return False, "L2: no golden and floor given"
+            return False, "L2: no golden and floor given (pass the model's recorded ones)"
         golden, prompts = Recording.load(self.inputs.golden), self.inputs.prompts
         need = max(len(p.ids) for p in prompts.prompts) + 1
         engine = self._fresh(dataclasses.replace(self.config, max_model_len=max(self.config.max_model_len, need)))

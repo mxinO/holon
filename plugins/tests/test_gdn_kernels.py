@@ -36,7 +36,7 @@ from holon_plugins.kernels.fla import plugin as fla_plugin
 from holon_plugins.kernels.fla.vendor import fused_sigmoid_gating
 from holon_std.mixers.gdn import reference as ref
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 hf = pytest.importorskip("transformers.models.qwen3_5.modeling_qwen3_5")
 
 SHAPES = {"qwen3.8-27b": (16, 48, 128), "qwen3.5": (16, 32, 128), "small": (2, 6, 64)}   # Hk, Hv, D

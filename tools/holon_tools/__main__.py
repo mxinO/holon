@@ -3,16 +3,18 @@
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
-                                    --golden <fp32 golden> --floor <floor> [--prompts judge/prompts/v1.jsonl]
+                                    [--snapshot-runs 2] [--golden <fp32 golden> --floor <floor>]
+                                    [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
                                 [--json record] [the flags of propagate]
     python -m holon_tools profile <model> [--prompts judge/prompts/v1.jsonl] [--max-tokens 64]
                                   [--name <stem>.profile.json] [engine flags: --host-memory ...]
 
-`propagate` and `tune` exit 0 when nothing needs doing or the lock was written, 2 when the new lock needs an
-approval (re-run with --approve to write it), 1 on failure — a lock binding an `approx` plugin (docs/v1-offload.md §6)
-included, unless --allow-approx says a human gated it.
+`propagate` and `tune` exit 0 when nothing needs doing or the lock was written (a byte-identical trace advances
+without L2), 2 when the new lock needs an approval (re-run with --approve to write it), 1 on failure — a lock binding
+an `approx` plugin (docs/v1-offload.md §6) included, unless --allow-approx says a human gated it. The golden and floor
+are needed only when the trace moves.
 
 The lock's kernel pins carry over (they isolate a model from kernels installed since); engine settings come from the
 flags, so changing one is a visible plan change that goes through the checks.
@@ -104,7 +106,7 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_
     pools = previous.meta.get("pool_bytes") if previous is not None and same else None
     checks = propagate.EngineChecks(config, trace(prompts), l2, pools, model_id)
     sm = fp.sm
-    outcome = propagate.decide(start, checks, sm, previous, a.allow_uncovered_advance)
+    outcome = propagate.decide(start, checks, sm, previous, a.snapshot_runs)
     print(propagate.report(outcome))
     if outcome.verdict == "advance" or (outcome.verdict == "approve" and a.approve):
         try:
@@ -207,9 +209,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--class", dest="cls", help="start from this fingerprint class's newest lock")
         p.add_argument("--new-model", action="store_true", help="write the model's first lock")
         p.add_argument("--approve", action="store_true", help="write a lock that needs an approval")
-        p.add_argument("--allow-uncovered-advance", action="store_true",
-                       help="advance without approval on a byte-identical snapshot trace, although changed-line "
-                            "coverage is not checked yet")
+        p.add_argument("--snapshot-runs", type=int, default=2, choices=(2, 3),
+                       help="runs of the snapshot trace that must be identical (3 for race-prone features)")
         p.add_argument("--allow-approx", action="store_true",
                        help="write a lock that binds an `approx` plugin (a human gate, never a default lock)")
         p.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set of L2 and the snapshot trace")

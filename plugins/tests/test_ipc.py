@@ -33,6 +33,7 @@ def _closing_engine(config, endpoints, lock=None):
     serve(factory, endpoints)
 
 
+@pytest.mark.slow
 def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
     """Concurrent streams, n > 1, a rejection, an abort, stats and a processor ready late; at shutdown the engine is
     closed, so the logits processor and shared objects stop their helpers (docs/v1-offload.md S0)."""
@@ -92,6 +93,7 @@ def _failing_engine(config, endpoints, lock=None):
     serve(factory, endpoints)
 
 
+@pytest.mark.slow
 def test_a_failing_step_ends_every_request_with_an_error(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, _ = tiny_case
 

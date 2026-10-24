@@ -3577,3 +3577,71 @@ the tag only. The repository stays private until v1 / v2. Before it goes public:
 unreferenced unscrubbed objects (§20), and never push the `local-only/…` branches or any branch built on them.
 The CI workflow did not start on the first push: the account's Actions billing (private repositories are billed;
 public ones are free) — an account setting, not a code failure; the same checks pass locally.
+
+## 22. The test and propagation process (owner, 2026-10-21)
+
+A test audit found that the expensive full-model checks almost never caught a real bug; per-kernel L0 tests, CI's
+static checks, paired performance runs and real clients caught nearly everything. The owner approved a cheaper
+process, which replaces §6's per-change propagation and the release's re-checks where they differ.
+
+**Locks.**
+- **Propagation runs at a release or a milestone's close only**, one round covering everything merged since; between
+  rounds a merge may outdate locks (`holon serve` then says so and serves another class's current lock or the
+  defaults). A release tag is always propagated. A change lists the locks it outdates (`holon_tools impact
+  <base>..HEAD`). **Open (for the owner):** the defaults select no grammar processor, which every lock does, so
+  between rounds `main` refuses structured outputs (`response_format`, strict tools) with a 400 on a model whose
+  locks are all outdated — the real-client smoke met it (it now selects the processor itself).
+- **A byte-identical trace advances a code change without a human.** `propagate` runs the snapshot trace twice; when
+  only code pins changed (`commit`, `uv_lock`, units), both runs are identical and equal to the predecessor lock's
+  trace, and no uncovered site changed, it appends the lock without L2 and without an approval. Any other change (engine
+  settings such as `max_model_len` or a tier's bytes, site bindings, sources, the recipe, another class's lock) with an
+  identical trace skips L2 but needs the approval: the trace cannot show, e.g., a pool's margin. A moved trace runs L2
+  against the goldens and floors already recorded — never a new fp32 or CPU golden — and takes one approval.
+  `--snapshot-runs 3` asks for a third identical run, for race-prone features (it replaces the separate `holon_judge
+  snapshot --runs 3`, which stays available).
+
+**Checks.**
+
+| check | when |
+|---|---|
+| lock impact (`scripts/ci/check_lock_impact.py`, run by `run_all.sh`) | every branch: warns when merging it would outdate committed locks (any `core/holon` change outdates all of them); such a branch merges at a release or a milestone's close, with the propagation round |
+| L0 (kernel against its oracle, `pytest -m l0`) | on all three SMs (sm_86, sm_89, sm_120) for a Triton, FP8 or FP4 change; on sm_86 and sm_120 for a ggml-only change |
+| `compute-sanitizer` memcheck | for a new kernel shape, and at a release |
+| plants | one per new check, on the CPU or a tiny model where possible |
+| bounded checks (`holon_judge bounded`) | at a release only; the exact tier audits (`holon_judge tiers`) stay where they run |
+| paired performance (ABBA) | 3 rounds; 6 only when within 3% of a bar |
+| release bars (`bench/bars.py`) | 3 rounds |
+| perf smoke (`bench/perf_smoke.py`) | per change: batch-1 decode against main's build, 3 ABBA rounds on one card, each arm asserted to import its own tree, clock-screened (2.3 min on an RTX A5000 with Qwen3-8B Q4_K_M) |
+| real-client smoke (`bench/client_smoke.py`) | at each merge: `holon serve` on a small locked model driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes (under a minute on an RTX A5000 with Qwen3-8B Q4_K_M; a planted Anthropic `stop_reason` bug fails it) |
+
+**pytest.** A dev run (`pytest`) leaves out the tests marked `slow` (over ≈ 8 s: spawned servers, conversions,
+end-to-end CLIs, bounded and tier judges) and `model` (a real checkpoint from the Hugging Face cache); the pre-merge
+full run takes everything with `-m ""`, and `-m "not l0"` where the per-arch L0 job (`-m l0`, the kernel files) ran on
+the same tree. The full run shards over idle GPUs with pytest-xdist, one GPU per worker (the root `conftest.py`):
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3 systemd-run --user --scope -p MemoryMax=160G -p MemorySwapMax=0 -q \
+    python -m pytest core std plugins judge testing tools -m "" -n 4 --dist loadfile
+```
+
+FlashInfer's JIT modules are cached per environment during tests (`FLASHINFER_WORKSPACE_BASE` = the environment):
+their build files name the environment's paths, so worktree environments sharing the home directory's cache rebuilt
+every module the other had built last (≈ 13 s a module; the FlashInfer prefill oracle cases compiled once per module,
+not once per case). Run `FLASHINFER_WORKSPACE_BASE=$VIRTUAL_ENV python -m holon_plugins.kernels.flashinfer.prebuild
+--sm <n>` once in a new environment, or let its first run compile.
+
+**Measured** (one RTX A5000 unless sharded, `pytest core std plugins judge testing tools --durations=0`, the shared
+development host under other users' load, so ±10% run to run; llama.cpp's converter present, so its tests ran):
+
+| run | `main` (24a333f) | this change |
+|---|---|---|
+| full suite, one GPU (`-m ""`) | 2,360 s and 2,447 s (1,726 tests) | 2,044 s and 2,198 s (1,729 tests) |
+| dev run (`pytest`: not `slow`, not `model`) | — (every run was the full suite) | 964 s (110 deselected; 425 s of it the L0 files) |
+| full suite sharded, 4 GPUs (`-m "" -n 4 --dist loadfile`) | — | 498 s (the longest worker carries `test_judge_tiers.py`, 293 s) |
+
+The full suite's gain is FlashInfer's per-environment cache and the shared engine; the sharded run first took 1,339 s,
+every worker's torch using all CPUs (the CPU-engine files ran up to 30× slower), and 498 s with each worker's share.
+Two tests failed on `main` in every run above, `test_qwen3_5_plants.py`'s `gate-one-block` and
+`payload-one-block-early` plants (one patched a `GQA._split_gate` that no longer exists, the other's planted step had
+a stale signature): they run only where llama.cpp's converter is, so worktrees and CI skipped them. Both are fixed
+against the current code and still bite.

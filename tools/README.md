@@ -69,7 +69,7 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this
 machine's class, else the nearest class's), `--prompts` (prompt set of L2 and of the snapshot trace; default
-`judge/prompts/v1.jsonl`), `--approve`, `--allow-uncovered-advance`, `--allow-approx`, and every EngineConfig field as
+`judge/prompts/v1.jsonl`), `--approve`, `--snapshot-runs 3`, `--allow-approx`, and every EngineConfig field as
 a flag (`--device`, `--dtype`, `--max-seqs`, …). `propagate`/`tune` exit 0 when nothing needs doing or the lock was
 written, 2 when the new lock waits for `--approve`, 1 on failure. A plan that binds a plugin declaring
 `numerics = "approx"` (e.g. the route tail skip, `docs/v1-offload.md` §6) is never written without `--allow-approx`:
@@ -82,15 +82,18 @@ then:
 | outcome | condition | effect |
 |---|---|---|
 | unchanged | the plan equals the lock's except for `commit` | nothing written |
-| approve | judge L2 vs the HF golden passes the floor budgets; the snapshot trace (run twice) and whether it is byte-identical to the lock's are recorded as evidence | written with `--approve` |
+| advance | only code pins changed (`commit`, `uv_lock`, `unit:*`), the snapshot trace (run twice, or three times with `--snapshot-runs 3`) is run-identical and byte-identical to the lock's, and no `uncovered` site (old or new) changed | next lock appended; no L2 |
+| approve | the trace moved, an uncovered site changed, or a first lock: judge L2 vs the recorded golden passes the floor budgets; a byte-identical trace with more than code changed (engine settings, site bindings, sources, the recipe, another class's lock) skips L2 | written with `--approve` |
 | fail | L2 fails, or the new snapshot trace is not run-identical while every kernel claims determinism | nothing written |
-| advance | only with `--allow-uncovered-advance`: the trace is byte-identical to the lock's and no `uncovered` site (old or new) changed | next lock appended |
 
-Design §4.6 auto-advances only when, in addition, every changed line in the model's closure ran during the trace.
-Changed-line coverage is not recorded yet, so every changed plan gets one approval by default. A plan with uncovered
-sites may have no run-identical trace; its lock then records no snapshot and every change goes through L2. The commit
-does not count as a change: a lock committed in commit C can never name C, so counting it would make every re-run
-write another lock. Core changes are seen through the core's own `holon` unit pin. Starting from another class's lock
+A code change whose trace is byte-identical advances without a human and without L2 (owner, 2026-10-21; design
+§4.6's changed-line coverage is not recorded, and the identical trace alone is accepted). L2 runs only when the trace
+moves, against the
+golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. `--snapshot-runs 3`
+asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
+(`docs/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
+snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can
+never name C, so counting it would make every re-run write another lock. Core changes are seen through the core's own `holon` unit pin. Starting from another class's lock
 (no lock for this class yet), only the pins whose provider runs here are kept.
 
 `tune` builds the base plan, lists for each decode op the providers that run here and support every site, and
@@ -110,7 +113,8 @@ and saves 2064 prefix tokens. Timings for Qwen3-0.6B on an RTX A5000: a first lo
 
 ## Not yet
 
-- Changed-line coverage (§4.6), the condition for auto-advance without the opt-in flag.
+- Changed-line coverage (§4.6): auto-advance takes a byte-identical trace of a code change without it (owner,
+  2026-10-21).
 - Approval also requires "no L2 metric regresses beyond δ vs the current lock": needs the lock's L2 metrics stored.
 - The trace's long context stops at the prompt set's longest prompt (2048 tokens); buckets above 64 (`max_seqs` >
   64), spec decoding and grammar are not exercised.

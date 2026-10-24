@@ -4,6 +4,7 @@ does, its pages coming back from the level."""
 import random
 
 import numpy as np
+import pytest
 import torch
 from holon.core.engine import Engine, EngineConfig
 from holon_judge import bounded, tiers
@@ -24,6 +25,7 @@ def test_blobs_round_trip_and_capacity_counts_uncompressed_units():
     assert level.stored() == 0
 
 
+@pytest.mark.slow
 def test_tier_invariance_through_the_zlib_level(tmp_path):
     model = tiny_hf(4, seed=1)
     with torch.no_grad():

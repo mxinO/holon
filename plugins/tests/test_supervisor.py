@@ -134,6 +134,7 @@ def test_a_failed_sequence_ends_its_siblings_engine_requests():
     assert aborted_by_then == ["r#1.0", "r#1.1"] and req.finished and req.queue.qsize() == 1
 
 
+@pytest.mark.slow
 def test_a_killed_engine_restarts_and_streams_continue_exactly(tiny_checkpoint, tiny_case):  # noqa: F811
     # The request the kill interrupts is constrained by the toy logits processor from its first token on: after the
     # restart the processor must resume from the output (M0.5 §3.5), or its continuation differs.
@@ -168,6 +169,7 @@ def test_a_killed_engine_restarts_and_streams_continue_exactly(tiny_checkpoint, 
     assert 0 < stats["restart_s"] < 60 and stats["start_s"] > 0 and stats["quarantined"] == stats["rollbacks"] == 0
 
 
+@pytest.mark.slow
 def test_a_hung_engine_is_killed_and_its_requests_resubmitted(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, expected = tiny_case
 
@@ -187,6 +189,7 @@ def test_a_hung_engine_is_killed_and_its_requests_resubmitted(tiny_checkpoint, t
     assert stats["crashes"] == stats["restarts"] == 1 and stats["resubmitted"] == 2
 
 
+@pytest.mark.slow
 def test_a_poison_request_is_quarantined_without_rollback(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, expected = tiny_case
 
@@ -205,6 +208,7 @@ def test_a_poison_request_is_quarantined_without_rollback(tiny_checkpoint, tiny_
     assert stats["quarantined"] == 1 and stats["rollbacks"] == 0 and stats["config"] == 1    # still the newest
 
 
+@pytest.mark.slow
 def test_unexplained_crashes_roll_back_to_the_previous_config(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, expected = tiny_case
     good = _config(tiny_checkpoint)
@@ -239,6 +243,7 @@ def _unstartable_engine(config, endpoints, lock=None):
     serve(factory, endpoints)
 
 
+@pytest.mark.slow
 def test_failed_starts_roll_back_and_an_exhausted_history_gives_up(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
     prompts, expected = tiny_case
     starts = tmp_path / "starts"
@@ -260,6 +265,7 @@ def test_failed_starts_roll_back_and_an_exhausted_history_gives_up(tiny_checkpoi
     assert starts.read_text().split() == ["2"] * FAST.rollback_crashes + ["3", "1"]
 
 
+@pytest.mark.slow
 def test_a_lone_poison_request_on_a_quiet_server_is_quarantined(tiny_checkpoint, tiny_case):  # noqa: F811
     prompts, expected = tiny_case
     config = _config(tiny_checkpoint)

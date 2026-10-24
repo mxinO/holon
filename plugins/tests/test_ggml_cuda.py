@@ -68,7 +68,7 @@ from holon_std.weights.hf import reference as hf
 from holon_testing.qwen3_5_files import LLAMA
 from huggingface_hub.constants import HF_HUB_CACHE
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 
 INS = (768, 2304, 4096, 12288)
 OUT = 300
@@ -329,6 +329,8 @@ def test_qlinear_at_in_640(ctx, name):
         assert not [s for s in ctx.candidates("qlinear@2", facts) if s.provider == "kernels.ggml_cuda"], other
 
 
+@pytest.mark.slow
+@pytest.mark.model
 def test_qlinear_real_tensors(ctx, real):
     tested = {(name, k) for name, k in real if name in TYPES}
     if not tested:
@@ -555,6 +557,7 @@ def test_rows_on_the_ssd_read_what_the_host_holds(ctx, tmp_path):
         errors.shutdown()
 
 
+@pytest.mark.model
 def test_qembedding_real_table(ctx):
     path = next((p for p in FILES if p.name.endswith("Q4_K_M.gguf")), None)
     if path is None:

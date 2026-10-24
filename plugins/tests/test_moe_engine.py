@@ -967,6 +967,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     engine.close()
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_the_fill_maps_nothing_a_later_call_of_its_step_reads(gpu_moe):
     """F11's fill (FN §21.15) on a step whose layers make two resolve calls — a 900-token prompt arriving while two

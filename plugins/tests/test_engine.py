@@ -109,6 +109,8 @@ def test_seeded_sampling_is_reproducible_under_preemption(tiny_checkpoint, tiny_
 SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
+@pytest.mark.slow
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_engine_matches_hf_greedy_qwen3_0_6b():
     from transformers import AutoTokenizer
@@ -126,6 +128,7 @@ def test_engine_matches_hf_greedy_qwen3_0_6b():
     assert engine.generate(prompts, GREEDY) == expected
 
 
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_fast_kernels_agree_with_reference_and_are_run_identical_bf16():
     # bf16 rounding differs between kernels, so greedy paths may legitimately split late; exact checks are L0's.
@@ -269,8 +272,8 @@ def test_siblings_adopt_the_first_sequence_prompt(tiny_checkpoint, tiny_case):
     assert engine.state.tokens_saved == 2 * ((len(prompts[3]) - 1) // 4 * 4)
 
 
-@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
-def test_prefix_cache_on_vs_off_is_bounded_bf16():
+@pytest.mark.model
+def test_prefix_cache_on_vs_off_is_bounded_bf16(qwen3_0_6b_engine):
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(SNAP)
@@ -281,9 +284,11 @@ def test_prefix_cache_on_vs_off_is_bounded_bf16():
     params = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
     outs, saved = {}, {}
     for cache in (False, True):
-        engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=1024, prefix_cache=cache))
+        engine = qwen3_0_6b_engine if cache else Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16,
+                                                                     max_model_len=1024, prefix_cache=False))
+        before = engine.state.tokens_saved
         outs[cache] = [engine.generate([p], params)[0] for p in prompts]       # one after another: later ones hit
-        saved[cache] = engine.state.tokens_saved
+        saved[cache] = engine.state.tokens_saved - before
         del engine
     assert saved[False] == 0 and saved[True] >= 3 * (len(tok(system)["input_ids"]) // 16 * 16)
     agree = [next((i for i, (a, b) in enumerate(zip(x, y, strict=True)) if a != b), len(x))
@@ -345,6 +350,7 @@ def test_host_staged_inputs_equal_the_device_derived(tiny_checkpoint, tiny_case,
     assert all(torch.equal(a, b) for x, y in zip(*runs, strict=True) for a, b in zip(x, y, strict=True))
 
 
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_decode_launch_never_waits_for_the_device():
     from holon.core import platform
@@ -376,8 +382,8 @@ def test_prompt_logprobs_are_complete_after_a_prefix_hit(tiny_checkpoint, tiny_c
     assert len(deltas[0].prompt_logprobs.token) == len(prompts[3]) - 1
 
 
-@pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
-def test_cuda_graphs_are_bounded_and_run_identical_bf16():
+@pytest.mark.model
+def test_cuda_graphs_are_bounded_and_run_identical_bf16(qwen3_0_6b_engine):
     from transformers import AutoTokenizer
 
     tok = AutoTokenizer.from_pretrained(SNAP)
@@ -388,7 +394,8 @@ def test_cuda_graphs_are_bounded_and_run_identical_bf16():
     sampled = SamplingParams(temperature=0.8, top_p=0.9, seed=3, max_tokens=24, ignore_eos=True)
     outs = {}
     for graphs in (False, True):
-        engine = Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16, max_model_len=1024, cuda_graphs=graphs))
+        engine = qwen3_0_6b_engine if graphs else Engine(EngineConfig(model=str(SNAP), dtype=torch.bfloat16,
+                                                                      max_model_len=1024, cuda_graphs=False))
         outs[graphs] = [engine.generate(prompts, params), engine.generate(prompts, sampled)]
         assert outs[graphs][0] == engine.generate(prompts, params)              # run-identical
         assert (engine.executor.graphs is not None and len(engine.executor.graphs) > 0) == graphs

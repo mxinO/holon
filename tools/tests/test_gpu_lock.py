@@ -11,6 +11,8 @@ SNAP = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-
 GOLDENS = pathlib.Path(__file__).resolve().parents[2] / "judge" / "goldens" / "qwen3-0.6b"
 
 
+@pytest.mark.slow
+@pytest.mark.model
 @pytest.mark.skipif(SNAP is None or not torch.cuda.is_available(), reason="needs Qwen3-0.6B + GPU")
 def test_first_lock_for_qwen3_0_6b(tmp_path, capsys):
     flags = [str(SNAP), "--plans", str(tmp_path), "--golden", str(GOLDENS / "v1-fp32.safetensors"),

@@ -754,6 +754,16 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   unit pin are frozen in ABI 1.0 and in every committed lock, so narrowing them (e.g. hashing the modules a model's
   step imports, without docstrings and comments, and leaving the frontend-facing records out) is a deliberate v1
   change with its own lock migration.
+- **The test and propagation process** (owner, 2026-10-21; `docs/release.md` §22): locks are propagated at a release
+  or a milestone's close only; a code change whose 2-run trace is byte-identical advances without L2 or an approval
+  (another change with an identical trace skips L2 only), a moved trace runs L2 against the recorded goldens
+  (`--snapshot-runs 3` for race-prone features); bounded checks at a release only, the exact tier audits kept; one plant per new check, on the CPU or a tiny model where possible; L0 on all three SMs for
+  a Triton, FP8 or FP4 change, on sm_86 and sm_120 for a ggml-only one; memcheck for a new kernel shape and at a
+  release; ABBA 3 rounds (6 only within 3% of a bar), release bars 3 rounds; the perf smoke (`bench/perf_smoke.py`)
+  per change and the real-client smoke (`bench/client_smoke.py`) at each merge; `pytest` leaves out
+  `slow` and `model` tests, the pre-merge full run (`-m ""`) shards over idle GPUs.
+- **RTX 3090 27B trace differs by desktop** (`c203f34`, release §19.1): the 27B lock's snapshot trace on the RTX 3090
+  differs between two desktops of the same class, cause not identified; diagnose before the next 3090 propagation.
 
 **v2 — breadth**
 - DeepSeek-class: DSA indexer (page groups; GLM-5.3-Flash brings it into v1, `docs/v1-offload.md` D2), V4
@@ -771,4 +781,5 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - Every perf claim comes with an evidence record (command, fingerprint class, plan_id, raw numbers); consumer
   claims only from consumer desktops.
 - Every bug fix comes with a test that fails before and passes after.
-- A PR that changes shared code includes the `holon propagate` output.
+- A PR that changes shared code lists the locks it outdates (`holon_tools impact <base>..HEAD`); locks are propagated
+  at a release or a milestone's close (`docs/release.md` §22).

@@ -6,8 +6,12 @@ import os
 # there failed its check). Read when CUDA's allocator starts, so setting it at collection is early enough.
 os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
+import pathlib  # noqa: E402
+
 import pytest  # noqa: E402
 import torch  # noqa: E402
+
+QWEN3_0_6B = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 
 @pytest.fixture(autouse=True)
@@ -19,3 +23,17 @@ def _free_gpu_memory():
     if torch.cuda.is_available() and torch.cuda.memory_reserved():
         gc.collect()
         torch.cuda.empty_cache()
+
+
+@pytest.fixture(scope="session")
+def qwen3_0_6b_engine():
+    """One Qwen3-0.6B bf16 engine at the default settings (graphs, overlap, prefix cache), shared by the tests that only
+    generate on it. Its pools are small, so the engines other tests build beside it still fit."""
+    if QWEN3_0_6B is None or not torch.cuda.is_available():
+        pytest.skip("needs Qwen3-0.6B + GPU")
+    from holon.core.engine import Engine, EngineConfig
+
+    engine = Engine(EngineConfig(model=str(QWEN3_0_6B), dtype=torch.bfloat16, max_model_len=1024,
+                                 state_memory=256 << 20))
+    yield engine
+    engine.close()
