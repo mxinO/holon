@@ -202,6 +202,23 @@ def test_the_mtp_head_matches_the_pooled_reference(tiny, chunk):
     engine.close()
 
 
+def test_the_mtp_head_plant_fails(tiny):
+    """§6.3's `mtp_stream0` (the head reading stream 0 for every stream): its output leaves the pooled reference."""
+    from holon_judge.planted import PLANTS
+    path, fixtures, _, _ = tiny
+    pack = path.with_name(f"{q.NAME}-mtp-q2_0.gguf")
+    with PLANTS["mtp_stream0"]():
+        engine = _engine(path, 128, mtp=pack, options={"mtp.front": "off"})
+        head, rows = engine.executor.drafter.head, []
+        forward = head.forward
+        head.forward = lambda e, r, ctx: rows.append(out := forward(e, r, ctx)) or out
+        ids = fixtures["p0.ids"].tolist()
+        _ask(engine, ids, SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+        got = head.out(torch.cat([r for r in rows if len(r) > 1]))
+        engine.close()
+    assert (got - fixtures["p0.mtp_x"]).abs().max() > 1e-4
+
+
 def _flat(deltas: list) -> tuple[list, list]:
     return [t for ts, _ in deltas for t in ts], [x for _, xs in deltas for x in xs]
 
@@ -214,7 +231,8 @@ def test_dflash_refuses_a_wide_residual(tiny, tmp_path):
         _engine(tiny[0], 128, mtp=draft, drafter="dflash")
 
 
-JUDGE_PLANTS = ("qsa_select_shift", "qsa_pool_rope_last", "hc_inject_unscaled", "ple_gate_no_sqrt")     # §6.3's
+JUDGE_PLANTS = ("qsa_select_shift", "qsa_pool_rope_last", "hc_inject_unscaled", "ple_gate_no_sqrt",   # §6.3's
+                "ple_state_not_carried", "ple_state_bf16", "shexp_gate_off")
 
 
 @pytest.mark.parametrize("plant", ["qsa_dense_limit_off_by_one", "ple_conv_dilation_1", "ple_eos_cut_off",
