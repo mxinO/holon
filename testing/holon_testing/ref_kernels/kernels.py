@@ -293,7 +293,7 @@ class CpuTask:
     def __init__(self, ctx, *, pool: str) -> None:
         self.tasks, self.errors = [], ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
 
-    def bind(self, task) -> int:
+    def bind(self, task, urgent: bool = False) -> int:          # (`urgent`: a hint; a task runs at its signal)
         self.tasks.append(task)
         return len(self.tasks) - 1
 

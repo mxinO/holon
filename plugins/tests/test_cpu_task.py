@@ -139,3 +139,133 @@ def test_the_copy_task_reads_each_requested_piece_into_its_unit(lib, tmp_path):
     os.close(plain)
     if flag:
         os.close(direct)
+
+
+def _landing(tmp_path, size=3 * 4096 * 10 + 123):
+    """A file and its pieces (two extents each, unaligned), as O_DIRECT descriptors where the filesystem has it."""
+    import os
+
+    data = np.random.default_rng(1).integers(0, 256, size, dtype=np.uint8)
+    path = tmp_path / "experts.bin"
+    path.write_bytes(data.tobytes())
+    try:
+        fd, flag = os.open(path, os.O_RDONLY | os.O_DIRECT), 1
+    except OSError:
+        fd, flag = os.open(path, os.O_RDONLY), 0
+    pieces = [[(7, 1000), (5000, 2000)], [(9001, 3000), (40000, 0)], [(100, 50), (120000, 2950)]]
+    desc = torch.tensor([[(fd, flag, off, n) for off, n in piece] for piece in pieces], dtype=torch.int64)
+    return data, pieces, desc, fd
+
+
+def _check_landing(data, pieces, rows, runs, keep, req):
+    """Each requested piece's extents where `runs` says, in its landing row; kept pieces canonical in their unit."""
+    for piece, row, kept in req[1:1 + int(req[0, 0])].tolist():
+        canon = np.concatenate([data[off:off + n] for off, n in pieces[piece]])
+        got = np.concatenate([rows[row, a:a + n].numpy() for a, n in runs[row].tolist()])
+        assert np.array_equal(got, canon) and all(a % 4096 == off % 4096 for (a, _), (off, n) in
+                                                  zip(runs[row].tolist(), pieces[piece], strict=True) if n)
+        if kept >= 0:
+            assert np.array_equal(keep[kept, :len(canon)].numpy(), canon)
+
+
+def test_the_copy_task_reads_pieces_into_landing_rows_and_keeps(lib, tmp_path):
+    """docs/v1-glm.md D8f's landing rows: each O_DIRECT extent's aligned superset read in place at the row's next
+    4 KiB-aligned offset (no bounce), (offset, nbytes) of its bytes in `runs`, a kept piece copied canonical into its
+    keep unit; the oracle agrees on every byte it names; a row too small for a piece's supersets fails the task."""
+    import os
+
+    from holon_std.moe import reference
+
+    data, pieces, desc, fd = _landing(tmp_path)
+    req = torch.tensor([[2, 0, 0], [2, 1, 3], [0, 3, -1]], dtype=torch.int32)
+    rows = platform.host_memory(4 * 4 * 4096, torch.device("cuda"), mapped=False).view(torch.uint8).view(4, 4 * 4096)
+    runs, keep = torch.zeros(4, 2, 2, dtype=torch.int64), torch.zeros(4, 3000, dtype=torch.uint8)
+    task = lib.CopyTask([(desc, rows, req, runs, keep)])
+    assert task.run(2) == 0
+    _check_landing(data, pieces, rows, runs, keep, req)
+    want_rows, want_runs, want_keep = rows.clone().zero_(), torch.zeros_like(runs), torch.zeros_like(keep)
+    reference.copy_task([(desc, want_rows, req, want_runs, want_keep)])
+    assert torch.equal(want_runs, runs) and torch.equal(want_keep, keep)
+    _check_landing(data, pieces, want_rows, want_runs, want_keep, req)
+    small = rows[:, :4096]                                  # (one page a row: two supersets cannot fit)
+    assert lib.CopyTask([(desc, small.contiguous(), req, runs[:, :, :], keep)]).run(1) != 0
+    os.close(fd)
+
+
+def _io_worker(lib, tasks, backend, urgent=(), depth=4, chunk=8192):
+    device = torch.device("cuda")
+    words = platform.host_memory((len(tasks) + 1) * LINE, device, mapped=True)
+    alias = platform.device_alias(words, device)
+    core = sorted(__import__("os").sched_getaffinity(0))[-1:]
+    worker = lib.Worker(words.data_ptr(), alias.data_ptr(), [t.native() for t in tasks], core, int(5e9), False,
+                        depth, backend, list(urgent) or [False] * len(tasks), chunk)
+    return worker, (words, alias)
+
+
+@pytest.mark.parametrize("backend", ["uring", "aio"])
+def test_the_io_worker_reads_asynchronously_and_serves_urgent_requests_first(lib, tmp_path, backend):
+    """The `io` pool (docs/v1-glm.md D8f): one completion-driven thread over copy tasks, io_uring or native AIO (forced
+    here), small chunks in flight: canonical units (bounced) and landing rows (in place, kept pieces copied) as the
+    oracle reads them, through graph-free signals and waits; a failing request fails open. An urgent slot's request,
+    signalled while a large request's chunks are in flight, is answered before it (the large one's unsubmitted chunks
+    held meanwhile)."""
+    import os
+
+    from holon_std.moe import reference
+
+    words = torch.zeros(2 * LINE, dtype=torch.uint8)       # (a worker of no tasks: is the interface there?)
+    try:
+        lib.Worker(words.data_ptr(), words.data_ptr(), [], [0], 1, False, 1, backend).stop()
+    except RuntimeError as e:
+        pytest.skip(f"{backend}: {e}")
+    data, pieces, desc, fd = _landing(tmp_path)
+    req = torch.tensor([[2, 0], [2, 4], [0, 1]], dtype=torch.int32)
+    units, want = torch.zeros(5, 3000, dtype=torch.uint8), torch.zeros(5, 3000, dtype=torch.uint8)
+    reference.copy_task([(desc, want, req)])
+    lreq = torch.tensor([[2, 0, 0], [2, 1, 1], [0, 0, -1]], dtype=torch.int32)
+    rows = platform.host_memory(2 * 4 * 4096, torch.device("cuda"), mapped=False).view(torch.uint8).view(2, 4 * 4096)
+    runs, keep = torch.zeros(2, 2, 2, dtype=torch.int64), torch.zeros(2, 3000, dtype=torch.uint8)
+    tasks = [lib.CopyTask([(desc, units, req)]), lib.CopyTask([(desc, rows, lreq, runs, keep)])]
+    worker, held = _io_worker(lib, tasks, backend)
+    assert worker.backend() == {"uring": "io_uring", "aio": "aio"}[backend]
+    errors = torch.zeros(1, dtype=torch.int32, device="cuda")
+    for s in range(2):
+        worker.signal(s, errors)
+        worker.wait(s, errors)
+    torch.cuda.synchronize()
+    assert int(errors[0]) == 0 and torch.equal(units, want)
+    _check_landing(data, pieces, rows, runs, keep, lreq)
+    req[1] = torch.tensor([3, 0])                           # a piece past the descriptors: fails open
+    worker.signal(0, errors)
+    worker.wait(0, errors)
+    torch.cuda.synchronize()
+    assert int(errors[0]) == 1 and worker.flag() == 1
+    worker.stop()
+    os.close(fd)
+
+    big = tmp_path / "big.bin"                              # a large read in flight, then an urgent one
+    big.write_bytes(np.random.default_rng(2).integers(0, 256, 64 << 20, dtype=np.uint8).tobytes())
+    try:
+        bfd, bflag = os.open(big, os.O_RDONLY | os.O_DIRECT), 1
+    except OSError:
+        bfd, bflag = os.open(big, os.O_RDONLY), 0
+    os.posix_fadvise(bfd, 0, 0, os.POSIX_FADV_DONTNEED)
+    n = 16
+    bdesc = torch.tensor([[(bfd, bflag, i * (4 << 20), 4 << 20)] for i in range(n)], dtype=torch.int64)
+    breq = torch.tensor([[n, 0]] + [[i, i] for i in range(n)], dtype=torch.int32)
+    bunits = torch.zeros(n, 4 << 20, dtype=torch.uint8)
+    ureq = torch.tensor([[1, 0], [0, 0]], dtype=torch.int32)
+    uunits = torch.zeros(1, 4 << 20, dtype=torch.uint8)
+    tasks = [lib.CopyTask([(bdesc, bunits, breq)]), lib.CopyTask([(bdesc, uunits, ureq)])]
+    worker, (words, _) = _io_worker(lib, tasks, backend, urgent=(False, True), depth=2, chunk=256 << 10)
+    word = words.view(torch.int32)
+    word[0] = 1                                             # REQ, from the host: the large request
+    time.sleep(0.01)
+    word[16] = 1                                            # the urgent one, while the large one's reads go on
+    order = []
+    while len(order) < 2:
+        order += [s for s in (0, 1) if s not in order and int(word[16 * s]) >= 2]
+    assert order == [1, 0] and int(word[0]) == 2 and int(word[16]) == 2, order
+    assert np.array_equal(uunits[0].numpy(), bunits[0].numpy())
+    worker.stop()
+    os.close(bfd)

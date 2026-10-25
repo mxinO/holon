@@ -2,15 +2,19 @@
 worker — a signal op, a wait op, a word per slot in mapped pinned memory, fail-open by contract (csrc/cpu_task.cu).
 
 Each kind of work has its own worker (the fact `pool`): `compute` (CPU experts, F5b) and `io` (F9's SSD reads), so a
-blocking read never stalls a layer's CPU experts. A worker is the engine's one shared object of its kind
+read never stalls a layer's CPU experts. The `io` worker is one completion-driven thread (docs/v1-glm.md D8f): its
+copy tasks' reads go out asynchronously — io_uring, else Linux native AIO, chosen at start and logged — up to
+`io_depth` chunks in flight, an urgent slot's request (`bind(task, urgent=True)`, a hint) ahead of every chunk not yet
+submitted. A worker is the engine's one shared object of its kind
 (`cpu_task.<pool>`): tasks are bound while kernels are bound, its words are a mapped host pool requested before the
 first materialize, its threads start after it (pinned, the first one coordinating) and stop after the drain.
 
 Options (EngineConfig.plugin_options), from tune for a lock: `cpu_task.threads` (compute threads, the coordinator
-included; default 4: S6 and M3 saturate DRAM with 2–4 for Q4_K experts), `cpu_task.io_threads` (default 2: M7's two
-`pread` workers), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as "2-5,8", the first `threads` of them
-taken; default: one per physical core of
-the process's CPUs, past the first — the OS's and the engine loop's —, compute first, then I/O), `cpu_task.wait`
+included; default 4: S6 and M3 saturate DRAM with 2–4 for Q4_K experts), `cpu_task.io_depth` (the I/O worker's reads
+in flight; default 16: N3 saturates the bar drive from 8; `cpu_task.io_threads`, the old pread pool's size, is
+deleted), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as "2-5,8", the first `threads` of them taken — the
+I/O worker's first one; default: one per physical core of the process's CPUs, past the first — the OS's and the engine
+loop's —, compute first, then I/O), `cpu_task.wait`
 (`spin`: 1-thread kernels, 2–3 µs per handshake; `memop`: stream memory operations, no SM held, for display GPUs;
 default spin), `cpu_task.timeout` (seconds a wait waits before it fails open; default 60).
 
@@ -29,7 +33,8 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 OP = "cpu_task"
-POOLS = {"compute": ("threads", "cores", 4), "io": ("io_threads", "io_cores", 2)}
+POOLS = {"compute": ("threads", "cores", 4), "io": (None, "io_cores", 1)}     # (the io worker: one thread)
+IO_DEPTH, CHUNK = 16, 256 << 10                # reads in flight; bytes a read (N3: any from 256 KiB)
 TIMEOUT = 60.0                 # seconds (Maya bounds its wait at about 60 s)
 LINE = 64                      # bytes per slot word (one cache line each)
 
@@ -41,19 +46,26 @@ class Service:
         opts = ctx.options.get("plugins", {})
         threads, cores, default = POOLS[pool]
         self.lib, self.name = extension.load(ctx.fingerprint.sm), f"cpu_task.{pool}"
-        n = int(opts.get(f"cpu_task.{threads}", default))
+        if "cpu_task.io_threads" in opts:
+            raise ValueError("cpu_task.io_threads is deleted (docs/v1-glm.md D8f): the I/O worker is one thread with "
+                             "cpu_task.io_depth reads in flight")
+        n = int(opts.get(f"cpu_task.{threads}", default)) if threads else default
+        self.depth = int(opts.get("cpu_task.io_depth", IO_DEPTH)) if pool == "io" else 0
+        if pool == "io" and self.depth < 1:
+            raise ValueError(f"{self.name}: cpu_task.io_depth {self.depth}")
         self.cores = parse_cores(str(opts[f"cpu_task.{cores}"]))[:n] if f"cpu_task.{cores}" in opts else \
             default_cores(pool, n, int(opts.get("cpu_task.threads", POOLS["compute"][2])))
         if len(self.cores) != n:
             raise ValueError(f"{self.name}: {n} threads on cores {self.cores}")
         self.memop = {"spin": False, "memop": True}[str(opts.get("cpu_task.wait", "spin"))]
         self.timeout_ns = int(float(opts.get("cpu_task.timeout", TIMEOUT)) * 1e9)
-        self.tasks, self.native, self.words, self.left = [], None, None, False
+        self.tasks, self.urgent, self.native, self.words, self.left = [], [], None, None, False
 
-    def bind(self, task) -> int:
+    def bind(self, task, urgent: bool = False) -> int:
         if self.native is not None:
             raise RuntimeError(f"{self.name}: a task bound after the worker started")
         self.tasks.append(task)
+        self.urgent.append(bool(urgent))
         return len(self.tasks) - 1
 
     def before_materialize(self, ctx) -> None:
@@ -68,7 +80,10 @@ class Service:
             host, device = self.words.view(torch.uint8, (n,)), self.words.device_view(torch.uint8, (n,))
             self.views = host, device                      # the words stay mapped while this object lives
             self.native = self.lib.Worker(host.data_ptr(), device.data_ptr(), [t.native for t in self.tasks],
-                                          self.cores, self.timeout_ns, self.memop)
+                                          self.cores, self.timeout_ns, self.memop, self.depth, "auto", self.urgent,
+                                          CHUNK)
+            if self.depth:
+                print(f"holon: {self.name}: {self.native.backend()}, {self.depth} reads in flight")
 
     def shutdown(self) -> None:                     # (idempotent: a store may stop its I/O worker first)
         if self.left or self.native is None:
@@ -87,8 +102,9 @@ class CpuTask:
         self.service = ctx.shared(f"cpu_task.{pool}", functools.partial(Service, pool=pool))
         self.errors = ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
 
-    def bind(self, task) -> int:
-        return self.service.bind(task)
+    def bind(self, task, urgent: bool = False) -> int:
+        """Its slot; `urgent`: a hint — the worker serves its requests before requests it has not yet started."""
+        return self.service.bind(task, urgent)
 
     def signal(self, slot: int) -> None:
         self.service.native.signal(slot, self.errors)
@@ -97,8 +113,9 @@ class CpuTask:
         self.service.native.wait(slot, self.errors)
 
     def copy(self, roles) -> CopyTask:
-        """The generic copy task (F9) over `roles`: per role (descriptors, units, requests), host tensors."""
-        return CopyTask(self.service.lib.CopyTask(list(roles)))
+        """The generic copy task (F9) over `roles`: per role (descriptors, units, requests[, runs, keep]), host
+        tensors."""
+        return CopyTask(self.service.lib.CopyTask([list(r) for r in roles]))
 
 
 class CopyTask:

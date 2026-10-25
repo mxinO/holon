@@ -323,16 +323,23 @@ def cpu_task(task) -> None:
 
 
 def copy_task(roles) -> None:
-    """`cpu_task@1`'s copy task, run now: per role (descriptors [P, X, 4], units [U, unit], requests [1 + F, 2]) each
-    requested piece's extents (fd, direct, offset, nbytes) read in order into its unit (an O_DIRECT descriptor through
-    its aligned superset, into page-aligned memory)."""
+    """`cpu_task@1`'s copy task, run now: per role (descriptors [P, X, 4], units [U, unit], requests [1 + F, 2 or 3][,
+    runs [U, X, 2], keep [K, unit]]) each requested piece's extents (fd, direct, offset, nbytes) read in order: into its
+    unit back to back (canonical); or, with `runs`, into its landing row, each O_DIRECT extent's aligned superset at the
+    row's next 4 KiB-aligned offset, (offset in the row, nbytes) of its bytes into `runs[row, x]`, and a piece whose
+    keep (the requests' third column) is ≥ 0 copied canonical into that keep unit."""
     import mmap
     import os
 
-    for desc, units, req in roles:
-        for piece, unit in req[1:1 + int(req[0, 0])].tolist():
-            at = 0
-            for fd, direct, offset, nbytes in desc[piece].tolist():
+    for desc, units, req, *rest in roles:
+        runs, keep = (t if t is not None and t.numel() else None for t in (rest or [None, None]))
+        cols = req.shape[1]
+        for row in req[1:1 + int(req[0, 0])].tolist():
+            piece, unit, kept = row[0], row[1], (row[2] if cols > 2 else -1)
+            at = canon = 0
+            for x, (fd, direct, offset, nbytes) in enumerate(desc[piece].tolist()):
+                if runs is not None:
+                    runs[unit, x] = 0
                 if not nbytes:
                     continue
                 lo, hi = (offset // 4096 * 4096, -(-(offset + nbytes) // 4096) * 4096) if direct else \
@@ -341,9 +348,18 @@ def copy_task(roles) -> None:
                     got = os.preadv(fd, [buf], lo)
                     if got < offset + nbytes - lo:
                         raise OSError(f"copy task: {nbytes} bytes at {offset}, {got - (offset - lo)} read")
-                    data = bytes(buf[offset - lo:offset - lo + nbytes])
-                units[unit, at:at + nbytes] = torch.frombuffer(bytearray(data), dtype=torch.uint8)
-                at += nbytes
+                    raw = bytes(buf[:got])
+                data = torch.frombuffer(bytearray(raw[offset - lo:offset - lo + nbytes]), dtype=torch.uint8)
+                if runs is None:
+                    units[unit, at:at + nbytes] = data
+                    at += nbytes
+                    continue
+                units[unit, at:at + len(raw)] = torch.frombuffer(bytearray(raw), dtype=torch.uint8)
+                runs[unit, x] = torch.tensor([at + offset - lo, nbytes])
+                if kept >= 0:
+                    keep[kept, canon:canon + nbytes] = data
+                at += -(-(hi - lo) // 4096) * 4096
+                canon += nbytes
 
 
 class ActivationLoan:

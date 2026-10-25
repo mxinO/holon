@@ -187,19 +187,23 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
 The CPU's share of the misses (F5b, docs/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
 CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
 
-- `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task) -> slot` (at
-  build), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
+- `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task, urgent=False) ->
+  slot` (at build; `urgent` a hint: a worker serves an urgent slot's request before requests it has not yet started, and
+  may ignore it), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
   reaches the signal, the device's writes before it visible to the task; work after the wait runs once the task has
   answered, its writes visible), and `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
-  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers
-  at once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph
-  never waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now),
-  with `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI
-  (kernels.cpu_task's csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has
-  `copy(roles) -> task`, the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8,
-  requests [1 + F, 2] int32)` (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them;
-  the request table `moe_tiers@1`'s `io[r]`): each requested piece's extents read in order into its unit. The oracle
-  runs a task.
+  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers at
+  once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph never
+  waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now), with
+  `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI (kernels.cpu_task's
+  csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has `copy(roles) -> task`,
+  the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8, requests [1 + F, 2] int32)`
+  (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them; the request table `moe_tiers@1`'s
+  `io[r]`): each requested piece's extents read in order into its unit. A role may add `runs [U, X, 2] int64` and `keep
+  [K, unit] uint8` (docs/v1-glm.md D8f): its units are then landing rows, each O_DIRECT extent's 4 KiB-aligned superset
+  read in place at the row's next aligned offset and (offset in the row, nbytes) of its bytes written to `runs[row, x]`
+  (no copy); with requests `[1 + F, 3]` (piece, row, keep), a piece whose keep is ≥ 0 is also copied, canonical, into
+  keep unit `keep` before the request is answered. The oracle runs a task.
 - `cpu_experts@1` (a CPU kernel): instance `(jobs [1 + J, 4 + T] int32, x [T, hidden] f32, gate_up [U, gu_unit] uint8,
   down [V, down_unit] uint8, rows [T·k, hidden] f32, threads: int = 1)`, host tensors: for each job (`moe_resolve@1`'s
   table) the expert whose gate/up piece is unit `gate_up[u]` (gate's `inter` rows, then up's, as the GGUF stores them)
