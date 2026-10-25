@@ -249,14 +249,13 @@ class TieredStore:
                 for c in self.classes.values():
                     c.staging = self.prefill
             elif self.exclusive:
-                # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM for
-                # the SSD (its code −2, no RAM unit: the file always holds it), so its slots are free to overwrite at
-                # once. No step streams: the ring copies RAM units only, and an SSD-only piece has none.
+                # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM,
+                # parked in RAM (its slots copied into its units first) or for the SSD (the file always holds it:
+                # `_park`). No step streams yet: the ring copies RAM units only, and an SSD-only piece has none.
                 self.ring_tokens = 0
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
-            self.residency.lent = -2 if self.exclusive else -1     # a lent piece's code (`_unmap`)
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
             self.limits = self.ctx.static(f"{self.name}.limits", (len(self._order), self.roles), torch.int32)
@@ -275,6 +274,8 @@ class TieredStore:
             self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
                               "errors": self.errors, "edit_errors": self.edit_errors, "delta": self.delta,
                               "n_delta": self.n_delta}
+            if self.exclusive:                   # the step's map: the host mirror's tier codes (`moe_tiers@1` and
+                self.telemetry["map"] = self.residency.device          # a parked lend place pieces unlogged)
             self.zeroed = [self.counts, self.routed, self.misses, self.errors, self.edit_errors, self.n_delta]
             self.ring = self.ctx.static(f"{self.name}.ring", shape, torch.int32)      # this step's ring slots
             self.empty = self.ctx.static(f"{self.name}.empty", (shape[0], self.roles, self.items), torch.int32)
@@ -340,6 +341,7 @@ class TieredStore:
                                                                                                        pool="io")
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
+        self.parked = torch.zeros((), dtype=torch.int64, device=self.ctx.device)   # lent pieces parked in RAM, so far
 
     @property
     def layers(self) -> list[int]:
@@ -404,6 +406,10 @@ class TieredStore:
             self.piece.copy_(torch.from_numpy(piece))
             self.classes32.copy_(torch.from_numpy(self.class_table.astype(np.int32)))
             self.capacity.copy_(torch.tensor([c.held for c in classes], dtype=torch.int32))
+            # a lent expert's parking (`_park`): the groups of each class signature, each class's fetch (slot → unit)
+            self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
+                                for row in np.unique(self.class_table, axis=0)]
+            self._class_fetch = {c.name: f for r in self.resolvers for c, f in zip(r.classes, r._fetch, strict=True)}
             rows = 2 * (1 + self.prefill)
             self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
                                     pref_units=self.roles, device="host", mapped=True)
@@ -649,7 +655,8 @@ class TieredStore:
         if mode:
             self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
             self.borrowed["partial"] = self.borrowed.get("partial", 0) + (int(telemetry["ring_ok"][0]) == 2)
-        self.residency.commit(step.step, record["records"], returned=mode is not None)
+        self.residency.commit(step.step, record["records"], returned=mode is not None,
+                              device=telemetry["map"].numpy() if self.exclusive else None)
         for tap in self.taps:
             tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
@@ -807,7 +814,10 @@ class TieredStore:
         call's number."""
         self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
         self.lent_call.masked_fill_(picked, call)
-        self.residency.device.masked_fill_(picked[..., None], self.residency.lent)   # exclusive: to the SSD
+        if self.exclusive:                       # out of VRAM into RAM or onto the SSD (docs/v1-glm.md D8b)
+            self._park(picked)
+        else:
+            self.residency.device.masked_fill_(picked[..., None], -1)
         groups, items = picked.shape
         sink = self.delta.shape[1]
         at = (self.n_delta[:, None] + picked.cumsum(1) - 1).long()           # each group's records after its own
@@ -820,6 +830,71 @@ class TieredStore:
         self.errors.bitwise_or_(((self.n_delta + lent) > sink).any().int() * 2)          # OVERFLOW
         self.n_delta += lent
         return picked
+
+    def _park(self, picked: torch.Tensor) -> None:
+        """Exclusive tiers (docs/v1-glm.md D8b, Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups, items],
+        still mapped to their slots, leave VRAM hottest first (ties by group, then id): into free RAM units of their
+        classes, else into the units of RAM's coldest expert of the same classes when strictly hotter (that one goes to
+        the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit now,
+        before the step's staging overwrites it. On the device, no host sync (the step's first resolve)."""
+        res, host, owner, classes = self.residency.device, self.host_units, self.owner, self.classes32.long()
+        groups, items, roles = res.shape
+        n, (c_n, u_n) = groups * items, owner.shape
+        dev = res.device
+        heat = (self.heat.float() if self.heat is not None else torch.zeros(groups, items, device=dev)).reshape(-1)
+        lent = picked.reshape(-1)
+        cls = classes[:, None, :].expand(groups, items, roles).reshape(n, roles)            # each piece's class
+        slots, units = res.reshape(n, roles), host.reshape(n, roles)
+        # 1. free units: the k-th lent expert (hottest first) needing class c takes c's k-th free unit, if each of its
+        # classes has one (a unit a skipped expert would have taken stays free)
+        order = torch.argsort(torch.where(lent, -heat, math.inf), stable=True)
+        free = (owner == -1) & (torch.arange(u_n, device=dev) < self.capacity[:, None])
+        free_units = torch.argsort((~free).int(), dim=1, stable=True)                    # each class's free first
+        placed, ranks = lent.clone(), []
+        for r in range(roles):
+            hot = torch.zeros(n, c_n, dtype=torch.int64, device=dev).scatter_(1, cls[order, r:r + 1], 1)
+            rank = (hot * lent[order, None]).cumsum(0).gather(1, cls[order, r:r + 1])[:, 0] - 1
+            ranks.append(torch.empty_like(rank).scatter_(0, order, rank))
+            placed &= ranks[r] < free.sum(1)[cls[:, r]]
+        to = torch.stack([free_units[cls[:, r], ranks[r].clamp(0, u_n - 1)] for r in range(roles)], 1).int()
+        to = torch.where(placed[:, None], to, -1)
+        # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter
+        rest = lent & ~placed
+        ram = (slots == -1).all(1) & (units >= 0).all(1) & ~lent
+        dropped = torch.zeros(n + 1, dtype=torch.bool, device=dev)    # (+ a sink entry, as `to`'s row below)
+        at = torch.arange(n, device=dev)
+        to = torch.cat([to, to[:1]])
+        for sig in self._signatures:                                     # [groups] bool: one class per role
+            member = sig.repeat_interleave(items)
+            a = torch.argsort(torch.where(rest & member, -heat, math.inf), stable=True)
+            b = torch.argsort(torch.where(ram & member, heat, math.inf), stable=True)
+            pair = (at < (rest & member).sum()) & (at < (ram & member).sum()) & (heat[a] > heat[b])
+            to.index_copy_(0, torch.where(pair, a, n), torch.where(pair[:, None], units[b], to[n:]))
+            dropped.scatter_(0, torch.where(pair, b, n), True)
+        to, dropped = to[:n], dropped[:n]
+        placed = to[:, 0] >= 0
+        self.parked += placed.sum()
+        # 3. the maps: parked into their units (−1), the rest and the dropped onto the SSD (−2)
+        sink = c_n * u_n
+        flat_owner = torch.cat([owner.reshape(-1), owner.new_zeros(1)])
+        for r in range(roles):
+            flat_owner.scatter_(0, torch.where(placed, cls[:, r] * u_n + to[:, r].long(), sink), at.int())
+        owner.view(-1).copy_(flat_owner[:sink])
+        self._copy_parked(cls, slots.clone(), to, placed)
+        res.copy_(torch.where(lent[:, None], torch.where(placed[:, None], -1, -2),
+                              torch.where(dropped[:, None], -2, slots)).view(groups, items, roles).int())
+        host.copy_(torch.where(lent[:, None], to, torch.where(dropped[:, None], -1, units)).view(groups, items, roles))
+
+    def _copy_parked(self, cls: torch.Tensor, slots: torch.Tensor, to: torch.Tensor, placed: torch.Tensor) -> None:
+        """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit)."""
+        n, roles = slots.shape
+        for c, (name, sc) in enumerate(self.classes.items()):
+            mine = (cls == c) & placed[:, None]                          # [n, roles]
+            pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
+            ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos, x.reshape(-1))
+                    for x in (slots.int(), to)]                          # (+ a sink entry each)
+            fetch = torch.stack([e[:-1] for e in ends])
+            self._class_fetch[name](fetch, mine.sum().int().view(1), sc.slots(), sc.units())
 
     def _swap(self, commit: int, swaps: list[tuple[int, int, bool]]) -> None:
         """A host policy's swaps, two-phase: the outgoing items unmapped at launch commit + 2, the incoming copied into

@@ -29,7 +29,6 @@ class ResidencyMap:
         self._edits: dict[int, dict[int, tuple[int, int]]] = {}    # launch -> flat index -> (expected, value)
         self._launched: dict[int, np.ndarray] = {}                # launch -> its triples, until a commit mirrors them
         self.empty: list[list[np.ndarray]] = [[] for _ in range(shape[0])]   # per group: its empty slots (a stack)
-        self.lent = -1                # a lent piece's code (the store's: −2 under exclusive tiers, the SSD)
 
     def seed(self) -> None:
         """The host mirror to the device now (after a materialize, before any step), dropping pending edits."""
@@ -68,13 +67,12 @@ class ResidencyMap:
         self._flat.scatter_(0, index, torch.where(ok, value.int(), now))
         self._clear()
 
-    def commit(self, step: int, records: np.ndarray, returned: bool = False) -> None:
+    def commit(self, step: int, records: np.ndarray, returned: bool = False, device: np.ndarray | None = None) -> None:
         """The host mirror after step `step`: the host edits launched by it, then the step's delta log `records`
         ((group, a, b): a took b's slots, b unmapped; (group, a, −2 − j): a took the group's empty slots j, popped;
-        (group, −1, b): b unmapped, lent — its code `lent`; (group, RETURN, 0): the lent slots returned there), then — a
-        step that
+        (group, −1, b): b unmapped, lent; (group, RETURN, 0): the lent slots returned there), then — a step that
         `returned` its lent slots without a marker — every lent item's slots on top of its group's empty stack, in the
-        order of their records."""
+        order of their records; given the step's `device` map (as it stood after the step), the mirror is that."""
         flat = self.host.reshape(-1)
         for launch in sorted(x for x in self._launched if x <= step):
             index, _, value = self._launched.pop(launch)
@@ -93,9 +91,11 @@ class ResidencyMap:
                 self.host[g, a] = self.host[g, b]
             elif returned:
                 back[g].append(self.host[g, b].copy())
-            self.host[g, b] = -1 if a >= 0 else self.lent
+            self.host[g, b] = -1
         for g, slots in enumerate(back):
             self.empty[g] += slots
+        if device is not None:                   # the step's map itself (exclusive tiers: the tier codes the device
+            self.host[...] = device              # placed unlogged — demotions, keeps, parked lends — exact too)
 
     def _clear(self) -> None:
         self._list[0].fill_(len(self._flat) - 1)

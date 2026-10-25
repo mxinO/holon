@@ -878,8 +878,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
     holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; at one
-    sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts going to the SSD, while its
-    own staging slots stay a graphed step's: docs/v1-glm.md D8b+e). F11's
+    sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
+    coldest or sent to the SSD, while its own staging slots stay a graphed step's: docs/v1-glm.md D8b+e). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -939,6 +939,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert store.exclusive and io.served() > 0 and io.flag() == 0
     if one:                                          # exclusive tiers lend their prompt steps' staging (GLM D8b+e)
         assert store.staging < store.prefill and store.lending and store.borrowed["stage"] > 0, store.borrowed
+        assert int(store.parked) > 0                 # lent experts parked in RAM (D8b), read back by later misses
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache != "" and cache != "*=0")
