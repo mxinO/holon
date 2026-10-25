@@ -559,9 +559,10 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     repeated ≥ 4 times at the end) **misses one of the three outliers** — 32K prompt 1, h +0.11, a 175-token period-2
     loop that broke off before token 256 — and drops 20 of 120 rows, most at their prompt's median h (long list-like
     periods of 20–30 tokens that do not raise h). Widening the period to 64 catches neither problem.
-  - **The rule, pre-registered now** (the lead's call pending): a (prompt, run) is degenerate if **some run of ≥ 128
-    consecutive generated tokens has a period ≤ 16**, anywhere in its 256. On N1 it flags exactly the three rows more
-    than 0.08 above their prompt's median h (+0.14 at period 1, +0.11 at 2, +0.08 at 9) and nothing else.
+  - **The rule, pre-registered** (the lead's call, 2026-10-25, before any gated run; not tuned once Holon's runs
+    exist): a (prompt, run) is degenerate if **some run of ≥ 128 consecutive generated tokens has a period ≤ 16**,
+    anywhere in its 256. Its evidence is N1's validation: it flags exactly the three rows more than 0.08 above their
+    prompt's median h (+0.14 at period 1, +0.11 at 2, +0.08 at 9) and nothing else.
   - **Maya's greedy text varies run to run** (N1: two runs of one prompt diverge after 1–143 tokens, even within one
     arm), so its decode rate carries a path variance: most of the 1K decode CV.
 - **Corpus and spans:** FN's text corpus tokenized with GLM's tokenizer (184,531 tokens); 8 spans per context (FN's
