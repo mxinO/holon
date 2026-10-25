@@ -3619,6 +3619,14 @@ run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 
   - `plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/…/1.lock`
   - `…/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/…/1.lock`
   - At the final tree both advanced byte-identical to `2.lock` (§22.10).
+- **Their L2 inputs are tracked** (`judge/goldens/qwen3.8-flash-next-iq2_xs/`, `…-iq3_s/`, as the other models'):
+  step 5's v1-qwen3_5 recordings, rewritten by `holon_judge.recording`'s own save (byte-identical): `v1-fp32` (the
+  golden), `v1-bfloat16-mmq-floor` and `v1-bfloat16-mmvq-floor`, 5.6 MB each. A propagation whose trace moves runs
+  L2 from them: `holon_tools propagate <model> --prompts judge/prompts/v1-qwen3_5.jsonl --golden
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-fp32.safetensors --floor
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-bfloat16-mmq-floor.safetensors
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-bfloat16-mmvq-floor.safetensors …` (IQ3_S likewise). The v1-long
+  recordings stay out: no lock or check uses them.
 - **The first write was read from node-local copies of the shards,** so its model id lacked the repository, and
   `check_locks` refused it as not servable by name.
   - The locks above were tuned again with the shards hard-linked into a hub-cache-named directory. The id's build
