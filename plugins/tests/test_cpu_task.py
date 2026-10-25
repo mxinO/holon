@@ -192,13 +192,13 @@ def test_the_copy_task_reads_pieces_into_landing_rows_and_keeps(lib, tmp_path):
     os.close(fd)
 
 
-def _io_worker(lib, tasks, backend, urgent=(), depth=4, chunk=8192):
+def _io_worker(lib, tasks, backend, urgent=(), depth=4, chunk=8192, memop=False, timeout=5.0):
     device = torch.device("cuda")
     words = platform.host_memory((len(tasks) + 1) * LINE, device, mapped=True)
     alias = platform.device_alias(words, device)
     core = sorted(__import__("os").sched_getaffinity(0))[-1:]
-    worker = lib.Worker(words.data_ptr(), alias.data_ptr(), [t.native() for t in tasks], core, int(5e9), False,
-                        depth, backend, list(urgent) or [False] * len(tasks), chunk)
+    worker = lib.Worker(words.data_ptr(), alias.data_ptr(), [t.native() for t in tasks], core, int(timeout * 1e9),
+                        memop, depth, backend, list(urgent) or [False] * len(tasks), chunk)
     return worker, (words, alias)
 
 
@@ -235,6 +235,10 @@ def test_the_io_worker_reads_asynchronously_and_serves_urgent_requests_first(lib
     torch.cuda.synchronize()
     assert int(errors[0]) == 0 and torch.equal(units, want)
     _check_landing(data, pieces, rows, runs, keep, lreq)
+    stats = worker.io_stats()                               # its counters (step 1's review C S1-M3)
+    spans = sum(-(-(off + n) // 4096) * 4096 - off // 4096 * 4096 for p in (2, 0) for off, n in pieces[p] if n)
+    assert stats["backend"] == worker.backend() and stats["bytes"] >= spans and stats["busy_ns"] > 0, stats
+    assert stats["requests_2-3"] == 2 and stats["latency_ns_2-3"] > 0, stats
     req[1] = torch.tensor([3, 0])                           # a piece past the descriptors: fails open
     worker.signal(0, errors)
     worker.wait(0, errors)
@@ -267,5 +271,41 @@ def test_the_io_worker_reads_asynchronously_and_serves_urgent_requests_first(lib
         order += [s for s in (0, 1) if s not in order and int(word[16 * s]) >= 2]
     assert order == [1, 0] and int(word[0]) == 2 and int(word[16]) == 2, order
     assert np.array_equal(uunits[0].numpy(), bunits[0].numpy())
+    stats = worker.io_stats()
+    assert stats["requests_1"] == 1 and stats["requests_4+"] == 1 and stats["bytes"] >= (n + 1) * (4 << 20), stats
     worker.stop()
     os.close(bfd)
+
+
+def test_an_abandoned_read_never_answers_the_slots_next_request(lib, tmp_path):
+    """Step 1's review A S1-m1: the memop watchdog abandons a request whose read is still in flight (a FIFO with no
+    data yet); the slot is signalled again; when the old read lands, its answer is not the new request's — the new one
+    is started after the old one drains, and fails at once under the timeout flag."""
+    import os
+
+    words = torch.zeros(2 * LINE, dtype=torch.uint8)
+    try:
+        lib.Worker(words.data_ptr(), words.data_ptr(), [], [0], 1, False, 1, "uring").stop()
+    except RuntimeError as e:
+        pytest.skip(f"uring: {e}")
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo)
+    fd = os.open(fifo, os.O_RDWR)                           # (read and write ends: neither open blocks)
+    desc = torch.tensor([[(fd, 0, 0, 4096)]], dtype=torch.int64)
+    units = torch.zeros(1, 4096, dtype=torch.uint8)
+    task = lib.CopyTask([(desc, units, torch.tensor([[1, 0], [0, 0]], dtype=torch.int32))])
+    worker, (words, _) = _io_worker(lib, [task], "uring", depth=1, chunk=4096, memop=True, timeout=0.1)
+    word = words.view(torch.int32)
+    word[0] = 1                                             # REQ: its read waits on the FIFO
+    t0 = time.perf_counter()
+    while int(word[0]) != 4 and time.perf_counter() - t0 < 5:              # ABANDONED by the watchdog
+        time.sleep(0.01)
+    assert int(word[0]) == 4 and worker.flag() & 2
+    word[0] = 1                                             # the slot's next request, while the old read is in flight
+    os.write(fd, b"x" * 4096)                               # the old read lands
+    t0 = time.perf_counter()
+    while int(word[0]) == 1 and time.perf_counter() - t0 < 5:
+        time.sleep(0.01)
+    assert int(word[0]) == 3                                # FAILED (the flag): not DONE by the old read's answer
+    worker.stop()
+    os.close(fd)

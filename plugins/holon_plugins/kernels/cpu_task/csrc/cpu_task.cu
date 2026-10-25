@@ -22,9 +22,11 @@
 #include <linux/aio_abi.h>
 #if __has_include(<linux/io_uring.h>)
 #include <linux/io_uring.h>
+#include <linux/time_types.h>
 #endif
 #include <pthread.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #include <torch/extension.h>
@@ -56,6 +58,8 @@ constexpr uint32_t REQ = 1, DONE = 2, FAILED = 3, ABANDONED = 4;   // a slot's w
                                                                   // answered by the watchdog or at a stop
 constexpr uint32_t TASK = 1, TIMEOUT = 2;               // the flag's and `errors`' bits
 constexpr int STRIDE = 16;                              // uint32 words per 64-byte line
+constexpr int64_t IO_WAIT_NS = 20000;                   // the I/O worker's longest wait for a completion (then its
+                                                        // slots are polled again: a new request waits that long)
 
 using Clock = std::chrono::steady_clock;
 using SysRef = cuda::atomic_ref<uint32_t, cuda::thread_scope_system>;
@@ -275,6 +279,10 @@ struct State {
     std::atomic<bool> running{true}, dead{false}, exited{false};
     std::atomic<int64_t> served{0};
     std::shared_ptr<IoEngine> io;                     // the `io` pool's reads (completion-driven), or none
+    std::unique_ptr<std::atomic<uint32_t>[]> abandons;   // per slot: requests the watchdog abandoned (memop)
+    // The I/O worker's counters (docs/v1-glm.md D8f; step 1's review C S1-M3): bytes read, time with reads in flight,
+    // and per request (signal seen → answered) its latency by its experts (rows): 1 or none, 2–3, 4 or more.
+    std::atomic<int64_t> bytes{0}, busy_ns{0}, lat_ns[3]{}, requests[3]{};
 
     Word word(size_t s) const { return Word{words + s * STRIDE}; }
     Word cpu_flag() const { return word(tasks.size()); }
@@ -290,8 +298,8 @@ struct State {
 // next aligned offset, where (offset in the row, nbytes) of its bytes go to `runs[row, x]`; no copy). A landing role
 // with a keep pool takes requests (piece, row, keep): a piece with keep ≥ 0 is copied, canonical, into keep unit
 // `keep` once its extents are in. The request table (`[1 + F, 2 or 3]`: n, then the rows) is the GPU's, in mapped
-// memory: read once per run. Two ways to run: `run` (every thread of a pool its own blocking reads) and the I/O
-// worker's completion-driven loop (`IoEngine`), which plans the same extents.
+// memory: read once per run. Two ways to run: `run` (one thread's blocking reads) and the I/O worker's completion-driven
+// loop (`IoEngine`), which plans the same extents.
 struct CopyRole {
     const int64_t * desc;                             // [P, X, 4]
     int64_t pieces, extents;
@@ -307,36 +315,33 @@ struct CopyRole {
 constexpr int64_t ALIGN = 4096;
 
 // One extent's read: [lo, hi) of `fd` lands at `into`; `need` bytes from `lo` must come (an O_DIRECT tail may end at
-// the file's end); a bounced extent (into = a bounce buffer) then copies `nbytes` from into + skip to `dst`.
+// the file's end); a bounced extent (into = a bounce buffer) then copies `nbytes` from into + skip to `dst`; a kept
+// one (a landing row's, `keep` set) copies its `nbytes` at into + skip to `keep`, its place in the canonical keep unit.
 struct Extent {
     int fd;
     bool direct, bounce;
     int64_t lo, hi, need, skip, nbytes;
     uint8_t * into;
     uint8_t * dst;
-    int piece;                                        // its piece in the plan
-};
-
-// A planned piece: its keep copies (src, dst, n), run once its extents are in.
-struct Piece {
-    std::vector<std::tuple<const uint8_t *, uint8_t *, int64_t>> keep;
+    uint8_t * keep;
 };
 
 struct Plan {
     std::vector<Extent> extents;
-    std::vector<Piece> pieces;
+    int64_t rows = 0;                                 // the most rows a role's table has: the request's experts
     int64_t bounce_bytes = 0;                         // the largest bounced superset
 };
 
 // The request tables' pieces as extents: 0, or an error (2: a bad request; 4: a landing row too small or unaligned).
 inline int plan_copy(const std::vector<CopyRole> & roles, Plan & plan) {
     plan.extents.clear();
-    plan.pieces.clear();
+    plan.rows = 0;
     for (const CopyRole & r : roles) {
         const int32_t n = r.req[0];
         if (n < 0 || n > r.width) {
             return 2;
         }
+        plan.rows = std::max<int64_t>(plan.rows, n);
         for (int32_t i = 0; i < n; ++i) {
             const int32_t * row = r.req + r.cols * (1 + i);
             const int32_t piece = row[0], unit = row[1], keep = r.cols > 2 ? row[2] : -1;
@@ -344,8 +349,6 @@ inline int plan_copy(const std::vector<CopyRole> & roles, Plan & plan) {
                 (keep >= 0 && (r.keep == nullptr || keep >= r.keep_count))) {
                 return 2;
             }
-            const int at = int(plan.pieces.size());
-            plan.pieces.emplace_back();
             uint8_t * base = r.units + int64_t(unit) * r.unit;
             int64_t off = 0, canon = 0;
             for (int64_t x = 0; x < r.extents; ++x) {
@@ -358,7 +361,7 @@ inline int plan_copy(const std::vector<CopyRole> & roles, Plan & plan) {
                 if (!nbytes) {
                     continue;
                 }
-                Extent e{int(d[0]), d[1] != 0, false, 0, 0, 0, 0, nbytes, nullptr, nullptr, at};
+                Extent e{int(d[0]), d[1] != 0, false, 0, 0, 0, 0, nbytes, nullptr, nullptr, nullptr};
                 e.lo = e.direct ? offset / ALIGN * ALIGN : offset;
                 e.hi = e.direct ? (offset + nbytes + ALIGN - 1) / ALIGN * ALIGN : offset + nbytes;
                 e.need = offset + nbytes - e.lo;
@@ -371,8 +374,7 @@ inline int plan_copy(const std::vector<CopyRole> & roles, Plan & plan) {
                     r.runs[(int64_t(unit) * r.extents + x) * 2] = off + e.skip;
                     r.runs[(int64_t(unit) * r.extents + x) * 2 + 1] = nbytes;
                     if (keep >= 0) {
-                        plan.pieces[at].keep.emplace_back(base + off + e.skip,
-                                                          r.keep + int64_t(keep) * r.keep_unit + canon, nbytes);
+                        e.keep = r.keep + int64_t(keep) * r.keep_unit + canon;
                     }
                     off += (e.hi - e.lo + ALIGN - 1) / ALIGN * ALIGN;
                 } else {                                               // a canonical unit
@@ -396,7 +398,8 @@ inline int plan_copy(const std::vector<CopyRole> & roles, Plan & plan) {
     return 0;
 }
 
-// After its read: a bounced extent's copy; true when the read covered what the extent needs.
+// After its read: a bounced extent's copy, a kept one's (each extent's as it lands: the answer waits for the last
+// only); true when the read covered what the extent needs.
 inline bool land(const Extent & e, int64_t got) {
     if (got < e.need) {
         return false;
@@ -404,19 +407,14 @@ inline bool land(const Extent & e, int64_t got) {
     if (e.bounce) {
         std::memcpy(e.dst, e.into + e.skip, size_t(e.nbytes));
     }
-    return true;
-}
-
-inline void keep_copies(const Piece & p) {
-    for (const auto & [src, dst, n] : p.keep) {
-        std::memcpy(dst, src, size_t(n));
+    if (e.keep) {
+        std::memcpy(e.keep, e.into + e.skip, size_t(e.nbytes));
     }
+    return true;
 }
 
 class Copy {
   public:
-    static constexpr int MAX_THREADS = 64;
-
     explicit Copy(std::vector<CopyRole> roles) : roles_(std::move(roles)) {
         for (const auto & r : roles_) {
             for (int64_t i = 0; i < r.pieces * r.extents; ++i) {
@@ -425,66 +423,33 @@ class Copy {
         }
         most_ = (most_ + 3 * ALIGN) / ALIGN * ALIGN;     // a bounced superset at most
     }
-    ~Copy() {
-        for (void * b : bounce_) {
-            std::free(b);
-        }
-    }
+    ~Copy() { std::free(bounce_); }
     const std::vector<CopyRole> & roles() const { return roles_; }
     int64_t most() const { return most_; }
 
-    // On every thread of a pool: each thread its own blocking reads, piece by piece (keep copies after a piece).
+    // On a pool: its thread 0 reads every extent in order with blocking reads (the I/O worker's `IoEngine` is the
+    // asynchronous form); the other threads have nothing to do.
     static int run(void * arg, const holon_cpu_env * env) {
-        auto * c = static_cast<Copy *>(arg);
-        if (env->thread == 0) {
-            c->err_.store(c->prepare(env->threads), std::memory_order_relaxed);
-        }
-        env->barrier(env);
-        if (c->err_.load(std::memory_order_relaxed)) {
-            return c->err_.load(std::memory_order_relaxed);
-        }
-        int err = 0;
-        const auto & ext = c->plan_.extents;
-        for (size_t p; !err && (p = c->next_.fetch_add(1, std::memory_order_relaxed)) < c->plan_.pieces.size();) {
-            for (size_t i = c->first_[p]; i < c->first_[p + 1] && !err; ++i) {
-                Extent e = ext[i];
-                if (e.bounce) {
-                    e.into = static_cast<uint8_t *>(c->bounce_[env->thread]);
-                }
-                if (!land(e, read(e))) {
-                    err = 3;
-                }
-            }
-            if (!err) {
-                keep_copies(c->plan_.pieces[p]);
-            }
-        }
-        return err;
+        return env->thread == 0 ? static_cast<Copy *>(arg)->read_all() : 0;
     }
 
   private:
-    int prepare(int threads) {
-        if (threads > MAX_THREADS) {
+    int read_all() {
+        if (!bounce_ && posix_memalign(&bounce_, ALIGN, size_t(most_))) {
+            bounce_ = nullptr;
             return 1;
-        }
-        while (int(bounce_.size()) < threads) {
-            void * b = nullptr;
-            if (posix_memalign(&b, ALIGN, size_t(most_))) {
-                return 1;
-            }
-            bounce_.push_back(b);
         }
         if (const int err = plan_copy(roles_, plan_)) {
             return err;
         }
-        first_.assign(plan_.pieces.size() + 1, plan_.extents.size());   // each piece's extents (in order)
-        for (size_t i = plan_.extents.size(); i-- > 0;) {
-            first_[size_t(plan_.extents[i].piece)] = i;
+        for (Extent e : plan_.extents) {
+            if (e.bounce) {
+                e.into = static_cast<uint8_t *>(bounce_);
+            }
+            if (!land(e, read(e))) {
+                return 3;
+            }
         }
-        for (size_t p = plan_.pieces.size(); p-- > 0;) {
-            first_[p] = std::min(first_[p], first_[p + 1]);
-        }
-        next_.store(0, std::memory_order_relaxed);
         return 0;
     }
 
@@ -508,12 +473,9 @@ class Copy {
     }
 
     std::vector<CopyRole> roles_;
-    std::vector<void *> bounce_;
+    void * bounce_ = nullptr;
     int64_t most_ = 0;
     Plan plan_;
-    std::vector<size_t> first_;
-    std::atomic<size_t> next_{0};
-    std::atomic<int> err_{0};
 };
 
 // ---- the I/O worker's asynchronous reads (docs/v1-glm.md D8f): io_uring (raw syscalls, no SQPOLL), else Linux
@@ -523,7 +485,8 @@ class Backend {
     virtual ~Backend() = default;
     virtual bool prep(int fd, uint8_t * buf, int64_t len, int64_t off, uint64_t tag) = 0;   // false: queue full
     virtual void submit() = 0;
-    virtual void reap(std::vector<std::pair<uint64_t, int64_t>> & out) = 0;              // (tag, result or −errno)
+    // (tag, result or −errno); `wait_ns` > 0: blocks for the first completion up to that long
+    virtual void reap(std::vector<std::pair<uint64_t, int64_t>> & out, int64_t wait_ns) = 0;
     virtual const char * name() const = 0;
 };
 
@@ -537,6 +500,9 @@ class Uring final : public Backend {
             return;
         }
         entries_ = p.sq_entries;
+#ifdef IORING_ENTER_EXT_ARG
+        timed_ = p.features & IORING_FEAT_EXT_ARG;
+#endif
         size_t sq = p.sq_off.array + p.sq_entries * sizeof(uint32_t), cq = p.cq_off.cqes +
                     p.cq_entries * sizeof(io_uring_cqe);
         const bool single = p.features & IORING_FEAT_SINGLE_MMAP;
@@ -610,8 +576,22 @@ class Uring final : public Backend {
             unsubmitted_ -= unsigned(n);
         }
     }
-    void reap(std::vector<std::pair<uint64_t, int64_t>> & out) override {
+    void reap(std::vector<std::pair<uint64_t, int64_t>> & out, int64_t wait_ns) override {
         unsigned head = *cq_head_;
+        if (wait_ns > 0 && head == __atomic_load_n(cq_tail_, __ATOMIC_ACQUIRE)) {
+#ifdef IORING_ENTER_EXT_ARG
+            if (timed_) {                                 // (−ETIME at the bound, −EINTR: the caller's next pass)
+                __kernel_timespec ts{0, wait_ns};
+                io_uring_getevents_arg arg{};
+                arg.ts = reinterpret_cast<uint64_t>(&ts);
+                syscall(__NR_io_uring_enter, fd_, 0, 1, IORING_ENTER_GETEVENTS | IORING_ENTER_EXT_ARG, &arg,
+                        sizeof(arg));
+            } else
+#endif
+            {
+                std::this_thread::sleep_for(std::chrono::nanoseconds(wait_ns));
+            }
+        }
         const unsigned tail = __atomic_load_n(cq_tail_, __ATOMIC_ACQUIRE);
         for (; head != tail; ++head) {
             const io_uring_cqe & c = cqes_[head & cq_mask_];
@@ -623,6 +603,7 @@ class Uring final : public Backend {
 
   private:
     int fd_ = -1;
+    bool timed_ = false;                              // a timed wait for completions (IORING_FEAT_EXT_ARG)
     unsigned entries_ = 0, unsubmitted_ = 0, sq_mask_ = 0, cq_mask_ = 0;
     void * sq_ = MAP_FAILED;
     void * cq_ = MAP_FAILED;
@@ -683,9 +664,9 @@ class Aio final : public Backend {
         }
         queued_.erase(queued_.begin(), queued_.begin() + long(at));
     }
-    void reap(std::vector<std::pair<uint64_t, int64_t>> & out) override {
-        timespec zero{0, 0};
-        const long n = syscall(__NR_io_getevents, ctx_, 0L, long(depth_), events_.data(), &zero);
+    void reap(std::vector<std::pair<uint64_t, int64_t>> & out, int64_t wait_ns) override {
+        timespec ts{0, wait_ns > 0 ? long(wait_ns) : 0L};
+        const long n = syscall(__NR_io_getevents, ctx_, wait_ns > 0 ? 1L : 0L, long(depth_), events_.data(), &ts);
         for (long i = 0; i < n; ++i) {
             out.emplace_back(events_[size_t(i)].data, int64_t(events_[size_t(i)].res));
             free_.push_back(reinterpret_cast<iocb *>(events_[size_t(i)].obj));
@@ -723,9 +704,10 @@ inline std::unique_ptr<Backend> make_backend(const std::string & want, unsigned 
 // One request in the I/O worker: a slot's copy task planned, its extents read chunk by chunk.
 struct IoRequest {
     bool urgent = false, failed = false;
+    uint32_t epoch = 0;                               // the slot's abandons when it started
+    Clock::time_point since;
     Plan plan;
     std::vector<int> pending;                         // per extent: its chunks in flight
-    std::vector<int> left;                            // per piece: its extents not yet in
     std::vector<uint8_t *> buf;                       // per extent: its bounce buffer, while it is read
     size_t ext = 0;                                   // the next extent to start, and its next chunk's offset
     int64_t at = 0;
@@ -740,7 +722,8 @@ struct Chunk {                                        // a read in flight: its r
 
 // The completion-driven loop of the `io` pool's one thread: new requests (urgent slots' first), chunks submitted up to
 // `depth` in flight — an urgent request ahead of every chunk not yet submitted, the others' held while one is open
-// —, completions reaped without blocking, a slot answered once its request's extents (and keep copies) are in.
+// —, completions reaped (a pass that moved nothing blocks for one, at most `wait_ns`: new requests are seen after), a
+// slot answered once its request's extents (and their keep copies) are in.
 class IoEngine {
   public:
     IoEngine(std::shared_ptr<State> st, std::vector<Copy *> copies, std::vector<bool> urgent, unsigned depth,
@@ -766,7 +749,7 @@ class IoEngine {
     const char * backend() const { return be_->name(); }
 
     // One pass (`take`: new requests too; not while draining at a stop): true if anything moved.
-    bool step(bool take = true);
+    bool step(bool take, int64_t wait_ns);
     bool idle() const { return inflight_ == 0; }
 
   private:
@@ -787,6 +770,7 @@ class IoEngine {
     std::vector<size_t> order_;                       // open requests' slots, by arrival
     std::vector<uint8_t *> bufs_, free_bufs_;
     unsigned inflight_ = 0;
+    Clock::time_point busy_since_;                    // reads in flight since
     std::vector<Chunk> chunks_;                       // by tag
     std::vector<uint64_t> free_tags_;
     std::vector<std::pair<uint64_t, int64_t>> done_;
@@ -795,16 +779,14 @@ class IoEngine {
 void IoEngine::start(size_t s) {
     auto r = std::make_unique<IoRequest>();
     r->urgent = urgent_[s];
+    r->since = Clock::now();
+    r->epoch = st_->abandons[s].load(std::memory_order_acquire);
     if (st_->flag() != 0 || plan_copy(copies_[s]->roles(), r->plan) != 0) {
         r->failed = true;
     }
     const size_t n = r->plan.extents.size();
     r->pending.assign(n, 0);
     r->buf.assign(n, nullptr);
-    r->left.assign(r->plan.pieces.size(), 0);
-    for (const Extent & e : r->plan.extents) {
-        ++r->left[size_t(e.piece)];
-    }
     r->unfinished = r->failed ? 0 : n;
     active_[s] = std::move(r);
     order_.push_back(s);
@@ -831,7 +813,9 @@ bool IoEngine::issue(size_t s, size_t ext, int64_t from, int64_t len) {
         return false;
     }
     ++r.pending[ext];
-    ++inflight_;
+    if (inflight_++ == 0) {
+        busy_since_ = Clock::now();
+    }
     return true;
 }
 
@@ -863,7 +847,12 @@ bool IoEngine::submit_from(size_t s) {
 void IoEngine::complete(uint64_t tag, int64_t res) {
     const Chunk c = chunks_[tag];
     free_tags_.push_back(tag);
-    --inflight_;
+    if (--inflight_ == 0) {
+        st_->busy_ns.fetch_add((Clock::now() - busy_since_).count(), std::memory_order_relaxed);
+    }
+    if (res > 0) {
+        st_->bytes.fetch_add(res, std::memory_order_relaxed);
+    }
     IoRequest & r = *active_[c.slot];
     --r.pending[c.ext];
     const Extent & e = r.plan.extents[c.ext];
@@ -887,9 +876,11 @@ void IoEngine::complete(uint64_t tag, int64_t res) {
 void IoEngine::extent_done(size_t s, size_t ext) {
     IoRequest & r = *active_[s];
     Extent e = r.plan.extents[ext];
-    if (r.buf[ext] && !r.failed) {
+    if (r.buf[ext]) {
         e.into = r.buf[ext];
-        land(e, e.need);                              // the bounced extent into its unit
+    }
+    if (!r.failed) {
+        land(e, e.need);                              // a bounced extent into its unit, a kept one into its keep unit
     }
     if (r.buf[ext]) {
         free_bufs_.push_back(r.buf[ext]);
@@ -900,9 +891,6 @@ void IoEngine::extent_done(size_t s, size_t ext) {
             answer(s);
         }
         return;
-    }
-    if (--r.left[size_t(e.piece)] == 0) {
-        keep_copies(r.plan.pieces[size_t(e.piece)]);
     }
     if (--r.unfinished == 0) {
         answer(s);
@@ -920,14 +908,19 @@ void IoEngine::answer(size_t s) {
     if (r.failed) {
         st_->cpu_flag().fetch_or(TASK, __ATOMIC_RELAXED);
     }
-    uint32_t req = REQ;                                // not answered meanwhile by the watchdog
-    st_->word(s).compare_exchange_strong(req, r.failed ? FAILED : DONE, __ATOMIC_RELEASE);
+    uint32_t req = REQ;                                // not answered meanwhile by the watchdog — nor abandoned by it:
+    if (st_->abandons[s].load(std::memory_order_acquire) == r.epoch) {        // then a REQ is a later request's
+        st_->word(s).compare_exchange_strong(req, r.failed ? FAILED : DONE, __ATOMIC_RELEASE);
+    }
     st_->served.fetch_add(1, std::memory_order_relaxed);
+    const int b = r.plan.rows <= 1 ? 0 : r.plan.rows < 4 ? 1 : 2;
+    st_->lat_ns[b].fetch_add((Clock::now() - r.since).count(), std::memory_order_relaxed);
+    st_->requests[b].fetch_add(1, std::memory_order_relaxed);
     active_[s].reset();
     order_.erase(std::find(order_.begin(), order_.end(), s));
 }
 
-bool IoEngine::step(bool take) {
+bool IoEngine::step(bool take, int64_t wait_ns) {
     bool moved = false;
     for (size_t s = 0; take && s < active_.size(); ++s) {      // new requests
         if (!active_[s] && st_->word(s).load(__ATOMIC_ACQUIRE) == REQ && !st_->dead.load(std::memory_order_relaxed)) {
@@ -951,7 +944,7 @@ bool IoEngine::step(bool take) {
     moved |= inflight_ != before;
     be_->submit();
     done_.clear();
-    be_->reap(done_);
+    be_->reap(done_, moved || inflight_ == 0 ? 0 : wait_ns);
     for (const auto & [tag, res] : done_) {
         complete(tag, res);
         moved = true;
@@ -962,22 +955,19 @@ bool IoEngine::step(bool take) {
 // The `io` pool's coordinator: the engine's loop; at a stop, what is in flight lands before its buffers go.
 void serve_io(std::shared_ptr<State> st) {
     pin_to(st->cores[0]);
+    prctl(PR_SET_TIMERSLACK, 1UL);                     // its waits end on time (Linux's default slack is 50 µs)
     IoEngine & eng = *st->io;
     Backoff b;
     b.reset();
     while (st->running.load(std::memory_order_relaxed)) {
-        if (eng.step()) {
+        if (eng.step(true, IO_WAIT_NS)) {              // (reads in flight: it blocked for a completion, briefly)
             b.reset();
-        } else if (!eng.idle()) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));    // reads in flight: their completions soon
-        } else {
+        } else if (eng.idle()) {
             b.wait();
         }
     }
     while (!eng.idle()) {                              // (a read that never ends: `stop` leaves this thread behind)
-        if (!eng.step(false)) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10));
-        }
+        eng.step(false, IO_WAIT_NS);
     }
     st->exited.store(true, std::memory_order_release);
 }
@@ -1036,7 +1026,9 @@ void watch(std::shared_ptr<State> st) {
             if (st->flag() || now - since[s] > std::chrono::nanoseconds(st->timeout_ns)) {
                 st->cpu_flag().fetch_or(TIMEOUT, __ATOMIC_RELAXED);
                 uint32_t req = REQ;
-                st->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
+                if (st->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE)) {
+                    st->abandons[s].fetch_add(1, std::memory_order_release);   // its request's answer: none
+                }
             }
         }
     }
@@ -1062,6 +1054,7 @@ class Worker {
         for (size_t s = 0; s <= st_->tasks.size(); ++s) {
             st_->word(s).store(0, __ATOMIC_RELAXED);
         }
+        st_->abandons = std::make_unique<std::atomic<uint32_t>[]>(st_->tasks.size());
         st_->gpu_flag().store(0, __ATOMIC_RELAXED);
         if (memop) {
             driver();
@@ -1118,6 +1111,18 @@ class Worker {
     int64_t flag() const { return st_->flag(); }
     std::string backend() const { return st_->io ? st_->io->backend() : ""; }
     int64_t served() const { return st_->served.load(std::memory_order_relaxed); }
+    pybind11::dict io_stats() const {
+        pybind11::dict d;
+        d["backend"] = backend();
+        d["bytes"] = st_->bytes.load(std::memory_order_relaxed);
+        d["busy_ns"] = st_->busy_ns.load(std::memory_order_relaxed);
+        const char * names[3] = {"1", "2-3", "4+"};
+        for (int b = 0; b < 3; ++b) {
+            d[(std::string("requests_") + names[b]).c_str()] = st_->requests[b].load(std::memory_order_relaxed);
+            d[(std::string("latency_ns_") + names[b]).c_str()] = st_->lat_ns[b].load(std::memory_order_relaxed);
+        }
+        return d;
+    }
 
     void signal(int64_t slot, const at::Tensor & like) {
         check(slot);
@@ -1257,6 +1262,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("wait", &Worker::wait, "on the current stream: later work waits for the slot's answer (fail-open)")
         .def("flag", &Worker::flag, "the sticky error bits: 1 a task failed, 2 a wait timed out")
         .def("served", &Worker::served, "requests answered so far")
+        .def("io_stats", &Worker::io_stats, "the io pool's counters: backend, bytes read, busy_ns (time with reads in "
+             "flight), and per request size (experts: 1 or none, 2-3, 4+) requests_* and latency_ns_* (signal seen to answer)")
         .def("stop", &Worker::stop, "join the threads (after a drain); a request still open is abandoned; True: the "
              "coordinator, in a task past the time bound, was left behind (its words and tasks must outlive it)")
         .def("kill", &Worker::kill, "tests: the coordinator stops answering");

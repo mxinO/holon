@@ -1146,6 +1146,7 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
     store = engine.ctx.shared_objects[KEY]
     assert _served(engine, prompts) == want
     assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
+    assert store._parked is None                     # each step's parking copies waited for (C S1-M2's fence)
     assert _ram_units_hold_their_pieces(store) > 0
     engine.close()
 
