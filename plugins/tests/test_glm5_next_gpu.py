@@ -45,7 +45,8 @@ BOUNDS = {"prompt": (0.040, 0.44), "decode": (0.035, 0.54)}    # measured (A5000
 # Measured at step 4 (A5000, KL mean / p99 against the bounds): router_prompt_softmax prompt 0.084 / 0.38 (2.1× the
 # mean's bound); kda_gate_softplus decode 0.068 / 0.22 (1.9×); glu_clamp_off decode 0.017 / 0.21 (inside);
 # dsa_decode_select_shift decode 0.011 / 0.089 (no effect: the tiny model's DSA output is small beside R). None
-# reaches 10×: their L0s carry them (test_ggml_cuda_moe, test_kda_kernels), dsa_decode_select_shift the cover (step 5).
+# reaches 10×: their own tests fail them (test_ggml_cuda_moe, test_kda_kernels; dsa_decode_select_shift below).
+# dsa_decode_select_shift's also runs in step 5's cover.
 REGISTERED: tuple[str, ...] = ()
 
 
@@ -144,3 +145,63 @@ def test_plants_move_the_kl(cpu, plant):
     print(f"plant {plant}: {stats}")
     if plant in REGISTERED:
         assert _past(stats), (plant, stats)
+
+
+EPS_SELECT = 2e-6       # a chosen pool's oracle score ≥ an unchosen one's − ε · max |score| (test_dsa_kernels' ε)
+
+
+def _decode_selections_hold(engine: Engine) -> int:
+    """Run the first prompt and 16 decode steps; at every DSA layer's decode call, the pools its attention read (the
+    blocks handed to `mla_attend`) against the oracle's scores on the call's own inputs (q, w, pooled keys): complete
+    pools within the near-tie ε of the top-k, the open pool as the oracle's. Returns the rows checked."""
+    from holon_std.mixers.qsa import reference, units
+
+    seen = []
+    for m in engine.executor.model.modules():
+        if isinstance(m, units.DSAMLA):
+            select, attend = m._select, m._attend
+
+            def spy_select(q, pooled, table, seq, positions, w, select=select, m=m):
+                m._seen = (q.cpu(), pooled.cpu(), table.cpu(), seq.cpu(), positions.cpu(), w.cpu())
+                return select(q, pooled, table, seq, positions, w)
+
+            def spy_attend(q, kv, blocks, table, seq, positions, attend=attend, m=m):
+                if len(positions) == 1 and getattr(m, "_seen", None) is not None:
+                    seen.append((m.ratio, m.budget, m._seen, blocks.cpu()))
+                m._seen = None
+                return attend(q, kv, blocks, table, seq, positions)
+            m._select, m._attend = spy_select, spy_attend
+    _run(engine, g.prompts("gpu")[0], SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True))
+    for ratio, budget, (q, pooled, table, seq, positions, w), blocks in seen:
+        oracle = reference.qsa_select(q, pooled, table, seq, positions, ratio, budget, w)
+        n, top = (int(positions[0]) + 1) // ratio, budget // ratio
+        k = min(n, top)
+        assert torch.equal(blocks[0, k:k + 1].int(), oracle[0, k:k + 1]), "the open pool"
+        if n > top:
+            first = torch.arange(n) * ratio
+            page = pooled.shape[1] * ratio
+            keys = pooled[table[int(seq[0]), first // page].long(), (first % page) // ratio].double()
+            scores = ((keys @ q[0].double().T).relu() * w[0].double()).sum(-1)
+            chosen = torch.zeros(n, dtype=torch.bool)
+            chosen[blocks[0, :k].long()] = True
+            gap = float((scores[~chosen].max() - scores[chosen].min()) / scores.abs().max())
+            assert gap <= EPS_SELECT, f"decode selection off the oracle's top-k by {gap:.2e} of max |score|"
+    return len(seen)
+
+
+@pytest.mark.parametrize("plant", [None, "dsa_decode_select_shift"])
+def test_decode_selections_are_the_oracles(plant):
+    """The decode rows' DSA selection, as the attention reads it, is the oracle's top-k on the engine's own inputs
+    (sparse: the tiny model's pools of 4 with top-k 8, past position 11); `dsa_decode_select_shift` (§6.3) fails it."""
+    import contextlib
+
+    from holon_judge.planted import PLANTS
+
+    engine = _gpu(100, False)
+    with PLANTS[plant]() if plant else contextlib.nullcontext():
+        if plant is None:
+            assert _decode_selections_hold(engine) > 0
+        else:
+            with pytest.raises(AssertionError):
+                _decode_selections_hold(engine)
+    engine.close()

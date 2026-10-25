@@ -2,7 +2,7 @@
 build context, at GLM's shape (64 heads × 128) and the tiny GPU fixture's (2 × 128) and a small one (2 × 64).
 
 - The yardstick (`test_gdn_kernels.py`'s form): per row, the relative Frobenius error of the output and of the final
-  state against an f64 recurrence written out here, within RATIO × that of a bf16 torch path on the same inputs —
+  state against an f64 recurrence written out here, within RATIOS × that of a bf16 torch path on the same inputs —
   HF's KDA recurrence (transformers 5.19.0 `recurrent_kimi_delta_attention`, f32 throughout) with q and k
   l2-normalised and β taken in bf16, as the GDN yardstick's HF path does; the kernel's chunks round their operands
   (k, β, the WY factors, h) to bf16 alike. Mixed batches (lengths around the 64-token chunk, rows with and without
@@ -43,11 +43,15 @@ INIT = [True, False, True, False, True, True, False, True]
 SLOTS = [0, UNITS - 1, 3, 7, 9, 1, 12, 5]                      # row 4 has no tokens: unit 9 stays as it is
 DECODE_INIT = [True, False, True, True, False, True]
 DECODE_SLOTS = [0, UNITS - 1, 4, 2, 11, 6]
-# × the bf16 yardstick's error. GDN's L0 holds 2.0; KDA's chunked path reads its state through a bf16 copy of h for
-# the output (FLA's design, as GDN's), which for a one-token row on the chunked path (a mixed batch's) is most of its
-# error: measured over 16 seeds ≤ 3.3 there at 2 × 128, ≤ 2.3 for every other row and shape, ≤ 1.22 at GLM's
-# 64 × 128. A wrong gate (the plant below) or state is O(10–100)×.
-RATIO = 4.0
+# × the bf16 yardstick's error, by head count (docs/v1-glm.md D4's table, 16 seeds of the mixed batch): GLM's 64 heads
+# hold GDN's 2.0 (worst 1.46: a one-token row's output on the chunked path); the 2-head shapes need 4.0 (worst 3.28,
+# the same case at 2 × 128; ≤ 2.3 otherwise). KDA's chunked path reads its state through FLA's bf16 copy of h for the
+# output, as GDN's does; a wrong gate (the plant below) or state is O(10–100)×.
+RATIOS = {64: 2.0, 2: 4.0}
+
+
+def budget(x: dict) -> float:
+    return RATIOS[x["q"].shape[1]]
 FLOOR = 2e-2                                                   # the yardstick's error itself stays below this
 STATE_ULPS = 8
 
@@ -150,7 +154,7 @@ def judge_rows(o, state, x, g, h0s, lens, slots, what: str) -> float:
         for name, got, want, floor in (("o", o[lo:hi], want_o, bf_o), ("state", state[slots[r]], want_s, bf_s)):
             assert torch.isfinite(got).all(), (what, r, name)
             x_ratio = ratio(got, want, floor)
-            assert x_ratio <= RATIO, (what, r, hi - lo, name, fro(got, want), fro(floor, want))
+            assert x_ratio <= budget(x), (what, r, hi - lo, name, fro(got, want), fro(floor, want))
             worst = max(worst, x_ratio)
     return worst
 
@@ -210,7 +214,7 @@ def test_decode_continues_prefill_step_by_step():
         bf_o, bf_s = bf16_path(s, g, None)
         for got, want, floor in ((torch.cat(outs[r]), want_o, bf_o), (pool[slots[r]], want_s, bf_s)):
             x_ratio = ratio(got, want, floor)
-            assert x_ratio <= RATIO, (r, fro(got, want), fro(floor, want))
+            assert x_ratio <= RATIOS[h], (r, fro(got, want), fro(floor, want))
             worst = max(worst, x_ratio)
     print(f"kda prefill + decode: worst error / bf16 path error = {worst:.3f}")
 
@@ -329,7 +333,7 @@ def test_one_sequence_decodes_at_slot_zero_and_the_old_sentinel_fails(tmp_path, 
     outs = [run(kernel, rows(x, t, t + 1), g, pool, [1], [True], [0]) for t in range(4)]
     want_o, want_s = exact(x, g, h0)
     bf_o, bf_s = bf16_path(x, g, h0)
-    assert ratio(torch.cat(outs), want_o, bf_o) <= RATIO and ratio(pool[0], want_s, bf_s) <= RATIO
+    assert ratio(torch.cat(outs), want_o, bf_o) <= RATIOS[h] and ratio(pool[0], want_s, bf_s) <= RATIOS[h]
     src = inspect.getsource(fused_sigmoid_gating)
     old = src.replace("if state_idx < 0:", "if state_idx <= 0:").replace("if final_state_idx >= 0:",
                                                                          "if final_state_idx > 0:")
