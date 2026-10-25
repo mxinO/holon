@@ -103,7 +103,8 @@ def test_prefill_beside_decode_rows_fits_the_profiled_reserve(engine):
 
 
 GLM_TINY, GLM_SLICE = os.environ.get("GLM_TINY_Q8_GGUF"), os.environ.get("GLM_SLICE_GGUF")
-GLM_SLICE8 = os.environ.get("GLM_SLICE8_GGUF")        # the first 8 blocks (five MoE layers: a store a tail can lend)
+GLM_SLICE8 = os.environ.get("GLM_SLICE8_GGUF")        # the first 8 blocks (five MoE layers)
+GLM_SLICE12 = os.environ.get("GLM_SLICE12_GGUF")      # the first 12 blocks (nine MoE layers: a tail can lend 32K)
 
 for name, value in (("GLM_TINY_Q8_GGUF", GLM_TINY), ("GLM_SLICE_GGUF", GLM_SLICE)):
     if value is None:
@@ -262,3 +263,46 @@ def test_glm_a_loan_over_the_minimum_layout_is_refused():
         assert "own tail" in str(e) and "moe.lend_peak" in str(e)
         return
     assert got == want
+
+
+@pytest.mark.parametrize("fraction", [0.99, 0.985])
+def test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction(fraction):
+    """The lead's step-5 call on `--memory-fraction`: at the lock's fraction, with the deployment's lending
+    (`moe.lend_peak`, `moe.loan_min_tokens`), a sequence of steps that fragments the caching allocator — a long prompt,
+    short prompts, mid-size prompts with prompt logprobs (the head's full-vocabulary chunks), 4 sequences decoding
+    beside a prompt — runs without running out of memory, and the device keeps some memory free after every step.
+    The first 12 blocks of the real file (a store whose tail can lend a 32K step's loan), at 32K steps."""
+    if GLM_SLICE12 is None:
+        pytest.skip("GLM_SLICE12_GGUF not set")
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_lend": "tail", "moe.lend_peak": "require",
+            "moe.loan_min_tokens": 8192}
+    e = Engine(EngineConfig(model=GLM_SLICE12, device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                            max_step_tokens=32768, max_model_len=33792, memory_fraction=fraction,
+                            host_memory=48 << 30, plugin_options=opts))
+    gen, least = torch.Generator().manual_seed(9), []
+    ids = lambda n: torch.randint(0, 150000, (n,), generator=gen).tolist()        # noqa: E731
+    step = e.step
+
+    def recorded():
+        out = step()
+        torch.cuda.synchronize()
+        least.append(torch.cuda.mem_get_info()[0])
+        return out
+    e.step = recorded
+    try:
+        decode = SamplingParams(temperature=0.0, max_tokens=64, ignore_eos=True)
+        plp = SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=1)
+        e.generate([ids(24000)], decode)
+        e.generate([ids(n) for n in (40, 300, 1500, 900)], decode)
+        for n in (2048, 3000, 5451, 8000, 12000, 20000):
+            e.generate([ids(n)], plp)
+        for n in (40, 40, 40):
+            e.add(ids(n), SamplingParams(temperature=0.0, max_tokens=200, ignore_eos=True))
+        e.step()
+        e.add(ids(6000), plp)
+        while e.has_work():
+            e.step()
+    finally:
+        e.close()
+    print(f"fraction {fraction}: least free {min(least) / 2**20:.0f} MiB over {len(least)} steps")
+    assert min(least) > 0

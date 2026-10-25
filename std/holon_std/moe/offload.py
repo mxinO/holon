@@ -59,7 +59,8 @@ def _store(ctx, experts: int, top_k: int):
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
-                        ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0))))
+                        ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0)),
+                        loan_min_tokens=int(opts.get("moe.loan_min_tokens", 0))))
 
 
 def _rows(ctx) -> int:
