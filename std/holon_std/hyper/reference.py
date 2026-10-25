@@ -28,3 +28,33 @@ def hc_gr_mix(r: torch.Tensor, norm: torch.Tensor, down: torch.Tensor, up: torch
 def hc_gr_combine(r: torch.Tensor, y: torch.Tensor, w: torch.Tensor) -> None:
     streams = w.shape[1]
     r.view(len(r), streams, r.shape[1] // streams).add_(w[:, :, None] * y.float()[:, None, :])
+
+
+def hc_mhc_mix(r: torch.Tensor, fn: torch.Tensor, base: torch.Tensor, scale: torch.Tensor,
+               y_prev: torch.Tensor | None, post_prev: torch.Tensor | None, comb_prev: torch.Tensor | None,
+               streams: int, eps: float, hc_eps: float, iters: int, dtype: torch.dtype
+               ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """HF's `Glm5NextTextHyperConnection` (transformers 5.19.0, `models/glm5_next/modeling_glm5_next.py:286-330`) on a
+    flattened residual, after the pending write-back."""
+    if y_prev is not None:
+        hc_mhc_writeback(r, y_prev, post_prev, comb_prev)
+    n, t = streams, len(r)
+    x = r.float()
+    m = F.linear(x * torch.rsqrt(x.square().mean(-1, keepdim=True) + eps), fn.float())
+    b, s = base.float(), scale.float()
+    pre = torch.sigmoid(m[:, :n] * s[0] + b[:n]) + hc_eps
+    post = 2 * torch.sigmoid(m[:, n:2 * n] * s[1] + b[n:2 * n])
+    comb = torch.softmax(m[:, 2 * n:].view(t, n, n) * s[2] + b[2 * n:].view(n, n), dim=-1) + hc_eps
+    comb = comb / (comb.sum(dim=-2, keepdim=True) + hc_eps)
+    for _ in range(iters - 1):
+        comb = comb / (comb.sum(dim=-1, keepdim=True) + hc_eps)
+        comb = comb / (comb.sum(dim=-2, keepdim=True) + hc_eps)
+    out = (pre[:, :, None] * x.view(t, n, -1)).sum(dim=1).to(dtype)
+    return out, post, comb
+
+
+def hc_mhc_writeback(r: torch.Tensor, y: torch.Tensor, post: torch.Tensor, comb: torch.Tensor) -> None:
+    """In place: R'_d = post_d · y + Σ_s comb[s, d] · R_s (HF's `post · y + combᵀ @ R`)."""
+    n = post.shape[1]
+    rs = r.view(len(r), n, -1)
+    rs.copy_(post[:, :, None] * y.float()[:, None, :] + torch.matmul(comb.transpose(-1, -2), rs))

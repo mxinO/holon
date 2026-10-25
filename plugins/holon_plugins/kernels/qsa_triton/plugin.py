@@ -46,7 +46,8 @@ class Plugin:
     def register(self, regs) -> None:
         checks = {INDEX: lambda f: _pow2(f["head_dim"]) and f["page"] % f["ratio"] == 0
                   and f["rotary_dim"] % 2 == 0 and f["rotary_dim"] <= f["head_dim"],
-                  SELECT: lambda f: _pow2(f["head_dim"]) and f["head_dim"] >= 16 and f["heads"] <= 16,
+                  SELECT: lambda f: (_pow2(f["head_dim"]) and f["head_dim"] >= 16 and f["heads"] <= 16
+                                     and "head_weights" not in f),       # (GLM's head weights: its step 4)
                   ATTEND: lambda f: _pow2(f["head_dim"]) and f["head_dim"] % 32 == 0 and f["layout"] in LAYOUTS
                   and f["q_dtype"] in ("bfloat16", "float16")}
         fp8 = lambda f: f["layout"] == "kv.hnd.fp8"                              # noqa: E731

@@ -382,6 +382,17 @@ class GatedDeltaRule:
                                     snapshot, snaps, out_slots)
 
 
+class KDA(GatedDeltaRule):
+    def __init__(self, ctx, *, heads: int, head_k_dim: int, head_v_dim: int, lower_bound: float, dtype: str,
+                 out_slots: bool = False) -> None:
+        self.lower_bound = lower_bound
+
+    def __call__(self, handle, q, k, v, f, b, a_log, dt_bias, state, slots, has_init, snapshot=None, out_slots=None):
+        query_start, snaps = handle
+        return gdn.kda(q, k, v, f, b, a_log, dt_bias, state, slots, query_start, has_init, self.lower_bound,
+                       snapshot, snaps, out_slots)
+
+
 class GatedRMSNorm:
     def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu", round: str = "model") -> None:
         self.eps, self.out_gate, self.round = eps, out_gate, round
@@ -414,6 +425,23 @@ class HcCombine:
         hyper.hc_gr_combine(r, y, w)
 
 
+class HcMhcMix:
+    def __init__(self, ctx, *, streams: int, hidden: int, eps: float, hc_eps: float, iters: int, dtype: str) -> None:
+        self.streams, self.eps, self.hc_eps, self.iters, self.dtype = streams, eps, hc_eps, iters, getattr(torch, dtype)
+
+    def __call__(self, r, fn, base, scale, y_prev, post_prev, comb_prev):
+        return hyper.hc_mhc_mix(r, fn, base, scale, y_prev, post_prev, comb_prev, self.streams, self.eps,
+                                self.hc_eps, self.iters, self.dtype)
+
+
+class HcMhcWriteback:
+    def __init__(self, ctx, *, streams: int, hidden: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, r, y, post, comb):
+        hyper.hc_mhc_writeback(r, y, post, comb)
+
+
 class QsaIndex:
     def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, rotary_dim: int, max_positions: int,
                  eps: float, dtype: str) -> None:
@@ -424,11 +452,29 @@ class QsaIndex:
 
 
 class QsaSelect:
-    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int) -> None:
+    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int,
+                 head_weights: bool = False) -> None:
         self.ratio, self.budget = ratio, budget
 
-    def __call__(self, q, pooled, table, seq, positions):
-        return qsa.qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget)
+    def __call__(self, q, pooled, table, seq, positions, w=None):
+        return qsa.qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget, w)
+
+
+class DsaIndex:
+    def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, dtype: str) -> None:
+        self.ratio = ratio
+
+    def __call__(self, k, gate, raw, gates, pooled, ape, table, seq, positions):
+        qsa.dsa_index(k, gate, raw, gates, pooled, ape, table, seq, positions, self.ratio)
+
+
+class MlaAttend:
+    def __init__(self, ctx, *, heads: int, latent: int, ratio: int, width: int, page: int, scale: float,
+                 q_dtype: str, kv_dtype: str) -> None:
+        self.ratio, self.scale = ratio, scale
+
+    def __call__(self, q, kv, blocks, table, seq, positions):
+        return qsa.mla_attend(q, kv, blocks, table, seq, positions, self.ratio, self.scale)
 
 
 class QsaAttend:
@@ -465,7 +511,9 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "moe_topk": MoeTopk, "moe_router": MoeRouter, "moe_combine": MoeCombine, "moe_resolve": MoeResolve,
          "expert_fetch": ExpertFetch, "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
          "moe_patch_rows": MoePatchRows, "moe_tiers": MoeTiers,
-         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
+         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm, "kda": KDA,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite, "hc_gr_mix": HcMix, "hc_gr_combine": HcCombine,
-         "qsa_index": QsaIndex, "qsa_select": QsaSelect, "qsa_attend": QsaAttend, "qwen4_exp.ple_rows": PleRows,
+         "hc_mhc_mix": HcMhcMix, "hc_mhc_writeback": HcMhcWriteback,
+         "qsa_index": QsaIndex, "qsa_select": QsaSelect,
+         "dsa_index": DsaIndex, "mla_attend": MlaAttend, "qsa_attend": QsaAttend, "qwen4_exp.ple_rows": PleRows,
          "qwen4_exp.ple_block": PleBlock}

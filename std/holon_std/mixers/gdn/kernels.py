@@ -25,6 +25,15 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   o = S q` (S is [Dv, Dk] per v-head), and the final S written back. V-head j reads q/k head `j // (Hv/Hk)`
   (`v_head_order = "grouped"`, HF's) or `j % Hk` (`"tiled"`, GGUF's). Facts: heads_k, heads_v, head_k_dim,
   head_v_dim, v_head_order, dtype.
+- `kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/v1-glm.md D4): `gated_delta_rule@1`'s `plan` and call terms
+  (rows, slots, `has_init`, in-step snapshots, `per_token`, `out_slots`) with a per-channel gate: instance `(handle,
+  q [T, H, Dk], k [T, H, Dk], v [T, H, Dv], f [T, H·Dk], b [T, H], a_log [H] f32, dt_bias [H·Dk] f32, state [units, H,
+  Dv, Dk] f32, slots [R], has_init [R], snapshot=None, out_slots=None) -> o [T, H, Dv]` of v's dtype: q and k
+  l2-normalised (`x / sqrt(Σx² + 1e-6)`, HF's and FLA's form) in f32, q scaled by Dk^-½; the gate per channel
+  `g = lower_bound · σ(exp(a_log) · (f + dt_bias))` (`a_log` per head, broadcast over its Dk channels), `β = σ(b)`;
+  per row from `S = state[slots[r]]` (zeros without `has_init`), for each token `S ← S · diag(e^g)` (each key channel
+  decayed), `S += (β(v − S k)) kᵀ; o = S q`, and the final S written back. Facts: heads, head_k_dim, head_v_dim,
+  lower_bound, dtype[, out_slots].
 - `gated_rmsnorm@1`: instance `(o [T, H, D], z [T, H, D], weight [D]) -> [T, H, D]`: per head
   `weight · (o · rsqrt(mean(o²) + eps)) · act(z)`, the norm in f32 cast to o's dtype before the weight (HF's
   `RMSNormGated`), the gate in f32, act = silu, or sigmoid with the fact `out_gate="sigmoid"` (Qwen3.8-Flash-Next's
@@ -45,6 +54,7 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
 from __future__ import annotations
 
 CAUSAL_CONV1D, GATED_DELTA_RULE, GATED_RMSNORM = "causal_conv1d@1", "gated_delta_rule@1", "gated_rmsnorm@1"
+KDA = "kda@1"
 GDN_REWIND = "gdn_rewind@1"
 MASKED = float("-inf")             # gdn_rewind's gates past the accepted tokens: the delta rules' identity step
 ORDERS = ("grouped", "tiled")

@@ -57,6 +57,8 @@ class GDNMeta:
     ssm_pool: str | None = None                      # in-step checkpoints: the delta-rule payloads' pool (the
     conv: tuple[str, torch.Tensor, torch.Tensor] | None = None   # kernel has their rows); the conv payloads' pool,
                                                      # token indices [P·(K−1)] and units [P]
+    subs: list | None = None                         # KDA's prompt-step sub-batches (`KDAPlanner`), and its conv
+    conv_pool: str | None = None                     # payloads' pool
 
 
 class Planner:
@@ -275,3 +277,233 @@ class GDN(nn.Module):
         mixed = self._conv(saved_x[:t], self.conv_weight, window, self._rows[:rows], meta.query_start, meta.has_init)
         self._rule_call(meta.rule, meta.handle, mixed, saved_a[:t], saved_b[:t], self._states()[1], meta.slots,
                         meta.has_init, out_slots=meta.slots)
+
+
+@dataclasses.dataclass(eq=False)
+class SubBatch:
+    """A KDA step's sub-batch (docs/v1-glm.md D4, D9): tokens [lo, hi) of the step, its row pieces (`rows`: the step
+    rows they belong to; `cont`: pieces after a row's first, which continue its state), their plan, the snapshots
+    falling at a piece's end (the piece's final state, copied) and the conv payloads inside it."""
+
+    lo: int
+    hi: int
+    handle: Any
+    rows: torch.Tensor
+    cont: torch.Tensor
+    query_start: torch.Tensor
+    at_end: list[tuple[int, int]]
+    conv: tuple[torch.Tensor, torch.Tensor] | None
+    slots: torch.Tensor | None = None
+    has_init: torch.Tensor | None = None
+
+
+class KDAPlanner(Planner):
+    """GDN's planner (mixed steps, in-step checkpoints) for the KDA rule, and with `rows` > 0 a prompt step longer than
+    `rows` tokens planned as sub-batches (D9): its rows packed in order into sub-batches of at most `rows` tokens, a
+    longer row split at multiples of `rows` from its start (each piece continuing the previous one's state), so the
+    whole mixer runs a sub-batch at a time. Its in-step checkpoints are re-based per piece (a snapshot at a piece's end
+    is that piece's final state; a conv payload belongs to the piece its position ends); only behind `rows > 0`, so
+    GDN's plans are untouched (B3-m2)."""
+
+    def __init__(self, rule: Any, conv_kernel: int, rows: int) -> None:
+        super().__init__(rule, conv_kernel)
+        self.rows = rows
+
+    def plan_bounds(self, batch, pages) -> GDNMeta:
+        plan = batch.plan
+        lens = plan.n_query.tolist()
+        if not self.rows or plan.n_decode or sum(lens) <= self.rows or bool((plan.n_logits > 1).any()):
+            return super().plan_bounds(batch, pages)
+        pieces = []                                             # (row, offset in the row, length)
+        for r, n in enumerate(lens):
+            pieces += [(r, a, min(self.rows, n - a)) for a in range(0, n, self.rows)]
+        subs, cur, size = [], [], 0
+        for p in pieces:
+            if cur and size + p[2] > self.rows:
+                subs.append(cur)
+                cur, size = [], 0
+            cur.append(p)
+            size += p[2]
+        subs.append(cur)
+        pubs = {spec: [p for p in plan.publishes if p.spec == spec] for spec in (CONV, SSM)}
+        device, starts, out = batch.dev.slots.device, [0, *itertools.accumulate(lens)], []
+        for sub in subs:
+            lo = starts[sub[0][0]] + sub[0][1]
+            snaps, at_end, conv_rows, conv_units = [], [], [], []
+            for i, (r, a, n) in enumerate(sub):
+                for p in pubs[SSM]:
+                    if p.row == r and a < p.offset < a + n:
+                        snaps.append((i, p.offset - a, p.payload.units[0]))
+                    elif p.row == r and p.offset == a + n:
+                        at_end.append((i, p.payload.units[0]))
+                for p in pubs[CONV]:
+                    if p.row == r and a < p.offset <= a + n:
+                        first = starts[r] + p.offset - lo - self.window
+                        conv_rows += [first + j for j in range(self.window)]
+                        conv_units.append(p.payload.units[0])
+            n_lens = [n for _, _, n in sub]
+            out.append(SubBatch(lo, lo + sum(n_lens), self.rule.plan(n_lens, snaps),
+                                _on([r for r, _, _ in sub], device),
+                                _on([int(a > 0) for _, a, _ in sub], device).bool(),
+                                _on([0, *itertools.accumulate(n_lens)], device).int(), at_end,
+                                (_on(conv_rows, device), _on(conv_units, device)) if conv_units else None))
+        return GDNMeta(self.rule, None, batch.dev.slots, batch.dev.query_start, None, subs=out,
+                       ssm_pool=pubs[SSM][0].payload.pool if pubs[SSM] else None,
+                       conv_pool=pubs[CONV][0].payload.pool if pubs[CONV] else None)
+
+    def prepare_device(self, meta: GDNMeta, ctx) -> None:
+        super().prepare_device(meta, ctx)
+        for sub in meta.subs or ():
+            sub.slots = meta.slots.index_select(0, sub.rows)
+            sub.has_init = meta.has_init.index_select(0, sub.rows) | sub.cont
+
+
+class KDA(nn.Module):
+    """GLM-5.3-Flash's Kimi delta attention mixer (docs/v1-glm.md D4; HF's `Glm5NextTextLinearAttention`): q, k and v
+    projections → their causal convs (f32 weights, one conv over q ‖ k ‖ v) → `kda@1` with the per-channel forget gate
+    `f_b(f_a(x))` and β = σ(b(x)) → `gated_rmsnorm@1` (sigmoid of `g_b(g_a(x))`, f32 through the weight: `round =
+    "none"`) → `o_proj`. Its state is GDN's two `Slot` specs (the conv windows of q, k, v in the model dtype; the
+    recurrent [H, Dv, Dk] f32), GDN's planner and in-step checkpoints. With `rows` > 0 a prompt step runs as sub-batches
+    of at most `rows` tokens (D9, `KDAPlanner`): bitwise the unsplit recurrence (the rule's contract), the projections'
+    bits per sub-batch. Speculative verify rows (MTP, deferred by D7) are not served."""
+
+    @classmethod
+    def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
+        width = params["heads"] * params["head_dim"]
+        conv = 3 * width * (params.get("conv_kernel", 4) - 1) * ctx.dtype.itemsize
+        ssm = params["heads"] * params["head_dim"] ** 2 * 4
+        n = len(layers)
+        return [StateSpec(CONV, "recurrent@1", Slot(conv * n), layers, "kda.conv", segments=n,
+                          alignment=CHUNK, page_group=GROUP, in_step=CHUNK),
+                StateSpec(SSM, "recurrent@1", Slot(ssm * n), layers, "kda.ssm", segments=n,
+                          alignment=CHUNK, page_group=GROUP, in_step=CHUNK)]
+
+    @classmethod
+    def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
+        if ctx.options.get("max_draft_tokens"):
+            raise ValueError("std.mixers.kda@1: speculative verify rows are not served (MTP is deferred, "
+                             "docs/v1-glm.md D7)")
+        facts = cls._facts(params, str(ctx.dtype).removeprefix("torch."))
+        rule = ctx.select_kernel(kernels.KDA, site=GROUP, **facts).impl(ctx, **facts)
+        return KDAPlanner(rule, params.get("conv_kernel", 4), params.get("rows", 0))
+
+    @staticmethod
+    def _facts(params: dict, dtype: str) -> dict:
+        return {"heads": params["heads"], "head_k_dim": params["head_dim"], "head_v_dim": params["head_dim"],
+                "lower_bound": float(params.get("lower_bound", -5.0)), "dtype": dtype}
+
+    def __init__(self, ctx, *, layer: int, hidden: int, heads: int, head_dim: int, conv_kernel: int = 4,
+                 lower_bound: float = -5.0, norm_eps: float = 1e-5, rows: int = 0) -> None:
+        super().__init__()
+        if rows % CHUNK:
+            raise ValueError(f"std.mixers.kda@1: rows {rows} must be a multiple of {CHUNK} (the rule's chunk)")
+        self.h, self.d, self.kernel, self.rows = heads, head_dim, conv_kernel, rows
+        self._dtype = ctx.dtype                    # the conv state's (its inputs are the projections' outputs)
+        width = heads * head_dim
+        self.channels = 3 * width
+        lin = lambda i, o: ctx.unit(Ref(LINEAR, in_features=i, out_features=o))       # noqa: E731
+        self.q_proj, self.k_proj, self.v_proj = lin(hidden, width), lin(hidden, width), lin(hidden, width)
+        self.f_a_proj, self.f_b_proj = lin(hidden, head_dim), lin(head_dim, width)
+        self.b_proj = lin(hidden, heads)
+        self.g_a_proj, self.g_b_proj = lin(hidden, head_dim), lin(head_dim, width)
+        self.o_proj = lin(width, hidden)
+        f32 = lambda *s: nn.Parameter(torch.empty(*s, dtype=torch.float32), requires_grad=False)   # noqa: E731
+        self.conv_q, self.conv_k, self.conv_v = (f32(width, conv_kernel) for _ in range(3))   # as stored (F32)
+        self.conv_weight: torch.Tensor | None = None                 # q ‖ k ‖ v (finalize_weights)
+        self.A_log, self.dt_bias, self.norm_weight = f32(heads), f32(width), f32(head_dim)
+        dtype = str(ctx.dtype).removeprefix("torch.")
+        site = f"std.mixers.kda[layer={layer}]"
+        conv = {"channels": self.channels, "kernel_size": conv_kernel, "dtype": dtype}
+        norm = {"dim": head_dim, "eps": norm_eps, "dtype": dtype, "out_gate": "sigmoid", "round": "none"}
+        self._conv = ctx.select_kernel(kernels.CAUSAL_CONV1D, site=site, **conv).impl(ctx, **conv)
+        self._norm = ctx.select_kernel(kernels.GATED_RMSNORM, site=site, **norm).impl(ctx, **norm)
+        conv_bound, ssm_bound = ctx.state(CONV, layer), ctx.state(SSM, layer)
+        self._state = None if conv_bound is None else (conv_bound, ssm_bound, conv_bound[0].layers.index(layer))
+        self._rule = None
+        if conv_bound is None:                     # a model-only build: whole sequences from zero state
+            facts = self._facts({"heads": heads, "head_dim": head_dim, "lower_bound": lower_bound}, dtype)
+            self._rule = ctx.select_kernel(kernels.KDA, site=site, **facts).impl(ctx, **facts)
+
+    def finalize_weights(self, ctx) -> None:
+        """The three convs as one (q ‖ k ‖ v), as the mixed projection's channels lie."""
+        if self.conv_weight is None:
+            self.conv_weight = torch.cat([self.conv_q, self.conv_k, self.conv_v]).contiguous()
+            self.conv_q = self.conv_k = self.conv_v = None
+
+    def _states(self, conv_pool=None, ssm_pool=None) -> tuple[torch.Tensor, torch.Tensor]:
+        (conv_spec, own_conv), (_, own_ssm), index = self._state
+        conv_pool, ssm_pool, n = conv_pool or own_conv, ssm_pool or own_ssm, len(conv_spec.layers)
+        conv = conv_pool.view(self._dtype, (n, conv_pool.capacity, self.channels, self.kernel - 1))
+        ssm = ssm_pool.view(torch.float32, (n, ssm_pool.capacity, self.h, self.d, self.d))
+        return conv[index], ssm[index]
+
+    def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
+        if self._state is None:
+            return self._whole_sequences(x, ctx)
+        meta = ctx.meta(GROUP)
+        if meta.subs:
+            return torch.cat([self._sub_batch(x[s.lo:s.hi], s, meta, ctx) for s in meta.subs])
+        conv_state, ssm_state = self._states()
+        qkv, f, b, gate_in = self._project(x)
+        mixed = self._conv(qkv, self.conv_weight, conv_state, meta.slots, meta.query_start, meta.has_init)
+        snapshot = None
+        if meta.conv is not None:                           # in-step conv checkpoints: the inputs before each position
+            pool, rows, units = meta.conv
+            self._publish_conv(qkv, rows, units, pool, ctx)
+        if meta.ssm_pool is not None:
+            snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
+        if meta.chunks is not None:                         # a mixed step: decode rows, then the chunks
+            n = meta.n_decode
+            o = torch.cat([self._rule_call(meta.rule, meta.handle, mixed[:n], f[:n], b[:n], ssm_state,
+                                           meta.slots[:n], meta.has_init[:n]),
+                           self._rule_call(meta.rule, meta.chunks, mixed[n:], f[n:], b[n:], ssm_state,
+                                           meta.slots[n:], meta.has_init[n:], snapshot)])
+        else:
+            o = self._rule_call(meta.rule, meta.handle, mixed, f, b, ssm_state, meta.slots, meta.has_init, snapshot)
+        return self._out(o, gate_in)
+
+    def _sub_batch(self, x: torch.Tensor, sub: SubBatch, meta: GDNMeta, ctx) -> torch.Tensor:
+        """One sub-batch of a prompt step (`KDAPlanner`): its pieces continue their rows' states in the pool."""
+        conv_state, ssm_state = self._states()
+        qkv, f, b, gate_in = self._project(x)
+        mixed = self._conv(qkv, self.conv_weight, conv_state, sub.slots, sub.query_start, sub.has_init)
+        if sub.conv is not None:
+            self._publish_conv(qkv, *sub.conv, meta.conv_pool, ctx)
+        snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1] if meta.ssm_pool is not None else None
+        o = self._rule_call(meta.rule, sub.handle, mixed, f, b, ssm_state, sub.slots, sub.has_init, snapshot)
+        for i, unit in sub.at_end:                          # a checkpoint at a piece's end: the state it left
+            snapshot[unit].copy_(ssm_state[sub.slots[i]])
+        return self._out(o, gate_in)
+
+    def _publish_conv(self, qkv: torch.Tensor, rows: torch.Tensor, units: torch.Tensor, pool: str, ctx) -> None:
+        window = qkv.index_select(0, rows).view(len(units), self.kernel - 1, self.channels).transpose(1, 2)
+        target = self._states(conv_pool=ctx.pool(pool))[0]
+        target.index_copy_(0, units, window.to(target.dtype))
+
+    def _project(self, x: torch.Tensor):
+        qkv = torch.cat([self.q_proj(x), self.k_proj(x), self.v_proj(x)], dim=-1)
+        return qkv, self.f_b_proj(self.f_a_proj(x)), self.b_proj(x), x
+
+    def _rule_call(self, rule, handle, mixed, f, b, ssm_state, slots, has_init, snapshot=None):
+        t, w = mixed.shape[0], self.h * self.d
+        q, k, v = mixed.split([w, w, w], dim=-1)
+        shape = (t, self.h, self.d)
+        return rule(handle, q.reshape(shape), k.reshape(shape), v.reshape(shape), f, b, self.A_log, self.dt_bias,
+                    ssm_state, slots, has_init, snapshot=snapshot)
+
+    def _out(self, o: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        t = o.shape[0]
+        gate = self.g_b_proj(self.g_a_proj(x)).reshape(t, self.h, self.d)
+        return self.o_proj(self._norm(o, gate, self.norm_weight).reshape(t, self.h * self.d))
+
+    def _whole_sequences(self, x: torch.Tensor, ctx) -> torch.Tensor:
+        """A model-only build: each sequence from zero state."""
+        lens = ctx.batch.dev.query_start.diff().tolist()
+        rows, qs = len(lens), ctx.batch.dev.query_start
+        conv_state = x.new_zeros(rows, self.channels, self.kernel - 1)
+        ssm_state = torch.zeros(rows, self.h, self.d, self.d, dtype=torch.float32, device=x.device)
+        slots, has_init = torch.arange(rows, device=x.device), torch.zeros(rows, dtype=torch.bool, device=x.device)
+        qkv, f, b, gate_in = self._project(x)
+        mixed = self._conv(qkv, self.conv_weight, conv_state, slots, qs, has_init)
+        o = self._rule_call(self._rule, self._rule.plan(lens), mixed, f, b, ssm_state, slots, has_init)
+        return self._out(o, gate_in)

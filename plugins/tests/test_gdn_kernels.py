@@ -590,7 +590,7 @@ def test_snapshots_must_fall_inside_their_row_on_a_chunk():
 STATE_ULPS = 8
 
 
-def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
+def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None, masked=MASKED):
     """A verify step over rows of q tokens (written to `sink`, else to the rows' units) and its masked replay."""
     n = len(slots)
     init = dev([True] * n, torch.bool)
@@ -599,10 +599,10 @@ def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
         out = rule(rule.plan([q] * n, per_token=True), *rows(x, 0, n * q).values(), g["a_log"], g["dt_bias"], s0,
                    dev(slots), init, out_slots=dev([sink] * n))
     keep = torch.arange(q, device="cuda")[None, :] < 1 + torch.tensor(accepted, device="cuda")[:, None]
-    masked = dict(rows(x, 0, n * q))
+    masked_rows = dict(rows(x, 0, n * q))
     for name in ("a", "b"):
-        masked[name] = masked[name].masked_fill(~keep.reshape(-1, 1), MASKED)       # (−inf: the contract's)
-    rule(rule.plan([q] * n, per_token=True), *masked.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
+        masked_rows[name] = masked_rows[name].masked_fill(~keep.reshape(-1, 1), masked)   # (−inf: the contract's)
+    rule(rule.plan([q] * n, per_token=True), *masked_rows.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
          out_slots=dev(slots))
     return out
 
@@ -640,8 +640,10 @@ def test_verify_rows_replay_bitwise_to_the_accepted_tokens(shape, order):
     others = [u for u in range(UNITS) if u != sink]
     assert torch.equal(state[others], keep_s0[others])               # the verify step moved nothing but the sink
 
-    replay = s0.clone()
+    replay, before = s0.clone(), s0.clone()
     _verify_replay(rule, x, g, replay, slots, accepted, q)
+    _verify_replay(rule, x, g, before, slots, accepted, q, masked=-1e4)   # docs/v1-glm.md D4: −inf, −1e4's bits
+    assert torch.equal(replay, before)
     alone = s0.clone()
     take = torch.cat([torch.arange(r * q, r * q + 1 + n, device="cuda") for r, n in enumerate(accepted)])
     rule(rule.plan([1 + n for n in accepted], per_token=True),
