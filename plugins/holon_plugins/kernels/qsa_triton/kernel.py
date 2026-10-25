@@ -12,8 +12,10 @@ where the output is stored.
 
 The index and the selection are ours. `_index` stores a token's raw key and pools the block it completes. `_score`:
 one program per (query, tile of 64 blocks), the same for every shape (shape invariance), each key chunk loaded once
-for four indexer heads and its products summed within a thread (IEEE float32 products, no TF32). `_topk`: the k-th
-largest score found exactly from its float bits, a bit a round with an early exit, over keys held in registers up to
+for four indexer heads and its products summed within a thread (IEEE float32 products, no TF32). `_score_weighted`
+(GLM's DSA: signed head weights): the same tiling with the products on tensor cores, exact (each f32 key split into
+three bfloat16 parts against the bfloat16 query). `_topk`: the k-th largest score found exactly from its float bits
+(signed), a bit a round with an early exit, over keys held in registers up to
 8,192 blocks; then one scan writes the chosen blocks in index order, which gives D2's lower-block ties exactly.
 Correct and graph-safe; tuned further in FN's step 7.
 """
@@ -27,6 +29,7 @@ import triton.language as tl
 
 TOPK_CHUNK = 8192                  # a row of up to 8,192 blocks (32K tokens) selects from registers
 SCORE_BLOCKS, SCORE_CHUNK = 64, 8  # fixed for every shape (shape invariance); one warp per program
+WEIGHTED_BLOCKS = 64               # the weighted scores' tile (GLM), fixed for every shape
 
 
 @triton.jit
@@ -113,9 +116,45 @@ def _score(q_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_ptr, stride_q, str
 
 
 @triton.jit
+def _score_weighted(q_ptr, w_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_ptr, stride_q, stride_w, stride_table,
+                    stride_ws, pooled_unit, scale, H: tl.constexpr, HP: tl.constexpr, D: tl.constexpr,
+                    PAGE: tl.constexpr, RATIO: tl.constexpr, BB: tl.constexpr):
+    """Scores of BB of a query's complete blocks with signed head weights (GLM's DSA): Σ_h w_h · relu(⟨q_h, k_b⟩) / √D.
+    The products on tensor cores, the query's heads as the rows (q bfloat16): each float32 key is split into three
+    bfloat16 parts (hi + mid + lo carry its 24 bits), so every product is exact and summed in float32; the same
+    program for every shape (shape invariance)."""
+    t = tl.program_id(0).to(tl.int64)
+    b = tl.program_id(1) * BB + tl.arange(0, BB)
+    s = tl.load(seq_ptr + t)
+    n = (tl.load(pos_ptr + t) + 1) // RATIO
+    ok = (b < n) & (s >= 0)
+    if tl.program_id(1) * BB < n:
+        h = tl.arange(0, HP)
+        d = tl.arange(0, D)
+        tok = b.to(tl.int64) * RATIO
+        unit = tl.load(table_ptr + tl.maximum(s, 0).to(tl.int64) * stride_table + tok // PAGE, mask=ok,
+                       other=0).to(tl.int64)
+        keys = tl.load(pooled_ptr + unit[None, :] * pooled_unit + ((tok % PAGE) // RATIO)[None, :] * D + d[:, None],
+                       mask=ok[None, :], other=0.0)                                                   # [D, BB] f32
+        k_hi = keys.to(tl.bfloat16)
+        rest = keys - k_hi.to(tl.float32)
+        k_mid = rest.to(tl.bfloat16)
+        k_lo = (rest - k_mid.to(tl.float32)).to(tl.bfloat16)
+        q = tl.load(q_ptr + t * stride_q + h[:, None] * D + d[None, :], mask=h[:, None] < H, other=0.0)  # [HP, D]
+        dots = tl.dot(q, k_hi) + tl.dot(q, k_mid) + tl.dot(q, k_lo)                                    # [HP, BB]
+        w = tl.load(w_ptr + t * stride_w + h, mask=h < H, other=0.0)
+        score = tl.sum(tl.maximum(dots, 0.0) * w[:, None], 0)
+        tl.store(ws_ptr + t * stride_ws + b, score * scale, mask=ok)
+
+
+@triton.jit
 def _keys(base, i, n):
-    """Scores as int32 keys: non-negative floats order as their bits; past n, −1 (below every key)."""
-    return tl.load(base + i, mask=i < n, other=-1.0).to(tl.int32, bitcast=True)
+    """Scores as int32 keys in their float order: a non-negative float's bits, a negative one's with the magnitude bits
+    flipped (signed scores: head weights), −0.0 as +0.0 (a tie, as the floats compare); past n, the int32 minimum
+    (below every score's key)."""
+    bits = tl.load(base + i, mask=i < n, other=0.0).to(tl.int32, bitcast=True)
+    key = tl.where(bits == -2147483648, 0, tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits))
+    return tl.where(i < n, key, -2147483648)
 
 
 @triton.jit
@@ -138,9 +177,9 @@ def _emit(out, key, i, kth, need, above, equal):
 def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.constexpr, TOP: tl.constexpr,
           CHUNK: tl.constexpr, PAD: tl.constexpr):
     """A query's top min(TOP, n) blocks, ties to the lower block, ascending, then its open block. The k-th largest
-    key is found exactly, a bit a round from the top (the largest v with count(key ≥ v) ≥ k), over keys held in
-    registers when the row fits CHUNK (≤ 65,535), else re-read per round; then one pass writes the chosen blocks in
-    index order."""
+    key is found exactly, a bit a round from the top (the largest v with count(key ≥ v) ≥ k; its sign first: from 0
+    when k keys are non-negative, else from the int32 minimum), over keys held in registers when the row fits CHUNK
+    (≤ 65,535), else re-read per round; then one pass writes the chosen blocks in index order."""
     row = tl.program_id(0).to(tl.int64)
     out = out_ptr + row * stride_out
     pad = tl.arange(0, PAD)
@@ -158,7 +197,7 @@ def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.co
             tl.store(out + c0 + i, c0 + i, mask=c0 + i < n)
     elif n <= CHUNK:
         key = _keys(base, i, n)
-        kth = n * 0
+        kth = tl.where(tl.sum((key >= 0).to(tl.int32), 0) >= k, 0, -2147483648)
         settled = n * 0
         for b in tl.static_range(31):
             if settled == 0:                        # until exactly k keys are at or above kth
@@ -171,7 +210,10 @@ def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.co
             need = k - tl.sum((key > kth).to(tl.int32), 0)
         _emit(out, key, i, kth, need, 0, 0)
     else:
-        kth = n * 0
+        count = n * 0
+        for c0 in range(0, n, CHUNK):
+            count += tl.sum((_keys(base, c0 + i, n) >= 0).to(tl.int32), 0)
+        kth = tl.where(count >= k, 0, -2147483648)
         for b in tl.static_range(31):
             count = n * 0
             for c0 in range(0, n, CHUNK):
@@ -298,18 +340,28 @@ def qsa_index(k, raw, pooled, table, seq, positions, weight, cos_sin, ratio: int
                      raw.stride(0), pooled.stride(0), raw.shape[1], d, ratio, cos_sin.shape[1])
 
 
-def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor) -> None:
-    """Every query's block scores into `ws` [T, blocks]: one program per (query, tile of SCORE_BLOCKS), the same tile,
-    chunk and warps for every shape, so a query's bits never depend on the call's other rows or its row count."""
+def scores(q, pooled, table, seq, positions, ratio: int, ws: torch.Tensor, w: torch.Tensor | None = None) -> None:
+    """Every query's block scores into `ws` [T, blocks] (`w` [T, H] f32: the rows' head weights): one program per
+    (query, tile of blocks), the same tile, chunk and warps for every shape, so a query's bits never depend on the
+    call's other rows or its row count."""
     t, heads, d = q.shape
     page = pooled.shape[1] * ratio
-    _score[(t, triton.cdiv(ws.shape[1], SCORE_BLOCKS))](
-        q, pooled, table, seq, positions, ws, q.stride(0), table.stride(0), ws.stride(0), pooled.stride(0),
-        1.0 / math.sqrt(d), heads,
-        d, page, ratio, SCORE_BLOCKS, SCORE_CHUNK, num_warps=1)
+    if w is None:
+        _score[(t, triton.cdiv(ws.shape[1], SCORE_BLOCKS))](
+            q, pooled, table, seq, positions, ws, q.stride(0), table.stride(0), ws.stride(0), pooled.stride(0),
+            1.0 / math.sqrt(d), heads,
+            d, page, ratio, SCORE_BLOCKS, SCORE_CHUNK, num_warps=1)
+        return
+    if w.dtype != torch.float32 or w.stride(1) != 1 or q.dtype != torch.bfloat16:
+        raise ValueError("qsa_select: head weights are float32 with contiguous heads, q bfloat16")
+    _score_weighted[(t, triton.cdiv(ws.shape[1], WEIGHTED_BLOCKS))](
+        q, w, pooled, table, seq, positions, ws, q.stride(0), w.stride(0), table.stride(0), ws.stride(0),
+        pooled.stride(0), 1.0 / math.sqrt(d), heads, max(16, triton.next_power_of_2(heads)), d, page, ratio,
+        WEIGHTED_BLOCKS, num_warps=4)
 
 
-def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_batch: int) -> torch.Tensor:
+def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_batch: int,
+               w: torch.Tensor | None = None) -> torch.Tensor:
     _dense_rows(pooled)
     t, heads, d = q.shape
     top = budget // ratio
@@ -319,7 +371,7 @@ def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_ba
     for a in range(0, t, sub_batch):
         rows = min(sub_batch, t - a)
         ws = torch.empty(rows, blocks, dtype=torch.float32, device=q.device)
-        scores(q[a:a + rows], pooled, table, seq[a:], positions[a:], ratio, ws)
+        scores(q[a:a + rows], pooled, table, seq[a:], positions[a:], ratio, ws, None if w is None else w[a:a + rows])
         _topk[(rows,)](ws, seq[a:], positions[a:], out[a:], ws.stride(0), out.stride(0), ratio, top, TOPK_CHUNK,
                        triton.next_power_of_2(top + 1), num_warps=8)
     return out
