@@ -81,6 +81,11 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
         return all(k + staging <= int(after[e, r]) < int(limits[r]) for r in range(roles))
 
     records, fetched = [], []
+
+    def slots_held() -> int:  # the layer's slots: mapped, empty, spare
+        mapped = sum(int((after[:, r] >= k + staging).sum()) for r in range(roles))
+        return mapped + n_empty * roles + int((spare[:, 0] > 0).sum()) * roles
+    before = slots_held()
     present = [s for s in range(len(spare)) if int(spare[s, 0]) > 0]   # (ownership: a spare's slots are its own)
     mapped = {(r, int(after[e, r])) for e in range(experts) for r in range(roles) if after[e, r] >= 0}
     free = {(r, int(empty[r, j])) for r in range(roles) for j in range(n_empty)}
@@ -155,6 +160,8 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
                 records.append((group, SPARE, v))                       # demotes it (D8a)
             else:
                 after[v] = -1
+    if not exclusive:                    # every slot conserved (exclusive: a refilled owner stays mapped until placed)
+        assert slots_held() == before, "a call lost or made a slot"
     return {"slots": slots.int(), "fetch": fetch.int(), "n_fetch": n_fetch.int(), "counts": counts.int(),
             "routed": seen, "errors": errors, "residency": after.int(), "last": last, "clock": clock,
             "spare": spare, "n_empty": n_empty, "records": records, "cpu": cpu, "jobs": jobs}
@@ -184,13 +191,19 @@ def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, r
 
 def release_tail(cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                  spare: torch.Tensor) -> torch.Tensor:
-    """`lend_tail` (std.moe.kernels, docs/v1-glm.md D8a): each layer's spares with a slot of class `cls` among its
-    last n released in place (absent: their owners left VRAM when they became spares), then `picked [G, E] bool`, the
-    experts holding such a slot, as placement.lfu's. No spare slot is left in the range."""
+    """`lend_tail` (std.moe.kernels, docs/v1-glm.md D8a): every spare of a layer with a role of class `cls` released —
+    absent, its owner mapped back to its slots, so the caller lends it with the range's holders and returns its slots
+    to the layer at the step's end (step 1's review S1-M1: no slot leaks; a spare outside the range would hold slots
+    the step's staging cannot borrow, and the next decode boundary refills it) —; then `picked [G, E] bool`: the
+    experts holding a slot of class `cls` among its last n, as placement.lfu's, and the released spares' owners."""
     slots = spare[..., 1:]                                              # [G, S, R]
-    tail = (classes[:, None, :] == cls) & (slots >= (limits - n)[:, None, :]) & (spare[..., :1] > 0)
-    spare.masked_fill_(tail.any(-1, keepdim=True), 0)
-    return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
+    freed = (classes == cls).any(1)[:, None] & (spare[..., 0] > 0)
+    released = torch.zeros(residency.shape[:2], dtype=torch.bool)
+    for g, s in freed.nonzero().tolist():
+        residency[g, int(spare[g, s, 0]) - 1] = slots[g, s]
+        released[g, int(spare[g, s, 0]) - 1] = True
+        spare[g, s] = 0
+    return ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1) | released
 
 
 def lend(need, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor, clock: torch.Tensor,

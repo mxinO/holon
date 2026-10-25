@@ -153,26 +153,40 @@ def test_lend_matches_the_oracle(plugins, need):  # noqa: F811
 
 
 @pytest.mark.parametrize("device", DEVICES)
-def test_lend_tail_releases_the_spares_in_the_tail(plugins, device):  # noqa: F811
-    """`lend_tail` (docs/v1-glm.md D8a): the spares with a slot of the class among its last n are released (absent),
-    the others kept, and the experts holding such a slot picked — as the oracle; no spare slot is left in the range."""
+def test_lend_tail_releases_the_lending_layers_spares(plugins, device):  # noqa: F811
+    """`lend_tail` (docs/v1-glm.md D8a; step 1's review S1-M1): every spare of a layer with a role of the tail's class
+    is released — absent, its owner mapped back to its slots and picked with the range's holders, so the caller lends
+    it and returns its slots at the step's end (none leaks, none held from the step's staging) —, the other layers'
+    kept; each provider as the oracle (kernels.promote's own device ops, no host sync)."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
     g = torch.Generator().manual_seed(4)
     limits = torch.full((6, ROLES), K + E + 200, dtype=torch.int32)
-    residency = (K + E + torch.randperm(200, generator=g)[:E]).int()[None, :, None].expand(6, E, ROLES).clone()
+    residency = (K + E + torch.randperm(190, generator=g)[:E]).int()[None, :, None].expand(6, E, ROLES).clone()
+    residency[:, :reference.SPARES] = -1                             # the spares' owners: unmapped
     classes = torch.tensor([[0, 1], [0, 1], [0, 2], [0, 1], [0, 2], [0, 2]])
     spare = torch.zeros(6, reference.SPARES, 1 + ROLES, dtype=torch.int32)
     spare[:, :, 0] = torch.arange(1, 1 + reference.SPARES)
-    spare[:, :, 1:] = torch.tensor([K + E + 195, K + E + 10, K + E + 199])[None, :, None]   # in, out, in the tail
-    want_spare = spare.clone()
-    want = reference.release_tail(0, 8, residency, classes, limits, want_spare)
+    spare[:, :, 1:] = torch.tensor([K + E + 195, K + E + 190, K + E + 199])[None, :, None]   # in, out, in the tail
+    want_res, want_spare, held = residency.clone(), spare.clone(), spare[..., 1].clone()
+    want = reference.release_tail(1, 8, want_res, classes, limits, want_spare)
     dev = {n: t.to(device) for n, t in (("residency", residency), ("classes", classes), ("limits", limits),
                                         ("spare", spare))}
-    got = resolve.lend_tail(0, 8, dev["residency"], dev["classes"], dev["limits"], spare=dev["spare"],
-                            last=torch.zeros(6, E, dtype=torch.int32, device=device))
+    if device == "cuda":
+        torch.cuda.set_sync_debug_mode("error")
+    try:
+        got = resolve.lend_tail(1, 8, dev["residency"], dev["classes"], dev["limits"], spare=dev["spare"],
+                                last=torch.zeros(6, E, dtype=torch.int32, device=device))
+    finally:
+        if device == "cuda":
+            torch.cuda.set_sync_debug_mode("default")
     assert torch.equal(got.cpu(), want) and torch.equal(dev["spare"].cpu(), want_spare)
-    assert (want_spare[:, [0, 2], 0] == 0).all() and (want_spare[:, 1, 0] == 2).all()
-    assert want.any() and not ((want_spare[..., 1:] >= (limits - 8)[:, None]) & (want_spare[..., :1] > 0)).any()
+    assert torch.equal(dev["residency"].cpu(), want_res)
+    lending = torch.tensor([True, True, False, True, False, False])
+    assert (want_spare[lending, :, 0] == 0).all() and (want_spare[~lending, :, 0] > 0).all()
+    assert want[lending, :reference.SPARES].all() and not want[~lending, :reference.SPARES].any()
+    assert torch.equal(want_res[lending, :reference.SPARES, 0], held[lending])     # owners on their slots
+    tail = ((classes[:, None] == 1) & (want_res >= (limits - 8)[:, None])).any(-1)
+    assert torch.equal(want, tail | (lending[:, None] & (torch.arange(E) < reference.SPARES)))
 
 
 @contextlib.contextmanager

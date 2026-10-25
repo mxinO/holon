@@ -32,6 +32,7 @@ there. Every host edit carries the value it expects (a failed precondition stops
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import fnmatch
 import functools
@@ -127,6 +128,7 @@ class TieredStore:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
+        self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
         # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
@@ -369,7 +371,7 @@ class TieredStore:
         self.hits = static(f"{self.name}.hits", (1,))                  # misses found read ahead, so far (tests)
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
-        self.parked = torch.zeros((), dtype=torch.int64, device=self.ctx.device)   # lent pieces parked in RAM, so far
+        self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
 
     @property
     def layers(self) -> list[int]:
@@ -669,6 +671,7 @@ class TieredStore:
                 print(f"holon: {self.name}: this layout stages (its cache cannot lend a prompt step's staging): the "
                       "step-peak loan (moe.lend_peak) stays reserved, in the pool's own tail")
         self._step, kinds, at = step.step, self._kinds, 0
+        self._started = False
         kinds[:self._written] = PADDING
         if step.row_kind is None:                                    # launched plans are the scheduler's
             raise ValueError(f"{self.name}: step {step.step} launched without row kinds (`BatchPlan.row_kind`)")
@@ -741,6 +744,9 @@ class TieredStore:
             self.borrowed["partial"] = self.borrowed.get("partial", 0) + (int(telemetry["ring_ok"][0]) == 2)
         self.residency.commit(step.step, record["records"], returned=mode is not None,
                               device=telemetry["map"].numpy() if self.exclusive else None)
+        if self.exclusive and mode:              # the step's lent experts that ended in RAM: parked
+            lent = record["records"][record["records"][:, 1] == -1]
+            self.parked += int((self.residency.host[lent[:, 0], lent[:, 2]] == -1).all(-1).sum())
         for tap in self.taps:
             tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
@@ -820,6 +826,8 @@ class TieredStore:
         are never read after); None for any other step."""
         if self._loan is None or not self._step_loan:
             return None
+        if self.exclusive:                       # its lent experts parked before the forward writes the loan
+            self.start_step(early=True)
         if self._step_tail is not None:
             cls, n = self._step_tail
             c = list(self.classes.values())[cls]
@@ -904,7 +912,7 @@ class TieredStore:
 
     def lend_tail(self, cls: int, n: int) -> torch.Tensor:
         """A tail step's call 0 (docs/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last `n`
-        slots, as the resolve contract's `lend_tail` picks them (the policy's spares there released), unmapped and
+        slots, as the resolve contract's `lend_tail` picks them (with the policy's released spares'), unmapped and
         logged as `lend`'s. Returns the picks [groups, items]."""
         picked = self.resolvers[0].resolve.lend_tail(cls, n, self.residency.device, self._class_index, self.limits,
                                                      **self.state)
@@ -943,9 +951,14 @@ class TieredStore:
         n, (c_n, u_n) = groups * items, owner.shape
         dev = res.device
         heat = (self.heat.double() if self.heat is not None else torch.zeros(groups, items, device=dev)).reshape(-1)
-        lent = picked.reshape(-1)
         cls = classes[:, None, :].expand(groups, items, roles).reshape(n, roles)            # each piece's class
         slots, units = res.reshape(n, roles), host.reshape(n, roles)
+        picked = picked.reshape(-1)
+        # a lent expert already in RAM (a policy's released spare's owner, mapped back to its spare's slots by its
+        # `lend_tail`) stays there; one holding a slot of this step's activation loan goes to the SSD (the forward
+        # writes the loan before these copies may run: docs/v1-glm.md D8b, step 1's review S1-B1)
+        already = picked & (units >= 0).all(1)
+        lent = picked & ~already & ~self._in_loan(cls, slots)
         # 1. free units: the k-th lent expert (hottest first) needing class c takes c's k-th free unit, if each of its
         # classes has one (a unit a skipped expert would have taken stays free)
         order = torch.argsort(torch.where(lent, -heat, math.inf), stable=True)
@@ -961,7 +974,7 @@ class TieredStore:
         to = torch.where(placed[:, None], to, -1)
         # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter
         rest = lent & ~placed
-        ram = (slots == -1).all(1) & (units >= 0).all(1) & ~lent
+        ram = (slots == -1).all(1) & (units >= 0).all(1) & ~picked
         dropped = torch.zeros(n + 1, dtype=torch.bool, device=dev)    # (+ a sink entry, as `to`'s row below)
         at = torch.arange(n, device=dev)
         to = torch.cat([to, to[:1]])
@@ -974,28 +987,72 @@ class TieredStore:
             dropped.scatter_(0, torch.where(pair, b, n), True)
         to, dropped = to[:n], dropped[:n]
         placed = to[:, 0] >= 0
-        self.parked += placed.sum()
-        # 3. the maps: parked into their units (−1), the rest and the dropped onto the SSD (−2)
+        # 3. the maps: parked into their units (−1), the rest and the dropped onto the SSD (−2), the already parked
+        # as they were
         sink = c_n * u_n
         flat_owner = torch.cat([owner.reshape(-1), owner.new_zeros(1)])
         for r in range(roles):
             flat_owner.scatter_(0, torch.where(placed, cls[:, r] * u_n + to[:, r].long(), sink), at.int())
         owner.view(-1).copy_(flat_owner[:sink])
         self._copy_parked(cls, slots.clone(), to, placed)
+        lent = lent | (picked & ~already)
         res.copy_(torch.where(lent[:, None], torch.where(placed[:, None], -1, -2),
-                              torch.where(dropped[:, None], -2, slots)).view(groups, items, roles).int())
+                              torch.where(already[:, None], -1, torch.where(dropped[:, None], -2, slots)))
+                  .view(groups, items, roles).int())
         host.copy_(torch.where(lent[:, None], to, torch.where(dropped[:, None], -1, units)).view(groups, items, roles))
 
+    def _in_loan(self, cls: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
+        """[n] bool: the pieces' experts holding a slot of this step's activation loan (`activations`: the tail's
+        class, its last slots' bytes)."""
+        if not self._step_loan or self._step_tail is None:
+            return torch.zeros(slots.shape[0], dtype=torch.bool, device=slots.device)
+        c, _ = self._step_tail
+        size, unit = list(self.classes.values())[c].size, list(self.classes.values())[c].unit_bytes
+        first = size - (-(-self._step_loan // unit) + 1)                 # (+ one: the loan's 512-byte alignment)
+        return ((cls == c) & (slots >= first)).any(1)
+
     def _copy_parked(self, cls: torch.Tensor, slots: torch.Tensor, to: torch.Tensor, placed: torch.Tensor) -> None:
-        """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit)."""
+        """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit), on the
+        store's copy stream after the work enqueued so far: the step's first resolve waits for them (`wait_parked`)
+        before its staging can overwrite a lent slot."""
         n, roles = slots.shape
-        for c, (name, sc) in enumerate(self.classes.items()):
-            mine = (cls == c) & placed[:, None]                          # [n, roles]
-            pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
-            ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos, x.reshape(-1))
-                    for x in (slots.int(), to)]                          # (+ a sink entry each)
-            fetch = torch.stack([e[:-1] for e in ends])
-            self._class_fetch[name](fetch, mine.sum().int().view(1), sc.slots(), sc.units())
+        side = self.fetch_stream() if slots.is_cuda else None
+        if side is not None:
+            side.wait_stream(torch.accelerator.current_stream(slots.device))
+        with side if side is not None else contextlib.nullcontext():
+            for c, (name, sc) in enumerate(self.classes.items()):
+                mine = (cls == c) & placed[:, None]                      # [n, roles]
+                pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
+                ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos,
+                                                                                                    x.reshape(-1))
+                        for x in (slots.int(), to)]                      # (+ a sink entry each)
+                fetch = torch.stack([e[:-1] for e in ends])
+                self._class_fetch[name](fetch, mine.sum().int().view(1), sc.slots(), sc.units())
+        if side is not None:
+            for t in (slots, to):
+                t.record_stream(side)
+            self._parked = torch.Event(device=slots.device)
+            self._parked.record(side)
+
+    def wait_parked(self) -> None:
+        """The current stream waits for the step's parking copies (before a lent slot is reused)."""
+        if self._parked is not None:
+            torch.accelerator.current_stream(self.ctx.device).wait_event(self._parked)
+            self._parked = None
+
+    def start_step(self, early: bool = False) -> None:
+        """The step's first device work (its first resolve; or, `early`, a tail step's under exclusive tiers before its
+        activation loan is handed out, so its lent experts are parked from intact slots, the copies under the layers
+        before the first MoE one — its first resolve then skips it): its counts and error words from zero, its edits
+        applied, its slots borrowed. (No flag survives into a graph's capture: an early start is eager only.)"""
+        if self._started and not early:
+            self._started = False
+            return
+        self._started = early
+        for t in self.zeroed:
+            t.zero_()
+        self.residency.apply(self.edit_errors)
+        self.begin()
 
     def _swap(self, commit: int, swaps: list[tuple[int, int, bool]]) -> None:
         """A host policy's swaps, two-phase: the outgoing items unmapped at launch commit + 2, the incoming copied into

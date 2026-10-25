@@ -13,8 +13,6 @@ from __future__ import annotations
 import torch
 from holon.api import Constraint, KernelSpec
 
-from holon_plugins.placement.promote import reference
-
 from . import extension
 
 OP, RESOLVE = "moe_resolve.promote", "moe_resolve@1"
@@ -54,9 +52,21 @@ class Resolve:
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   spare: torch.Tensor, **state) -> torch.Tensor:
-        """The experts holding class `cls`'s last n slots, after the spares there are released (docs/v1-glm.md D8a);
-        device ops, no host sync."""
-        return reference.release_tail(cls, n, residency, classes, limits, spare)
+        """The experts holding class `cls`'s last n slots (docs/v1-glm.md D8a), and the owners of the spares of every
+        layer with a role of class `cls`, released: absent, the owners mapped back to their slots so the caller lends
+        them with the range's holders and returns the slots at the step's end. Device ops, no host sync."""
+        groups, experts, roles = residency.shape
+        slots = spare[..., 1:]                                                # [G, S, R]
+        freed = (classes == cls).any(1)[:, None] & (spare[..., 0] > 0)       # [G, S]
+        owner = torch.arange(groups, device=spare.device)[:, None] * experts + spare[..., 0].long() - 1
+        flat = torch.cat([residency.view(-1, roles), residency.new_zeros(1, roles)])     # (+ a sink row)
+        flat.index_copy_(0, torch.where(freed, owner, groups * experts).view(-1), slots.reshape(-1, roles))
+        residency.view(-1, roles).copy_(flat[:-1])
+        released = torch.zeros(groups * experts + 1, dtype=torch.bool, device=spare.device)
+        released.index_fill_(0, torch.where(freed, owner, groups * experts).view(-1), True)
+        spare.masked_fill_(freed[..., None], 0)
+        tail = ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
+        return tail | released[:-1].view(groups, experts)
 
 
 class Plugin:

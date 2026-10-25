@@ -1090,9 +1090,56 @@ def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, polic
     store._loan.use = lambda r: (ranges.append(r.numel()), use(r))[1]
     assert _served(engine, prompts) == want
     assert store.exclusive and ranges and store.borrowed["stage"] and not store.borrowed["ring"], store.borrowed
+    held = _slots_held(store)                        # again, F10's spares (refilled by the decodes) in the lent tail:
+    assert _served(engine, prompts) == want          # released, their slots return (step 1's review S1-M1)
+    assert torch.equal(_slots_held(store), held)
     engine.close()
     with pytest.raises(RuntimeError, match="require.*moe.ring_lend is not tail"):
         _gpu_engine(file, host_memory=1 << 27, plugin_options=opts | {"moe.ring_lend": "coldest"})
+
+
+def _slots_held(store) -> torch.Tensor:
+    """Each layer's cache slots per role between steps: mapped, empty, a policy's spares' — conserved (none leaks)."""
+    spare = store.state.get("spare")
+    spares = (spare[..., 0] > 0).sum(1) if spare is not None else 0
+    return ((store.residency.device >= 0).sum(1) + (store.n_empty + spares)[:, None]).cpu()
+
+
+def _ram_units_hold_their_pieces(store) -> int:
+    """Every RAM-resident expert's units hold its pieces' bytes, as the file has them (exclusive tiers); how many."""
+    from holon_std.tiered import files
+    from holon_std.tiered.store import _offsets
+
+    res, host = store.residency.device.cpu().numpy(), store.host_units.cpu().numpy()
+    checked = 0
+    for g, classes in enumerate(store.layer_classes):
+        for i in np.flatnonzero((res[g] == -1).all(-1)):
+            for r, c in enumerate(classes):
+                piece = c.pieces[store._piece_index(c, g, int(i), r)][3]
+                want = np.empty(c.unit_bytes, dtype=np.uint8)
+                files.read([(e, want[o:o + e.nbytes]) for e, o in _offsets(piece)])
+                got = c.host_view()[int(host[g, i, r])].numpy()[:c.unit_bytes]
+                assert np.array_equal(got, want), (g, int(i), r)
+            checked += 1
+    return checked
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
+    """Step 1's review S1-B1 (docs/v1-glm.md D8b, D9): RAM with free units, the tail lent with the step's activation
+    loan (`require`): lent experts are parked from intact slots — the step's lending runs before the loan is handed to
+    the forward, an expert holding a loan slot goes to the SSD, the copies are waited for before a lent slot is reused —
+    so every RAM-resident expert's units hold its pieces as the file does, and the streams are the resident store's."""
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    assert _served(engine, prompts) == want
+    assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
+    assert _ram_units_hold_their_pieces(store) > 0
+    engine.close()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

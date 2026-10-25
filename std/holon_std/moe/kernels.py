@@ -122,12 +122,13 @@ then `staging` slots, then cache slots.
   int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/v1-moe-prefill.md D11), on the
   device without a host sync: the experts holding any of class `cls`'s last `n` slots (a role r of class `cls` at a
   slot ≥ `limits[g, r]` − n, the class's arena size less n), whole — the caller evicts them in every role, unmaps,
-  logs and returns them as `lend`'s —, after the policy has released its own slots in that range that no expert maps
-  (spares: such a slot stops being one). The caller lends the range itself to the step's expert passes (D10's `out`
-  and `scratch`), and the experts' other slots and the layer's empty slots outside it to the step's ring and staging,
-  until the step's end. Its class is the store's choice, the same under every policy: the largest class arena — the
-  class of the first role (gate/up) that the most layers have, ties to the lower class index. A policy without
-  `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
+  logs and returns them as `lend`'s —, after the policy has released its own slots that no expert maps (spares) in
+  that range or anywhere in a lending layer: each mapped back to an expert it picks, so the slots are lent and return
+  to the layer's empty stack at the step's end (none leaks). The caller lends the range itself to the step's expert
+  passes (D10's `out` and `scratch`), and the experts' other slots and the layer's empty slots outside it to the
+  step's ring and staging, until the step's end. Its class is the store's choice, the same under every policy: the
+  largest class arena — the class of the first role (gate/up) that the most layers have, ties to the lower class
+  index. A policy without `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its

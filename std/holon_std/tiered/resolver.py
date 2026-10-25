@@ -52,10 +52,8 @@ class DeviceResolver:
             return
         self._prepared = True
         if not self.group and not first:
-            for t in store.zeroed:
-                t.zero_()
-            store.residency.apply(store.edit_errors)
-            store.begin()
+            store.start_step()
+            store.wait_parked()
         if not first:
             self.ring, self.stage = store.sources(self.group)
 
