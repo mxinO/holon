@@ -379,6 +379,43 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
                     assert torch.equal(d2[units2[1, :4].long()].cpu(), data2[units2[0, :4].long()])
                     assert not d2[units2[1, 4:].long()].any()
             assert torch.equal(d2[units2[1].long()].cpu(), data2[units2[0].long()])
+            d2.zero_()                         # an SSD round's fixed size: entries [r·4, (r + 1)·4)
+            fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                [data2.to(device)], [d2], part=1, size=4)
+            assert torch.equal(d2[units2[1, 4:].long()].cpu(), data2[units2[0, 4:].long()])
+            assert not d2[units2[1, :4].long()].any()
+            with pytest.raises(ValueError, match="not both"):
+                fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                    [data2.to(device)], [d2], part=0, parts=2, size=4)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_fetch_reads_landing_rows_by_their_runs(plugins, device):
+    """docs/v1-glm.md D8f: from landing rows (each piece's extents at their offsets in an aligned superset, `runs`),
+    a slot gets the extents back to back, as the oracle does — 16-byte-aligned runs and unaligned ones — through the
+    instance's call and, both roles at once, `gather_roles`; landing rows wider than the slots."""
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    unit, row = 4096 + 48, 2 * 4096 + 8192
+    fetch_ = kernel(plugins, device, EXPERT_FETCH, provider, unit_bytes=unit, staging=4)
+    g = torch.Generator().manual_seed(1)
+    rows = torch.randint(0, 256, (5, row), dtype=torch.uint8, generator=g)
+    runs = torch.tensor([[[32, 2048], [8192 + 32, unit - 2048]], [[16, 4096], [4096 + 4096, 48]],
+                         [[7, 1000], [9000, unit - 1000]], [[0, unit], [0, 0]], [[100, 3], [200, unit - 3]]],
+                        dtype=torch.int64)
+    dst = torch.randint(0, 256, (K + 8, unit), dtype=torch.uint8, generator=g)
+    units = torch.tensor([[2, 0, 4, 1], [K + 1, K + 3, K, K + 7]], dtype=torch.int32)
+    want = reference.expert_fetch(units, 4, rows, dst.clone(), runs)
+    assert torch.equal(want[K + 3, :2048], rows[0, 32:32 + 2048])
+    d = dst.to(device)
+    fetch_(units.to(device), torch.tensor([4], dtype=torch.int32, device=device), rows.to(device), d, runs.to(device))
+    assert torch.equal(d.cpu(), want)
+    if hasattr(fetch_, "gather_roles"):
+        d, d2 = dst.to(device), dst.to(device)
+        units2 = torch.tensor([[3, 1, 0, 2], [K + 2, K + 4, K + 5, K + 6]], dtype=torch.int32)
+        fetch_.gather_roles(torch.stack([units, units2]).to(device), torch.tensor([4, 3], dtype=torch.int32,
+                            device=device), [rows.to(device)] * 2, [d, d2], runs=[runs.to(device)] * 2)
+        assert torch.equal(d.cpu(), want)
+        assert torch.equal(d2.cpu(), reference.expert_fetch(units2, 3, rows, dst.clone(), runs))
 
 
 def test_prefetch_is_selected_for_its_copy_mode():

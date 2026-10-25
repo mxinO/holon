@@ -101,13 +101,21 @@ class ExpertFetch:
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    def __call__(self, fetch, n, src, dst) -> None:
-        self.lib.fetch(fetch, n, src, dst, False)
+    def __call__(self, fetch, n, src, dst, runs=None) -> None:
+        if runs is None:
+            self.lib.fetch(fetch, n, src, dst, False)
+        else:                                  # landing rows (docs/v1-glm.md D8f): each piece's extents by its runs
+            self.lib.fetch_runs(fetch, n, src, dst, runs)
 
-    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
+    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int | None = None, size: int | None = None,
+                     runs=None) -> None:
         """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
-        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉."""
-        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts)
+        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ — or q = `size`
+        (exactly one of the two); `runs` (one per role): srcs are landing rows."""
+        if parts is not None and size is not None:
+            raise ValueError("expert_fetch@1's gather_roles: parts or size, not both")
+        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts or 1, size or 0,
+                             list(runs or []))
 
 
 class ExpertPrefetch:

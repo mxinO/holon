@@ -473,7 +473,29 @@ struct Roles {
     int64_t words[MAX_ROLES];
     int roles, staging;
     int part = 0, parts = 1;           // the call copies part `part` of `parts` of each role's list: its entries
-};                                     // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group)
+                                       // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group) —
+    int size = 0;                      // or, `size` > 0, q = size (docs/v1-glm.md D8f's rounds)
+    // A role read from landing rows (D8f): runs[r][row, x] = (offset in the row, nbytes) of extent x of the piece
+    // there; the slot gets the extents back to back. The row's width is its own (`row_bytes`).
+    const int64_t * runs[MAX_ROLES] = {};
+    int extents[MAX_ROLES] = {};
+    int64_t row_bytes[MAX_ROLES] = {};
+};
+
+// One extent of a landing row into its place in a slot: 16-byte words where offsets and length allow, else bytes.
+__device__ __forceinline__ void copy_run(const uint8_t * __restrict__ s, uint8_t * __restrict__ d, int64_t nbytes,
+                                         int64_t c, int64_t step) {
+    if (((reinterpret_cast<uintptr_t>(s) | reinterpret_cast<uintptr_t>(d) | uint64_t(nbytes)) & 15) == 0) {
+        const int64_t words = nbytes / 16, base = c * step + threadIdx.x;
+        for (int64_t i = base; i < words && i < (c + 1) * step; i += blockDim.x) {
+            reinterpret_cast<uint4 *>(d)[i] = reinterpret_cast<const uint4 *>(s)[i];
+        }
+    } else {
+        for (int64_t i = c * step * 16 + threadIdx.x; i < nbytes && i < (c + 1) * step * 16; i += blockDim.x) {
+            d[i] = s[i];
+        }
+    }
+}
 
 template <int UNROLL>
 __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const Roles p) {
@@ -481,11 +503,28 @@ __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t 
     const int64_t step = int64_t(blockDim.x) * UNROLL;
     int64_t flat = 0;
     for (int r = 0; r < p.roles; ++r) {
-        const int all = min(n[r], p.staging), q = (all + p.parts - 1) / p.parts;
+        const int all = min(n[r], p.staging), q = p.size > 0 ? p.size : (all + p.parts - 1) / p.parts;
         const int first = min(all, p.part * q), count = min(all, first + q) - first;
         const int64_t chunks = (p.words[r] + step - 1) / step;
         const int32_t * f = fetch + int64_t(r) * 2 * p.staging;
         const int64_t grid = gridDim.x;
+        if (p.runs[r] != nullptr) {                          // landing rows: (entry, extent, chunk) by the flat walk
+            const int X = p.extents[r];
+            for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * X * chunks;
+                 c += grid) {
+                const int b = first + int(c / (X * chunks)), x = int(c / chunks % X);
+                const int64_t * run = p.runs[r] + (int64_t(f[b]) * X) * 2;
+                int64_t at = 0;                              // the extent's place in the slot: the ones before it
+                for (int y = 0; y < x; ++y) {
+                    at += run[2 * y + 1];
+                }
+                const auto * row = reinterpret_cast<const uint8_t *>(p.src[r]) + int64_t(f[b]) * p.row_bytes[r];
+                auto * slot = reinterpret_cast<uint8_t *>(p.dst[r] + int64_t(f[p.staging + b]) * p.words[r]);
+                copy_run(row + run[2 * x], slot + at, run[2 * x + 1], c % chunks, step);
+            }
+            flat += int64_t(count) * X * chunks;
+            continue;
+        }
         for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * chunks;
              c += grid) {                                    // global chunk flat + c falls to CTA (flat + c) % grid
             const int b = first + int(c / chunks);
@@ -980,7 +1019,8 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
 }
 
 void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at::Tensor> srcs,
-                  std::vector<at::Tensor> dsts, int64_t ctas, int64_t part, int64_t parts) {
+                  std::vector<at::Tensor> dsts, int64_t ctas, int64_t part, int64_t parts, int64_t size,
+                  std::vector<at::Tensor> runs) {
     TORCH_CHECK(!dsts.empty() && dsts.size() == srcs.size() && int(dsts.size()) <= MAX_ROLES, "1 to ", MAX_ROLES,
                 " roles, a src and dst each");
     const c10::cuda::CUDAGuard guard(dsts[0].device());
@@ -991,14 +1031,26 @@ void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at
     Roles p{};
     p.roles = int(roles);
     p.staging = int(fetch.size(2));
-    TORCH_CHECK(parts >= 1 && 0 <= part && part < parts, "part ", part, " of ", parts);
+    TORCH_CHECK(size > 0 ? part >= 0 : (parts >= 1 && 0 <= part && part < parts), "part ", part, " of ", parts,
+                " (size ", size, ")");
     p.part = int(part);
     p.parts = int(parts);
+    p.size = int(size);
+    TORCH_CHECK(runs.empty() || runs.size() == dsts.size(), "runs: one per role, or none");
     for (int64_t r = 0; r < roles; ++r) {
         const at::Tensor & src = srcs[r];
         const at::Tensor & dst = dsts[r];
-        TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) &&
-                    dst.size(1) % 16 == 0, "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
+        if (!runs.empty()) {                                 // landing rows of their own width
+            const at::Tensor & run = runs[r];
+            TORCH_CHECK(run.scalar_type() == at::kLong && run.dim() == 3 && run.size(0) == src.size(0) &&
+                        run.size(2) == 2 && run.is_contiguous() && run.device() == dst.device(),
+                        "runs [U, X, 2] int64 beside the rows (a mapped host pool's device view)");
+            p.runs[r] = run.data_ptr<int64_t>();
+            p.extents[r] = int(run.size(1));
+            p.row_bytes[r] = src.size(1);
+        }
+        TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && (!runs.empty() || dst.size(1) == src.size(1))
+                    && dst.size(1) % 16 == 0, "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
         check(src, dsts[0], at::kByte, {src.size(0), src.size(1)}, "src");
         check(dst, dsts[0], at::kByte, {dst.size(0), dst.size(1)}, "dst");
         TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 &&
@@ -1159,7 +1211,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
     m.def("fetch_roles", &gather_roles, "expert_fetch@1's gather_roles: every role's fetch of a group in one launch "
-          "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging)");
+          "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging); one part of "
+          "the lists (`parts`, or a fixed `size`); `runs`: srcs are landing rows (D8f)",
+          pybind11::arg("fetch"), pybind11::arg("n"), pybind11::arg("srcs"), pybind11::arg("dsts"), pybind11::arg("ctas"),
+          pybind11::arg("part") = 0, pybind11::arg("parts") = 1, pybind11::arg("size") = 0,
+          pybind11::arg("runs") = std::vector<at::Tensor>{});
+    m.def("fetch_runs", [](const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, const at::Tensor & dst,
+                           const at::Tensor & runs) {
+              gather_roles(fetch.unsqueeze(0), n, {src}, {dst}, FETCH_CTAS, 0, 1, 0, {runs});
+          }, "expert_fetch@1 from landing rows: dst[fetch[1, i]] = the extents runs[fetch[0, i]] name in src[fetch[0, i]]");
     m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
           "for i < min(n, staging)");
 }

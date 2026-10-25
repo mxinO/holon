@@ -272,8 +272,8 @@ class ExpertFetch:
     def __init__(self, ctx, *, unit_bytes: int, staging: int) -> None:
         pass
 
-    def __call__(self, fetch, n, src, dst):
-        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
+    def __call__(self, fetch, n, src, dst, runs=None):
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst, runs))
 
 
 class ExpertPrefetch:
