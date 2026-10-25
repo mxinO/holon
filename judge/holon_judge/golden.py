@@ -11,6 +11,7 @@ import os
 import pathlib
 import re
 import time
+from collections.abc import Callable
 
 import torch
 import transformers
@@ -209,6 +210,7 @@ def _skeleton(config_dir: pathlib.Path) -> torch.nn.Module:
     config = transformers.AutoConfig.from_pretrained(config_dir).get_text_config()
     if hasattr(config, "quantization_config"):
         del config.quantization_config
+    archs.register(config.model_type)
     with torch.device("meta"):
         return transformers.AutoModelForCausalLM.from_config(config, attn_implementation="sdpa",
                                                              experts_implementation="eager").eval()
@@ -217,15 +219,15 @@ def _skeleton(config_dir: pathlib.Path) -> torch.nn.Module:
 class _Inputs(torch.nn.Module):
     """A decoder layer's stand-in: keeps what the model passes the layer (per call) and returns its input."""
 
-    def __init__(self, layer: torch.nn.Module, kept: list) -> None:
+    def __init__(self, layer: torch.nn.Module, kept: list, out: Callable) -> None:
         super().__init__()
-        self.kept = kept
+        self.kept, self.out = kept, out
         if hasattr(layer, "attention_type"):
             self.attention_type = layer.attention_type
 
     def forward(self, hidden: torch.Tensor, **kwargs) -> torch.Tensor:
         self.kept.append((hidden, kwargs))
-        return hidden
+        return self.out(hidden)
 
 
 @torch.inference_mode()
@@ -249,12 +251,14 @@ def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k:
         model.tie_weights()
     if missing := [n for n, p in model.named_parameters() if p.is_meta and not n.startswith("model.layers.")]:
         raise ValueError(f"no tensor for {missing[:4]}")
-    model.model.rotary_emb = type(model.model.rotary_emb)(config=config).to(device)    # buffers, not weights
+    if hasattr(model.model, "rotary_emb"):                                              # (NoPE models: none)
+        model.model.rotary_emb = type(model.model.rotary_emb)(config=config).to(device)    # buffers, not weights
     prepare(model.lm_head, "lm_head")
     _torch_paths(model)
     t0 = time.perf_counter()
     kept: list[list] = [[] for _ in blocks]
-    model.model.layers = torch.nn.ModuleList(_Inputs(b, kept[i]) for i, b in enumerate(blocks))
+    model.model.layers = torch.nn.ModuleList(_Inputs(b, kept[i], lambda h: archs.stand_in(model, h))
+                                             for i, b in enumerate(blocks))
     for p in prompts.prompts:
         model.model(torch.tensor([p.ids], device=device), use_cache=False)
     model.model.layers = blocks
@@ -263,7 +267,7 @@ def _streamed(model: torch.nn.Module, state, layers: str, prompts: PromptSet, k:
         prefix = f"model.layers.{i}."
         load(block, state(lambda name, start=f"{layers}{i}.": name.startswith(start)), prefix)
         prepare(block, prefix)
-        hidden = [block(h, **kwargs) for h, (_, kwargs) in zip(hidden, kept[i], strict=True)]
+        hidden = [archs.layer_out(model, block(h, **kwargs)) for h, (_, kwargs) in zip(hidden, kept[i], strict=True)]
         block.to("meta")
     final = archs.final_norm(model)
     rows = [_head(model.lm_head, final(h)[0, :-1], torch.tensor(p.ids[1:], device=device), k)
