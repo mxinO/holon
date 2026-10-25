@@ -281,8 +281,9 @@ struct State {
     std::shared_ptr<IoEngine> io;                     // the `io` pool's reads (completion-driven), or none
     std::unique_ptr<std::atomic<uint32_t>[]> abandons;   // per slot: requests the watchdog abandoned (memop)
     // The I/O worker's counters (docs/v1-glm.md D8f; step 1's review C S1-M3): bytes read, time with reads in flight,
-    // and per request (signal seen → answered) its latency by its experts (rows): 1 or none, 2–3, 4 or more.
-    std::atomic<int64_t> bytes{0}, busy_ns{0}, lat_ns[3]{}, requests[3]{};
+    // and per request (signal seen → answered) its latency by its experts (rows): none (an empty round, answered at
+    // once), 1, 2–3, 4 or more (step 1's fix review C: k = 1 then means what N3's does).
+    std::atomic<int64_t> bytes{0}, busy_ns{0}, lat_ns[4]{}, requests[4]{};
 
     Word word(size_t s) const { return Word{words + s * STRIDE}; }
     Word cpu_flag() const { return word(tasks.size()); }
@@ -915,7 +916,7 @@ void IoEngine::answer(size_t s) {
         st_->word(s).compare_exchange_strong(req, r.failed ? FAILED : DONE, __ATOMIC_RELEASE);
     }
     st_->served.fetch_add(1, std::memory_order_relaxed);
-    const int b = r.plan.rows <= 1 ? 0 : r.plan.rows < 4 ? 1 : 2;
+    const int b = r.plan.rows == 0 ? 0 : r.plan.rows == 1 ? 1 : r.plan.rows < 4 ? 2 : 3;
     st_->lat_ns[b].fetch_add((Clock::now() - r.since).count(), std::memory_order_relaxed);
     st_->requests[b].fetch_add(1, std::memory_order_relaxed);
     nvtxRangeEnd(r.range);
@@ -1118,8 +1119,8 @@ class Worker {
         d["backend"] = backend();
         d["bytes"] = st_->bytes.load(std::memory_order_relaxed);
         d["busy_ns"] = st_->busy_ns.load(std::memory_order_relaxed);
-        const char * names[3] = {"1", "2-3", "4+"};
-        for (int b = 0; b < 3; ++b) {
+        const char * names[4] = {"0", "1", "2-3", "4+"};
+        for (int b = 0; b < 4; ++b) {
             d[(std::string("requests_") + names[b]).c_str()] = st_->requests[b].load(std::memory_order_relaxed);
             d[(std::string("latency_ns_") + names[b]).c_str()] = st_->lat_ns[b].load(std::memory_order_relaxed);
         }
@@ -1265,7 +1266,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         .def("flag", &Worker::flag, "the sticky error bits: 1 a task failed, 2 a wait timed out")
         .def("served", &Worker::served, "requests answered so far")
         .def("io_stats", &Worker::io_stats, "the io pool's counters: backend, bytes read, busy_ns (time with reads in "
-             "flight), and per request size (experts: 1 or none, 2-3, 4+) requests_* and latency_ns_* (signal seen to answer)")
+             "flight), and per request size (experts: 0, 1, 2-3, 4+) requests_* and latency_ns_* (signal seen to answer)")
         .def("stop", &Worker::stop, "join the threads (after a drain); a request still open is abandoned; True: the "
              "coordinator, in a task past the time bound, was left behind (its words and tasks must outlive it)")
         .def("kill", &Worker::kill, "tests: the coordinator stops answering");
