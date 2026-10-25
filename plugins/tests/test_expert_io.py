@@ -566,7 +566,7 @@ def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("policy", ["lfu", ""])
 @pytest.mark.parametrize("tokens, free, ahead", [(1, 0, False), (6, 3, False), (12, 0, True), (40, 20, False),
-                                                 (40, 0, True)])
+                                                 (40, 20, True)])
 def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     """`moe_tiers@2` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
@@ -574,7 +574,8 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is
     displaced. SSD reads land in landing rows (docs/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
     its io row (piece, row, keep unit), its own fetch list; the RAM entries stay in the fetch list, in order. A miss
-    the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, not kept."""
+    the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, never kept — with
+    decode rows and free RAM units beside it (docs/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3)."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -648,3 +649,8 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
         assert records and (want["n_moves"][:, 0] > 0).all()         # victims demoted
     if tokens == 40 and free:
         assert (want["residency"] == -2).sum() < (t["residency"] == -2).sum()   # SSD reads kept in free units
+    if ahead:                                                   # a read-ahead hit: no read, never kept in RAM
+        early = (sets >= 0).nonzero().flatten()
+        assert not (want["residency"][layer, early] == -1).any()
+        assert all(not {piece for piece, _, _ in want["io"][r]} & {int(t["piece"][layer, e, r]) for e in early}
+                   for r in range(ROLES))

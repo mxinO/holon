@@ -367,8 +367,6 @@ class TieredStore:
         self.io_rows = static(f"{self.name}.io_rows", (self.roles, 1 + self.prefill, 3))
         self.hit = static(f"{self.name}.hit", (self.roles, 2, self.prefill))       # misses read ahead (row, slot)
         self.n_hit = static(f"{self.name}.n_hit", (self.roles,))
-        self.ssd_peak = static(f"{self.name}.ssd_peak", (1,))          # the most SSD misses of a call (tests)
-        self.hits = static(f"{self.name}.hits", (1,))                  # misses found read ahead, so far (tests)
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
         self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
@@ -438,14 +436,14 @@ class TieredStore:
             # a lent expert's parking (`_park`): the groups of each class signature, each class's fetch (slot → unit)
             self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
                                 for row in np.unique(self.class_table, axis=0)]
-            self._class_fetch = {c.name: f for r in self.resolvers for c, f in zip(r.classes, r._fetch, strict=True)}
+            self._class_fetch = {name: f for r in self.resolvers for name, f in r.fetches().items()}
             rows = 3 * (1 + self.landing_rows)                     # a round's request rows, the worker's view
             self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
                                     pref_units=self.roles, device="host", mapped=True)
             rows = 3 * (1 + self.ahead_rows)                       # each read-ahead set's request rows
             self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
                                        pref_units=DEPTH * self.roles, device="host", mapped=True)
-            self.descriptors = {}
+            self.descriptors, shape = {}, {}
             for c in classes:
                 rows = []
                 for n in range(len(c.pieces)):
@@ -458,14 +456,21 @@ class TieredStore:
                 width = max(map(len, rows))
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)
-                # its landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in
-                # place (the copy task's runs), a row as wide as the widest piece's supersets
-                row = max(sum(_superset(x) for x in piece) for piece in rows)
-                n = self.landing_rows + DEPTH * self.ahead_rows
-                self.landing[c.name] = (ctx.pool(f"{self.name}.landing.{c.name}", unit_bytes=row, min_units=n,
-                                                 pref_units=n, device="host", mapped=True), row, width)
-                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width, min_units=n,
-                                             pref_units=n, device="host", mapped=True)
+                shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows), width)
+            # landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
+            # (the copy task's runs); one pool a role — a layer's role is of one class, so its classes share it
+            # (step 1's review C S1-m2) —, a row as wide as its classes' widest piece's supersets; a class reads it
+            # as rows of its own width
+            n = self.landing_rows + DEPTH * self.ahead_rows
+            for role in sorted({r for r, _, _ in shape.values()}):
+                row, width = (max(x[i] for x in shape.values() if x[0] == role) for i in (1, 2))
+                pool = ctx.pool(f"{self.name}.landing.{role}", unit_bytes=row, min_units=n, pref_units=n,
+                                device="host", mapped=True)
+                runs = ctx.pool(f"{self.name}.runs.{role}", unit_bytes=16 * width, min_units=n, pref_units=n,
+                                device="host", mapped=True)
+                for name, (r, row, width) in shape.items():
+                    if r == role:
+                        self.landing[name], self.runs[name] = (pool, row, width), runs
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
@@ -557,8 +562,9 @@ class TieredStore:
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
-        if self.exclusive and "exclusive" in self.state:     # a policy's own flag: its resolve logs what exclusive
-            self.state["exclusive"].fill_(1)                 # tiers must place (F10's refills: docs/v1-glm.md D8a)
+        flag = getattr(self.policy, "exclusive_flag", None)  # a policy's own flag: its resolve logs what exclusive
+        if self.exclusive and flag:                          # tiers must place (F10's refills: docs/v1-glm.md D8a)
+            self.state[flag].fill_(1)
         self._written, self.peak_misses = 0, 0
         self._sized = False                     # the arena's size is checked at the first launch after a materialize
         self.borrowed = dict.fromkeys(self.borrowed, 0)

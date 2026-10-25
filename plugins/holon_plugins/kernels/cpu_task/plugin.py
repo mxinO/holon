@@ -6,17 +6,17 @@ read never stalls a layer's CPU experts. The `io` worker is one completion-drive
 copy tasks' reads go out asynchronously — io_uring, else Linux native AIO, chosen at start and logged — up to
 `io_depth` chunks in flight, an urgent slot's request (`bind(task, urgent=True)`, a hint) ahead of every chunk not yet
 submitted; its counters (`io_stats()`: bytes read, time with reads in flight, latency per request size) are the
-in-engine rate's evidence. A worker is the engine's one shared object of its kind
-(`cpu_task.<pool>`): tasks are bound while kernels are bound, its words are a mapped host pool requested before the
-first materialize, its threads start after it (pinned, the first one coordinating) and stop after the drain.
+in-engine rate's evidence. A worker is the engine's one shared object of its kind (`cpu_task.<pool>`): tasks are bound
+while kernels are bound, its words are a mapped host pool requested before the first materialize, its threads start
+after it (pinned, the first one coordinating) and stop after the drain.
 
 Options (EngineConfig.plugin_options), from tune for a lock: `cpu_task.threads` (compute threads, the coordinator
 included; default 4: S6 and M3 saturate DRAM with 2–4 for Q4_K experts), `cpu_task.io_depth` (the I/O worker's reads
-in flight; default 16: N3 saturates the bar drive from 8), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as "2-5,8", the first `threads` of them taken — the
-I/O worker's first one; default: one per physical core of the process's CPUs, past the first — the OS's and the engine
-loop's —, compute first, then I/O), `cpu_task.wait`
-(`spin`: 1-thread kernels, 2–3 µs per handshake; `memop`: stream memory operations, no SM held, for display GPUs;
-default spin), `cpu_task.timeout` (seconds a wait waits before it fails open; default 60).
+in flight; default 16: N3 saturates the bar drive from 8), `cpu_task.cores` / `cpu_task.io_cores` (CPU lists such as
+"2-5,8", the first `threads` of them taken — the I/O worker's first one; default: one per physical core of the
+process's CPUs, past the first — the OS's and the engine loop's —, compute first, then I/O), `cpu_task.wait` (`spin`:
+1-thread kernels, 2–3 µs per handshake; `memop`: stream memory operations, no SM held, for display GPUs; default
+spin), `cpu_task.timeout` (seconds a wait waits before it fails open; default 60).
 
 The native module is built ahead of time (`python -m holon_plugins.kernels.cpu_task.prebuild`); without it an
 instance cannot be created and the error names that command."""

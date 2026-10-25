@@ -30,6 +30,10 @@ class DeviceResolver:
             facts = {"unit_bytes": c.unit_bytes, "staging": c.staging}
             self._fetch.append(ctx.select_kernel(FETCH, site=f"{site}.{c.name}", **facts).impl(ctx, **facts))
 
+    def fetches(self) -> dict[str, object]:
+        """Its classes' `expert_fetch@1` instances, by class name."""
+        return {c.name: f for c, f in zip(self.classes, self._fetch, strict=True)}
+
     @property
     def fetches_parts(self) -> bool:
         """Its fetch fetches a list part by part (`expert_fetch@1`'s `parts`, every role's in one launch)."""
@@ -126,10 +130,8 @@ class DeviceResolver:
                       store.classes32, store.owner, store.capacity, store.heat, store.io_rows, store.moves,
                       store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
                       store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
-        a = store.landing_rows
-        rounds = -(-min(store.items, store.top_k * len(ids)) // a)
-        store.ssd_peak.copy_(torch.maximum(store.ssd_peak, store.n_ssd[:1]))
-        store.errors.bitwise_or_((store.n_ssd[:1] > rounds * a).int() * SHORT)
+        # rounds of A landing rows for the most SSD misses a call can have: its distinct routed experts
+        rounds = -(-min(store.items, store.top_k * len(ids)) // store.landing_rows)
         store.round_rows(0)                      # round 0's reads first: the RAM gather runs while they do (C S1-M1)
         store.io.signal(self.io_slot)
         main = torch.accelerator.current_stream(ids.device) if split else None
@@ -146,7 +148,6 @@ class DeviceResolver:
             if store._ahead:                     # read ahead: its set signalled two layers back (or at step start)
                 store.io.wait(store.ahead_slots[g])
                 self._gather(store.hit, store.n_hit, landed=True, part=None)
-                store.hits.add_(store.n_hit[:1])
             for r in range(rounds):
                 if r:
                     store.round_rows(r)

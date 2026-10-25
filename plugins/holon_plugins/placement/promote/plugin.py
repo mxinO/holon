@@ -18,6 +18,7 @@ OP = "moe_resolve.promote"
 class Promote:
     resolve_variant = OP + "@1"
     device_owned = True                       # the whole cache, spares included: no host edits
+    exclusive_flag = "exclusive"              # the device state the store sets under exclusive tiers
     heat = "last"                             # what RAM's coldest is by under exclusive tiers: the least recent
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:

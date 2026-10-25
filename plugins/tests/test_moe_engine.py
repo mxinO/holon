@@ -925,6 +925,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     store = engine.ctx.shared_objects[KEY]
     if ssd:                                          # (prompt steps of 8 tokens or more read ahead; never one with
         store.read_ahead_tokens = 8                  # a decode row: at 4 sequences, mixed steps keep: D8f)
+    calls = []                                       # eager calls' SSD misses (round 0's count) and read-ahead hits
+    spy_rows = mock.patch.object(tiered_store.TieredStore, "round_rows", lambda self, r: (
+        r or calls.append(("ssd", self.n_ssd[:1].clone())), rows(self, r))[1])
+    spy_hits = mock.patch.object(DeviceResolver, "_gather", lambda self, f, n, landed=False, part=0: (
+        landed and part is None and calls.append(("hit", n[:1].clone())), gather(self, f, n, landed=landed,
+                                                                                part=part))[1])
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query[np.isin(step.row_kind, (    # its decode and
         RowKind.DECODE, RowKind.VERIFY))].sum()) * 2 * 4, int(t["counts"].sum()))) or commit(step, t)   # verify rows
@@ -940,7 +946,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         return pipelined(self, *a)
     spy = mock.patch.object(DeviceResolver, "_pipelined", piping)
     with (spy, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
-          _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails):
+          _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails, spy_rows,
+          spy_hits):
         warnings.simplefilter("always")
         assert _served(engine, prompts, mirrored=store if one else None) == want
     assert bool(tails) == (ring in ("tail", "pipe"))
@@ -960,11 +967,13 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0
         assert any(splits) == split              # "ssdsplit": RAM misses beside the hits' passes (D8c)
-        calls = [i for i, e in enumerate(order) if e == "call"]  # round 0's reads requested before the RAM gather
-        assert calls and all(order[i + 1:i + 3] == ["rows 0", "ram"] for i in calls), order[:8]   # (C S1-M1)
+        starts = [i for i, e in enumerate(order) if e == "call"]  # round 0's reads requested before the RAM gather
+        assert starts and all(order[i + 1:i + 3] == ["rows 0", "ram"] for i in starts), order[:8]   # (C S1-M1)
         # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/v1-glm.md D8f)
-        assert not one or (store.landing_rows == 2 and int(store.ssd_peak) > 2), int(store.ssd_peak)
-        assert not one or int(store.hits) > 0    # ssd1: prompt steps of 8 tokens or more read their sets ahead
+        peak = max((int(t) for k, t in calls if k == "ssd"), default=0)
+        assert not one or (store.landing_rows == 2 and peak > 2), peak
+        assert not one or sum(int(t) for k, t in calls if k == "hit") > 0     # ssd1: prompt steps of 8 tokens or
+        #                                                                       more read their sets ahead
     if one:                                          # exclusive tiers lend their prompt steps' staging (GLM D8b+e)
         assert store.staging < store.prefill and store.lending and store.borrowed["stage"] > 0, store.borrowed
         assert int(store.parked) > 0                 # lent experts parked in RAM (D8b), read back by later misses
@@ -1111,6 +1120,49 @@ def _slots_held(store) -> torch.Tensor:
     spare = store.state.get("spare")
     spares = (spare[..., 0] > 0).sum(1) if spare is not None else 0
     return ((store.residency.device >= 0).sum(1) + (store.n_empty + spares)[:, None]).cpu()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
+    """Step 1's review C S1-m2 (test_reserve.py's rule under exclusive tiers, docs/v1-glm.md D9): with the loan
+    required, each step's peak beyond what was allocated before it is at most the profiled reserve plus the step's
+    own activation loan — staged prompt steps of a full width and a tail, and a prompt's chunks beside decode rows (a
+    step with a decode row never reads ahead: docs/v1-glm.md D8f)."""
+    from holon.core import platform
+
+    file, _, _ = gpu_moe
+    peaks, measure = [], platform.peak_memory
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    with mock.patch.object(platform, "peak_memory", lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
+    store.read_ahead_tokens, hooks, ahead = 8, engine.executor._before, []
+
+    def launched(step, launch=store.before_launch):  # each step: (a decode row, read ahead) — never both (C S1-m3)
+        out = launch(step)
+        ahead.append((bool(np.isin(step.row_kind, (RowKind.DECODE, RowKind.VERIFY)).any()), store._ahead))
+        return out
+    hooks[hooks.index(store.before_launch)] = launched
+    params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True)
+    for n in (40, 40, 300):                          # two decoding rows, then a prompt beside them
+        engine.add(torch.randint(0, 512, (n,), generator=gen).tolist(), params)
+        if n == 40:
+            engine.step()
+    loans = []
+    while engine.has_work():
+        torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
+        before = torch.cuda.memory_allocated()
+        engine.step()
+        torch.cuda.synchronize()
+        loans.append(store._step_loan)
+        took = torch.cuda.max_memory_allocated() - before
+        assert took <= reserve + store._step_loan, (took, reserve, store._step_loan)
+    assert store.exclusive and any(loans) and store.borrowed["stage"], (loans, store.borrowed)
+    assert (False, True) in ahead and (True, True) not in ahead and (True, False) in ahead, ahead
+    engine.close()
 
 
 def _ram_units_hold_their_pieces(store) -> int:
