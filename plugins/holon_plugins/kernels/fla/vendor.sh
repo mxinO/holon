@@ -13,7 +13,7 @@ COMMIT=6dd813e0b7ca8314fed28c13a73cfb5fc5310163
 HERE=$(cd "$(dirname "$0")" && pwd)
 SRC=vllm/third_party/flash_linear_attention
 FILES="LICENSE"                                      # vendor/<name> <- $SRC/ops/<name> (LICENSE: $SRC/LICENSE)
-for f in __init__ chunk chunk_delta_h chunk_o chunk_scaled_dot_kkt cumsum fused_sigmoid_gating index l2norm op \
+for f in __init__ chunk chunk_delta_h chunk_o chunk_scaled_dot_kkt cumsum fused_sigmoid_gating index kda l2norm op \
          solve_tril utils wy_fast; do
   FILES="$FILES $f.py"
 done
