@@ -514,6 +514,12 @@ XML_TYPED = "<tool_call>\n<function=f>\n" + "".join(f"<parameter={k}>\n{v}\n</pa
 TYPED_ARGS = {"s": "007", "n": 3, "t": True, "l": [1, 2], "m": "line 1\nline 2", "o": "5"}   # o: Optional[str]
 MARKED = {"city": "Paris", "note": "a </tool_call> and a <tool_call> in a string"}
 START, OPEN, CLOSED = "<|im_start|>assistant\n", "<|im_start|>assistant\n<think>\n", "<think>\n\n</think>\n\n"
+GLM_OPEN = "<|assistant|><think>"                    # GLM-5.3-Flash's template (docs/v1-glm.md D13)
+GLM_CALL = "<tool_call>get_weather<arg_key>city</arg_key><arg_value>Paris</arg_value><arg_key>days</arg_key>" \
+           "<arg_value>3</arg_value></tool_call>"
+GLM_TYPED = "<tool_call>f" + "".join(f"<arg_key>{k}</arg_key><arg_value>{v}</arg_value>" for k, v in [
+    ("s", "007"), ("n", "3"), ("b", "true"), ("t", "true"), ("u", "true"), ("z", "null"), ("l", "[1, 2]"),
+    ("m", "line 1\nline 2"), ("o", "5")]) + "</tool_call>"
 
 PARSES = {   # format, prompt tail, tools, output -> the answer: (kind, text) and ("call", name, arguments)
     "hermes, the model opens its reasoning": (
@@ -551,6 +557,14 @@ PARSES = {   # format, prompt tail, tools, output -> the answer: (kind, text) an
     "xml, a marker that starts no call stays text": (
         "qwen_xml@2", CLOSED, [WEATHER], "Use <tool_call> tags, and <think> too.",
         [("text", "Use <tool_call> tags, and <think> too.")]),
+    "glm, reasoning then text and a call": (
+        "glm_xml@1", GLM_OPEN, [WEATHER], f"Let me check.</think>Calling.{GLM_CALL}",
+        [("reasoning", "Let me check."), ("text", "Calling."), ("call", "get_weather", {"city": "Paris", "days": 3})]),
+    "glm, values as its template writes them (tojson, strings raw)": (
+        "glm_xml@1", CLOSED, [TYPED], GLM_TYPED, [("call", "f", {**TYPED_ARGS, "b": True, "u": True, "z": None})]),
+    "glm, cut inside a value": (
+        "glm_xml@1", CLOSED, [WEATHER], "<tool_call>get_weather<arg_key>days</arg_key><arg_value>2</arg_value>"
+                                       "<arg_key>city</arg_key><arg_value>Par", [("call", "get_weather", {"days": 2})]),
 }
 
 

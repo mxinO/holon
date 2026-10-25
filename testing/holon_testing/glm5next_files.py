@@ -194,6 +194,93 @@ def quantize(f32: pathlib.Path, quantizer: pathlib.Path) -> pathlib.Path:
     return out
 
 
+QUANTIZED = {"attn_k_b.weight": "Q6_K", "attn_v_b.weight": "Q6_K", "indexer.attn_q_b.weight": "Q8_0",
+             "indexer.attn_k.weight": "Q8_0", "indexer.proj.weight": "Q8_0", "indexer_compressor_gate.weight": "Q8_0",
+             "ssm_f_a.weight": "Q8_0", "ssm_f_b.weight": "Q8_0", "ssm_g_a.weight": "Q8_0", "ssm_g_b.weight": "Q8_0",
+             "ssm_beta.weight": "Q8_0"}
+LATENT, NOPE = 512, 256               # the real file's widths of `attn_v_b` and `attn_k_b` rows (Q6_K's 256 blocks)
+
+
+def quantized_copy(f32: pathlib.Path, out: pathlib.Path) -> tuple[pathlib.Path, set[str]]:
+    """§6.1's A-m1 file: the CPU fixture's GGUF with the tensors `llama-quantize` leaves f32 quantized as the release
+    ships them (`QUANTIZED`: Q6_K `attn_k_b` / `attn_v_b`, Q8_0 indexer and KDA-gate tensors), its DSA layers' MLA at
+    the real row widths (kv_lora 512, nope 256: Q6_K needs rows of 256) with random values; everything else as it is.
+    Returns the file and the quantized tensors' names: Q8_0 by gguf-py, Q6_K by `q6_k` (gguf-py quantizes no
+    Q6_K, and llama.cpp's `llama-quantize` leaves these tensors f32 for `glm5-next`)."""
+    import gguf
+    import numpy as np
+
+    reader = gguf.GGUFReader(f32)
+    arch = "glm5-next"
+    heads = int(reader.fields[f"{arch}.attention.head_count"].contents())
+    q_lora = int(reader.fields[f"{arch}.attention.q_lora_rank"].contents())
+    hidden = int(reader.fields[f"{arch}.embedding_length"].contents())
+    v = int(reader.fields[f"{arch}.attention.value_length_mla"].contents())
+    shapes = {"attn_kv_a_mqa.weight": (LATENT, hidden), "attn_kv_a_norm.weight": (LATENT,),
+              "attn_q_b.weight": (heads * NOPE, q_lora), "attn_k_b.weight": (heads, LATENT, NOPE),
+              "attn_v_b.weight": (heads, v, LATENT)}
+    keys = {f"{arch}.attention.kv_lora_rank": LATENT, f"{arch}.attention.key_length": LATENT,
+            f"{arch}.attention.value_length": LATENT, f"{arch}.attention.key_length_mla": NOPE}
+    rng = np.random.default_rng(5)
+    path = out / f"{NAME}-quantized.gguf"
+    writer = gguf.GGUFWriter(path, arch)
+    for field in reader.fields.values():
+        if field.name == gguf.Keys.General.ARCHITECTURE or field.name.startswith("GGUF."):
+            continue
+        kind = field.types[0]
+        sub = field.types[-1] if kind == gguf.GGUFValueType.ARRAY else None
+        writer.add_key_value(field.name, keys.get(field.name, field.contents()), kind, sub_type=sub)
+    tensors, quantized = [], set()
+    for t in reader.tensors:
+        part = t.name.split(".", 2)[2] if t.name.startswith("blk.") else t.name
+        x = np.asarray(t.data, dtype=np.float32).reshape([int(n) for n in reversed(t.shape)])
+        if part in shapes and int(t.name.split(".")[1]) % 4 == 3:
+            x = (rng.standard_normal(shapes[part]) * (0.05 if part != "attn_kv_a_norm.weight" else 1)).astype(
+                np.float32) + (1 if part == "attn_kv_a_norm.weight" else 0)
+        kind = QUANTIZED.get(part)
+        if kind is None:
+            tensors.append((t.name, x, None))
+            continue
+        qtype = getattr(gguf.GGMLQuantizationType, kind)
+        tensors.append((t.name, q6_k(x) if kind == "Q6_K" else gguf.quants.quantize(x, qtype), qtype))
+        quantized.add(t.name)
+    for name, data, qtype in tensors:
+        writer.add_tensor(name, data, raw_dtype=qtype)
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file()
+    writer.close()
+    return path, quantized
+
+
+def q6_k(x):
+    """`x` [..., n·256] f32 as ggml's Q6_K blocks [..., n·210] uint8 (16 sub-blocks of 16 values a block: an int8
+    scale each, an f16 block scale, 6-bit values), laid out as gguf-py's `Q6_K.dequantize_blocks` reads them."""
+    import numpy as np
+
+    shape = x.shape
+    v = x.reshape(-1, 16, 16).astype(np.float32)                         # [blocks, sub-blocks, values]
+    sub = np.abs(v).max(-1) / 31
+    d = (np.abs(sub).max(-1) / 127).astype(np.float16)                 # [blocks]
+    df = d.astype(np.float32)
+    sc = np.where(df[:, None] > 0, np.rint(sub / np.where(df[:, None] > 0, df[:, None], 1)), 0).clip(-128, 127)
+    step = df[:, None, None] * sc[:, :, None]
+    q = np.where(step != 0, np.rint(v / np.where(step != 0, step, 1)), 0).clip(-32, 31).astype(np.int16) + 32
+    q = q.reshape(-1, 256).astype(np.uint8)
+    p = np.arange(256)
+    h, r = p // 128, p % 128
+    ql = np.zeros((len(q), 128), dtype=np.uint8)
+    qh = np.zeros((len(q), 64), dtype=np.uint8)
+    for s in range(2):                                                    # low nibbles: byte h·64 + r % 64
+        at = r // 64 == s
+        np.bitwise_or.at(ql, (slice(None), h[at] * 64 + r[at] % 64), (q[:, at] & 0x0F) << (4 * s))
+    for s in range(4):                                                    # high bits: byte h·32 + r % 32
+        at = r // 32 == s
+        np.bitwise_or.at(qh, (slice(None), h[at] * 32 + r[at] % 32), ((q[:, at] >> 4) & 0x03) << (2 * s))
+    blocks = np.concatenate([ql, qh, sc.astype(np.int8).view(np.uint8), d.reshape(-1, 1).view(np.uint8)], axis=1)
+    return blocks.reshape(*shape[:-1], shape[-1] // 256 * 210)
+
+
 def prompts(kind: str = "cpu") -> list[list[int]]:
     """The test prompts: random ids below the special tokens, each CPU prompt with an EOS."""
     g = torch.Generator().manual_seed(11)

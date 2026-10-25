@@ -238,6 +238,109 @@ def shexp_gate_off() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def mhc_comb_transposed() -> Iterator[None]:
+    """GLM's mHC (docs/v1-glm.md §6.3): the comb applied as C, not Cᵀ, in every write-back (the pending one in the
+    FFN half's mix and the block's last), handed to the kernels transposed. Reports how often it fired."""
+    from holon_std.hyper import units
+
+    mix, writeback, fired = units._MHC.mix, units._MHC.writeback, collections.Counter()
+
+    def planted_mix(self, r, pending=None):
+        if pending is not None:
+            fired[_when()] += 1
+            pending = (pending[0], pending[1], pending[2].transpose(-1, -2).contiguous())
+        return mix(self, r, pending)
+
+    def planted_writeback(self, r, y, post, comb):
+        fired[_when()] += 1
+        writeback(self, r, y, post, comb.transpose(-1, -2).contiguous())
+    with mock.patch.object(units._MHC, "mix", planted_mix), mock.patch.object(units._MHC, "writeback",
+                                                                             planted_writeback):
+        yield
+    print(f"plant mhc-comb-transposed fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def mhc_sinkhorn_short() -> Iterator[None]:
+    """GLM's mHC (§6.3): one Sinkhorn normalisation short (19 iterations, not 20) — the mix computed by the oracle at
+    `iters` − 1 (the CPU providers' path). Reports how often it fired."""
+    from holon_std.hyper import reference, units
+
+    fired = collections.Counter()
+
+    def planted(self, r, pending=None):
+        fired[_when()] += 1
+        k = self._mix
+        return reference.hc_mhc_mix(r, self.fn, self.base, self.scale, *(pending or (None, None, None)), k.streams,
+                                    k.eps, k.hc_eps, k.iters - 1, k.dtype)
+    with mock.patch.object(units._MHC, "mix", planted):
+        yield
+    print(f"plant mhc-sinkhorn-short fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def dsa_pool_ape_off() -> Iterator[None]:
+    """GLM's DSA (§6.3): the pooling's APE left out (zeros handed to `dsa_index@1`). Reports how often it fired."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.DSAMLA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        ape = self.ape
+        self.ape = torch.nn.Parameter(torch.zeros_like(ape), requires_grad=False)
+        fired[_when()] += 1
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self.ape = ape
+    with mock.patch.object(units.DSAMLA, "forward", planted):
+        yield
+    print(f"plant dsa-pool-ape-off fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def router_bias_in_weights() -> Iterator[None]:
+    """GLM's router (§6.3): the selection bias added to the combine weights too (std.moe's route). Reports how often it
+    fired."""
+    from holon_std.moe import units
+
+    route, fired = units.MoE._route, collections.Counter()
+
+    def planted(self, x):
+        weights, ids, xin = route(self, x)
+        if self.bias is None:
+            return weights, ids, xin
+        fired[_when()] += 1
+        return weights + self.bias[ids.long()], ids, xin
+    with mock.patch.object(units.MoE, "_route", planted):
+        yield
+    print(f"plant router-bias-in-weights fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def kda_state_not_carried() -> Iterator[None]:
+    """GLM's KDA (§6.3): a prompt step (or sub-batch) starts every row from zero state — chunked prefill differs from
+    one-shot. Reports how often it fired."""
+    from holon_std.mixers.gdn import units
+
+    call, fired = units.KDA._rule_call, collections.Counter()
+
+    def planted(self, rule, handle, mixed, f, b, ssm_state, slots, has_init, snapshot=None):
+        if len(mixed) > 1:
+            fired[_when()] += 1
+            has_init = torch.zeros_like(has_init)
+        return call(self, rule, handle, mixed, f, b, ssm_state, slots, has_init, snapshot)
+    with mock.patch.object(units.KDA, "_rule_call", planted):
+        yield
+    print(f"plant kda-state-not-carried fired: {dict(fired)}", file=sys.stderr)
+
+
+GLM_PLANTS = {"mhc_comb_transposed": mhc_comb_transposed, "mhc_sinkhorn_short": mhc_sinkhorn_short,
+              "dsa_pool_ape_off": dsa_pool_ape_off, "router_bias_in_weights": router_bias_in_weights,
+              "kda_state_not_carried": kda_state_not_carried}
+
+
+@contextlib.contextmanager
 def mtp_stream0() -> Iterator[None]:
     """The MTP head (§6.3): its input reads the trunk's stream 0 for every stream (fc_hidden over stream 0 n times) —
     the drafts worse, the verified outputs unchanged. Reports how often it fired."""
@@ -1993,6 +2096,8 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
     "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
     "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
+    # GLM-5.3-Flash (docs/v1-glm.md §6.3): the tiny CPU model's
+    **GLM_PLANTS,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

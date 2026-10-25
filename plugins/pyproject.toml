@@ -18,6 +18,7 @@ dependencies = [                  # std units are reached through Ref, never imp
 "models.qwen3_moe" = "holon_plugins.models.qwen3_moe"
 "models.qwen3_5" = "holon_plugins.models.qwen3_5"
 "models.qwen4_exp" = "holon_plugins.models.qwen4_exp"
+"models.glm5_next" = "holon_plugins.models.glm5_next"
 "kernels.flashinfer" = "holon_plugins.kernels.flashinfer"
 "kernels.triton_attn" = "holon_plugins.kernels.triton_attn"
 "kernels.triton_experts" = "holon_plugins.kernels.triton_experts"
