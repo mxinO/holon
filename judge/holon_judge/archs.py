@@ -9,10 +9,19 @@ from types import ModuleType
 import torch
 
 MODULES = {"qwen4_exp_text": ".qwen4exp", "glm5_next_text": ".glm5next"}   # HF text model type -> its module
+# GGUF architecture (`general.architecture`) -> its module: `GGUF_NAMES` (layer part -> HF parameter), `GGUF_FUSED`
+# and `gguf_tensor(name, x, pending)`, for `gguf.hf_state` (a file of another architecture: the shared maps only)
+GGUF_ARCHS = {"glm5-next": ".glm5next"}
 
 
 def _by_type(model_type: str) -> ModuleType | None:
     name = MODULES.get(model_type)
+    return importlib.import_module(name, __package__) if name else None
+
+
+def gguf_module(arch: str) -> ModuleType | None:
+    """The module that maps GGUF architecture `arch`'s own tensors, if any."""
+    name = GGUF_ARCHS.get(arch)
     return importlib.import_module(name, __package__) if name else None
 
 

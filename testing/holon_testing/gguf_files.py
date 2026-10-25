@@ -1,10 +1,15 @@
 """Tiny GGUF files for tests: an HF Qwen3 or Qwen3-MoE checkpoint written with gguf-py's writer, as llama.cpp's
-converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in])."""
+converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in]); and the
+plumbing the tiny-model tools share (`tokenizer_dir`, `copy_tokenizer`, `convert`: llama.cpp's own converter;
+`load_fixtures`)."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 
 import gguf
 import numpy as np
@@ -16,6 +21,38 @@ LAYER = {"input_layernorm": "attn_norm", "post_attention_layernorm": "ffn_norm",
          "self_attn.k_proj": "attn_k", "self_attn.v_proj": "attn_v", "self_attn.o_proj": "attn_output",
          "self_attn.q_norm": "attn_q_norm", "self_attn.k_norm": "attn_k_norm", "mlp.gate_proj": "ffn_gate",
          "mlp.up_proj": "ffn_up", "mlp.down_proj": "ffn_down"}
+
+
+def tokenizer_dir(repo: str, revision: str) -> pathlib.Path:
+    """A hub snapshot's directory in the local cache (`HF_HUB_CACHE`, else `HF_HOME`/hub, else ~/.cache)."""
+    hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
+                                                                       "~/.cache/huggingface").expanduser() / "hub")
+    return hub / f"models--{repo.replace('/', '--')}" / "snapshots" / revision
+
+
+def copy_tokenizer(source: pathlib.Path, path: pathlib.Path, names: tuple[str, ...]) -> None:
+    """The model's tokenizer files `names` from `source` into the checkpoint directory `path` (the converter reads
+    the full vocabulary there)."""
+    for name in names:
+        (path / name).write_bytes((source / name).read_bytes())
+
+
+def convert(path: pathlib.Path, llama: pathlib.Path, name: str) -> pathlib.Path:
+    """The checkpoint directory `path` converted by llama.cpp's `convert_hf_to_gguf.py` to f32 (`general.name`
+    `name`, which it would default to the directory's), as `<path>/<name>-f32.gguf`."""
+    out = path / f"{name}-f32.gguf"
+    subprocess.run([sys.executable, str(llama / "convert_hf_to_gguf.py"), str(path), "--outtype", "f32",
+                    "--model-name", name, "--outfile", str(out)],
+                   env=os.environ | {"PYTHONPATH": str(llama / "gguf-py")}, check=True)
+    return out
+
+
+def load_fixtures(path: pathlib.Path) -> tuple[dict, dict[str, str]]:
+    """A committed fixture file: its tensors and metadata."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), "pt") as f:
+        return load_file(str(path)), f.metadata()
 
 
 EXPERT = re.compile(r"model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate|up|down)_proj\.weight")

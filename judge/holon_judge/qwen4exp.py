@@ -24,6 +24,8 @@ from collections.abc import Callable
 import torch
 from holon_std.mixers.qsa.reference import stable_topk
 
+from .ties import scoped
+
 TIE_RULE = "qsa indexer: stable top-k, ties to the lower block"
 
 
@@ -36,17 +38,9 @@ def wrap_indexers(model: torch.nn.Module, on_tie: Callable[[bool], None] | None 
             on_tie(bool(values[k - 1] == values[k]))
         return stable_topk(x, k, dim, largest, sorted)
 
-    def scoped(forward):
-        def call(*args, **kwargs):
-            torch_topk, torch.Tensor.topk = torch.Tensor.topk, topk
-            try:
-                return forward(*args, **kwargs)
-            finally:
-                torch.Tensor.topk = torch_topk
-        return call
     indexers = [m for m in model.modules() if type(m).__name__ == "Qwen4ExpTextQSAIndexer"]
     for m in indexers:
-        m.forward = scoped(m.forward)
+        m.forward = scoped(m.forward, torch.Tensor, "topk", topk)
     return len(indexers)
 
 

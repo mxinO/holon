@@ -16,6 +16,8 @@ import gguf
 import numpy as np
 import torch
 
+from . import archs
+
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
 GATES = {"mxfp4": 0.1, "q8_0": 1e-3}     # docs/m06-lowp.md §4.8: FP4 experts; Q8_0 from its prediction (≈ 5e-5)
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
@@ -53,42 +55,28 @@ _QWEN4EXP = {f"hc_{g}_{p}.weight": f"{h}_hyper_connection.{w}.weight" for g, h i
     "indexer.q_norm.weight": "self_attn.indexer.q_layernorm.weight",
     "indexer.k_norm.weight": "self_attn.indexer.k_layernorm.weight"}
 _INDEXER = {"indexer.q_proj.weight": "q", "indexer.k_proj.weight": "k"}
-# GLM-5.3-Flash (`glm5-next`, llama.cpp 27c7a76 conversion/glm.py): the mHC tensors, KDA's (`ssm_*`; `attn_q` / `k`
-# / `v` / `output` as `_LAYER`'s), the MLA and DSA indexer tensors, the shared expert and the selection bias. Fused back
-# here: the three KDA convs (`self_attn.conv1d`) and MLA's `k_b` / `v_b` (`kv_b_proj`, `_MLA`).
-_GLM5NEXT = {f"hc_{g}_{p}.weight": f"{g}_hc.{p}" for g in ("attn", "ffn") for p in ("fn", "base", "scale")} | {
-    "ssm_a": "self_attn.forget_gate.A_log", "ssm_dt.bias": "self_attn.forget_gate.dt_bias",
-    "ssm_f_a.weight": "self_attn.forget_gate.f_a_proj.weight",
-    "ssm_f_b.weight": "self_attn.forget_gate.f_b_proj.weight", "ssm_beta.weight": "self_attn.b_proj.weight",
-    "ssm_g_a.weight": "self_attn.g_a_proj.weight", "ssm_g_b.weight": "self_attn.g_b_proj.weight",
-    "ssm_norm.weight": "self_attn.o_norm.weight",
-    "attn_q_a.weight": "self_attn.q_a_proj.weight", "attn_q_a_norm.weight": "self_attn.q_a_layernorm.weight",
-    "attn_q_b.weight": "self_attn.q_b_proj.weight", "attn_kv_a_mqa.weight": "self_attn.kv_a_proj_with_mqa.weight",
-    "attn_kv_a_norm.weight": "self_attn.kv_a_layernorm.weight",
-    "indexer.attn_q_b.weight": "self_attn.indexer.wq_b.weight", "indexer.attn_k.weight": "self_attn.indexer.wk.weight",
-    "indexer.k_norm.weight": "self_attn.indexer.k_norm.weight", "indexer.k_norm.bias": "self_attn.indexer.k_norm.bias",
-    "indexer.proj.weight": "self_attn.indexer.weights_proj.weight",
-    "indexer_compressor_ape.weight": "self_attn.indexer.index_kpool_compress_ape",
-    "indexer_compressor_gate.weight": "self_attn.indexer.index_kpool_compress_gate",
-    "exp_probs_b.bias": "mlp.gate.e_score_correction_bias",
-    "ffn_gate_shexp.weight": "mlp.shared_experts.gate_proj.weight",
-    "ffn_up_shexp.weight": "mlp.shared_experts.up_proj.weight",
-    "ffn_down_shexp.weight": "mlp.shared_experts.down_proj.weight"}
-_GLM5NEXT_FUSED = {"ssm_conv1d_q.weight": ("conv", 0), "ssm_conv1d_k.weight": ("conv", 1),
-                   "ssm_conv1d_v.weight": ("conv", 2), "attn_k_b.weight": ("mla", 0), "attn_v_b.weight": ("mla", 1)}
 PLE_TABLE = "per_layer_token_embd.weight"
-NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS, _QWEN35, _QWEN4EXP_GLOBAL, _QWEN4EXP, _INDEXER,
-                                           _GLM5NEXT, _GLM5NEXT_FUSED], sort_keys=True).encode()).hexdigest()[:16]
+_MAPS = [_GLOBAL, _LAYER, _EXPERTS, _QWEN35, _QWEN4EXP_GLOBAL, _QWEN4EXP, _INDEXER]
+NAME_MAP_HASH = hashlib.sha256(json.dumps(_MAPS, sort_keys=True).encode()).hexdigest()[:16]
 
 
 def _arch(fields) -> str:
     return bytes(fields["general.architecture"].parts[-1]).decode()
 
 
+def name_map_hash(arch: str = "") -> str:
+    """The name map's hash a golden records: the shared maps', with an architecture module's own maps
+    (`archs.GGUF_ARCHS`) where it has one — so adding one architecture leaves the others' provenance as it was."""
+    m = archs.gguf_module(arch)
+    if m is None:
+        return NAME_MAP_HASH
+    return hashlib.sha256(json.dumps([*_MAPS, m.GGUF_NAMES, m.GGUF_FUSED], sort_keys=True).encode()).hexdigest()[:16]
+
+
 def hf_name(name: str, arch: str = "") -> str:
     m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
-    if arch == "glm5-next" and m is not None and m[2] in _GLM5NEXT:
-        return f"model.layers.{m[1]}.{_GLM5NEXT[m[2]]}"
+    if m is not None and (mod := archs.gguf_module(arch)) is not None and m[2] in mod.GGUF_NAMES:
+        return f"model.layers.{m[1]}.{mod.GGUF_NAMES[m[2]]}"
     if name in _GLOBAL or name in _QWEN4EXP_GLOBAL:
         return _GLOBAL.get(name) or _QWEN4EXP_GLOBAL[name]
     if m is not None and (m[2] in _QWEN35 or m[2] in _QWEN4EXP):
@@ -189,6 +177,7 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
     pending: dict[str, dict[str, torch.Tensor]] = {}
     fields = gguf.GGUFReader(path).fields
     q35, arch = _qwen35(fields), _arch(fields)
+    mod = archs.gguf_module(arch)
     for t in _tensors(path):
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue                                   # the MTP block (M0.4)
@@ -198,10 +187,9 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
         x = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
         if q35 is not None:
             x = _qwen35_value(t.name, x, q35)
-        if arch == "glm5-next":
-            if (fused := _glm5next(t.name, x, pending)) is not None:
-                yield from fused
-                continue
+        if mod is not None and (made := mod.gguf_tensor(t.name, x, pending)) is not None:
+            yield from made                            # (an architecture's conversion undone, fused parts joined)
+            continue
         m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps|indexer\.[qk]_proj)\.weight", t.name)
         if m is None:
             yield hf_name(t.name, arch), x
@@ -219,32 +207,6 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
                 yield f"model.layers.{m[1]}.mlp.experts.gate_up_proj", torch.cat([p["gate"], p["up"]], dim=1)
     if q35 is not None and q35["arch"] == "qwen4exp":
         yield from ((n, x) for n, x in ple_buffers(path).items() if select(f"blk.{n.split('.')[2]}."))
-
-
-def _glm5next(name: str, x: torch.Tensor, pending: dict) -> list[tuple[str, torch.Tensor]] | None:
-    """Undo `glm5-next`'s conversion where it changed values or split a tensor (None: the tensor maps as it is):
-    `ssm_a` is −exp(A_log); the q / k / v convs ([1, C, 1, 4] each) are transformers' one depthwise `conv1d`
-    [3C, 1, 4]; MLA's `kv_b_proj` [heads·(nope + v), kv_lora] was split into `k_b` (transposed, [heads, kv_lora,
-    nope]) and `v_b` ([heads, v, kv_lora]). A fused tensor comes out once its parts are in (`pending`)."""
-    m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
-    if m is None:
-        return None
-    if m[2] == "ssm_a":
-        return [(hf_name(name, "glm5-next"), torch.log(-x))]
-    if m[2] not in _GLM5NEXT_FUSED:
-        return None
-    kind, at = _GLM5NEXT_FUSED[m[2]]
-    parts = pending.setdefault(f"{m[1]}.{kind}", {})
-    parts[at] = x
-    if len(parts) < (3 if kind == "conv" else 2):
-        return []
-    del pending[f"{m[1]}.{kind}"]
-    if kind == "conv":
-        return [(f"model.layers.{m[1]}.self_attn.conv1d.weight",
-                 torch.cat([parts[i].reshape(-1, 1, parts[i].shape[-1]) for i in range(3)]))]
-    k_b, v_b = parts[0].transpose(1, 2), parts[1]                      # [heads, nope, kv_lora], [heads, v, kv_lora]
-    kv_b = torch.cat([k_b, v_b], dim=1)
-    return [(f"model.layers.{m[1]}.self_attn.kv_b_proj.weight", kv_b.reshape(-1, kv_b.shape[-1]).contiguous())]
 
 
 def ple_buffers(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
@@ -535,7 +497,8 @@ def file_meta(path: str | pathlib.Path) -> dict:
     with open(gguf.quants.__file__, "rb") as f:
         quants = hashlib.file_digest(f, "sha256").hexdigest()[:16]
     return {"model": model, "gguf_sha256": digests[0], **({"shards_sha256": digests} if len(digests) > 1 else {}),
-            "gguf_py": version("gguf"), "gguf_py_quants": quants, "name_map": NAME_MAP_HASH}
+            "gguf_py": version("gguf"), "gguf_py_quants": quants,
+            "name_map": name_map_hash(_arch(gguf.GGUFReader(shards(p)[0]).fields))}
 
 
 def _digest(p: pathlib.Path) -> str:

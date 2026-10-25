@@ -27,7 +27,9 @@ import subprocess
 import sys
 
 import torch
-from safetensors.torch import load_file, save_file
+from safetensors.torch import save_file
+
+from . import gguf_files
 
 TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
 EOS = 248044
@@ -123,21 +125,14 @@ def save(model: torch.nn.Module, path: pathlib.Path) -> pathlib.Path:
 
 
 def tokenizer_dir() -> pathlib.Path:
-    hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
-                                                                       "~/.cache/huggingface").expanduser() / "hub")
-    return hub / f"models--{TOKENIZER[0].replace('/', '--')}" / "snapshots" / TOKENIZER[1]
+    return gguf_files.tokenizer_dir(*TOKENIZER)
 
 
 def convert(path: pathlib.Path, llama: pathlib.Path) -> pathlib.Path:
     """`path` (the checkpoint directory) converted by llama.cpp's `convert_hf_to_gguf.py` to f32, with the model's
     tokenizer (the converter needs the full 248,320-token vocabulary)."""
-    for name in ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja"):
-        (path / name).write_bytes((tokenizer_dir() / name).read_bytes())
-    out = path / f"{NAME}-f32.gguf"
-    subprocess.run([sys.executable, str(llama / "convert_hf_to_gguf.py"), str(path), "--outtype", "f32",
-                    "--model-name", NAME, "--outfile", str(out)],
-                   env=os.environ | {"PYTHONPATH": str(llama / "gguf-py")}, check=True)
-    return out
+    gguf_files.copy_tokenizer(tokenizer_dir(), path, ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja"))
+    return gguf_files.convert(path, llama, NAME)
 
 
 def mtp_pack(model: torch.nn.Module, path: pathlib.Path, strata: pathlib.Path, llama: pathlib.Path) -> pathlib.Path:
@@ -227,10 +222,7 @@ def fixtures(model: torch.nn.Module, pack: pathlib.Path | None = None
 
 
 def load_fixtures() -> tuple[dict[str, torch.Tensor], dict[str, str]]:
-    from safetensors import safe_open
-
-    with safe_open(str(FIXTURES), "pt") as f:
-        return load_file(str(FIXTURES)), f.metadata()
+    return gguf_files.load_fixtures(FIXTURES)
 
 
 def main() -> None:

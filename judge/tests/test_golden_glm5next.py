@@ -71,17 +71,32 @@ def test_the_gpu_fixture_is_pinned_and_meets_d2(tmp_path):
     model, ids = g.tiny_hf("gpu"), g.prompts("gpu")
     with torch.inference_mode():
         assert model(torch.tensor([ids[0]])).logits[0].std(-1).mean() >= 2        # A-N2
-    stats = g.stats(model, ids)
-    assert stats["comb_peaked"] >= 0.5 and min(v for k, v in stats.items() if k != "comb_peaked") >= 0.05, stats
+    _meets_d2(g.stats(model, ids))
 
 
-def test_the_committed_fixtures_are_the_tools():
+def _meets_d2(stats: dict) -> None:
+    """D2: the clamp binds on >= 5% of every path's rows, on each bound; most comb rows peaked."""
+    rows = {k: v for k, v in stats.items() if k != "comb_peaked" and not k.endswith("elements")}
+    assert len(rows) == 9 and min(rows.values()) >= 0.05 and stats["comb_peaked"] >= 0.5, stats
+
+
+def test_the_release_f32_tensors_stay_full_precision(tiny):
+    """Step 2's review A-m1: the tensors the release keeps F32 are not bf16 values in the fixture, so a recipe that
+    loads one in the model dtype shows."""
     from holon_testing import glm5next_files as g
 
-    tensors, meta = g.fixtures(g.tiny_hf("cpu"))
+    state = g.tiny_hf("cpu").state_dict()
+    kept = [k for k in state if any(n in k for n in g.F32)]
+    assert {n for n in g.F32 if any(n in k for k in kept)} == set(g.F32)
+    assert all(not torch.equal(state[k], state[k].bfloat16().float()) for k in kept), kept
+
+
+def test_the_committed_fixtures_are_the_tools(tiny):
+    from holon_testing import glm5next_files as g
+
+    tensors, meta = g.fixtures(g.tiny_hf("cpu"), tiny)
     committed, committed_meta = g.load_fixtures()
     assert tensors.keys() == committed.keys() and all(torch.equal(tensors[k], committed[k]) for k in tensors)
     assert all(meta[k] == committed_meta[k] for k in meta)
     assert all(int(meta[k]) > 0 for k in meta if k.endswith("boundary_ties"))        # ties occur
-    stats = json.loads(meta["stats"])                            # D2: the clamp on every path, most combs peaked
-    assert stats["comb_peaked"] >= 0.5 and min(v for k, v in stats.items() if k != "comb_peaked") >= 0.05, stats
+    _meets_d2(json.loads(meta["stats"]))

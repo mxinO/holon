@@ -28,19 +28,20 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import pathlib
 import subprocess
 import sys
 
 import torch
-from safetensors.torch import load_file, save_file
+from safetensors.torch import save_file
+
+from . import gguf_files
 
 TOKENIZER = ("zai-org/GLM-5.3-Flash", "46a050bec13002ad29ee795c16e61cf4fa3c4a9c")
 EOS = PAD = 154820
 NAME = "tiny-glm5next"
-GGUF_SHA256 = {"cpu": "f554d84e8a4562618ce3b525b34315042d9782db291017513857e166e52594f5",       # f32
-               "gpu": "1eb41f3f690c577efcfbc66378a897de7bb87ee2762f9ea90a886866917c98fe"}       # Q8_0
+GGUF_SHA256 = {"cpu": "7114e563b206c3aaccfae604f73158eb3514147b11f72be0b087a7c90ec64e79",       # f32
+               "gpu": "8f439ffad222f0fb7284510dc5219f5fde1eb032fc6e446bfe001bba8b1f7d86"}       # Q8_0
 FIXTURES = pathlib.Path(__file__).with_name("glm5next_fixtures.safetensors")
 PROMPT, DECODE, EOS_AT = 100, 24, (40, 71)           # §6.1: 100-token prompts with an EOS, then 24 decode steps
 GPU_PROMPT, GPU_PROMPTS = 300, 3                     # §6.1: 3 prompts of 300 tokens
@@ -55,12 +56,13 @@ LAYERS = 8
 CLAMP_SIGMA = {"cpu": 3.3, "gpu": 2.9}   # an FFN pre-activation's std: the clamp at ±10 binds on 10-20% of rows
 COMB_SIGMA = 12.0            # s2 * m's std: |s2 * m| >= 8 on about half the entries
 LOGIT_STD = 2.5              # the GPU fixture's head (A-N2)
+# What the release keeps in F32 (transformers' `_keep_in_fp32_modules_strict` and the mHC base and scale): left at full
+# f32 in both fixtures, so a recipe that loads one of them in the model dtype shows (step 2's review A-m1)
+F32 = ("e_score_correction_bias", "conv1d", "dt_bias", "A_log", "hc.base", "hc.scale")
 
 
 def tokenizer_dir() -> pathlib.Path:
-    hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
-                                                                       "~/.cache/huggingface").expanduser() / "hub")
-    return hub / f"models--{TOKENIZER[0].replace('/', '--')}" / "snapshots" / TOKENIZER[1]
+    return gguf_files.tokenizer_dir(*TOKENIZER)
 
 
 def checkpoint_config(kind: str) -> dict:
@@ -131,11 +133,9 @@ def tiny_hf(kind: str = "cpu", seed: int = 0) -> torch.nn.Module:
         randomise(emb[PAD], emb[0].std() * torch.randn(h))
         if kind == "gpu":
             model.lm_head.weight.normal_(0, LOGIT_STD / h ** 0.5)
-        for p in model.parameters():                     # bf16 values, as the released checkpoint holds them
-            p.copy_(p.bfloat16().float())
-        for b in model.buffers():
-            if b.is_floating_point():
-                b.copy_(b.bfloat16().float())
+        for name, t in [*model.named_parameters(), *model.named_buffers()]:   # bf16 values, as the release holds
+            if t.is_floating_point() and not any(n in name for n in F32):    # them, but its F32 tensors
+                t.copy_(t.bfloat16().float())
     defaults = (torch.zeros(()), torch.ones(()))
     assert all(not any(torch.equal(p, d.expand_as(p)) for d in defaults) for p in picked)
     return model
@@ -147,7 +147,8 @@ def checkpoint(model: torch.nn.Module) -> dict[str, torch.Tensor]:
     tensors the release keeps f32."""
     from transformers.models.glm5_next import modeling_glm5_next as hf
 
-    f32 = tuple(hf.Glm5NextPreTrainedModel._keep_in_fp32_modules_strict)
+    f32 = (*hf.Glm5NextPreTrainedModel._keep_in_fp32_modules_strict, "hc_attn_base", "hc_attn_scale",
+           "hc_ffn_base", "hc_ffn_scale")
     out = {}
     for k, v in model.state_dict().items():
         k = k.replace(".forget_gate.", ".")
@@ -176,18 +177,14 @@ def save(model: torch.nn.Module, path: pathlib.Path, kind: str = "cpu") -> pathl
     path.mkdir(parents=True, exist_ok=True)
     save_file(checkpoint(model), str(path / "model.safetensors"))
     (path / "config.json").write_text(json.dumps(checkpoint_config(kind), indent=1))
-    for name in ("tokenizer.json", "tokenizer_config.json", "chat_template.jinja", "generation_config.json"):
-        (path / name).write_bytes((tokenizer_dir() / name).read_bytes())
+    gguf_files.copy_tokenizer(tokenizer_dir(), path, ("tokenizer.json", "tokenizer_config.json",
+                                                      "chat_template.jinja", "generation_config.json"))
     return path
 
 
 def convert(path: pathlib.Path, llama: pathlib.Path) -> pathlib.Path:
     """`path` converted by llama.cpp's `convert_hf_to_gguf.py` to f32."""
-    out = path / f"{NAME}-f32.gguf"
-    subprocess.run([sys.executable, str(llama / "convert_hf_to_gguf.py"), str(path), "--outtype", "f32",
-                    "--model-name", NAME, "--outfile", str(out)],
-                   env=os.environ | {"PYTHONPATH": str(llama / "gguf-py")}, check=True)
-    return out
+    return gguf_files.convert(path, llama, NAME)
 
 
 def quantize(f32: pathlib.Path, quantizer: pathlib.Path) -> pathlib.Path:
@@ -214,8 +211,9 @@ def prompts(kind: str = "cpu") -> list[list[int]]:
 def stats(model: torch.nn.Module, ids: list[list[int]]) -> dict[str, float]:
     """Over HF's one-shot forward of `ids`: per FFN path (dense, routed, shared), the fraction of its rows (a token's,
     or a token's at one routed expert) with some element at the clamp's bound — the gate's upper (`gate`), the up
-    projection's upper and lower (`up+`, `up-`); and `comb_peaked`, the fraction of comb rows (a token's source
-    stream) whose largest |s2 * m| is >= 8."""
+    projection's upper and lower (`up+`, `up-`) — and, `... elements`, the fraction of their elements there (the clamp's
+    effect size); and `comb_peaked`, the fraction of comb rows (a token's source stream) whose largest |s2 * m| is
+    >= 8."""
     from transformers.models.glm5_next import modeling_glm5_next as hf
 
     lim = model.config.swiglu_limit
@@ -224,6 +222,7 @@ def stats(model: torch.nn.Module, ids: list[list[int]]) -> dict[str, float]:
     def bound(path: str, gate: torch.Tensor, up: torch.Tensor) -> None:
         for side, hit in (("gate", gate > lim), ("up+", up > lim), ("up-", up < -lim)):
             seen.setdefault(f"{path} {side}", []).append(hit.any(-1).float())
+            seen.setdefault(f"{path} {side} elements", []).append(hit.float().flatten())
 
     def mlp_hook(m, args, path):
         x = args[0]
@@ -261,16 +260,20 @@ def stats(model: torch.nn.Module, ids: list[list[int]]) -> dict[str, float]:
 
 
 @torch.inference_mode()
-def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
-    """HF's reference per prompt `p<i>`: `ids` [T] (the prompt and its greedy tokens, recomputed from scratch), `x`
-    [T, H] (the head's input, one-shot) and `sets.<layer>` [T, top-k + pool - 1] (each position's selected tokens as
-    the indexer returns them, -1 padded); the boundary ties per prompt and `stats` in the metadata. Wraps `model`'s
-    indexers and routers with the judge's tie rule (`holon_judge.glm5next`), so pass a model of its own."""
+def fixtures(model: torch.nn.Module, gguf: pathlib.Path) -> tuple[dict[str, torch.Tensor], dict[str, str]]:
+    """HF's reference per prompt `p<i>`, over the weights the CPU fixture's GGUF `gguf` holds (its A_log as read back,
+    as the engine reads it; step 2's review A-m2): `ids` [T] (the prompt and its greedy tokens, recomputed from
+    scratch), `x` [T, H] (the head's input, one-shot) and `sets.<layer>` [T, top-k + pool - 1] (each position's
+    selected tokens as the indexer returns them, -1 padded); the indexer's and the router's boundary ties per prompt
+    and `stats` in the metadata. Wraps `model`'s indexers and routers with the judge's tie rule
+    (`holon_judge.glm5next`), so pass a model of its own."""
+    from holon_judge import gguf as judge_gguf
     from holon_judge.glm5next import wrap_topk
 
+    model.load_state_dict(dict(judge_gguf.hf_state(gguf)))
     seen: dict[str, torch.Tensor] = {}
-    ties = [0]
-    wrap_topk(model, lambda n: ties.__setitem__(0, ties[0] + n))
+    ties = [0, 0]
+    wrap_topk(model, lambda n: ties.__setitem__(0, ties[0] + n), lambda n: ties.__setitem__(1, ties[1] + n))
     hooks = [layer.self_attn.indexer.register_forward_hook(
         lambda m, a, out, i=i: seen.__setitem__(f"sets.{i}", out[0])) for i, layer in enumerate(model.model.layers)
         if getattr(layer.self_attn, "indexer", None) is not None]
@@ -279,12 +282,12 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
         for p, ids in enumerate(prompts()):
             for _ in range(DECODE):
                 ids = ids + [int(model(torch.tensor([ids])).logits[0, -1].argmax())]
-            ties[0] = 0
+            ties[:] = [0, 0]
             x = model.model(torch.tensor([ids])).last_hidden_state[0]
             tensors[f"p{p}.ids"], tensors[f"p{p}.x"] = torch.tensor(ids), x.float().contiguous()
             for name, sets in seen.items():
                 tensors[f"p{p}.{name}"] = sets.int().contiguous()
-            meta[f"p{p}.boundary_ties"] = str(ties[0])
+            meta[f"p{p}.boundary_ties"], meta[f"p{p}.router_ties"] = str(ties[0]), str(ties[1])
     finally:
         for h in hooks:
             h.remove()
@@ -293,10 +296,7 @@ def fixtures(model: torch.nn.Module) -> tuple[dict[str, torch.Tensor], dict[str,
 
 
 def load_fixtures() -> tuple[dict[str, torch.Tensor], dict[str, str]]:
-    from safetensors import safe_open
-
-    with safe_open(str(FIXTURES), "pt") as f:
-        return load_file(str(FIXTURES)), f.metadata()
+    return gguf_files.load_fixtures(FIXTURES)
 
 
 def build(out: pathlib.Path, llama: pathlib.Path, kind: str, quantizer: pathlib.Path | None = None) -> pathlib.Path:
@@ -328,7 +328,7 @@ def main() -> None:
         bad |= not ok
         print(f"{digest}  {f.name}  {'ok' if ok else 'DIFFERS from the pin ' + GGUF_SHA256[kind]}")
     if a.fixtures:
-        tensors, meta = fixtures(tiny_hf("cpu"))
+        tensors, meta = fixtures(tiny_hf("cpu"), a.out / f"{NAME}-cpu" / f"{NAME}-f32.gguf")
         meta |= {"transformers": transformers.__version__, "llama_cpp": "27c7a76", "gguf_sha256": GGUF_SHA256["cpu"]}
         save_file(tensors, str(FIXTURES), metadata=meta)
         print(f"wrote {FIXTURES.name}: {meta}")
