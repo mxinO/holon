@@ -1223,24 +1223,34 @@ def test_swiglu_clamp_on_every_path(ctx, lib, name):
 
 
 def test_glm_plants_fail_their_l0(ctx, lib):
-    """§6.3's L0 plants: `router_prompt_softmax` (the prompt path's `moe_topk` at softmax) fails the sigmoid routing
-    check; `glu_clamp_off` (the decode path's experts unclamped) fails the clamped SwiGLU check at one token."""
+    """§6.3's L0 plants: `router_prompt_softmax` (the prompt path's `moe_topk` at softmax) changes most rows' picks
+    past a near-tie; `glu_clamp_off` (the decode path's experts unclamped) misses the clamped SwiGLU at one token by
+    ≥ 10× the fp32 budget."""
     from holon_judge.planted import PLANTS
 
     gen = torch.Generator().manual_seed(5)
     logits, bias = (2 * torch.randn(64, 288, generator=gen)).cuda(), (0.5 * torch.randn(288, generator=gen)).cuda()
     choose = select(ctx, "moe_topk@1", experts=288, top_k=8, renormalize=True, **GLM)
     check_sigmoid(logits, *choose(logits, bias), 8, bias, 2.5)
-    with PLANTS["router_prompt_softmax"](), pytest.raises(AssertionError):
-        check_sigmoid(logits, *choose(logits, bias), 8, bias, 2.5)
+    with PLANTS["router_prompt_softmax"]():
+        _, ids = choose(logits, bias)
+    choice = torch.sigmoid(logits.double()) + bias.double()
+    want = reference.moe_topk(logits, 8, True, "sigmoid", bias, 2.5)[1]
+    off = ((choice.gather(1, ids.long()) - choice.gather(1, want.long())).abs() > TIE).any(1).float().mean().item()
+    print(f"plant router_prompt_softmax: {off:.0%} of rows pick past a near-tie")
+    assert off >= 0.5                                                  # most rows' picks change
     none = experts(ctx, "q8_0", H, 2 * INTER, 1)
     s = stack("q8_0", E, 2 * INTER, H, seed=21)
     limit = float(none(gate_up_input(64, seed=22), s.parts, uniform(64, E, seed=22)).abs().quantile(0.75))
     fused = experts(ctx, "q8_0", H, 2 * INTER, 1, "swiglu", glu_limit=limit)
     ids, x = uniform(1, E, seed=1), gate_up_input(1, seed=1)
     check_swiglu(lib, fused, none, s, x, ids, "clamped", limit=limit)
-    with PLANTS["glu_clamp_off"](), pytest.raises(AssertionError):
-        check_swiglu(lib, fused, none, s, x, ids, "planted", limit=limit)
+    ours = torch.empty_like(fused(x, s.parts, ids))
+    lib.swiglu(none(x, s.parts, ids), ours, None, None, None, limit=limit)
+    with PLANTS["glu_clamp_off"]():
+        usage = l0.check(fused(x, s.parts, ids), ours, torch.float32, 1).usage
+    print(f"plant glu_clamp_off: L0 usage {usage:.0f} (budget 1)")
+    assert usage >= 10
 
 
 def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):

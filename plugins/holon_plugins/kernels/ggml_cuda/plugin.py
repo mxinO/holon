@@ -808,9 +808,12 @@ def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
             and CHUNK * f["top_k"] <= ID_PAIRS)
 
 
+# topk-moe.cu's and the fused router's instances: vendor.patch's HOLON_ROUTER_CASE list (keep the two in step)
+ROUTER_CASES = (1, 2, 4, 8, 16, 32, 64, 128, 256, 288, 512)
+
+
 def _supports_moe_topk(f: dict) -> bool:
-    e = f["experts"]
-    return ((0 < e <= 512 and e & (e - 1) == 0 or e == 288) and 0 < f["top_k"] <= e     # topk-moe.cu's instances
+    return (f["experts"] in ROUTER_CASES and 0 < f["top_k"] <= f["experts"]
             and f.get("scoring", "softmax") in ("softmax", "sigmoid"))
 
 

@@ -24,6 +24,7 @@ Run with `-s` to see the worst error ratios. Skips without a GPU.
 """
 import importlib.util
 import inspect
+import math
 
 import pytest
 import torch
@@ -44,9 +45,10 @@ SLOTS = [0, UNITS - 1, 3, 7, 9, 1, 12, 5]                      # row 4 has no to
 DECODE_INIT = [True, False, True, True, False, True]
 DECODE_SLOTS = [0, UNITS - 1, 4, 2, 11, 6]
 # × the bf16 yardstick's error, by head count (docs/v1-glm.md D4's table, 16 seeds of the mixed batch): GLM's 64 heads
-# hold GDN's 2.0 (worst 1.46: a one-token row's output on the chunked path); the 2-head shapes need 4.0 (worst 3.28,
-# the same case at 2 × 128; ≤ 2.3 otherwise). KDA's chunked path reads its state through FLA's bf16 copy of h for the
-# output, as GDN's does; a wrong gate (the plant below) or state is O(10–100)×.
+# hold GDN's 2.0 (worst 1.33); the 2-head shapes need 4.0 (worst 2.86, a one-token row's output on the chunked path,
+# e.g. a prompt step's 1-token tail). The cause: FLA's two per-head bf16 casts (`kda.py:928` q·scale, `:961` Aqk),
+# coherent over a head's outputs, which two heads cannot average, plus small-sample tails; a wrong gate (the plants
+# below) or state is ≥ 10×.
 RATIOS = {64: 2.0, 2: 4.0}
 
 
@@ -144,8 +146,10 @@ def run(kernel, x, g, pool, lens, init, slots, snapshots=(), view=None, per_toke
                   g["a_log"], g["dt_bias"], pool, dev(slots), dev(init, torch.bool), snapshot=view)
 
 
-def judge_rows(o, state, x, g, h0s, lens, slots, what: str) -> float:
-    worst, qs = 0.0, query_start(lens).tolist()
+def judge_rows(o, state, x, g, h0s, lens, slots, what: str, limit: float | None = None) -> float:
+    """Per row: output and state errors vs f64 over the bf16 yardstick's, each within `limit` (default the shape's
+    budget); the worst ratio."""
+    limit, worst, qs = budget(x) if limit is None else limit, 0.0, query_start(lens).tolist()
     for r, (lo, hi) in enumerate(zip(qs[:-1], qs[1:], strict=True)):
         if hi == lo:
             continue
@@ -154,7 +158,7 @@ def judge_rows(o, state, x, g, h0s, lens, slots, what: str) -> float:
         for name, got, want, floor in (("o", o[lo:hi], want_o, bf_o), ("state", state[slots[r]], want_s, bf_s)):
             assert torch.isfinite(got).all(), (what, r, name)
             x_ratio = ratio(got, want, floor)
-            assert x_ratio <= budget(x), (what, r, hi - lo, name, fro(got, want), fro(floor, want))
+            assert x_ratio <= limit, (what, r, hi - lo, name, fro(got, want), fro(floor, want))
             worst = max(worst, x_ratio)
     return worst
 
@@ -400,21 +404,22 @@ def test_masked_tokens_leave_the_state_bitwise_unchanged(path):
 
 @pytest.mark.parametrize("batch", ["mixed", "decode"])
 def test_plant_a_looser_gate_bound_fails(batch, monkeypatch):
-    """The gate's bound at −4 instead of the fact's −5, on both paths: far outside the budget."""
-    h, d = SHAPES["tiny-gpu"]
+    """The gate's bound at −4 instead of the fact's −5, on both paths, at GLM's shape: ≥ 5× its budget."""
+    h, d = SHAPES["glm-5.3-flash"]
     lens, init, slots = (LENS, INIT, SLOTS) if batch == "mixed" else ([1] * 6, DECODE_INIT, DECODE_SLOTS)
-    x, g, kernel = tokens(sum(lens), h, d), gates(h, d), kda("tiny-gpu")
+    x, g, kernel = tokens(sum(lens), h, d), gates(h, d), kda("glm-5.3-flash")
     kernel.lower_bound, kernel._recurrent = -4.0, {"is_kda": True, "lower_bound": -4.0}
     pool, w = torch.zeros(UNITS, h, d, d, device="cuda"), warm(h, d, g)
     pool[slots] = w
     h0s = [w if has else None for has in init]
-    with pytest.raises(AssertionError):
-        judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted")
+    worst = judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted", math.inf)
+    print(f"plant gate bound -4 ({batch}): worst ratio {worst:.1f} (budget {budget(x)})")
+    assert worst >= 5 * budget(x)                   # (measured 20-21: a bound one unit off is the subtlest gate plant)
 
 
 def test_plant_kda_gate_softplus_fails():
     """§6.3's `kda_gate_softplus`: the recurrent (decode) kernel's gate unbounded (GDN's softplus form per channel)
-    fails the decode L0."""
+    fails the decode L0 by ≥ 10× its budget."""
     from holon_judge.planted import PLANTS
 
     h, d = SHAPES["tiny-gpu"]
@@ -425,5 +430,6 @@ def test_plant_kda_gate_softplus_fails():
     pool, w = torch.zeros(UNITS, h, d, d, device="cuda"), warm(h, d, g)
     pool[slots] = w
     h0s = [w if has else None for has in init]
-    with pytest.raises(AssertionError):
-        judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted")
+    worst = judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted", math.inf)
+    print(f"plant kda_gate_softplus: worst ratio {worst:.1f} (budget {budget(x)})")
+    assert worst >= 10 * budget(x)

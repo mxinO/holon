@@ -150,10 +150,11 @@ def test_plants_move_the_kl(cpu, plant):
 EPS_SELECT = 2e-6       # a chosen pool's oracle score ≥ an unchosen one's − ε · max |score| (test_dsa_kernels' ε)
 
 
-def _decode_selections_hold(engine: Engine) -> int:
+def _decode_selections(engine: Engine) -> tuple[int, float]:
     """Run the first prompt and 16 decode steps; at every DSA layer's decode call, the pools its attention read (the
-    blocks handed to `mla_attend`) against the oracle's scores on the call's own inputs (q, w, pooled keys): complete
-    pools within the near-tie ε of the top-k, the open pool as the oracle's. Returns the rows checked."""
+    blocks handed to `mla_attend`) against the oracle's scores on the call's own inputs (q, w, pooled keys): the open
+    pool as the oracle's, and the worst gap of the complete pools' top-k (an unchosen pool's score over a chosen one's,
+    of max |score|). Returns the rows checked and the worst gap."""
     from holon_std.mixers.qsa import reference, units
 
     seen = []
@@ -172,6 +173,7 @@ def _decode_selections_hold(engine: Engine) -> int:
                 return attend(q, kv, blocks, table, seq, positions)
             m._select, m._attend = spy_select, spy_attend
     _run(engine, g.prompts("gpu")[0], SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True))
+    worst = 0.0
     for ratio, budget, (q, pooled, table, seq, positions, w), blocks in seen:
         oracle = reference.qsa_select(q, pooled, table, seq, positions, ratio, budget, w)
         n, top = (int(positions[0]) + 1) // ratio, budget // ratio
@@ -184,24 +186,20 @@ def _decode_selections_hold(engine: Engine) -> int:
             scores = ((keys @ q[0].double().T).relu() * w[0].double()).sum(-1)
             chosen = torch.zeros(n, dtype=torch.bool)
             chosen[blocks[0, :k].long()] = True
-            gap = float((scores[~chosen].max() - scores[chosen].min()) / scores.abs().max())
-            assert gap <= EPS_SELECT, f"decode selection off the oracle's top-k by {gap:.2e} of max |score|"
-    return len(seen)
+            worst = max(worst, float((scores[~chosen].max() - scores[chosen].min()) / scores.abs().max()))
+    return len(seen), worst
 
 
-@pytest.mark.parametrize("plant", [None, "dsa_decode_select_shift"])
-def test_decode_selections_are_the_oracles(plant):
+def test_decode_selections_are_the_oracles():
     """The decode rows' DSA selection, as the attention reads it, is the oracle's top-k on the engine's own inputs
-    (sparse: the tiny model's pools of 4 with top-k 8, past position 11); `dsa_decode_select_shift` (§6.3) fails it."""
-    import contextlib
-
+    within the near-tie ε (sparse: the tiny model's pools of 4 with top-k 8, past position 11);
+    `dsa_decode_select_shift` (§6.3) misses it by ≥ 100× ε."""
     from holon_judge.planted import PLANTS
 
     engine = _gpu(100, False)
-    with PLANTS[plant]() if plant else contextlib.nullcontext():
-        if plant is None:
-            assert _decode_selections_hold(engine) > 0
-        else:
-            with pytest.raises(AssertionError):
-                _decode_selections_hold(engine)
+    rows, clean = _decode_selections(engine)
+    with PLANTS["dsa_decode_select_shift"]():
+        _, planted = _decode_selections(engine)
     engine.close()
+    print(f"decode selections: {rows} rows, worst gap {clean:.1e}; planted {planted:.1e} (ε {EPS_SELECT:.0e})")
+    assert rows > 0 and clean <= EPS_SELECT and planted >= 100 * EPS_SELECT

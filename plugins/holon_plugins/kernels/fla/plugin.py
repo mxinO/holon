@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import dataclasses
 import itertools
+import types
 
 import torch
 import torch.nn.functional as F
@@ -149,7 +150,7 @@ class GatedDeltaRule:
             slots, has_init = slots.index_select(0, h.live), has_init.index_select(0, h.live)
         units, init = slots.long(), ~has_init.bool().view(-1, 1, 1, 1)
         g = self._chunk_gates(a, a_log, dt_bias)
-        beta = torch.sigmoid(b.float()).to(v.dtype)      # the chunk kernels' operand dtype (as vLLM and HF feed it)
+        beta = self._beta(b, v)
         o = torch.empty(v.shape, dtype=v.dtype, device=v.device)
         if h.snap is not None and (snapshot is None or not snapshot.is_contiguous() or snapshot.dtype != torch.float32):
             raise ValueError("a plan with snapshots needs a contiguous f32 payload view to store them in")
@@ -170,7 +171,7 @@ class GatedDeltaRule:
         return o
 
     # The rule's gate, by path: GDN's scalar gate per v-head.
-    _recurrent: dict = {}                          # the fused recurrent kernel's gate arguments
+    _recurrent: types.MappingProxyType = types.MappingProxyType({})   # the fused recurrent kernel's gate arguments
 
     @staticmethod
     def _gate_rows(a: torch.Tensor) -> torch.Tensor:
@@ -179,6 +180,10 @@ class GatedDeltaRule:
     @staticmethod
     def _chunk_gates(a, a_log, dt_bias) -> torch.Tensor:
         return -a_log.float().exp() * F.softplus(a.float() + dt_bias.float())
+
+    @staticmethod
+    def _beta(b, v) -> torch.Tensor:
+        return torch.sigmoid(b.float()).to(v.dtype)     # the chunk kernels' operand dtype (as vLLM and HF feed it)
 
     def _chunk(self, h: _Handle, part: slice, q, k, v, g, beta, a_log, dt_bias, initial, o, snapshot) -> torch.Tensor:
         """One chunked call over tokens `part` from the rows' `initial` states: their final states."""
@@ -199,13 +204,17 @@ class KDA(GatedDeltaRule):
         super().__init__(ctx, heads_k=heads, heads_v=heads, head_k_dim=head_k_dim, head_v_dim=head_v_dim,
                          v_head_order="grouped", dtype=dtype, out_slots=out_slots)
         self.heads, self.dk, self.lower_bound = heads, head_k_dim, float(lower_bound)
-        self._recurrent = {"is_kda": True, "lower_bound": self.lower_bound}
+        self._recurrent = types.MappingProxyType({"is_kda": True, "lower_bound": self.lower_bound})
 
     def _gate_rows(self, f: torch.Tensor) -> torch.Tensor:
         return f.view(f.shape[0], self.heads, self.dk)            # per token, per head, per key channel
 
     def _chunk_gates(self, f, a_log, dt_bias) -> torch.Tensor:
         return self._gate_rows(f)                       # raw: the chunk call fuses the gate into its cumsum
+
+    @staticmethod
+    def _beta(b, v) -> torch.Tensor:
+        return torch.sigmoid(b.float())                 # f32, as the recurrent path computes it (D4)
 
     def _chunk(self, h: _Handle, part: slice, q, k, v, f, beta, a_log, dt_bias, initial, o, snapshot) -> torch.Tensor:
         _, final = chunk_kda_with_fused_gate(

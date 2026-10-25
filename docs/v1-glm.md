@@ -240,25 +240,28 @@ state specs, replay buffers, in-step conv publishes and rewind flow; kernels fro
   byte-identical at the landing step. **The bitwise test covers the recurrence only** (A-m3): `chunk_kda` with the
   carried f32 state and conv window at 64-multiple boundaries against one call; the projections and `o_proj` are
   `qlinear` calls whose bits may depend on the row count.
-- β is the fp32 sigmoid (LC, Maya, FT).
+- β is the fp32 sigmoid (LC, Maya, FT). **As built (step 4's review A-m1):** both paths take it in f32 — the chunk
+  kernels accept an f32 β (GDN's chunked path keeps its bf16 β, unchanged).
 - **The L0 budget, as built (step 4; the lead's call):** the kernel's error against the f64 recurrence over the bf16
   yardstick's (HF's f32 recurrence with q, k, β in bf16), per row, worst over 16 seeds of the mixed batch
   (`test_kda_kernels.py`'s and GDN's `test_gdn_kernels.py`'s cases, measured alike):
 
   | Shape | one-token rows, output | one-token rows, state | longer rows, output | longer rows, state | Budget |
   |---|---|---|---|---|---|
-  | KDA 64 × 128 (GLM) | 1.46 | 1.20 | 1.23 | 1.26 | 2.0 (GDN's) |
-  | KDA 2 × 128 (the GPU fixture's) | **3.28** | 2.04 | 2.16 | 2.04 | 4.0 |
-  | KDA 2 × 64 | 2.09 | 1.67 | 1.41 | 2.28 | 4.0 |
+  | KDA 64 × 128 (GLM) | 1.33 | 1.04 | 1.07 | 1.13 | 2.0 (GDN's) |
+  | KDA 2 × 128 (the GPU fixture's) | **2.86** | 1.77 | 1.87 | 1.74 | 4.0 |
+  | KDA 2 × 64 | 2.56 | 1.38 | 1.48 | 1.87 | 4.0 |
   | GDN 16 / 48 × 128 (the 27B's) | 1.10 | 1.35 | 1.22 | 1.31 | 2.0 |
-  | GDN 2 / 6 × 64 | 1.38 | 1.69 | 1.89 | 1.64 | 2.0 |
+  | GDN 2 / 6 × 64 | 1.38 | 1.69 | **1.89** | 1.64 | 2.0 |
 
-  The cause (measured where it sits; the mechanism inferred): a one-token row on the chunked path reads its state
-  through FLA's bf16 copy of h for the output, as GDN's does. GDN's decay is one scalar per head, so h's rounding
-  enters the output with q's own weights; KDA's decay is per key channel, `o = (q ⊙ e^G) · h`, with `e^G` spanning
-  e⁻⁵ to 1 across channels, so the output rests on the few least-decayed channels and h's rounding averages over
-  fewer of them, while the yardstick's error shrinks with the output. With two heads the norm pools 256 values a
-  token and the seeds' spread shows; at GLM's 64 heads KDA holds GDN's 2.0 on every case.
+  (KDA with its f32 β; with bf16 β the KDA rows were 1.46 / 1.20 / 1.23 / 1.26, 3.28 / 2.04 / 2.16 / 2.04 and
+  2.09 / 1.67 / 1.41 / 2.28.) The cause (panel C's simulation of the chunked path, step 4's review m2): mainly two
+  per-head bf16 casts in FLA's KDA kernel, coherent across a head's 128 outputs — `(q * scale).to(bf16)` and Aqk
+  to bf16 before the PV dot (`vendor/kda.py:928`, `:961`) — which two heads cannot average, plus a small-sample
+  ratio's long tail; KDA's per-key decay adds ≈ 1.1–1.3× over a scalar decay. A one-token row on the chunked path
+  (a prompt step's 1-token tail, e.g. after a prefix hit) shows it most. At GLM's 64 heads KDA holds GDN's 2.0 on
+  every case. GDN's 2 / 6 × 64 longer-row output sits at 1.89 of its 2.0: watched for flakes (a Triton or seed
+  change).
 
 **D5 — DSA: `unit.std.mixers.dsa_mla@1`, `op.dsa_index@1` and `op.mla_attend@1` inside the `std.mixers.qsa` package**,
 reusing `IndexPlanner`, `dense_limit` / `width` and the model-only path; one mixer because the indexer's query reads
@@ -1194,10 +1197,14 @@ prompt for both engines; **step 7** adds the throttled background refill and the
 the cell more than ≈ 5% behind Maya. 6. **Step 4's calls** (§13, step 4): mode (i) keeps 32K steps; step 6's
 natural-text bench decides, with the decode after a 32K prompt measured over the bench's 8 prompts × its rounds — if
 mode (i) loses net there, 32K becomes a mode (ii) override (D9). KDA's L0 budget by head count (D4's table); DSA's
-precision as built (D5). **Step 7's entry list** (the A5000's measurements; the A5000 → RTX 5090 scaling unknown until
-step 5 times the full model): mHC ≈ 0.8 s of a 16K step (≈ 18 ms a layer) and ≈ 2.7 ms a decode token; DSA ≈ 1 s of a
-16K step (66 ms attend, 26 ms select a layer); KDA's chunked call 2.5× GDN's (5.5 ms against 2.2 for 4,096 tokens);
-≈ 2,100 launches a decode token (graphed).
+precision as built (D5). **Step 7's entry list** (A5000 measurements; the expected 5090 sizes are panel C's step-4
+estimates, confirmed or replaced by step 5's full-model timing): mHC ≈ 0.8 s of a 16K step (≈ 18 ms a layer) and
+≈ 2.7 ms a decode token (5090 ≈ 1.6–1.9 ms: its decode launches first); DSA at GLM's 2,048-token budget ≈ 2.7 s of a
+16K step (218 ms attend, 25 ms select a layer) and ≈ 2.7 ms a decode token at 32K (224 µs attend a layer on 4 CTAs a
+row: a token-split decode attend), the attend's 4 dots a tile → 2–3 judged by the real model's KL; KDA's chunked call
+2.5× GDN's (5.5 ms against 2.2 for 4,096 tokens); ≈ 2,100 launches a decode token (graphed); `tf32x3` for mHC last
+on the 5090 (memory-bound there). Step 6 also checks the mode (i) 4K prefill on natural text (1.02 of Maya's
+against §7.4's 1.25 on random-id prompts) and finds the cause before step 7 if it holds.
 
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
@@ -1269,6 +1276,20 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
 | the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
 
+### Step 4's code review (panels A, B, C: clean; minors folded into step 5)
+
+| Finding | Disposition |
+|---|---|
+| A m1 prefill KDA β bf16, decode f32 | **Fixed:** KDA's chunked path takes f32 β (D4); its L0 ratios fell (D4's table) |
+| A m2, C m1 each plant's detector, with a margin | **Fixed:** each kernel-level plant test returns its measure and asserts a floor — `router_prompt_softmax` changes 100% of rows' picks past a near-tie (floor 50%); `glu_clamp_off` L0 usage 1.3e7 (floor 10); `kda_gate_softplus` 364× the 2-head budget (floor 10×); the gate bound at −4, at GLM's shape, 10–10.5× (floor 5×); `dsa_decode_select_shift` a top-k gap of 1.5 of max \|score\| against ε 2e-6 (floor 100 ε) on the GPU tiny model's decode rows, and step 5's cover |
+| A nit, C m2 the KDA budget's cause | **Fixed:** D4 and the test name FLA's two per-head bf16 casts (`kda.py:928`, `:961`) and the 2-head tails; GDN's 2 / 6 × 64 at 1.89 / 2.0 watched |
+| B m1 the FLA notice | **Fixed:** `THIRD_PARTY_NOTICES.md` lists `kda.py` and the new patch items |
+| B nits | **Fixed:** `ROUTER_CASES` beside the patch's `HOLON_ROUTER_CASE` list; `_recurrent` an immutable mapping |
+| C m3 the DSA attend's timing | **Corrected:** step 4's DSA timings ran at a 512-token budget, not GLM's 2,048. At 2,048 (A5000, one layer): attend 30.2 ms for 2,048 rows × 2,048 tokens (36.5 TFLOPS at its 4 dots a tile), a 16K prompt 218 ms attend and 25 ms select (1,024-row sub-batches), a 4K prompt 45 ms attend, decode at 32K 224 µs attend (graphed) and 23 µs select |
+| C m4 the attend's precision | Step 5 / 7: a 2- or 3-dot attend variant is judged by the real model's KL (the cover, gate (c)), not by kernel rel L2 |
+| C m5 (a′) | **Recorded:** (a′) is a smoke test on a chaotic fixture (the GPU path runs end to end within 3× its clean KL, graphs bitwise eager); detection is the L0s' and the cover's |
+| C m6, the lead's note on 4K prefill | §11 call 6: step 7's entry sizes are C's 5090 estimates, corrected for the DSA timing, confirmed by step 5's timing; step 6 checks the mode (i) 4K prefill (1.02 of Maya's against §7.4's 1.25 on random-id prompts) on natural text |
+
 ### Step 4 (kernels, 32K steps)
 
 Four workstreams on their own branches, merged (`0655d672..82cba065`); evidence `evidence/glm_step4_close_2026-10-25.json`.
@@ -1277,7 +1298,7 @@ Four workstreams on their own branches, merged (`0655d672..82cba065`); evidence 
 |---|---|
 | mHC (`kernels.hc_triton`, `mhc.py`) | IEEE f32 only (no `tf32x3` yet), Sinkhorn f32; a row's bits do not depend on T (the dot's order fixed by its chunk, sums of squares through a product with ones); the write-back's run-identity test catches a stream split from 77 rows. Decode ≈ 60 µs a block on the A5000 (≈ 2.7 ms a token over 45 layers); a 16K step ≈ 18 ms a layer (mix, pending mix, write-back): step 7 items (`tf32x3` ≈ −1.5 ms a layer at 16K, a lower-latency decode mix) |
 | KDA (`kernels.fla`) | `chunk_kda` vendored from vLLM `6dd813e0`; the recurrent path through `IS_KDA` with the bounded gate; the fixed `b` stride of `IS_KDA` (an `is_kda`-only path: GDN's unchanged); pinned autotune configs keyed by module. **L0 budget by head count** (the lead's call; D4's table): GDN's 2.0 at GLM's 64 heads (worst 1.46), 4.0 at the 2-head test shapes (worst 3.28: one-token rows on the chunked path, reading the state through FLA's bf16 copy of h). C-m4's 16-row sub-chunk is not load-bearing in this kernel form (the exponents used stay ≤ 0); the gate-at-the-bound case stays in L0. A 4,096-token call at 64 × 128 is 5.5 ms on the A5000 (GDN at the 27B's 48 × 128: 2.2): step 7 |
-| DSA (`kernels.qsa_triton`, `mla.py`) | D5's as-built notes (the weighted scores' tensor-core split at every shape; q̃ as two bf16 parts, 3.3e-6 rel L2). FN's unweighted selection bit-identical (6 random and tied cases). A5000, one layer: decode at 32K 2.1 / 26.6 / 67 µs (index / select / attend, graphed); a 16K prompt 26 ms select, 66 ms attend: step 7 |
+| DSA (`kernels.qsa_triton`, `mla.py`) | D5's as-built notes (the weighted scores' tensor-core split at every shape; q̃ as two bf16 parts, 3.3e-6 rel L2). FN's unweighted selection bit-identical (6 random and tied cases). A5000, one layer, at GLM's 2,048-token budget (step 4's review C m3 corrected a 512-token run): decode at 32K 2.1 / 23 / 224 µs (index / select / attend, graphed); a 16K prompt 25 ms select, 218 ms attend: step 7 |
 | Router, clamp, passes (`kernels.ggml_cuda`, `flashinfer`, `ggml_cpu`) | Both routing paths take sigmoid, bias, scale and E = 288 (`router_chains` 4 at 288 × 4,096); above a 4,096 option the router GEMM's pass follows the option (it is row-invariant); the GEMM is eligible for E a multiple of 32; the CPU expert share passed no `glu_limit` before (std.moe's `cpu.py`, `offload.py`: fixed); FlashInfer's clamp is exact for limits the dtype holds; ggml's `fminf` / `fmaxf` drop NaN (recorded). `PASS_PROVEN`'s 16,384-row entries for IQ2_XXS / IQ2_S / IQ3_XXS on sm_86 and sm_120 (each SM's L0 run) |
 | DSA's query sub-batch | `DSA_ROWS` = 1,024 (KDA and the dense / shared FFN at 2,048): at 2,048 the step's live set was 150 KiB a token at 16K, at 1,024 it is 126 / 114 KiB at 16K / 32K, outside the routed experts' lent passes (acceptance 3: ≤ 150) |
 | (a′) | Bounds from the clean run × 3 (A5000): prompt KL mean / p99 0.040 / 0.44, decode 0.035 / 0.54; within them on sm_86, sm_89 and sm_120, graphs bitwise eager. The tiny model is chaotic (its 8-expert router and DSA selection flip on bf16 and q8_1 noise: R's relative error ≈ 0.2 by the last block on the CPU in bf16 too); the GPU's error tracks the CPU-bf16 run's at ≈ 1.3–1.5× a block, no block standing out. **No (a′) plant reaches 10× a bound** (`router_prompt_softmax` 2.1×, `kda_gate_softplus` 1.9×, `glu_clamp_off` and `dsa_decode_select_shift` inside): none is pre-registered; each has a test that fails it: `router_prompt_softmax` and `glu_clamp_off` the routing and clamp L0s (`test_ggml_cuda_moe.py::test_glm_plants_fail_their_l0`), `kda_gate_softplus` the decode L0 (`test_kda_kernels.py::test_plant_kda_gate_softplus_fails`), `dsa_decode_select_shift` the decode rows' selection against the oracle on the engine's own inputs (`test_glm5_next_gpu.py::test_decode_selections_are_the_oracles`; step 5's cover runs it too) |
