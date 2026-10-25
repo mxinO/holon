@@ -1,12 +1,12 @@
 """GLM acceptance 2, exactness (docs/v1-glm.md §6.2): the snapshot trace (holon_judge.snapshot: a long prompt, its
 prefix-hit extension, 62 short requests through every graph bucket, logprobs and seeded sampling) recorded under
-named configurations of one model at one `max_step_tokens`, each on a fresh engine with the same state pools, and
-diffed against a reference: the first run of the first configuration, or `--ref` (a snapshot another card or process
-saved: the cross-card identity). Run-identity (`--runs` of the first configuration), identity across fits, placement
-policies, lending, the ring and the RAM tier (other configurations), and plants (a configuration under
-`holon_judge.planted`'s plant, which must differ). FN's `spikes/fn7/exact.py` with a configuration's own engine flags
-(not only plugin options: the all-resident reference and the store's deployments take different budgets) and every
-snapshot saved (`--save`), so cards compare across processes.
+named configurations of one model at one `max_step_tokens`, each on a fresh engine, and diffed against a reference:
+the first run of the first configuration, or `--ref` (a snapshot another process saved). Run-identity (`--runs` of
+the first configuration), identity across fits, placement policies, lending, the ring and the RAM tier (other
+configurations), and plants (a configuration under `holon_judge.planted`'s plant, which must differ, or raise from
+the store's own checks: recorded as such). FN's `spikes/fn7/exact.py` with a configuration's own engine flags (not
+only plugin options: the all-resident reference and the store's deployments take different budgets) and every
+snapshot saved (`--save`).
 
 A configuration is `NAME='<holon serve flags>'`, layered over the base flags (plugin options merged per key, `k=`
 deleting one). Each engine measures its own pools unless the base flags give `--state-memory` (not FN's first-engine
@@ -60,15 +60,26 @@ def main() -> None:
     out = {"ref": "--ref" if a.ref else "the first run", "steps": None if ref is None else len(ref.steps), "runs": []}
     for name, extra, plant, i in runs:
         cfg = layered(base, tasks.flags(extra))
-        with planted.PLANTS[plant]() if plant else contextlib.nullcontext():
-            e = Engine(EngineConfig(a.model, **cfg))
-            pools = {k: p.capacity for k, p in e.ledger.pools.items() if k.startswith("state.")}   # (the schedule's)
-            snap = snapshot.record(e, trace)
-            stats = e.stats()
-            e.close()
-        del e
-        gc.collect()
-        torch.cuda.empty_cache()
+        e = None
+        try:
+            with planted.PLANTS[plant]() if plant else contextlib.nullcontext():
+                e = Engine(EngineConfig(a.model, **cfg))
+                pools = {k: p.capacity for k, p in e.ledger.pools.items() if k.startswith("state.")}  # (the schedule's)
+                snap = snapshot.record(e, trace)
+                stats = e.stats()
+        except RuntimeError as err:          # a plant the store's own checks catch (its error words): it failed
+            if not plant:
+                raise
+            out["runs"].append({"config": name, "run": i, "plant": plant, "identical": False,
+                                "first_difference": f"raised: {str(err)[:300]}"})
+            print(json.dumps(out["runs"][-1]), flush=True)
+            continue
+        finally:
+            if e is not None:
+                e.close()
+            del e
+            gc.collect()
+            torch.cuda.empty_cache()
         if a.save:
             pathlib.Path(a.save).mkdir(parents=True, exist_ok=True)
             snap.save(pathlib.Path(a.save) / f"{name}.{i}.json")
@@ -80,7 +91,8 @@ def main() -> None:
                             "stats": stats})
         print(json.dumps(out["runs"][-1]), flush=True)
     out["pass"] = all(r["identical"] != bool(r["plant"]) for r in out["runs"])
-    out["state_pools_equal"] = all(r["state_pools"] == out["runs"][0]["state_pools"] for r in out["runs"])
+    out["state_pools_equal"] = all(r.get("state_pools", out["runs"][0]["state_pools"]) == out["runs"][0]["state_pools"]
+                                   for r in out["runs"])
     print(json.dumps({k: v for k, v in out.items() if k != "runs"}))
     if a.out:
         pathlib.Path(a.out).write_text(json.dumps(out, indent=1) + "\n")
