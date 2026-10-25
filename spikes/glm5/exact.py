@@ -9,8 +9,9 @@ policies, lending, the ring and the RAM tier (other configurations), and plants 
 snapshot saved (`--save`), so cards compare across processes.
 
 A configuration is `NAME='<holon serve flags>'`, layered over the base flags (plugin options merged per key, `k=`
-deleting one). The state pools are the base flags' explicit `--state-memory` (equal on every card), else the first
-engine's measured bytes.
+deleting one). Each engine measures its own pools unless the base flags give `--state-memory` (not FN's first-engine
+budget: an explicit budget skips the startup profile, so an offload deployment's step-peak loan (`moe.lend_peak`)
+never binds and a large step runs out of memory); the state pools are recorded per run.
 
 Usage: exact.py <model> '<base flags>' --prompts <set.jsonl> --config NAME='<flags>' [--config ...]
        [--plant NAME=PLANT:'<flags>'] [--runs 3] [--long-len 24000] [--ref <snapshot.json>] [--save <dir>]
@@ -55,15 +56,13 @@ def main() -> None:
             for i in range(a.runs if k == 0 else 1)]
     runs += [(name, rest.partition(":")[2], rest.partition(":")[0], 0) for name, _, rest in
              (p.partition("=") for p in a.plant)]
-    budget = base.get("state_memory")
     ref = snapshot.Snapshot.load(a.ref) if a.ref else None
     out = {"ref": "--ref" if a.ref else "the first run", "steps": None if ref is None else len(ref.steps), "runs": []}
     for name, extra, plant, i in runs:
-        cfg = layered(layered(base, tasks.flags(extra)), {} if budget is None else {"state_memory": budget})
+        cfg = layered(base, tasks.flags(extra))
         with planted.PLANTS[plant]() if plant else contextlib.nullcontext():
             e = Engine(EngineConfig(a.model, **cfg))
             pools = {k: p.capacity for k, p in e.ledger.pools.items() if k.startswith("state.")}   # (the schedule's)
-            budget = budget or e.ledger.device_bytes()
             snap = snapshot.record(e, trace)
             stats = e.stats()
             e.close()
