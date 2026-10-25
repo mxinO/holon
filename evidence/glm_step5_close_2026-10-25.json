@@ -735,5 +735,29 @@
  },
  "open": {
   "no-lend illegal address": "the no-lend configuration (lend_peak off, ring coldest, ring_tokens 0) at --memory-fraction 0.99 on the RTX 5090 hits an illegal memory access during a 32K-context step (reported at DSA's einsum), twice; with CUDA_LAUNCH_BLOCKING=1 it completes; not reproduced on the 12-block slice on the A5000; at 0.985 it completed. Not the deployment's path (it lends)."
+ },
+ "exactness_lock_config (step 5's review A M1)": {
+  "flags": "32K steps, --memory-fraction 0.99, moe.lend_peak require, moe.loan_fixed_mib 1536, the rest as the deployment; 4 sequences",
+  "ref": "step 5's deployment run (deploy.0)",
+  "runs": [
+   {
+    "run": 0,
+    "identical": true,
+    "first_difference": null
+   },
+   {
+    "run": 1,
+    "identical": true,
+    "first_difference": null
+   },
+   {
+    "run": 2,
+    "identical": true,
+    "first_difference": null
+   }
+  ],
+  "pass": true,
+  "state_pools_equal": true,
+  "steps": 625
  }
 }
