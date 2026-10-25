@@ -270,8 +270,8 @@ def mhc_sinkhorn_short() -> Iterator[None]:
 
     def planted(self, r, pending=None):
         fired[_when()] += 1
-        k = self._mix
-        return reference.hc_mhc_mix(r, self.fn, self.base, self.scale, *(pending or (None, None, None)), k.streams,
+        k, n = self._mix, round(math.sqrt(len(self.base) + 1)) - 1            # (n² + 2n mix weights: any provider)
+        return reference.hc_mhc_mix(r, self.fn, self.base, self.scale, *(pending or (None, None, None)), n,
                                     k.eps, k.hc_eps, k.iters - 1, k.dtype)
     with mock.patch.object(units._MHC, "mix", planted):
         yield
