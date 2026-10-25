@@ -52,6 +52,7 @@ from .ring import ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
+ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (docs/v1-glm.md D8f)
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
@@ -341,13 +342,17 @@ class TieredStore:
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
                                                                                                        pool="io")
-        # SSD reads' landing (docs/v1-glm.md D8f): rows a class, a call's j-th SSD miss in row j % rows
-        self.landing_rows = self.prefill
+        # SSD reads' landing (docs/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's j-th
+        # SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@1` writes, a round's copied
+        # into the I/O worker's view before its signal
+        self.landing_rows = min(max(ON_DEMAND, self.staging), self.prefill)
         self.landing: dict[str, tuple] = {}
         self.runs: dict[str, object] = {}
         self.ssd = static(f"{self.name}.ssd", (self.roles, 2, self.prefill))
         self.n_ssd = static(f"{self.name}.n_ssd", (self.roles,))
         self.n_ram = static(f"{self.name}.n_ram", (self.roles,))
+        self.io_rows = static(f"{self.name}.io_rows", (self.roles, 1 + self.prefill, 3))
+        self.ssd_peak = static(f"{self.name}.ssd_peak", (1,))          # the most SSD misses of a call (tests)
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
         self.parked = torch.zeros((), dtype=torch.int64, device=self.ctx.device)   # lent pieces parked in RAM, so far
@@ -418,7 +423,7 @@ class TieredStore:
             self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
                                 for row in np.unique(self.class_table, axis=0)]
             self._class_fetch = {c.name: f for r in self.resolvers for c, f in zip(r.classes, r._fetch, strict=True)}
-            rows = 3 * (1 + self.prefill)
+            rows = 3 * (1 + self.landing_rows)                     # a round's request rows, the worker's view
             self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
                                     pref_units=self.roles, device="host", mapped=True)
             self.descriptors = {}
@@ -539,8 +544,16 @@ class TieredStore:
         self.borrowed = dict.fromkeys(self.borrowed, 0)
 
     def io_device(self) -> torch.Tensor:
-        """The SSD reads' request rows, as `moe_tiers@1` writes them (mapped)."""
-        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.prefill, 3))
+        """A round's SSD request rows, as the I/O worker reads them (mapped)."""
+        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.landing_rows, 3))
+
+    def round_rows(self, r: int) -> None:
+        """Round r's request rows (its count, then rows r·A … (r + 1)·A − 1 of `moe_tiers@1`'s) into the worker's
+        view, on the current stream."""
+        a, view = self.landing_rows, self.io_device()
+        rows = self.io_rows[:, 1 + r * a:1 + (r + 1) * a]
+        view[:, 1:1 + rows.shape[1]].copy_(rows)
+        view[:, 0, 0].copy_((self.io_rows[:, 0, 0] - r * a).clamp(0, a))
 
     def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
@@ -1107,7 +1120,7 @@ class _Reads:
     def bind(self) -> None:
         if self.task is None:                   # landing rows, their runs, kept pieces into the RAM units
             s = self.store
-            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.prefill, 3))
+            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.landing_rows, 3))
             self.task = s.io.copy([(s.descriptors[c.name], *s.landing_view(c.name, device=False)[:1], io[r],
                                     s.landing_view(c.name, device=False)[1], c.host_view())
                                    for r, c in enumerate(s.layer_classes[self.g])])

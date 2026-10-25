@@ -879,7 +879,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
     holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; at one
     sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
-    coldest or sent to the SSD, while its own staging slots stay a graphed step's: docs/v1-glm.md D8b+e). F11's
+    coldest or sent to the SSD, while its own staging slots stay a graphed step's, and its SSD reads land in landing
+    rows of two, a call's in rounds: docs/v1-glm.md D8b+e, D8f). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -899,12 +900,14 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
     pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
                                                      # "pipe": prompt steps stage, their misses in 4 fetched parts
-    engine = _gpu_engine(file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
-        "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
-        "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
-        "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"} | (
-        {"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {}) | (
-        {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
+    from holon_std.tiered import store as tiered_store
+    with mock.patch.object(tiered_store, "ON_DEMAND", 2 if one else tiered_store.ON_DEMAND):   # (ssd1: rounds of 2)
+        engine = _gpu_engine(file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
+            "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
+            "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"}
+            | ({"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {})
+            | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query[np.isin(step.row_kind, (    # its decode and
@@ -937,6 +940,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0
+        # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/v1-glm.md D8f)
+        assert not one or (store.landing_rows == 2 and int(store.ssd_peak) > 2), int(store.ssd_peak)
     if one:                                          # exclusive tiers lend their prompt steps' staging (GLM D8b+e)
         assert store.staging < store.prefill and store.lending and store.borrowed["stage"] > 0, store.borrowed
         assert int(store.parked) > 0                 # lent experts parked in RAM (D8b), read back by later misses
