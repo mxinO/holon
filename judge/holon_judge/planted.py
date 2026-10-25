@@ -1546,6 +1546,21 @@ def lent_slot_still_mapped() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def exclusive_lent_not_demoted() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8b): under exclusive tiers a lent expert parks in RAM without its copy — its RAM unit
+    keeps whatever it held, its map says RAM. A later fetch of it reads stale bytes. Reports how often it fired."""
+    from holon_std.tiered import store as tiered
+
+    fired = collections.Counter()
+
+    def planted(self, cls, slots, to, placed):
+        fired["parks"] += 1
+    with mock.patch.object(tiered.TieredStore, "_copy_parked", planted):
+        yield
+    print(f"plant exclusive-lent-not-demoted fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def tail_unmap_undone() -> Iterator[None]:
     """A tail step's lending (docs/v1-moe-prefill.md D11) logs the range's experts unmapped but leaves them mapped:
     they keep naming slots the step's expert passes write their buffers into (D10), and the slots come back as empty
@@ -2178,6 +2193,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
                                              lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
     "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
     "lent-slot-still-mapped": lent_slot_still_mapped, "tail-unmap-undone": tail_unmap_undone,
+    "exclusive_lent_not_demoted": exclusive_lent_not_demoted,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
