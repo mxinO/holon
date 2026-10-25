@@ -1168,8 +1168,8 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
     """Step 1's review C S1-m2 (docs/v1-glm.md D8f): the down role of two classes (layer 3's Q8_0, the others' Q4_0,
-    as GLM's two down types) reads its SSD misses into one landing pool, each class's rows as wide as its own pieces'
-    supersets; the streams are the resident store's."""
+    as GLM's two down types) reads its SSD misses into one landing pool, row j at the same bytes for both (a layer's
+    on-demand rows and the next layers' read-ahead sets never overlap); the streams are the resident store's."""
     file, prompts, _ = gpu_moe
     mixed = tmp_path / "mixed.gguf"
     write(file.parent / "hf", mixed, Q.Q8_0, types={"3.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q4_0})
@@ -1180,9 +1180,10 @@ def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
         "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
     store = engine.ctx.shared_objects[KEY]
+    store.read_ahead_tokens = 8                      # (prompt steps of 8 tokens or more read ahead)
     assert _served(engine, prompts) == want
-    down = {name: store.landing[name] for name, c in store.classes.items() if c.pieces[0][2] == 1}
-    assert len(down) == 2 and len({id(x[0]) for x in down.values()}) == 1 and len({x[1] for x in down.values()}) == 2
+    down = [store.landing_view(name, device=False)[0] for name, c in store.classes.items() if c.pieces[0][2] == 1]
+    assert len(down) == 2 and down[0].data_ptr() == down[1].data_ptr() and down[0].shape == down[1].shape
     assert store.exclusive and engine.ctx.shared_objects["cpu_task.io"].native.io_stats()["bytes"] > 0
     engine.close()
 

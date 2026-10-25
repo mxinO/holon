@@ -443,7 +443,7 @@ class TieredStore:
             rows = 3 * (1 + self.ahead_rows)                       # each read-ahead set's request rows
             self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
                                        pref_units=DEPTH * self.roles, device="host", mapped=True)
-            self.descriptors, shape = {}, {}
+            self.descriptors, shape, n_rows = {}, {}, self.landing_rows + DEPTH * self.ahead_rows
             for c in classes:
                 rows = []
                 for n in range(len(c.pieces)):
@@ -456,21 +456,20 @@ class TieredStore:
                 width = max(map(len, rows))
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)
-                shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows), width)
+                shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
+                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
+                                             min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
             # landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
-            # (the copy task's runs); one pool a role — a layer's role is of one class, so its classes share it
-            # (step 1's review C S1-m2) —, a row as wide as its classes' widest piece's supersets; a class reads it
-            # as rows of its own width
-            n = self.landing_rows + DEPTH * self.ahead_rows
-            for role in sorted({r for r, _, _ in shape.values()}):
-                row, width = (max(x[i] for x in shape.values() if x[0] == role) for i in (1, 2))
-                pool = ctx.pool(f"{self.name}.landing.{role}", unit_bytes=row, min_units=n, pref_units=n,
+            # (the class's runs, above); one pool a role — a layer's role is of one class, so its classes share it
+            # (step 1's review C S1-m2) —, its rows as wide as its classes' widest piece's supersets: every class
+            # reads row j at the same bytes (a narrower class's pieces in its first bytes)
+            for role in sorted({r for r, _ in shape.values()}):
+                row = max(w for r, w in shape.values() if r == role)
+                pool = ctx.pool(f"{self.name}.landing.{role}", unit_bytes=row, min_units=n_rows, pref_units=n_rows,
                                 device="host", mapped=True)
-                runs = ctx.pool(f"{self.name}.runs.{role}", unit_bytes=16 * width, min_units=n, pref_units=n,
-                                device="host", mapped=True)
-                for name, (r, own, x) in shape.items():
+                for name, (r, _) in shape.items():
                     if r == role:
-                        self.landing[name], self.runs[name] = (pool, own, x, row, width), runs
+                        self.landing[name] = (pool, row)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
@@ -583,12 +582,10 @@ class TieredStore:
 
     def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
-        pool, row, width, pool_row, pool_width = self.landing[name]      # (the role's pools: the widest class's)
-        n = self.landing_rows + DEPTH * self.ahead_rows
+        pool, row = self.landing[name]                                   # (its role's pool)
+        n, width = self.landing_rows + DEPTH * self.ahead_rows, self.descriptors[name].shape[1]
         view = (lambda p, *a: p.device_view(*a)) if device else (lambda p, *a: p.view(*a))
-        rows = view(pool, torch.uint8, (n * pool_row,))[:n * row].view(n, row)
-        runs = view(self.runs[name], torch.int64, (n * pool_width * 2,))[:n * width * 2].view(n, width, 2)
-        return rows, runs
+        return view(pool, torch.uint8, (n, row)), view(self.runs[name], torch.int64, (n, width, 2))
 
     def ahead_view(self, device: bool = True) -> torch.Tensor:
         """The read-ahead sets' request rows [DEPTH, roles, 1 + A_ra, 3] (mapped)."""
@@ -1002,7 +999,7 @@ class TieredStore:
         for r in range(roles):
             flat_owner.scatter_(0, torch.where(placed, cls[:, r] * u_n + to[:, r].long(), sink), at.int())
         owner.view(-1).copy_(flat_owner[:sink])
-        self._copy_parked(cls, slots.clone(), to, placed)
+        self._copy_parked(cls, slots, to, placed)
         lent = lent | (picked & ~already)
         res.copy_(torch.where(lent[:, None], torch.where(placed[:, None], -1, -2),
                               torch.where(already[:, None], -1, torch.where(dropped[:, None], -2, slots)))
@@ -1024,21 +1021,24 @@ class TieredStore:
         store's copy stream after the work enqueued so far: the step's first resolve waits for them (`wait_parked`)
         before its staging can overwrite a lent slot."""
         n, roles = slots.shape
+        lists = []                                                       # each class's (slot, unit) list, here
+        for c, name in enumerate(self.classes):
+            mine = (cls == c) & placed[:, None]                          # [n, roles]
+            pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
+            ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos, x.reshape(-1))
+                    for x in (slots.int(), to)]                          # (+ a sink entry each)
+            lists.append((name, torch.stack([e[:-1] for e in ends]), mine.sum().int().view(1)))
         side = self.fetch_stream() if slots.is_cuda else None
-        if side is not None:
+        if side is not None:                     # the copies on the copy stream, their lists kept until they ran
             side.wait_stream(torch.accelerator.current_stream(slots.device))
         with side if side is not None else contextlib.nullcontext():
-            for c, (name, sc) in enumerate(self.classes.items()):
-                mine = (cls == c) & placed[:, None]                      # [n, roles]
-                pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
-                ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos,
-                                                                                                    x.reshape(-1))
-                        for x in (slots.int(), to)]                      # (+ a sink entry each)
-                fetch = torch.stack([e[:-1] for e in ends])
-                self._class_fetch[name](fetch, mine.sum().int().view(1), sc.slots(), sc.units())
+            for name, fetch, count in lists:
+                sc = self.classes[name]
+                self._class_fetch[name](fetch, count, sc.slots(), sc.units())
         if side is not None:
-            for t in (slots, to):
-                t.record_stream(side)
+            for _, fetch, count in lists:
+                fetch.record_stream(side)
+                count.record_stream(side)
             self._parked = torch.Event(device=slots.device)
             self._parked.record(side)
 
