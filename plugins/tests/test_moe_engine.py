@@ -239,12 +239,15 @@ def test_the_structural_test_catches_a_misplaced_expert(tiny_moe, plant):
     assert mismatches(engine, checkpoint)
 
 
-def _served(engine, prompts) -> tuple[list, dict]:
-    """Greedy streams and prompt logprobs of `prompts`."""
+def _served(engine, prompts, mirrored=None) -> tuple[list, dict]:
+    """Greedy streams and prompt logprobs of `prompts` (`mirrored`: a store whose host mirror must be its device map,
+    tier codes too, once the prompt steps are committed)."""
     rids = [engine.add(p, SamplingParams(temperature=0.0, max_tokens=1, prompt_logprobs=3)) for p in prompts]
     got = {}
     while engine.has_work():
         got |= {d.rid: d.prompt_logprobs for d in engine.step() if d.prompt_logprobs is not None}
+    if mirrored is not None:
+        assert np.array_equal(mirrored.residency.device.cpu().numpy(), mirrored.residency.host)
     return engine.generate(prompts, GREEDY), [(got[r].token, got[r].top_ids, got[r].top) for r in rids]
 
 
@@ -920,7 +923,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     with (spy, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
           _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails):
         warnings.simplefilter("always")
-        assert _served(engine, prompts) == want
+        assert _served(engine, prompts, mirrored=store if one else None) == want
     assert bool(tails) == (ring in ("tail", "pipe"))
     syncs = [w for w in syncs if "called a synchronizing" in str(w.message)]
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)

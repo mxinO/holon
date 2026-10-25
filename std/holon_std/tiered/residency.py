@@ -29,6 +29,7 @@ class ResidencyMap:
         self._edits: dict[int, dict[int, tuple[int, int]]] = {}    # launch -> flat index -> (expected, value)
         self._launched: dict[int, np.ndarray] = {}                # launch -> its triples, until a commit mirrors them
         self.empty: list[list[np.ndarray]] = [[] for _ in range(shape[0])]   # per group: its empty slots (a stack)
+        self.lent = -1                # a lent piece's code (the store's: −2 under exclusive tiers, the SSD)
 
     def seed(self) -> None:
         """The host mirror to the device now (after a materialize, before any step), dropping pending edits."""
@@ -70,7 +71,8 @@ class ResidencyMap:
     def commit(self, step: int, records: np.ndarray, returned: bool = False) -> None:
         """The host mirror after step `step`: the host edits launched by it, then the step's delta log `records`
         ((group, a, b): a took b's slots, b unmapped; (group, a, −2 − j): a took the group's empty slots j, popped;
-        (group, −1, b): b unmapped, lent; (group, RETURN, 0): the lent slots returned there), then — a step that
+        (group, −1, b): b unmapped, lent — its code `lent`; (group, RETURN, 0): the lent slots returned there), then — a
+        step that
         `returned` its lent slots without a marker — every lent item's slots on top of its group's empty stack, in the
         order of their records."""
         flat = self.host.reshape(-1)
@@ -91,7 +93,7 @@ class ResidencyMap:
                 self.host[g, a] = self.host[g, b]
             elif returned:
                 back[g].append(self.host[g, b].copy())
-            self.host[g, b] = -1
+            self.host[g, b] = -1 if a >= 0 else self.lent
         for g, slots in enumerate(back):
             self.empty[g] += slots
 

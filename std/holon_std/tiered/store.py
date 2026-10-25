@@ -256,6 +256,7 @@ class TieredStore:
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
+            self.residency.lent = -2 if self.exclusive else -1     # a lent piece's code (`_unmap`)
             self.host_units = self.ctx.static(f"{self.name}.host", shape, torch.int32)
             self.counts = self.ctx.static(f"{self.name}.counts", shape[:2], torch.int32)
             self.limits = self.ctx.static(f"{self.name}.limits", (len(self._order), self.roles), torch.int32)
@@ -806,7 +807,7 @@ class TieredStore:
         call's number."""
         self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
         self.lent_call.masked_fill_(picked, call)
-        self.residency.device.masked_fill_(picked[..., None], -2 if self.exclusive else -1)   # exclusive: to the SSD
+        self.residency.device.masked_fill_(picked[..., None], self.residency.lent)   # exclusive: to the SSD
         groups, items = picked.shape
         sink = self.delta.shape[1]
         at = (self.n_delta[:, None] + picked.cumsum(1) - 1).long()           # each group's records after its own
