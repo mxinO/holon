@@ -114,12 +114,12 @@ class DeviceResolver:
         return slots, cpu
 
     def _tiers(self, ids: torch.Tensor, kinds: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, split: bool):
-        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@2` places; the RAM misses'
-        gather — on the high-priority side stream when the call splits, so a RAM miss never waits behind an SSD read
-        —; round 0 of the SSD reads signalled now. Returns `finish`, on the main stream: the read-ahead hits, the rounds
-        (each waited, gathered, then the next signalled: rounds of A_od landing rows, as many as the call could need —
-        no host sync; a round past the misses is empty; a graphed step's fit one), then the demotions and the admitted
-        moves (after the side stream's gather)."""
+        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@2` places; round 0 of the SSD
+        reads signalled at once; the RAM misses' gather beside those reads — on the high-priority side stream when the
+        call splits, so a RAM miss never waits behind an SSD read. Returns `finish`, on the main stream: the read-ahead
+        hits, the rounds (each waited, gathered, then the next signalled: rounds of A_od landing rows, as many as the
+        call could need — no host sync; a round past the misses is empty; a graphed step's fit one), then the demotions
+        and the admitted moves (after the side stream's gather)."""
         store, g = self.store, self.group
         store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
                       store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
@@ -130,6 +130,8 @@ class DeviceResolver:
         rounds = -(-min(store.items, store.top_k * len(ids)) // a)
         store.ssd_peak.copy_(torch.maximum(store.ssd_peak, store.n_ssd[:1]))
         store.errors.bitwise_or_((store.n_ssd[:1] > rounds * a).int() * SHORT)
+        store.round_rows(0)                      # round 0's reads first: the RAM gather runs while they do (C S1-M1)
+        store.io.signal(self.io_slot)
         main = torch.accelerator.current_stream(ids.device) if split else None
         side = store.fetch_stream(split=True) if split else None
         if side is not None:
@@ -139,8 +141,6 @@ class DeviceResolver:
             fetch.record_stream(side)
         else:
             self._gather(fetch, store.n_ram)
-        store.round_rows(0)
-        store.io.signal(self.io_slot)
 
         def finish() -> None:
             if store._ahead:                     # read ahead: its set signalled two layers back (or at step start)
