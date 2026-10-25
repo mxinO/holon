@@ -1195,6 +1195,15 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | FN's MTP head failing on `output.weight` (step 1's close) | **Not a regression:** the reproduction omitted the lock's `mtp.path` source (Strata's MTP pack); with it main and the branch build and agree, and FN's PLE RAM-vs-SSD identity holds with MTP on |
 | Minors: A S1-m1 (abandon epoch), A S1-m2 (a hit never kept), B BS1-m1 (test-only counters), BS1-m2 (`exclusive_flag`), BS1-m3 (one-thread copy task, `io_threads` guard), the `fetches()` nit, C S1-m1 (per-extent keeps), S1-m2 (a landing pool a role, §7.1, the exclusive reserve test), S1-m3 (the L0 and `keep_copy_skipped`) | **Fixed** as each finding asks (D8f, §6.2's plants, §7.1) |
 
+### Step 2 (the oracle)
+
+| Note | Disposition |
+|---|---|
+| transformers 5.19.0 has no text-only causal LM for `glm5_next` | the judge's `Glm5NextForCausalLM` (`holon_judge.glm5next`): the text model and its head, registered as the text config's `AutoModelForCausalLM` |
+| the router's `torch.topk` breaks ties as HF leaves them | wrapped per router call with the stable descending sort, beside the indexer's `Tensor.topk` (D2) |
+| §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
+| the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
+
 ### During step 1 (the lead's calls, §11)
 
 | Finding | Disposition |
