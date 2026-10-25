@@ -917,8 +917,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
             | ({"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {})
             | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
-    if one:                                          # (ssd1: prompt steps of 8 tokens or more read ahead)
-        store.read_ahead_tokens = 8
+    if ssd:                                          # (prompt steps of 8 tokens or more read ahead; never one with
+        store.read_ahead_tokens = 8                  # a decode row: at 4 sequences, mixed steps keep: D8f)
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query[np.isin(step.row_kind, (    # its decode and
         RowKind.DECODE, RowKind.VERIFY))].sum()) * 2 * 4, int(t["counts"].sum()))) or commit(step, t)   # verify rows
