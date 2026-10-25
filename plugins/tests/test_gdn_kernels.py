@@ -35,6 +35,7 @@ from holon_judge import l0
 from holon_plugins.kernels.fla import plugin as fla_plugin
 from holon_plugins.kernels.fla.vendor import fused_sigmoid_gating
 from holon_std.mixers.gdn import reference as ref
+from holon_std.mixers.gdn.kernels import MASKED
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 hf = pytest.importorskip("transformers.models.qwen3_5.modeling_qwen3_5")
@@ -600,7 +601,7 @@ def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
     keep = torch.arange(q, device="cuda")[None, :] < 1 + torch.tensor(accepted, device="cuda")[:, None]
     masked = dict(rows(x, 0, n * q))
     for name in ("a", "b"):
-        masked[name] = masked[name].masked_fill(~keep.reshape(-1, 1), -1e4)
+        masked[name] = masked[name].masked_fill(~keep.reshape(-1, 1), MASKED)       # (−inf: the contract's)
     rule(rule.plan([q] * n, per_token=True), *masked.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
          out_slots=dev(slots))
     return out

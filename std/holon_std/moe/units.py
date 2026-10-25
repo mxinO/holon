@@ -59,6 +59,7 @@ class ExpertLinear(nn.Module):
         super().__init__()
         self.experts, self.in_features, self.out_features = experts, in_features, out_features
         self.top_k, self.rows_per_token, self.glu, self._ctx = top_k, rows_per_token, "none", ctx
+        self.glu_limit = 0.0                       # SwiGLU's clamp (docs/v1-glm.md D6; the gate/up stack's)
         self.act_dtype, self.device = act_dtype, device or ctx.device     # where its parts are held
         self.extents = {}                          # a whole adopted stack's, per part (QTensor.extents)
         self.weight = nn.Parameter(torch.empty(experts, out_features, in_features, dtype=ctx.dtype),
@@ -115,7 +116,7 @@ class ExpertLinear(nn.Module):
                                   out_features=2 * gate.out_features, top_k=gate.top_k,
                                   rows_per_token=gate.rows_per_token, act_dtype=gate.act_dtype,
                                   device=gate.device)
-        merged.layout, merged.glu = gate.layout, "swiglu"
+        merged.layout, merged.glu, merged.glu_limit = gate.layout, "swiglu", gate.glu_limit
         merged.parts = _hold(merged.weight, parts, gate.device)
         gate.weight = up.weight = gate.parts = up.parts = None
         return merged
@@ -136,7 +137,8 @@ class ExpertLinear(nn.Module):
         return {"layout": self.layout_fact(), "experts": self.experts, "in": self.in_features,
                 "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
-                "act_quant": "a16" if self.layout is None else _act_quant(ctx)}
+                "act_quant": "a16" if self.layout is None else _act_quant(ctx)} | (
+            {"glu_limit": float(self.glu_limit)} if self.glu and self.glu_limit else {})     # (only when set: D6)
 
     @property
     def kernel(self):
@@ -259,13 +261,17 @@ def _store(ctx, **site):
 class MoE(nn.Module):
     """Mixture of experts: softmax top-k routing over an f32 router (held bf16 where `moe.router_dtype` asks and its
     values allow; `moe_router@1`, or the f32 linear and
-    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. The router runs CHUNK tokens at a
+    `moe_topk@1`), gate/up/down expert stacks with SwiGLU, the weighted combine. GLM's routing and clamp
+    (docs/v1-glm.md D6): `scoring = "sigmoid"`, `bias` (a selection bias [E] f32, `e_score_correction_bias`),
+    `scale` (the weights' factor) and `limit` (SwiGLU's clamp), each passed to the kernels as a fact only when not the
+    default. The router runs CHUNK tokens at a
     time, or a whole pass where it declares `pass_rows` (D3′); the expert path, in f32 (design D3), a pass of the
     store's size (whole CHUNKs). `fused_gate_up`: the checkpoint stores one gate/up stack, per expert gate's rows then
     up's (transformers' `gate_up_proj`; e.g. Qwen3.8-Flash-Next's MTP pack, FN D9), loaded as `gate_up`."""
 
     def __init__(self, ctx, *, hidden: int, experts: int, top_k: int, inter: int, renormalize: bool,
-                 layer: int = 0, fused_gate_up: bool = False) -> None:
+                 layer: int = 0, fused_gate_up: bool = False, scoring: str = "softmax", bias: bool = False,
+                 scale: float = 1.0, limit: float = 0.0) -> None:
         super().__init__()
         self.layer = layer
         self._store = _store(ctx, layer=layer, experts=experts, top_k=top_k)
@@ -273,6 +279,9 @@ class MoE(nn.Module):
             raise ValueError("std.moe@1: moe.route_transform drops routes, which only an offload store serves "
                              "(moe.store = std.moe.offload@1)")
         self.router = nn.Parameter(torch.empty(experts, hidden, dtype=torch.float32), requires_grad=False)
+        if scoring not in ("softmax", "sigmoid"):
+            raise ValueError(f"std.moe@1: scoring {scoring!r} (softmax or sigmoid)")
+        self.bias = nn.Parameter(torch.empty(experts, dtype=torch.float32), requires_grad=False) if bias else None
         stack = {"experts": experts, "top_k": top_k, "device": self._store.device}
         if fused_gate_up:
             self.gate_up = ExpertLinear(ctx, in_features=hidden, out_features=2 * inter, rows_per_token=1,
@@ -284,6 +293,8 @@ class MoE(nn.Module):
                                    act_dtype=ctx.dtype, **stack)
         self.down = ExpertLinear(ctx, in_features=inter, out_features=hidden, rows_per_token=top_k,
                                  act_dtype=torch.float32, **stack)          # the f32 SwiGLU output
+        for gate in (getattr(self, n) for n in ("gate", "up", "gate_up") if hasattr(self, n)):
+            gate.glu_limit = limit
         # an offload store's decode and verify passes run their resident entries while the misses land (`moe.split=on`;
         # off by default: mmvq computes a null slot's entries in full, so the two passes cost twice the expert work —
         # an RTX A5000's IQ2_XS MTP decode 68 against 73 tok/s — until it skips them)
@@ -293,7 +304,9 @@ class MoE(nn.Module):
         self._gate_up: ExpertLinear | None = None      # the expert store's stacks (`finalize_weights`)
         self._down: ExpertLinear | None = None
         dtype = _dtype(ctx.dtype)
-        topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize}
+        topk = {"experts": experts, "top_k": top_k, "renormalize": renormalize} | (
+            {"scoring": scoring} if scoring != "softmax" else {}) | ({"bias": True} if bias else {}) | (
+            {"scale": float(scale)} if scale != 1.0 else {})               # (only when not the default: D6)
         site = f"std.moe[experts={experts},top_k={top_k}]"
         # the router and top-k in one kernel where a provider serves them (bounded: its own f32 order), else the f32
         # linear and `moe_topk@1`
@@ -333,10 +346,11 @@ class MoE(nn.Module):
     def _route(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """(weights, ids, the gate/up input) for up to CHUNK tokens: the router's route_prepare where it has one, else
         its routing (or the f32 linear and top-k) and `x[:, None]`."""
+        bias = {} if self.bias is None else {"bias": self.bias}
         if self._prepare is not None:
-            return self._prepare(x, self.router, self._gate_up.kernel)
-        weights, ids = (self._router(x, self.router) if self._router is not None
-                        else self._topk(nn.functional.linear(x.float(), self.router.float())))
+            return self._prepare(x, self.router, self._gate_up.kernel, **bias)
+        weights, ids = (self._router(x, self.router, **bias) if self._router is not None
+                        else self._topk(nn.functional.linear(x.float(), self.router.float()), **bias))
         return weights, ids, x[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:

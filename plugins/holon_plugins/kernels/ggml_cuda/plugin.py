@@ -758,12 +758,13 @@ def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
     swiglu = f["glu"] == "swiglu"
     return (_supports_matmul(f, act_quant, types) and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu")
             and f["out"] % (8 if swiglu else 4) == 0 and f["rows_per_token"] in (1, f["top_k"])
-            and CHUNK * f["top_k"] <= ID_PAIRS)
+            and CHUNK * f["top_k"] <= ID_PAIRS and "glu_limit" not in f)        # (the clamp: docs/v1-glm.md step 4)
 
 
 def _supports_moe_topk(f: dict) -> bool:
     e = f["experts"]
-    return 0 < e <= 512 and e & (e - 1) == 0 and 0 < f["top_k"] <= e     # topk-moe.cu's instances
+    return (0 < e <= 512 and e & (e - 1) == 0 and 0 < f["top_k"] <= e     # topk-moe.cu's instances; softmax only
+            and not {"scoring", "bias", "scale"} & f.keys())                # (sigmoid / bias / scale: GLM's step 4)
 
 
 def _supports_moe_router(f: dict) -> bool:

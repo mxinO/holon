@@ -9,7 +9,8 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
 - `causal_conv1d@1`: instance `(x [T, C], weight [C, K], state [units, C, K-1], slots [R], query_start [R+1],
   has_init [R]) -> y [T, C]`: per row, a depthwise causal convolution of the row's tokens continuing the K-1 inputs in
   `state[slots[r]]` (zeros without `has_init`), `y = silu(conv)` in f32, cast to x's dtype; then `state[slots[r]]`
-  holds the last K-1 inputs of (previous ‖ row). Facts: channels, kernel_size, dtype.
+  holds the last K-1 inputs of (previous ‖ row). The weights are used in their stored dtype (f32 for KDA's convs,
+  docs/v1-glm.md D4; the model dtype for GDN's). Facts: channels, kernel_size, dtype.
 - `gated_delta_rule@1`: instance with `plan(lens: list[int], snapshots=(), per_token=False) -> handle` (host, once
   per step: per-row token counts; `snapshots` (row, offset, unit): every provider writes row's state after its first
   `offset` tokens, a multiple of 64 with 0 < offset < the row's length, to `snapshot[unit]` — an in-step checkpoint;
@@ -27,20 +28,24 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
 - `gated_rmsnorm@1`: instance `(o [T, H, D], z [T, H, D], weight [D]) -> [T, H, D]`: per head
   `weight · (o · rsqrt(mean(o²) + eps)) · act(z)`, the norm in f32 cast to o's dtype before the weight (HF's
   `RMSNormGated`), the gate in f32, act = silu, or sigmoid with the fact `out_gate="sigmoid"` (Qwen3.8-Flash-Next's
-  GDN, docs/v1-flash-next.md D8; given only when not silu, so the facts every other site records stay as they were).
-  Facts: dim, eps, dtype[, out_gate].
+  GDN, docs/v1-flash-next.md D8; given only when not silu, so the facts every other site records stay as they were);
+  with the fact `round = "none"` (KDA's o_norm, docs/v1-glm.md D4; given only then) the norm stays f32 through the
+  weight and the gate, rounded once at the end. Facts: dim, eps, dtype[, out_gate, round].
 - `gdn_rewind@1` (after a verify step, every layer of a state group at once; docs/m07-perf.md D5): instance
-  `(state [L, units, C, K-1], window [L, R', C, K-1], x [L, T', C], a [L, T', Hv], b [L, T', Hv], slots [R],
+  `(state [L, units, C, K-1], window [L, R', C, K-1], x [L, T', C], a [L, T', W], b [L, T', Hv], slots [R],
   accepted [S], width) -> None`, with R ≤ R' rows of `width` tokens (row r's at r·width in each layer's x, a and b; its
   conv inputs before them in window[:, r]) and n_r = accepted[slots[r]] (int64) of its drafts accepted: in place,
-  a and b ← −1e4 (in their dtype) at each row's tokens past its first 1 + n_r, and state[:, slots[r]] ← the last K-1
-  inputs of (window[:, r] ‖ the row's first 1 + n_r tokens of x). A unit shared by several rows (graph padding)
-  is left unspecified (deterministic otherwise). Facts: channels, kernel_size, heads_v, dtype.
+  a and b ← −inf (in their dtype) at each row's tokens past its first 1 + n_r, and state[:, slots[r]] ← the last K-1
+  inputs of (window[:, r] ‖ the row's first 1 + n_r tokens of x). The gate width W is Hv (GDN's a) or any other
+  per-row width (KDA's per-channel gate f, H·Dk: the fact `gate_width`, given only when it is not `heads_v`);
+  −inf is the delta rules' identity step for both (GDN: softplus(−inf) = 0, σ(−inf) = 0 — the bits −1e4 gave; KDA:
+  −5 · σ(−inf) = −0, β = 0; docs/v1-glm.md D4). A unit shared by several rows (graph padding) is left unspecified
+  (deterministic otherwise). Facts: channels, kernel_size, heads_v, dtype[, gate_width].
 """
 from __future__ import annotations
 
 CAUSAL_CONV1D, GATED_DELTA_RULE, GATED_RMSNORM = "causal_conv1d@1", "gated_delta_rule@1", "gated_rmsnorm@1"
 GDN_REWIND = "gdn_rewind@1"
-MASKED = -1e4                      # gdn_rewind's gates past the accepted tokens: the delta rule's identity step
+MASKED = float("-inf")             # gdn_rewind's gates past the accepted tokens: the delta rules' identity step
 ORDERS = ("grouped", "tiled")
 OUT_GATES = ("silu", "sigmoid")                # gated_rmsnorm's activation of z (`out_gate`; silu by default)

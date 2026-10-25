@@ -9,21 +9,38 @@ import torch
 CLAMP = 6.1e-5            # llama.cpp's guard on the top-k sum (never reached by softmax: the sum is ≥ k/E)
 
 
-def moe_topk(logits: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch.Tensor, torch.Tensor]:
-    """The `moe_topk@1` oracle: `(weights [T, k] f32, ids [T, k] int32)`."""
+def moe_topk(logits: torch.Tensor, top_k: int, renormalize: bool, scoring: str = "softmax",
+             bias: torch.Tensor | None = None, scale: float = 1.0) -> tuple[torch.Tensor, torch.Tensor]:
+    """The `moe_topk@1` oracle: `(weights [T, k] f32, ids [T, k] int32)`: softmax (or sigmoid) scores, the top k by
+    score (+ `bias`, selection only), their scores renormalised (sigmoid: as ggml computes it, `× 1 / max(Σ,
+    6.1e-5)`), times `scale`."""
     x = logits.float()
     x = torch.where(x.isnan(), torch.finfo(torch.float32).min, x)
-    probs = x.softmax(-1)
-    order = probs.sort(dim=-1, descending=True, stable=True)            # ties to the lower index
-    weights, ids = order.values[:, :top_k], order.indices[:, :top_k]
-    if renormalize:
-        weights = weights / weights.sum(-1, keepdim=True).clamp_min(CLAMP)
+    probs = x.softmax(-1) if scoring == "softmax" else torch.sigmoid(x)
+    choice = probs if bias is None else probs + bias.float()
+    ids = choice.sort(dim=-1, descending=True, stable=True).indices[:, :top_k]     # ties to the lower index
+    weights = probs.gather(1, ids)
+    if renormalize:                  # (sigmoid scores: ggml's reciprocal, as D6 states; softmax's division kept)
+        total = weights.sum(-1, keepdim=True).clamp_min(CLAMP)
+        weights = weights / total if scoring == "softmax" else weights * (1.0 / total)
+    if scale != 1.0:
+        weights = weights * scale
     return weights.contiguous(), ids.int().contiguous()
 
 
-def moe_router(x: torch.Tensor, router: torch.Tensor, top_k: int, renormalize: bool) -> tuple[torch.Tensor, ...]:
+def moe_router(x: torch.Tensor, router: torch.Tensor, top_k: int, renormalize: bool, scoring: str = "softmax",
+               bias: torch.Tensor | None = None, scale: float = 1.0) -> tuple[torch.Tensor, ...]:
     """The `moe_router@1` oracle: `moe_topk` of the f32 logits `x · routerᵀ`."""
-    return moe_topk(torch.nn.functional.linear(x.float(), router.float()), top_k, renormalize)
+    return moe_topk(torch.nn.functional.linear(x.float(), router.float()), top_k, renormalize, scoring, bias, scale)
+
+
+def swiglu(gate: torch.Tensor, up: torch.Tensor, limit: float = 0.0) -> torch.Tensor:
+    """silu(gate) · up in f32; with `limit` L > 0 (`glu_limit`, docs/v1-glm.md D6) silu(min(gate, L)) · clamp(up, −L,
+    L)."""
+    gate, up = gate.float(), up.float()
+    if limit:
+        gate, up = gate.clamp(max=limit), up.clamp(-limit, limit)
+    return torch.nn.functional.silu(gate) * up
 
 
 def expert_parts(parts: dict[str, torch.Tensor], experts: int, merged: bool) -> list[list[dict[str, torch.Tensor]]]:
@@ -41,7 +58,7 @@ def expert_parts(parts: dict[str, torch.Tensor], experts: int, merged: bool) -> 
 
 
 def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu: str = "none",
-                   operand_dtype: torch.dtype | None = None) -> torch.Tensor:
+                   operand_dtype: torch.dtype | None = None, glu_limit: float = 0.0) -> torch.Tensor:
     """The `linear_experts@2` oracle over the stack's weights `weight` [E, out, in] (dequantized, or dense):
     `y [T, k, out_y]` f32. `operand_dtype`: a dense layout rounds the activation to the weight dtype first."""
     t, k = ids.shape
@@ -53,8 +70,7 @@ def linear_experts(x: torch.Tensor, weight: torch.Tensor, ids: torch.Tensor, glu
         rows = flat == e
         y[rows] = xs[rows] @ weight[e].float().T
     if glu == "swiglu":
-        gate, up = y.chunk(2, dim=-1)
-        y = torch.nn.functional.silu(gate) * up
+        y = swiglu(*y.chunk(2, dim=-1), glu_limit)
     elif glu != "none":
         raise ValueError(f"unknown glu {glu!r}")
     return y

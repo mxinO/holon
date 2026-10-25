@@ -8,7 +8,7 @@ import torch
 import triton
 import triton.language as tl
 
-MASKED = tl.constexpr(-1e4)     # the contract's gates past the accepted tokens
+MASKED = tl.constexpr(float("-inf"))     # the contract's gates past the accepted tokens (the rules' identity step)
 BLOCK_C = 256                   # channels per program
 
 
@@ -59,4 +59,5 @@ class GDNRewind:
 
 
 def supports(f: dict) -> bool:
-    return f["dtype"] == "bfloat16" and 2 <= f["kernel_size"] <= 8          # the L0's dtype
+    return (f["dtype"] == "bfloat16" and 2 <= f["kernel_size"] <= 8           # the L0's dtype; one gate width
+            and "gate_width" not in f)                                          # (KDA's: docs/v1-glm.md step 4)

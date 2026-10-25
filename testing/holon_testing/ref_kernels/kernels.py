@@ -42,11 +42,11 @@ class Rope:
 
 
 class SiluMul:
-    def __init__(self, ctx, *, inter: int, dtype: str) -> None:
-        self.inter = inter
+    def __init__(self, ctx, *, inter: int, dtype: str, glu_limit: float = 0.0) -> None:
+        self.inter, self.limit = inter, glu_limit
 
     def __call__(self, gate_up):
-        return ffn.silu_mul(gate_up[..., : self.inter], gate_up[..., self.inter:])
+        return ffn.silu_mul(gate_up[..., : self.inter], gate_up[..., self.inter:], self.limit)
 
 
 class PagedAttention:
@@ -148,10 +148,10 @@ class LinearExperts:
     a chunk's), then written into `out`, so a buffer lent where it should not be shows in the outputs."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, top_k: int,
-                 **facts) -> None:
+                 glu_limit: float = 0.0, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
-        self.top_k, self.out_y = top_k, out // 2 if glu == "swiglu" else out
+        self.top_k, self.out_y, self.limit = top_k, out // 2 if glu == "swiglu" else out, glu_limit
         self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
         self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
         steps = ctx.options.get("max_step_tokens") or PASS_ROWS
@@ -180,7 +180,7 @@ class LinearExperts:
     def _chunk(self, x, parts, ids):
         if self.quantized is None:
             weight = parts["weight"]
-            y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
+            y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype, glu_limit=self.limit)
         else:
             first = next(iter(parts.values()))
             if len(first) * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
@@ -194,7 +194,7 @@ class LinearExperts:
                 experts = ids.unique().tolist()
                 stack = x.new_zeros(len(first), self.out, x.shape[-1], dtype=torch.float32)
                 stack[experts] = self._decode(parts, experts)
-            y = moe.linear_experts(x, stack, ids, self.glu)
+            y = moe.linear_experts(x, stack, ids, self.glu, glu_limit=self.limit)
         return y.to(self.out_dtype)
 
     def _decode(self, parts, experts) -> torch.Tensor:
@@ -224,19 +224,21 @@ def _check_buffers(x: torch.Tensor, out, scratch, shape: tuple, nbytes: int) -> 
 
 
 class MoeTopk:
-    def __init__(self, ctx, *, experts: int, top_k: int, renormalize: bool) -> None:
-        self.top_k, self.renormalize = top_k, renormalize
+    def __init__(self, ctx, *, experts: int, top_k: int, renormalize: bool, scoring: str = "softmax",
+                 bias: bool = False, scale: float = 1.0) -> None:
+        self.top_k, self.renormalize, self.scoring, self.scale = top_k, renormalize, scoring, scale
 
-    def __call__(self, logits):
-        return moe.moe_topk(logits, self.top_k, self.renormalize)
+    def __call__(self, logits, bias=None):
+        return moe.moe_topk(logits, self.top_k, self.renormalize, self.scoring, bias, self.scale)
 
 
 class MoeRouter:
-    def __init__(self, ctx, *, top_k: int, renormalize: bool, **facts) -> None:
-        self.top_k, self.renormalize = top_k, renormalize
+    def __init__(self, ctx, *, top_k: int, renormalize: bool, scoring: str = "softmax", bias: bool = False,
+                 scale: float = 1.0, **facts) -> None:
+        self.top_k, self.renormalize, self.scoring, self.scale = top_k, renormalize, scoring, scale
 
-    def __call__(self, x, router):
-        return moe.moe_router(x, router, self.top_k, self.renormalize)
+    def __call__(self, x, router, bias=None):
+        return moe.moe_router(x, router, self.top_k, self.renormalize, self.scoring, bias, self.scale)
 
 
 class MoeCombine:
@@ -381,15 +383,15 @@ class GatedDeltaRule:
 
 
 class GatedRMSNorm:
-    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu") -> None:
-        self.eps, self.out_gate = eps, out_gate
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu", round: str = "model") -> None:
+        self.eps, self.out_gate, self.round = eps, out_gate, round
 
     def __call__(self, o, z, weight):
-        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate)
+        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate, self.round)
 
 
 class GDNRewind:
-    def __init__(self, ctx, *, channels: int, kernel_size: int, heads_v: int, dtype: str) -> None:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, heads_v: int, dtype: str, gate_width: int = 0) -> None:
         pass
 
     def __call__(self, state, window, x, a, b, slots, accepted, width):

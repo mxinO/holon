@@ -33,7 +33,8 @@ class Plugin:
     def register(self, regs) -> None:
         for op, impl, supports in ((CONV, CausalConv1d, lambda f: _half(f) and 2 <= f["kernel_size"] <= 8),
                                    (NORM, GatedRMSNorm, lambda f: _half(f) and f["dim"] in (64, 128, 256)
-                                    and f.get("out_gate", "silu") in ("silu", "sigmoid"))):
+                                    and f.get("out_gate", "silu") in ("silu", "sigmoid")
+                                    and "round" not in f)):        # (KDA's f32 norm: docs/v1-glm.md step 4)
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.gdn_triton", impl=impl,
                                             requires=Constraint(sm_min=80), supports=supports,
                                             props=frozenset({"graph_safe", "deterministic"})))

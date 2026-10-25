@@ -1,17 +1,22 @@
 """Op contracts std.moe owns (docs/m02-moe.md D2). Their oracles are in `reference.py`; kernels come from kernel
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs; any `T` ≥ 0.
 
-- `moe_topk@1`: instance `(logits [T, E] f32) -> (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax
-  over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
-  `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
-  unspecified weights. Facts: experts, top_k, renormalize.
+- `moe_topk@1`: instance `(logits [T, E] f32, bias [E] f32 | None = None) -> (weights [T, k] f32, ids [T, k]
+  int32)`, both contiguous: the scores, softmax over E in f32 (or, with the fact `scoring = "sigmoid"`, the sigmoid of
+  each logit), the k largest — by score, or with the fact `bias` (true; then `bias` is given) by score + bias, the
+  bias choosing the experts only — ties to the lower index; their weights the scores (never the bias), divided by
+  their sum (clamped at 6.1e-5, i.e. `× 1 / max(Σ, 6.1e-5)`) when `renormalize`, then times the fact `scale` (absent:
+  1). Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and unspecified
+  weights. Facts: experts, top_k, renormalize[, scoring, bias, scale] (docs/v1-glm.md D6: the last three only when
+  not the default — softmax, no bias, scale 1 — so the facts every other site records stay as they were).
 - `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32, or bf16 under the fact router_dtype = bfloat16 —
-  its values, exactly) -> (weights [T, k] f32, ids [T, k] int32)`: the
+  its values, exactly, bias [E] f32 | None = None) -> (weights [T, k] f32, ids [T, k] int32)`: the
   router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
   from x's exact f32 values, in an order the provider fixes (deterministic; it may depend on the call's row count, as a
   linear's kernel path does), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
   where a provider serves its facts, else composes the f32 `linear` and `moe_topk@1`. Facts: hidden, experts, top_k,
-  renormalize, dtype. An instance may define `route_prepare(x, router, experts) -> (weights, ids, x_experts)`: its
+  renormalize, dtype[, router_dtype, scoring, bias, scale] (`moe_topk@1`'s, with the same defaults). An instance may
+  define `route_prepare(x, router, experts, bias=None) -> (weights, ids, x_experts)`: its
   result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
   `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
   `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
@@ -23,14 +28,15 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
   `{"weight": [E, out, in]}` for `dense/<dtype>`). With `glu = "swiglu"` the stack is a merged gate/up stack (per expert
   `out/2` gate rows, then `out/2` up rows; a part with one value per expert is [2, E], gate's row then up's) and `y =
-  silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's activation operand is
+  silu(gate) · up` in f32 (out_y = out/2) — with the fact `glu_limit` L > 0, `silu(min(gate, L)) · clamp(up, −L, L)`
+  (docs/v1-glm.md D6; given only when set); with `glu = "none"`, out_y = out. A dense layout's activation operand is
   rounded to the weight dtype before the product, with f32 accumulation. An instance may accept, in place of `x`, a
   handle its own provider's `moe_router@1` prepared for it (`route_prepare`; once stale, it reads the handle's x).
   Every such handle exposes `.x`, the tensor it stands for, so a consumer that does not know the handle (another
   provider's instance, a composition) falls back on `handle.x`.
   Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
-  quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
-  shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
+  quantized layouts, as `qlinear@2`'s; `a16` for dense ones)[, glu_limit]. An instance may define `prepare` as
+  `qlinear@2`'s (logical shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
   An instance may expose `pass_rows` (an int, a multiple of `CHUNK`; `CHUNK` without it), the most rows a call may
   carry at its `CHUNK`-row calls' bits (docs/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤ `pass_rows`, a
   call of n·`CHUNK` rows gives each row the bits the `CHUNK`-row call of that row's own chunk gives it. Nothing is

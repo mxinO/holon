@@ -10,23 +10,36 @@ LINEAR = "std.ops.linear@1"
 
 
 class SwiGLU(nn.Module):
-    def __init__(self, ctx, *, hidden: int, inter: int, layer: int = 0) -> None:
+    """down(silu(gate(x)) · up(x)). `limit` L > 0 (docs/v1-glm.md D6): silu(min(gate, L)) · clamp(up, −L, L), by
+    `silu_mul@1`'s `glu_limit` (no fused GLU: its kernels compute the plain form). `rows` > 0 (D9; 0, the default,
+    runs the whole step as one): the step's rows in sub-batches of `rows`, each its own calls, so a step's activations
+    peak at a sub-batch's — deterministic at a given step size, not the unsplit call's bits (a matmul's may depend on
+    its rows)."""
+
+    def __init__(self, ctx, *, hidden: int, inter: int, layer: int = 0, limit: float = 0.0, rows: int = 0) -> None:
         super().__init__()
         self.gate_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=inter))
         self.up_proj = ctx.unit(Ref(LINEAR, in_features=hidden, out_features=inter))
         self.down_proj = ctx.unit(Ref(LINEAR, in_features=inter, out_features=hidden))
-        facts = {"inter": inter, "dtype": str(ctx.dtype).removeprefix("torch.")}
+        facts = {"inter": inter, "dtype": str(ctx.dtype).removeprefix("torch.")} | (
+            {"glu_limit": float(limit)} if limit else {})               # (given only when set: D6)
         spec = ctx.select_kernel(kernels.SILU_MUL, site=f"std.ffn.swiglu[inter={inter}]", **facts)
         self._act = spec.impl(ctx, **facts)
         self._gate_up: nn.Module | None = None
+        self.limit, self.rows = limit, rows
 
     def finalize_weights(self, ctx) -> None:
         merge = getattr(type(self.gate_proj), "merge", None)       # one matmul for gate and up where possible
         self._gate_up = merge(self.gate_proj, self.up_proj) if merge else None
-        if self._gate_up is not None and hasattr(self._gate_up, "use_glu"):   # and the activation fused into it
-            self._gate_up.use_glu("swiglu")                                    # where its kernel can (D6)
+        if self._gate_up is not None and hasattr(self._gate_up, "use_glu") and not self.limit:   # and the activation
+            self._gate_up.use_glu("swiglu")                                     # fused into it where its kernel can
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.rows and x.shape[0] > self.rows:
+            return torch.cat([self._swiglu(x[a:a + self.rows]) for a in range(0, x.shape[0], self.rows)])
+        return self._swiglu(x)
+
+    def _swiglu(self, x: torch.Tensor) -> torch.Tensor:
         if self._gate_up is not None:
             fused = self._gate_up.glu(x) if hasattr(self._gate_up, "glu") else None
             return self.down_proj(self._act(self._gate_up(x)) if fused is None else fused)
