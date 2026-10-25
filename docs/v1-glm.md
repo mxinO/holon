@@ -112,6 +112,14 @@ placement; then meet the program bars against Project Maya on the RTX 5090, with
    cache), across policies (`lfu`, deferred admission, F10 spares), with lending and the ring on and off, and between
    RAM holding every expert and RAM short (exclusive tiers + SSD). Run-identical ×3 on the RTX 5090 and the RTX 5080
    at their locks. **Every existing lock advances byte-identical** at the step that lands a shared change (D9, D6, D4).
+   **As restated at step 5 (the lead's call):** identity is claimed **within a card** — across fits, policies,
+   lending, the ring and the tiers — and, on the RTX PRO 6000 at 16K, the offload store with its cache capped against
+   all-resident `std.moe@1` (the store changes no bits). It is **not** claimed across cards: llama.cpp's mmq splits a
+   dense call's K over the card's SM count unless its tiles fill ≥ 90% of a wave (`vendor/ggml/src/ggml-cuda/mmq.cuh`
+   :1604, 1661–1666: stream-k with `nsm` blocks; expert calls with ids always tile), so a small dense Q8_0 projection
+   (KDA's `f_a` / `f_b`, `b_proj`) differs between an RTX 5080 (84 SMs), 5090 (170) and PRO 6000 (188). The PRO 6000
+   is a KL reference across cards. Forcing mmq tiling everywhere (slower small shapes, every lock's trace moved) is
+   not taken.
 3. **Kernels:** L0 for every new kernel against its `reference.py` on sm_86, sm_89 and sm_120, memcheck clean; every
    decode step graphed; a kernel-level run-identity test for every in-place multi-CTA kernel (A-N5). **Launches per
    decode token are reported, not gated:** step 4 takes a launch inventory on a 4-layer slice (FN's method) and the
@@ -813,7 +821,7 @@ tokens (sparse DSA from t + 1 > 11), chunked at 100 / 250, then 32 decode steps;
 | (c) decode vs prefill; chunked (250) vs one-shot: KL mean ≤ 0.13, p50 ≤ 0.007 | 5090 deployment, step 5 and step 10 | pass (FN: 0.025–0.031 / 0.002–0.003) |
 | (d) 72 items vs Maya, greedy, thinking on, 16,384 new tokens at most, the template's default effort | both engines' 5090 mode (i) deployments | pass (within 5 items) |
 | (f) the cover (acceptance 1f). Bounds FN's way: each set at ≈ 10× the clean run's maximum and ≥ 10× below its plant's effect, both measured before the bound is written | RTX PRO 6000 and 5090 | pass |
-| exactness (acceptance 2) at each lock's step: 32K on the 5090 against the RTX PRO 6000 (§7.3); the 5080 at its own lock's step against the RTX PRO 6000 at that step (A R9-m1: its ≈ 5.6 GiB arena cannot lend a 32K loan) | RTX PRO 6000; 5090; 5080 | byte-identical |
+| exactness (acceptance 2) at each lock's step, within each card (step 5's restatement): the 5090 at 32K; the 5080 at its own step (8K, no loan); the RTX PRO 6000's store (cache capped) against its all-resident run at 16K; across cards a KL reference only (mmq's split-K follows the SM count) | RTX PRO 6000; 5090; 5080 | byte-identical within a card |
 | the clamp's bind rate, the real comb logits' spread, zero-score ties at the selection boundary per 1,000 rows | reported at step 5 | — |
 
 ### 6.3 Plants
@@ -893,7 +901,10 @@ The 5090's measured total is **31.448 GiB** (FN `evidence/fn_close_2026-10-24.js
 Visible 15.47 GiB; parameters 6.89, statics 0.2, state 0.98, outside 0.6, activation 0.75, graphs 0.1, slack 0.4 →
 arena ≈ 5.6 GiB → **≈ 840 experts, 6.9%**. Its IQ3_XXS down class (8 layers × ≈ 20 slots) cannot hold a ring, so the
 5080 stages routed misses (the ring of parts) at every step size, and its loan stays within the gate/up class. A
-reported row and the development lock (Q4).
+reported row and the development lock (Q4). **As built (step 5):** the 5080 runs **8K steps with no loan** (`moe.lend_peak = off`): at 16K
+the startup profile does not fit, and at 8K its minimum layout (staging only, the gate/up cache at its 296-slot floor)
+cannot hold the classes' staging below the loan's own tail — the store refuses that layout at build (it once ran the
+loan over expert slots: every greedy token 0, fixed in step 5).
 
 ### 7.3 The RTX PRO 6000 (96 GB), step 5
 
