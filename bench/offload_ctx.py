@@ -317,11 +317,12 @@ def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             t0 = time.perf_counter()
             engine.stdin.write(f"GEN {n} temperature=0 {','.join(map(str, ids))}\n")
             engine.stdin.flush()
-            stamps = []
+            stamps, out = [], []
             for line in engine.stdout:
                 now = time.perf_counter()
                 if line.startswith("T "):
                     stamps.append(now)
+                    out.append(int(line.split()[1]))
                 elif line.startswith("ERR"):
                     raise RuntimeError(line.strip())
                 elif line.startswith("DONE "):
@@ -332,7 +333,7 @@ def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             assert len(stamps) == int(f[1]) == n and f[5] == "length", (len(stamps), f[:6])
             return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0]),
                     "reused": int(f[8]), "hit_rate": int(f[9]) / max(int(f[10]), 1),
-                    "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4])}
+                    "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4]), "ids": out}
 
         warm, reqs = requests(a, corpus)
         request(warm["ids"], warm["output"])
@@ -387,7 +388,7 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
         return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows), by
 
     def request(ids: list[int], n: int) -> dict:
-        stamps, done = [], False
+        stamps, done, out = [], False, []
         torch.cuda.synchronize()
         seen.update(hits=0, routed=0)
         rows0, tokens0, by0 = passes()
@@ -397,22 +398,24 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             for d in engine.step():
                 if d.rid == rid:
                     stamps += [time.perf_counter()] * len(d.token_ids)
+                    out += list(d.token_ids)
                     done = d.finish_reason is not None
         assert len(stamps) == n, (len(stamps), n)
         rows, tokens, by = passes()
-        out = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
+        res = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
         if rows > rows0:
-            out["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
+            res["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
             for d in range(1, 1 + max(by, default=0)):   # draft d accepted, given d - 1 were (Strata's spec depth)
                 tested = sum(n - by0[a] for a, n in by.items() if a >= d - 1)
-                out[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
+                res[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
         if seen["routed"]:
-            out["hit_rate_all"] = seen["hits"] / seen["routed"]
-        return out
+            res["hit_rate_all"] = seen["hits"] / seen["routed"]
+        return res | {"ids": out}
 
     warm, reqs = requests(a, corpus)
     request(warm["ids"], warm["output"])
-    results = {r["key"]: {k: round(v, 4) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+    results = {r["key"]: {k: round(v, 4) if isinstance(v, float) else v for k, v in request(r["ids"], OUTPUT).items()}
+               for r in reqs}
     engine.close()
     return {"results": results}
 
@@ -484,7 +487,8 @@ def summary(rows: list[dict]) -> dict:
     for r in rows:
         for c, m in r.get("results", {}).items():
             for k, v in m.items():
-                out.setdefault(r["arm"], {}).setdefault(c, {}).setdefault(k, []).append(v)
+                if isinstance(v, (int, float)):           # (the generated ids are kept in the rows, not summarized)
+                    out.setdefault(r["arm"], {}).setdefault(c, {}).setdefault(k, []).append(v)
     return {arm: {c: {k: {"median": round(statistics.median(v), 2), "min": round(min(v), 2), "max": round(max(v), 2),
                           "n": len(v)} for k, v in ms.items()} for c, ms in cs.items()} for arm, cs in out.items()}
 
@@ -508,7 +512,9 @@ def orchestrate(a: argparse.Namespace) -> None:
                 continue
             print(f"round {rnd} {arm['name']}", flush=True)
             r = {"round": rnd, "arm": arm["name"]} | run_arm(arm, a, outdir / f"r{rnd}_{arm['name']}.log")
-            print("  " + json.dumps({k: r[k] for k in ("results", "error", "peak_vram_mib") if k in r}), flush=True)
+            brief = {c: {k: v for k, v in m.items() if k != "ids"} for c, m in r.get("results", {}).items()}
+            print("  " + json.dumps({"results": brief} | {k: r[k] for k in ("error", "peak_vram_mib") if k in r}),
+                  flush=True)
             rows.append(r)
             with open(raw, "a") as f:
                 f.write(json.dumps(r) + "\n")
