@@ -946,6 +946,33 @@ figures:
   arms. **Holon's mode (ii) runs take the same 64 GiB job step and hygiene, and every cell's evidence records the
   step's `memory.peak` for both engines** (reset per engine), so the cap's fairness shows.
 
+**Measured replay after step 1: mode (ii) lending's decode cost per context** (C's `lend_decode.py` over Maya's bench
+decode trace, at GLM's fit: VRAM 3,185, RAM 7,550; SSD reads a token over the 256 decode tokens after each prompt;
+step 1's fix review C). The
+frozen text above stands; this replaces its mode (i) reasoning for mode (ii)'s lending (−4 to −6% at 32K): **in mode
+(ii) a lend displaces into the SSD**, since parking moves the hot lent experts over RAM's "coldest", chosen by F11's
+≈ 12-token heat, which are long-term-warm experts the decode then reads back.
+
+| Lend a prompt (Holon) | SSD reads a token after it, as built | Cell effect |
+|---|---|---|
+| 0 | 4.44 (base) | — |
+| ≈ 300 (1K) | 4.57 | ≈ −1% (Maya lends ≈ 914 at every prompt: ≈ 0 against it) |
+| ≈ 690 (4K) | 5.08 | ≈ −2 to −5% |
+| ≈ 2,100 (32K) | **8.24** | **≈ −24%** (Maya's own ≈ 914 costs it ≈ −4.5%) |
+
+**The (ii) decode 32K cell is at risk: ≈ 0.81–0.92 as built**, below its bar. Coldest-first lending and sending hot
+lent experts to the SSD do not help (8.24 / 8.99). The levers, replayed:
+1. **RAM victims by a long-memory heat** (a second heat decaying ≈ ×0.999 a token, or F11's with the profile as the
+   tiebreak) for parking, keeps and demotions: 8.24 → **7.44** (4K: 5.08 → 4.45). Small; placement only.
+2. **A throttled background refill**: the hottest SSD-only experts (long heat) read into free RAM units as
+   non-urgent `cpu_task` requests, ≤ 5 a token, ≤ 2–4 chunks in flight: → **5.84** (4K ≈ 4.07). Moderate.
+3. **Fewer experts lent per byte at 32K** (the loan over both classes' tails, ≈ 2,100 → ≈ 1,300; or `LOAN_MARGIN`
+   1.6): ≈ −35–40% of the lend cost.
+
+With (1) + (2) the cell returns to **≈ 0.99–1.06**; with all three ≈ 1.03–1.11. The lead's call (§11): (1) at step 6
+with the mode (ii) deployment, measuring SSD reads a token after each prompt for both engines; (2) and (3) at step 7
+if step 6 still reads more than ≈ 5% behind Maya after the 32K prompts.
+
 **Cells with a band below their bar go to the lead at step 0's end** (N4's rule), with levers and costs:
 - **(i) decode** — R3's exact CPU row (decided at step 0's end); MTP with its head's experts pinned (D7: 0.89–1.09×,
   ≈ 4 days; C m1); the cache levers (+4% at Maya's share); the measured fixed part (step 4's launch inventory).
@@ -1133,6 +1160,11 @@ matters, a proper forward-start point is found or proposed then, with no core li
 under exclusive tiers, a mode (ii) prompt step gathers every miss before computing, and (ii) 32K reads ≈ 0.83–0.87
 against its 0.9 bar. 4. **The step-1 review's fix round** (A, B, C; §13): the order A's blocker and major, B's
 blocker and major, C's majors, then the minors; step 1's close checks re-run with parking and the loan together.
+5. **Mode (ii) lending's decode cost** (step 1's fix review C; §7.4's measured replay): the (ii) decode 32K cell is at
+risk, ≈ 0.81–0.92 as built. **Step 6** builds a long-memory RAM heat with the mode (ii) deployment — for parking
+victims, keeps and demotions, a placement-policy term with its own oracle — and measures SSD reads a token after each
+prompt for both engines; **step 7** adds the throttled background refill and the smaller lend if step 6 still shows
+the cell more than ≈ 5% behind Maya.
 
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
