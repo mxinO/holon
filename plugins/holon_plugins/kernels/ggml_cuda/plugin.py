@@ -92,14 +92,15 @@ PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest 
 # chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
 # classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
 # (docs/v1-flash-next.md D1′). Each entry maps to the most rows its L0 proved: PASS_ROWS, or 16,384 for GLM's expert
-# types (docs/v1-glm.md D9: IQ2_XXS, IQ2_S, IQ3_XXS) on sm_86 (sm_120's after its L0 run). Every other pair keeps CHUNK.
+# types (docs/v1-glm.md D9: IQ2_XXS, IQ2_S, IQ3_XXS) on sm_86 and sm_120 (step 4's L0 on each). Every other pair keeps
+# CHUNK.
 _FN_TYPES = ("iq1_m", "iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs", "q2_0")
 _GLM_TYPES = ("iq2_xxs", "iq2_s", "iq3_xxs")
 PASS_PROVEN: dict[tuple[int, str, str], int] = (
     {(86, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q6_k", *_FN_TYPES)}
     | {(89, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
     | {(120, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q5_k", "q6_k", *_FN_TYPES)}
-    | {(86, t, "q8_1"): 16384 for t in _GLM_TYPES})
+    | {(sm, t, "q8_1"): 16384 for sm in (86, 120) for t in _GLM_TYPES})
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots

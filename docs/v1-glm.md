@@ -253,9 +253,16 @@ MLA's `q_r`, so the indexer cannot wrap the attention as QSA's does.
 - **Selection:** `qsa_select@1` gains an optional per-row head-weight input `w [T, Hi]` (fact `head_weights`, default
   off) and Hi up to 32. fp32 scores, IEEE products, the exact top-k with lower-pool ties, shape-invariant,
   sub-batched workspace (FN D6). In prefill a `bf16x3` tensor-core split is allowed within the fp32 L0 budget.
+  **As built (step 4):** the weighted scores take that split (each f32 pooled key as three bf16 parts against the bf16
+  query: exact products, f32 sums) at every shape, decode included, so the selection stays shape-invariant (the
+  CUDA-core path took 178 ms a layer at 16K); signed scores are ordered by their bits, −0.0 tied with +0.0.
 - **Attention** (`mla_attend@1`): absorbed MQA over the latent for prefill, decode and verify, over the selected pools
   + tail. Decode's `q̃` is f32; prefill's `q̃` precision is set by L0 against the f32 reference (fp16 with a per-head
   power-of-two scale, Maya's form, or bf16; budget rel L2 ≤ 2e-4).
+  **As built (step 4):** one precision for every row, since a row's bits must not depend on its call: q̃ and the
+  softmax weights as two bf16 parts each (exact products, f32 sums), 3.3e-6 rel L2 against the f32 reference (one
+  part: 9e-4). The query path runs in sub-batches of 1,024 rows (`DSA_ROWS`: its f32 q̃ and context are ≈ 0.4 MiB a
+  row), KDA and the dense / shared FFN at 2,048.
 - **`attn_k_b` / `attn_v_b` are dequantized from Q6_K to BF16 at load** (+0.27 GB): a recorded deviation from the
   GGUF's exact values (A-n2), the rounding Maya's pack makes too, of tensors that are BF16 in the source checkpoint
   (`kv_b_proj`, G-A §3.1). The L0 reference takes the same rounded weights; the CPU tiny model is f32 and unaffected.
@@ -1237,6 +1244,23 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | the router's `torch.topk` breaks ties as HF leaves them | wrapped per router call with the stable descending sort, beside the indexer's `Tensor.topk` (D2) |
 | §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
 | the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
+
+### Step 4 (kernels, 32K steps)
+
+Four workstreams on their own branches, merged (`0655d672..82cba065`); evidence `evidence/glm_step4_close_2026-10-25.json`.
+
+| Note | Disposition |
+|---|---|
+| mHC (`kernels.hc_triton`, `mhc.py`) | IEEE f32 only (no `tf32x3` yet), Sinkhorn f32; a row's bits do not depend on T (the dot's order fixed by its chunk, sums of squares through a product with ones); the write-back's run-identity test catches a stream split from 77 rows. Decode ≈ 60 µs a block on the A5000 (≈ 2.7 ms a token over 45 layers); a 16K step ≈ 18 ms a layer (mix, pending mix, write-back): step 7 items (`tf32x3` ≈ −1.5 ms a layer at 16K, a lower-latency decode mix) |
+| KDA (`kernels.fla`) | `chunk_kda` vendored from vLLM `6dd813e0`; the recurrent path through `IS_KDA` with the bounded gate; the fixed `b` stride of `IS_KDA` (an `is_kda`-only path: GDN's unchanged); pinned autotune configs keyed by module. **L0 ratio budget 4.0** (GDN's 2.0): one-token rows on the chunked path read the state through FLA's bf16 copy of h (3.3 worst; every other case ≤ 2.3). C-m4's 16-row sub-chunk is not load-bearing in this kernel form (the exponents used stay ≤ 0); the gate-at-the-bound case stays in L0. A 4,096-token call at 64 × 128 is 5.5 ms on the A5000 (GDN at the 27B's 48 × 128: 2.2): step 7 |
+| DSA (`kernels.qsa_triton`, `mla.py`) | D5's as-built notes (the weighted scores' tensor-core split at every shape; q̃ as two bf16 parts, 3.3e-6 rel L2). FN's unweighted selection bit-identical (6 random and tied cases). A5000, one layer: decode at 32K 2.1 / 26.6 / 67 µs (index / select / attend, graphed); a 16K prompt 26 ms select, 66 ms attend: step 7 |
+| Router, clamp, passes (`kernels.ggml_cuda`, `flashinfer`, `ggml_cpu`) | Both routing paths take sigmoid, bias, scale and E = 288 (`router_chains` 4 at 288 × 4,096); above a 4,096 option the router GEMM's pass follows the option (it is row-invariant); the GEMM is eligible for E a multiple of 32; the CPU expert share passed no `glu_limit` before (std.moe's `cpu.py`, `offload.py`: fixed); FlashInfer's clamp is exact for limits the dtype holds; ggml's `fminf` / `fmaxf` drop NaN (recorded). `PASS_PROVEN`'s 16,384-row entries for IQ2_XXS / IQ2_S / IQ3_XXS on sm_86 and sm_120 (each SM's L0 run) |
+| DSA's query sub-batch | `DSA_ROWS` = 1,024 (KDA and the dense / shared FFN at 2,048): at 2,048 the step's live set was 150 KiB a token at 16K, at 1,024 it is 126 / 114 KiB at 16K / 32K, outside the routed experts' lent passes (acceptance 3: ≤ 150) |
+| (a′) | Bounds from the clean run × 3 (A5000): prompt KL mean / p99 0.040 / 0.44, decode 0.035 / 0.54; within them on sm_86, sm_89 and sm_120, graphs bitwise eager. The tiny model is chaotic (its 8-expert router and DSA selection flip on bf16 and q8_1 noise: R's relative error ≈ 0.2 by the last block on the CPU in bf16 too); the GPU's error tracks the CPU-bf16 run's at ≈ 1.3–1.5× a block, no block standing out. **No (a′) plant reaches 10× a bound** (`router_prompt_softmax` 2.1×, `kda_gate_softplus` 1.9×, `glu_clamp_off` and `dsa_decode_select_shift` inside): none is pre-registered; their L0s fail them (`test_ggml_cuda_moe`, `test_kda_kernels`), `dsa_decode_select_shift` is the cover's (step 5) |
+| The launch inventory (4-block slice, decode, eager, A5000) | KDA block 38 launches (mixer 23, dense FFN 7, the rest 8); DSA block 54 (mixer 38, routed + shared experts 12, the rest 4); 27 outside the blocks: ≈ 2,100 a decode token over 45 layers, graphed |
+| Locks after the router, pass-size and kernel changes | all advance byte-identical: RTX 5080 Qwen3-30B-A3B Q4_K_M (the vehicle, 2,048 / 512), Qwen3-8B Q4_K_M, Qwen3.8-27B IQ3_S, FN's IQ2_XS (3,072 at top-10); RTX 5090 Qwen3-30B-A3B Q4_K_M, Qwen3.8-27B Q4_K_M, FN's IQ3_S. FN's profiles were rebuilt under the locks' names (`holon_tools profile`, v1-qwen3_5's prompts; a profile seeds placement only) |
+| Mode (i) at 16K vs 32K steps (the full Maya-S file, RTX 5090, one run, random-id prompts) | the engine starts with `moe.lend_peak = require` at both (the gate/up tail holds a 32K step's loan, passes and staging); 4K prefill 2,171 / 2,169 tok/s, 32K prefill 3,402 / 3,226 (+5.5% at 32K), decode after the 32K prompt 43.5 / 45.3 (−4% at 32K), after 4K 53.0 / 53.1; the same tokens at both. **The lead's call** (D9: "if mode (i) loses, 32K becomes a mode (ii) override") |
+| `test_reserve.py`'s 32K case and the passes | the tiny GLM over the step shapes (KDA past `SUB_TOKENS`, sub-batching on) fits its reserve; the slice's 32K step runs every routed stack in two 16,384-row passes (sm_86, sm_120) |
 
 ### Step 3's code review (panels A, B, C: clean; minors folded into step 4)
 

@@ -202,3 +202,32 @@ def test_glm_live_activations_a_token(tokens):
         assert total <= peaks[-1]
     finally:
         e.close()
+
+
+def test_glm_prompt_passes_are_16384_rows():
+    """D9: under GLM's `ggml_cuda.pass_rows` = 16,384 (sm_86's and sm_120's proven bound for its expert types) a 32K
+    prompt step runs every routed stack in passes of 16,384 rows: two mmq calls a stack, the router GEMM's pass too."""
+    from holon_plugins.kernels.ggml_cuda.plugin import LinearExperts, MoeRouter
+
+    if GLM_SLICE is None:
+        pytest.skip("GLM_SLICE_GGUF not set")
+    e = Engine(EngineConfig(model=GLM_SLICE, device="cuda", dtype=torch.bfloat16, cuda_graphs=False, page_size=16,
+                            max_seqs=1, max_step_tokens=32768, max_model_len=32768 + 64, memory_fraction=0.95,
+                            plugin_options={"ggml_cuda.pass_rows": "16384"}))
+    try:
+        stacks, routers = _instances(e, LinearExperts), _instances(e, MoeRouter)
+        assert stacks and routers and all(k.pass_rows == 16384 for k in stacks + routers)
+        before = [sum(n for key, n in k.calls.items() if key.startswith("mmq/")) for k in stacks]
+        e.add(torch.randint(0, 150000, (32768,), generator=torch.Generator().manual_seed(4)).tolist(),
+              SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True))
+        e.step()
+        after = [sum(n for key, n in k.calls.items() if key.startswith("mmq/")) for k in stacks]
+        assert [a - b for a, b in zip(after, before, strict=True)] == [2] * len(stacks)
+    finally:
+        e.close()
+
+
+def _instances(engine, cls) -> list:
+    """The engine's kernel instances of `cls`: those its modules hold, each once."""
+    found = {id(v): v for m in engine.executor.model.modules() for v in vars(m).values() if isinstance(v, cls)}
+    return list(found.values())
