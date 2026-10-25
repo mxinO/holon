@@ -916,6 +916,28 @@ ring of parts in mode (ii) (D9), F10 spares + keep with `lend_tail` (D8a), no bo
 (§7.1). **No cell is centred below its bar with the levers**; (ii) 32K sits nearest (≈ 0.95–1.0 against 0.9). A cell
 still centred below its bar after the levers goes on the owner list.
 
+**Measured after the design closed: Maya in mode (ii)** (N1, 3 rounds × 2 arms in one 64 GiB job step, hygiene on;
+`evidence/glm_n1_maya_rtx-5090_2026-10-25.json`). The frozen text above stands; these replace its modelled Maya
+figures:
+
+| Maya, mode (ii) | 1K | 4K | 32K |
+|---|---|---|---|
+| prefill, default (tok/s; s) | 268; 3.80 | 762; 5.36 | 2,464; 13.25 |
+| prefill, `CKPT_EVERY=0` (the 32K cell's faster arm) | 268 | 762 | **3,303; 9.94** |
+| decode (tok/s; default / `CKPT_EVERY=0`) | 23.3 / 23.2 | 21.6 / 21.6 | 21.1 / 21.8 |
+| SSD reads a decode token (its counter); ms a token | 4.50; 14.2 | 5.14; 16.2 | 5.12–5.28; 16.1–16.6 |
+| hit rate | 0.72 | 0.70 | 0.69–0.70 |
+
+- **r_Maya = 4.5–5.3 at ≈ 3.15 ms a read**, as §7.4's decode model assumed (28.1 + 5 × 2.9 ≈ 42.6 ms; measured
+  43–47 ms): the (ii) decode cell with the levers stays ≈ 1.07–1.15.
+- **The prefill cells with the levers** (Holon still modelled): 32K against the faster arm's 9.94 s ≈ **0.95–1.05**
+  (C's 9.5–10 s held); 4K ≈ 1.25 (Maya 5.36 s against ≈ 4.3 s); **1K ≈ 1.0, now the tightest mode (ii) cell** (Maya
+  3.80 s against ≈ 3.8 s): its lever is R8-M1's overlap of the round's read with the RAM stream (D8f), already in the
+  design; step 6 watches it.
+- Its RAM tier: 7,545 slots, 49.99 GB pinned; the job step's `memory.peak` 65.35 GB (60.9 GiB) of 64 GiB across all
+  arms. **Holon's mode (ii) runs take the same 64 GiB job step and hygiene, and every cell's evidence records the
+  step's `memory.peak` for both engines** (reset per engine), so the cap's fairness shows.
+
 **Cells with a band below their bar go to the lead at step 0's end** (N4's rule), with levers and costs:
 - **(i) decode** — R3's exact CPU row (decided at step 0's end); MTP with its head's experts pinned (D7: 0.89–1.09×,
   ≈ 4 days; C m1); the cache levers (+4% at Maya's share); the measured fixed part (step 4's launch inventory).
@@ -932,7 +954,7 @@ probes.
 | # | Measure | Status | Decides |
 |---|---|---|---|
 | N0 | The harness: Maya built at `4615f34` (sm_120) and its pack; `offload_ctx`'s Maya backend; `produced` = n; `reused` = 0; the corpus retokenized | **done** (one run: decode 35.9 / 35.6 / 35.9, prefill 646 / 2,016 / 3,195 tok/s at 1K / 4K / 32K; pool 3,360–3,377; h 0.72–0.74) | D11 runnable |
-| N1 | Maya's rows: `--calibrate`, then mode (i) 5 rounds × 2 arms (its run-to-run CV), mode (ii) in a 64 GiB job step (pinned memory in `memory.peak`; the tier in experts; hygiene), the deterministic recipe; the 5080 mode (i); Maya's ledger lines | **calibrate done (kept the defaults); mode (i) done** (5 rounds × 2 arms, §7.4; the screen validated, D11); **mode (ii) queued behind N4's 5090 probes**, recording Maya's SSD reads a token (`stat.disk_reads`) | the denominators; D10's tier; D11's rounds |
+| N1 | Maya's rows: `--calibrate`, then mode (i) 5 rounds × 2 arms (its run-to-run CV), mode (ii) in a 64 GiB job step (pinned memory in `memory.peak`; the tier in experts; hygiene), the deterministic recipe; the 5080 mode (i); Maya's ledger lines | **calibrate done (kept the defaults); mode (i) done** (5 rounds × 2 arms, §7.4; the screen validated, D11); **mode (ii) done** (3 rounds × 2 arms; §7.4's measured table, its SSD reads a token from its own counter) | the denominators; D10's tier; D11's rounds |
 | N2 | Maya's route traces: decode (`STRATA_GLM_ROUTE_LOG`) and prompts (`--dump-routing`) on the bench plan and the 72 prompts; the held-out replay at each engine's share; F10 vs deferred admission in mode (ii); MTP verify windows; the routed fraction of the SSD-only set by window | **decode traces done** (bench 8,256 + tasks 27,680 tokens): h above; windows 13.9 / 19.1 / 23.9 distinct experts per layer at 2 / 3 / 4 tokens (D7). **Prompt traces queued.** Lending: not replayable at step 0 (§7.4) | D8's mode (ii) default; D7 (deferred); D9's rules; h |
 | N3 | The SSD microbench on the bar node's NVMe: io_uring (with and without the bounce copy, which copies each extent as it completes into a rotating page-locked 2 GiB region; C n2), native AIO, `pread`, an 8-thread pool; depth 8 / 16 / 32; 256 KiB–1 MiB chunks; 1–8 experts a call (`spikes/glm0/n3_ssd.c`) | **done** (`local/tmp/glm/n3_ssd_rtx-5090.txt`): **2.57 GB/s at k ≥ 4** on io_uring, native AIO and an 8-thread pool alike (2.45 at k = 1, 2.86 ms an expert); plain `pread` 1.62; depth 8–32 and chunks 256 KiB–1 MiB within 1%; the bounce copy −7% at k = 1, −1% at k = 8. The drive is the limit (a PCIe 4.0 x4 NVMe) | D8f's interface (io_uring, AIO fallback), depth (16) and chunk (any); its rate decided the mode (ii) levers (§7.4, rev 9); the bounce dropped |
 | N4 | The roofline per §7.4 row; **the prefill compute probe**, **4K / 8K / 16K MoE passes** (A5000 done on real routes: 10.50 / 8.24 / 7.41 µs a token a layer) (a spike build of the extension at `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072) and **the live set at 4K–32K** | **A5000 done**: MoE GEMMs per 4K pass (D9), the live set unsplit ≈ 326 KiB / sub-batched ≈ 55 KiB a token beyond R at 16K (D9); **the 5090's queued** (real routes from N2's tasks trace; 4K pass, and 8K / 16K with the spike build) | every gated row frozen; a row predicted below its bar goes to the lead before step 1 ends; **the non-lending peak** (decode / verify / sub-512-row steps) that the reserve trims to (C r9-m1) |

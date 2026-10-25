@@ -1,0 +1,185 @@
+{
+ "date": "2026-10-25",
+ "doc": "docs/v1-glm.md \u00a77.4, \u00a78 (N1), D11",
+ "gpu": "rtx-5090",
+ "model": "peasantsmith/GLM-5.3-Flash-Maya-GGUF@f16ee4ba (Maya-S v2 IQ2_XXS)",
+ "engine": "Project Maya v1.1.27 (4615f34), --serve raw ids, its calibrated defaults (--calibrate kept them)",
+ "method": "bench/offload_ctx.py: each run a fresh process over 24 requests (8 spans x 1K / 4K / 32K, 256 generated each), ABBA arm order, a discarded warm-up run first; the run statistic per context (total tokens over total time across its 8 prompts), the median over runs; decode and prefill timed from the client; glm stat: counters per request from the engine's log (per decode token)",
+ "arms": {
+  "default": "Maya's defaults (32K read as 16,384 + 16,384 at its checkpoint cut)",
+  "ckpt0": "MAYA_GLM_CKPT_EVERY=0 (a 32K prompt in one chunk)"
+ },
+ "mode_i": {
+  "runs_per_arm": 5,
+  "rows": 10,
+  "cells": {
+   "maya_ckpt0": {
+    "1024": {
+     "decode_tps": 36.7013,
+     "decode_tps_cv_pct": 2.52,
+     "prefill_tps": 657.9386,
+     "prefill_tps_cv_pct": 0.11,
+     "hit_rate": 0.7301,
+     "engine_prompt_ms": 1557.5,
+     "runs": 5
+    },
+    "32768": {
+     "decode_tps": 34.3257,
+     "decode_tps_cv_pct": 1.41,
+     "prefill_tps": 3457.5673,
+     "prefill_tps_cv_pct": 0.03,
+     "hit_rate": 0.706,
+     "engine_prompt_ms": 9484.0,
+     "runs": 5
+    },
+    "4096": {
+     "decode_tps": 33.8684,
+     "decode_tps_cv_pct": 1.73,
+     "prefill_tps": 2122.3964,
+     "prefill_tps_cv_pct": 0.06,
+     "hit_rate": 0.705,
+     "engine_prompt_ms": 1924.9,
+     "runs": 5
+    }
+   },
+   "maya_default": {
+    "1024": {
+     "decode_tps": 35.9182,
+     "decode_tps_cv_pct": 2.51,
+     "prefill_tps": 656.4308,
+     "prefill_tps_cv_pct": 0.2,
+     "hit_rate": 0.7301,
+     "engine_prompt_ms": 1563.5,
+     "runs": 5
+    },
+    "32768": {
+     "decode_tps": 34.1433,
+     "decode_tps_cv_pct": 1.2,
+     "prefill_tps": 3233.4495,
+     "prefill_tps_cv_pct": 0.03,
+     "hit_rate": 0.7077,
+     "engine_prompt_ms": 10119.7,
+     "runs": 5
+    },
+    "4096": {
+     "decode_tps": 33.9572,
+     "decode_tps_cv_pct": 1.54,
+     "prefill_tps": 2124.454,
+     "prefill_tps_cv_pct": 0.07,
+     "hit_rate": 0.7053,
+     "engine_prompt_ms": 1925.2,
+     "runs": 5
+    }
+   }
+  },
+  "screen": "rows with ids from round 2 on; the pre-registered rule (a run of >= 128 tokens with period <= 16) flags 3 of 120, the three with ids among the five rows > 0.08 above their prompt's median hit rate; two unscreenable (no ids)"
+ },
+ "mode_ii": {
+  "runs_per_arm": 3,
+  "rows": 6,
+  "cells": {
+   "maya_ckpt0_64g": {
+    "1024": {
+     "decode_tps": 23.2413,
+     "decode_tps_cv_pct": 2.13,
+     "prefill_tps": 267.569,
+     "prefill_tps_cv_pct": 0.42,
+     "hit_rate": 0.7185,
+     "engine_prompt_ms": 3797.7,
+     "disk_reads_per_token": 4.5012,
+     "disk_ms_per_token": 14.2287,
+     "ram_fetches_per_token": 67.675,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    },
+    "32768": {
+     "decode_tps": 21.7984,
+     "decode_tps_cv_pct": 3.54,
+     "prefill_tps": 3303.3869,
+     "prefill_tps_cv_pct": 0.13,
+     "hit_rate": 0.7028,
+     "engine_prompt_ms": 9941.8,
+     "disk_reads_per_token": 5.1188,
+     "disk_ms_per_token": 16.06,
+     "ram_fetches_per_token": 72.8863,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    },
+    "4096": {
+     "decode_tps": 21.5679,
+     "decode_tps_cv_pct": 0.87,
+     "prefill_tps": 762.2039,
+     "prefill_tps_cv_pct": 0.23,
+     "hit_rate": 0.7002,
+     "engine_prompt_ms": 5357.25,
+     "disk_reads_per_token": 5.1412,
+     "disk_ms_per_token": 16.1612,
+     "ram_fetches_per_token": 74.3863,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    }
+   },
+   "maya_default_64g": {
+    "1024": {
+     "decode_tps": 23.274,
+     "decode_tps_cv_pct": 2.05,
+     "prefill_tps": 267.6598,
+     "prefill_tps_cv_pct": 0.38,
+     "hit_rate": 0.7185,
+     "engine_prompt_ms": 3803.55,
+     "disk_reads_per_token": 4.5012,
+     "disk_ms_per_token": 14.17,
+     "ram_fetches_per_token": 67.675,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    },
+    "32768": {
+     "decode_tps": 21.127,
+     "decode_tps_cv_pct": 3.96,
+     "prefill_tps": 2464.105,
+     "prefill_tps_cv_pct": 0.52,
+     "hit_rate": 0.6896,
+     "engine_prompt_ms": 13245.75,
+     "disk_reads_per_token": 5.2837,
+     "disk_ms_per_token": 16.56,
+     "ram_fetches_per_token": 76.2938,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    },
+    "4096": {
+     "decode_tps": 21.5572,
+     "decode_tps_cv_pct": 0.8,
+     "prefill_tps": 762.1302,
+     "prefill_tps_cv_pct": 0.24,
+     "hit_rate": 0.7002,
+     "engine_prompt_ms": 5361.15,
+     "disk_reads_per_token": 5.1412,
+     "disk_ms_per_token": 16.1363,
+     "ram_fetches_per_token": 74.3863,
+     "ram_slots": 7545,
+     "vram_slots": 3377,
+     "runs": 3
+    }
+   }
+  },
+  "setup": "one job step with a 64 GiB memory limit (cgroup memory.max 68,719,476,736); MAYA_GLM_RAM_GB=50: a 7,545-slot RAM tier, 49.99 GB pinned; the GGUF's pages evicted before every arm; its fds O_DIRECT (one buffered handle per shard beside)",
+  "job_step_memory_peak_bytes": 65354207232,
+  "job_step_memory_peak_note": "the step's cgroup peak across all arms (each engine ran alone in it): 60.87 GiB of 64",
+  "device_read_GB_per_arm": [
+   702,
+   611,
+   704,
+   603,
+   613,
+   686,
+   699,
+   613
+  ],
+  "device_read_note": "NVMe read bytes around each arm (warm-up first), model load included: the default arm reads its 32K set twice (two chunks)"
+ }
+}
