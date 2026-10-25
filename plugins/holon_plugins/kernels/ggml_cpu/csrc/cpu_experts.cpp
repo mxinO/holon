@@ -5,7 +5,7 @@
 // A run is a `cpu_task@1` task: every thread of the worker's pool runs it, meeting at the pool's barrier between
 //   phase 1  each (job, token) item's input row quantized to gate/up's vec_dot type      (items split across threads)
 //   phase 2  gate and up rows (jobs × 2·inter), each row read once for all its job's tokens  (rows stolen, below)
-//   phase 3  f32 SwiGLU per item, quantized to down's vec_dot type                          (items split)
+//   phase 3  f32 SwiGLU per item (clamped at `limit` > 0, docs/v1-glm.md D6), quantized to down's vec_dot type (split)
 //   phase 4  down rows (jobs × hidden) into the items' output rows                           (rows stolen)
 // Rows, never K, are split across threads, and each (row, token) is one vec_dot call whatever the grouping, the batch
 // or the thread that ran it: a token's output is bitwise the same alone or grouped and at any thread count (D7). Each
@@ -200,14 +200,16 @@ class Rows {
 // One instance: an expert class pair (gate/up and down types, hidden, inter) and the most tokens and jobs per run.
 struct Experts {
     int hidden, inter, top_k, tokens, max_jobs;
+    float limit;                                        // SwiGLU's clamp (0: none): ggml's SWIGLU_CLAMP, fminf / fmaxf
     Traits gu, dn;
     size_t gu_row, dn_row, xq_row, aq_row;
     int dn_blocks;                                      // a down row's weight blocks (and its activation's)
 
     Experts(int64_t gu_type, int64_t dn_type, int64_t hidden_, int64_t inter_, int64_t top_k_, int64_t tokens_,
-            int64_t jobs_)
+            int64_t jobs_, double limit_)
         : hidden(int(hidden_)), inter(int(inter_)), top_k(int(top_k_)), tokens(int(tokens_)), max_jobs(int(jobs_)),
-          gu(traits(int(gu_type))), dn(traits(int(dn_type))) {
+          limit(float(limit_)), gu(traits(int(gu_type))), dn(traits(int(dn_type))) {
+        TORCH_CHECK(limit_ >= 0.0, "cpu_experts: limit >= 0");
         gu_row = ggml_row_size(ggml_type(gu_type), hidden);
         dn_row = ggml_row_size(ggml_type(dn_type), inter);
         xq_row = ggml_row_size(gu.dot_type, hidden);
@@ -309,8 +311,15 @@ struct Bound {
         for (size_t i = lo; i < hi; ++i) {                                  // phase 3
             const float * g = h + i * gu_rows + (swapped ? e.inter : 0);
             const float * u = h + i * gu_rows + (swapped ? 0 : e.inter);
-            for (int c = 0; c < e.inter; ++c) {
-                act[c] = g[c] / (1.0f + std::exp(-g[c])) * u[c];
+            if (e.limit > 0.0f) {                   // GLM's clamp (D6), as ggml_cuda_op_swiglu_clamp_single's
+                for (int c = 0; c < e.inter; ++c) {
+                    const float gc = fminf(g[c], e.limit), uc = fmaxf(fminf(u[c], e.limit), -e.limit);
+                    act[c] = gc / (1.0f + std::exp(-gc)) * uc;
+                }
+            } else {
+                for (int c = 0; c < e.inter; ++c) {
+                    act[c] = g[c] / (1.0f + std::exp(-g[c])) * u[c];
+                }
             }
             e.dn.quantize(act.data(), aq + i * e.aq_row, e.inter);
         }
@@ -453,8 +462,10 @@ struct Task {
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     pybind11::class_<Experts, std::shared_ptr<Experts>>(m, "Experts")
-        .def(pybind11::init<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t>(),
-             "gate/up and down ggml types, hidden, inter, top_k, the most tokens and jobs per run")
+        .def(pybind11::init<int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, int64_t, double>(),
+             "gate/up and down ggml types, hidden, inter, top_k, the most tokens and jobs per run, SwiGLU's clamp",
+             pybind11::arg("gate_up"), pybind11::arg("down"), pybind11::arg("hidden"), pybind11::arg("inter"),
+             pybind11::arg("top_k"), pybind11::arg("tokens"), pybind11::arg("jobs"), pybind11::arg("limit") = 0.0)
         .def_static("supports", [](int64_t type) {
             try {
                 traits(int(type));

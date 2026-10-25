@@ -111,8 +111,8 @@ def _half(f: dict) -> bool:
     return f["dtype"] in ("bfloat16", "float16")
 
 
-def _plain_silu(f: dict) -> bool:
-    return _half(f) and "glu_limit" not in f          # (no clamp: docs/v1-glm.md D6's silu_mul@1 fact)
+def _silu(f: dict) -> bool:
+    return _half(f) and ops.supports_glu_limit(f)     # (the clamp: docs/v1-glm.md D6's silu_mul@1 fact)
 
 
 def _rope(f: dict) -> bool:
@@ -134,7 +134,7 @@ class Plugin:
                                     | ({"serves_decode_rows"} if op == "attention.paged_prefill" else set())),
                     priority=10 if op == "attention.paged_prefill" else 5))
         for op, impl, supports in (("rmsnorm", ops.RMSNorm, _half), ("add_rmsnorm", ops.AddRMSNorm, _half),
-                                   ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _plain_silu)):
+                                   ("rope", ops.Rope, _rope), ("silu_mul", ops.SiluMul, _silu)):
             regs.kernels.add(op, KernelSpec(
                 op=op, provider="kernels.flashinfer", impl=impl, requires=Constraint(sm_min=80, sm_max=129),
                 supports=supports, props=frozenset({"deterministic", "graph_safe"}), priority=10))

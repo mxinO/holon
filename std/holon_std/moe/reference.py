@@ -300,10 +300,10 @@ def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, r
 
 
 def cpu_experts(jobs: torch.Tensor, x: torch.Tensor, gate_up: torch.Tensor, down: torch.Tensor, rows: torch.Tensor,
-                gate_up_type: str, down_type: str, inter: int, top_k: int) -> torch.Tensor:
+                gate_up_type: str, down_type: str, inter: int, top_k: int, glu_limit: float = 0.0) -> torch.Tensor:
     """The `cpu_experts@1` oracle: `rows` with each job's entries written (float64 sums, written as f32): weights
     dequantized by gguf-py, activations quantized as ggml-cpu's `from_float` of the type's `vec_dot_type` does
-    (`quantize_cpu`)."""
+    (`quantize_cpu`); `glu_limit` > 0 clamps the SwiGLU (D6)."""
     import gguf
 
     out = rows.clone()
@@ -316,6 +316,8 @@ def cpu_experts(jobs: torch.Tensor, x: torch.Tensor, gate_up: torch.Tensor, down
             xq = quantize_cpu(x[entry // top_k].float(), gate_up_type)
             h = (gu @ xq).float()                                       # f32, as ggml-cpu's dot writes
             g, up = h[:inter], h[inter:]
+            if glu_limit:
+                g, up = g.clamp(max=glu_limit), up.clamp(-glu_limit, glu_limit)
             act = g / (1.0 + torch.exp(-g.double()).float()) * up        # expf, correctly rounded
             out[entry] = (dn @ quantize_cpu(act, down_type)).float()
     return out

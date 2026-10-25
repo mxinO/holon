@@ -258,6 +258,7 @@ class ArenaExperts(nn.Module):
         self._facts, self.layout, self.in_features = like.facts, like.layout, like.in_features   # (not a child)
         self._store = owner.store
         self.glu, self.out, self.out_y = glu, out, out // 2 if glu == "swiglu" else out
+        self.glu_limit = like.glu_limit if glu == "swiglu" else 0.0        # SwiGLU's clamp (docs/v1-glm.md D6)
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
         if owner._aux:                  # an auxiliary model's pieces in classes of their own (an MTP head's: its draft
             name = f"aux.{name}"        # sub-steps never compete with the target's layers for slots; floored whole)
