@@ -1091,6 +1091,20 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_required_loan_without_the_startup_profile_is_refused(gpu_moe):
+    """`moe.lend_peak = require` with an explicit state budget (`state_memory`: no startup profile, so nothing is
+    measured to lend): refused at the first launch, naming why (it once served on, lending nothing, until a large step
+    ran out of memory)."""
+    file, prompts, _ = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require"}
+    engine = _gpu_engine(file, host_memory=1 << 27, state_memory=64 << 20, plugin_options=opts)
+    with pytest.raises(RuntimeError, match="startup profile did not run"):
+        _served(engine, prompts)
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy", ["", "placement.promote@1"])
 def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, policy):
     """`moe.lend_peak = require` (docs/v1-glm.md D9): a mode (ii)-shaped layout — RAM holding a quarter of the experts,

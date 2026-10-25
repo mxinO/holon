@@ -103,6 +103,7 @@ def test_prefill_beside_decode_rows_fits_the_profiled_reserve(engine):
 
 
 GLM_TINY, GLM_SLICE = os.environ.get("GLM_TINY_Q8_GGUF"), os.environ.get("GLM_SLICE_GGUF")
+GLM_SLICE8 = os.environ.get("GLM_SLICE8_GGUF")        # the first 8 blocks (five MoE layers: a store a tail can lend)
 
 for name, value in (("GLM_TINY_Q8_GGUF", GLM_TINY), ("GLM_SLICE_GGUF", GLM_SLICE)):
     if value is None:
@@ -231,3 +232,33 @@ def _instances(engine, cls) -> list:
     """The engine's kernel instances of `cls`: those its modules hold, each once."""
     found = {id(v): v for m in engine.executor.model.modules() for v in vars(m).values() if isinstance(v, cls)}
     return list(found.values())
+
+
+def test_glm_a_loan_over_the_minimum_layout_is_refused():
+    """GLM step 5 (an RTX 5080 served every greedy token as 0): a store at its minimum layout (staging only, no cache)
+    keeps the step-peak loan in its own tail (`moe.lend_peak = on`); where the arena cannot hold the classes' staging
+    below that tail the store refuses at build, naming it, instead of lending the classes' own slots. The first 8
+    blocks of the real file on ≈ 6.3 GB of the card's memory (the A5000's case); a store that fits must serve the
+    unlent run's tokens."""
+    if GLM_SLICE8 is None:
+        pytest.skip("GLM_SLICE8_GGUF not set")
+    frac = 6.3e9 / torch.cuda.get_device_properties(0).total_memory
+    ids = torch.randint(0, 150000, (3000,), generator=torch.Generator().manual_seed(0)).tolist()
+    params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True)
+
+    def served(lend: str) -> list[int]:
+        opts = {"moe.store": "std.moe.offload@1", "moe.ring_lend": "tail", "moe.lend_peak": lend}
+        e = Engine(EngineConfig(model=GLM_SLICE8, device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=1,
+                                max_step_tokens=4096, max_model_len=8192, memory_fraction=frac,
+                                host_memory=24 << 30, plugin_options=opts))
+        try:
+            return e.generate([ids], params)[0]
+        finally:
+            e.close()
+    want = served("off")
+    try:
+        got = served("on")
+    except RuntimeError as e:
+        assert "own tail" in str(e) and "moe.lend_peak" in str(e)
+        return
+    assert got == want

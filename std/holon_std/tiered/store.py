@@ -163,7 +163,7 @@ class TieredStore:
         # (`require`: as `on`, and the store raises where it would lend nothing: docs/v1-glm.md D9)
         if lend_peak not in ("off", "on", "require"):
             raise ValueError(f"{name}: moe.lend_peak is off, on or require, not {lend_peak!r}")
-        self.lend_peak, self._require_loan = lend_peak != "off", lend_peak == "require"
+        self.lend_peak, self._require_loan, self._asked = lend_peak != "off", lend_peak == "require", False
         self._loan, self._loan_bytes, self._loaned = None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
@@ -533,6 +533,11 @@ class TieredStore:
             at = -(-(at + c.size * c.unit_bytes) // self._align) * self._align
             free[c.name] = list(range(c.size - 1, c.null + c.staging - 1, -1))      # popped lowest first
             arenas[c.name] = c.slots(), c.host_view()
+        if self._own_tail is not None and at > self._own_tail[0]:  # the minimum layout under the loan's tail: refused
+            raise RuntimeError(f"{self.name}: the arena ({size / 2**30:.2f} GiB) cannot hold its classes' staging "
+                               f"({at / 2**30:.2f} GiB) below its own tail ({self._own_tail[1] / 2**30:.2f} GiB, the "
+                               "large passes' buffers and the step-peak loan, moe.lend_peak): give the store more "
+                               "memory (--memory-fraction), a smaller max_step_tokens, or moe.lend_peak = off")
         # each class's arena end: the first slot a streaming step does not lend to its ring and staging (a tail step
         # takes its own tail off it, `Lent`)
         self.lend_ends = torch.tensor([c.size for c in classes], device=self.ctx.device)
@@ -667,6 +672,9 @@ class TieredStore:
             self._sized = True
             self._pipelining = bool(self.pipelining) and all(f() for f in self.pipelining) and \
                 all(r.fetches_parts for r in self.resolvers)
+            if self._require_loan and not self._asked:     # no startup profile (an explicit state budget)
+                self._no_loan("the startup profile did not run (an explicit state budget, --state-memory): no step's "
+                              "activations were measured to lend")
             if self._loan is not None and not (self.lending and self.tail and self.prefill >= self.items):
                 if self._own_tail is None:
                     raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail "
@@ -795,6 +803,7 @@ class TieredStore:
         `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`,
         `LOAN_SLACK`) past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak`
         is the worst step's, of `max_step_tokens`), where its device has `activation_loan@1`; 0 where it lends none."""
+        self._asked = True
         missing = [why for why, ok in (("moe.lend_peak is off", self.lend_peak),
                                        ("moe.ring_lend is not tail", self.ring_lend == "tail"),
                                        ("moe.ring_tokens is 0", self.ring_tokens),
