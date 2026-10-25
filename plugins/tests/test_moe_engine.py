@@ -870,7 +870,7 @@ def _gpu_engine(model, **kw) -> Engine:
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
                                            ("", "*=0.25 split"), ("", "*=0.75 pipe"),
-                                           ("", "*=0.25 ssd"), ("", "*=0.25 ssd1"),
+                                           ("", "*=0.25 ssd"), ("", "*=0.25 ssd1"), ("", "*=0.25 ssdsplit"),
                                            ("std.tiered.static@1", "*=0.25 ssd"),
                                            ("placement.promote@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -898,13 +898,19 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         resident = _gpu_engine(file, max_seqs=1)
         want = _served(resident, prompts)
         resident.close()
-    ssd, split = ring in ("ssd", "ssd1"), ring == "split"   # their copies on SMs / copy engines, "tail" a tail (D11)
+    ssd, split = ring in ("ssd", "ssd1", "ssdsplit"), ring in ("split", "ssdsplit")   # their copies on SMs / copy
+    #                                                engines, "tail" a tail (D11), "ssdsplit" both (D8c)
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
     pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
                                                      # "pipe": prompt steps stage, their misses in 4 fetched parts
     from holon_std.tiered import store as tiered_store
-    with mock.patch.object(tiered_store, "ON_DEMAND", 2 if one else tiered_store.ON_DEMAND):   # (ssd1: rounds of 2)
-        engine = _gpu_engine(file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
+    from holon_std.tiered.resolver import DeviceResolver
+    tiers, splits = DeviceResolver._tiers, []                # exclusive tiers' calls, split or not (graphs captured
+    spy_tiers = mock.patch.object(DeviceResolver, "_tiers",  # at the build included)
+                                  lambda self, *a: splits.append(a[-1]) or tiers(self, *a))
+    with (spy_tiers, mock.patch.object(tiered_store, "ON_DEMAND", 2 if one else tiered_store.ON_DEMAND)):   # ssd1:
+        engine = _gpu_engine(                              # rounds of 2
+            file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
             "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
             "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"}
@@ -947,6 +953,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0
+        assert any(splits) == split              # "ssdsplit": RAM misses beside the hits' passes (D8c)
         # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/v1-glm.md D8f)
         assert not one or (store.landing_rows == 2 and int(store.ssd_peak) > 2), int(store.ssd_peak)
         assert not one or int(store.hits) > 0    # ssd1: prompt steps of 8 tokens or more read their sets ahead

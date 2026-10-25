@@ -78,7 +78,7 @@ class DeviceResolver:
         self.prepare(first)
         if store.exclusive:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
-        split = split and getattr(self.resolve, "splits", False) and not store.exclusive and before_fetch is None
+        split = split and getattr(self.resolve, "splits", False) and before_fetch is None
         parts = parts if self.fetches_parts and not store.exclusive and before_fetch is None else 1
         if store.parts > 1 and parts <= 1 and self.group < store.borrowing_groups:
             raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step whose staging "
@@ -91,6 +91,14 @@ class DeviceResolver:
             **({"split": True} if split else {}), **self.state)
         slots, fetch, n, cpu = out[:4]
         self._prepared = False
+        if store.exclusive:                      # exclusive tiers: RAM misses, then SSD rounds (docs/v1-glm.md D8f)
+            if before_fetch is not None:
+                before_fetch(cpu)
+            finish = self._tiers(ids, kinds, fetch, n, split)
+            if split:                            # the hits' passes run while the RAM misses come and the SSD reads
+                return slots, cpu, out[4], finish
+            finish()
+            return slots, cpu
         if split:                                # the fetch on a side stream; the hits' passes run meanwhile
             main = torch.accelerator.current_stream(ids.device)
             side = store.fetch_stream(split=True)
@@ -104,37 +112,55 @@ class DeviceResolver:
             return self._pipelined(ids, slots, fetch, n, parts)
         if before_fetch is not None:
             before_fetch(cpu)
-        if store.exclusive:
-            g = self.group
-            store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
-                          store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
-                          store.classes32, store.owner, store.capacity, store.heat, store.io_rows, store.moves,
-                          store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
-                          store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
-            # the SSD misses in rounds of A_od landing rows (docs/v1-glm.md D8f): as many as the call could need (no
-            # host sync; a round past them is empty), each signalled after the last one's gather; a graphed step's
-            # misses fit one round (the decode bound ≤ A_od), so its graph holds one
-            a = store.landing_rows
-            rounds = -(-min(store.items, store.top_k * len(ids)) // a)
-            store.ssd_peak.copy_(torch.maximum(store.ssd_peak, store.n_ssd[:1]))
-            store.errors.bitwise_or_((store.n_ssd[:1] > rounds * a).int() * SHORT)
-            self._gather(fetch, store.n_ram)                         # the RAM misses, then the landed SSD ones:
-            if store._ahead:                                         # read ahead (its set signalled two layers
-                store.io.wait(store.ahead_slots[g])                  # back, or at the step's start), then on demand
+        self._gather(fetch, n)
+        return slots, cpu
+
+    def _tiers(self, ids: torch.Tensor, kinds: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, split: bool):
+        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@1` places; the RAM misses'
+        gather — on the high-priority side stream when the call splits, so a RAM miss never waits behind an SSD read
+        —; round 0 of the SSD reads signalled now. Returns `finish`, on the main stream: the read-ahead hits, the rounds
+        (each waited, gathered, then the next signalled: rounds of A_od landing rows, as many as the call could need —
+        no host sync; a round past the misses is empty; a graphed step's fit one), then the demotions and the admitted
+        moves (after the side stream's gather)."""
+        store, g = self.store, self.group
+        store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
+                      store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
+                      store.classes32, store.owner, store.capacity, store.heat, store.io_rows, store.moves,
+                      store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
+                      store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
+        a = store.landing_rows
+        rounds = -(-min(store.items, store.top_k * len(ids)) // a)
+        store.ssd_peak.copy_(torch.maximum(store.ssd_peak, store.n_ssd[:1]))
+        store.errors.bitwise_or_((store.n_ssd[:1] > rounds * a).int() * SHORT)
+        main = torch.accelerator.current_stream(ids.device) if split else None
+        side = store.fetch_stream(split=True) if split else None
+        if side is not None:
+            side.wait_stream(main)
+            with side:
+                self._gather(fetch, store.n_ram)
+            fetch.record_stream(side)
+        else:
+            self._gather(fetch, store.n_ram)
+        store.round_rows(0)
+        store.io.signal(self.io_slot)
+
+        def finish() -> None:
+            if store._ahead:                     # read ahead: its set signalled two layers back (or at step start)
+                store.io.wait(store.ahead_slots[g])
                 self._gather(store.hit, store.n_hit, landed=True, part=None)
                 store.hits.add_(store.n_hit[:1])
             for r in range(rounds):
-                store.round_rows(r)
-                store.io.signal(self.io_slot)
+                if r:
+                    store.round_rows(r)
+                    store.io.signal(self.io_slot)
                 store.io.wait(self.io_slot)
                 self._gather(store.ssd, store.n_ssd, landed=True, part=r)
-        else:
-            self._gather(fetch, n)
-        if store.exclusive:
+            if side is not None:
+                main.wait_stream(side)
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
                 gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
-        return slots, cpu
+        return finish
 
     def _pipelined(self, ids: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):
         """(slots, part [T, k], landed): the misses' fetch in `parts` parts on the store's fetch stream — part i the

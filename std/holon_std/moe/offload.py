@@ -218,7 +218,8 @@ class Offload(nn.Module):
     def route_split(self, ids: torch.Tensor, first: int, x: torch.Tensor):
         """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
         join) — the fetch on a side stream that `join()` makes the current stream wait for —, or (slots, None, None)
-        where the pass does not split (F5b's CPU share: `route`'s; exclusive tiers, a resolve without it)."""
+        where the pass does not split (F5b's CPU share: `route`'s; a resolve without it). Under exclusive tiers
+        `join` also reads the SSD misses (docs/v1-glm.md D8c, D8f)."""
         if self._cpu is not None and self._cpu.takes(len(ids)):
             return self.route(ids, first, x), None, None
         self._pending = None
