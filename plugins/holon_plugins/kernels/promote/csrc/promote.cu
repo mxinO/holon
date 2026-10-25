@@ -15,7 +15,7 @@ namespace {
 
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
 constexpr int OVERFLOW = 2;                            // error bit: a delta record past the log
-constexpr int SPARE = -4, OWN = -5;                    // exclusive tiers' records (moe_tiers@1): b's slots a spare; b
+constexpr int SPARE = -4, OWN = -5;                    // exclusive tiers' records (moe_tiers@2): b's slots a spare; b
                                                        // took its spare back (docs/v1-glm.md D8a)
 constexpr int THREADS = 256;
 constexpr int MAX_SPARES = 8;
@@ -253,7 +253,7 @@ __global__ void k_settle(const int32_t * __restrict__ out, Layer L, const int32_
                         L.residency[e * roles + r] = -1;
                     }
                 }
-                if (excl && base + rank < cap) {       // exclusive tiers: still mapped, logged; moe_tiers@1 demotes
+                if (excl && base + rank < cap) {       // exclusive tiers: still mapped, logged; moe_tiers@2 demotes
                     delta[(base + rank) * 3] = group;  // it (D8a)
                     delta[(base + rank) * 3 + 1] = SPARE;
                     delta[(base + rank) * 3 + 2] = e;

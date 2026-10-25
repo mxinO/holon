@@ -382,7 +382,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             if (seen < L.F) {
                 const int32_t unit = L.host[e * roles + r];
-                units[seen] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
+                units[seen] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@2's
                 dst[seen] = v == 1 ? stage[min(staged, L.F - 1)] : -2 - v;
             }
             ++seen;
@@ -627,7 +627,7 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// moe_tiers@1 (std.moe.kernels): one CTA after a layer call's resolve keeps the RAM tier exclusive and provides the
+// moe_tiers@2 (std.moe.kernels): one CTA after a layer call's resolve keeps the RAM tier exclusive and provides the
 // pieces no device-readable tier holds. Decisions run in order (admissions in record order, then the SSD misses by id)
 // on thread 0; the searches they need (a class's first free RAM unit, RAM's coldest expert of the layer's classes) are
 // block-wide reductions every thread joins, in lockstep (the loop conditions read shared memory only).
@@ -1320,7 +1320,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
-    m.def("tiers", &tiers, "moe_tiers@1: the call's admissions and SSD misses through the exclusive RAM tier");
+    m.def("tiers", &tiers, "moe_tiers@2: the call's admissions and SSD misses through the exclusive RAM tier");
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");

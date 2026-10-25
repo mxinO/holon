@@ -1,7 +1,7 @@
 """A group's in-graph resolve and fetch (docs/v1-offload.md D5): its routed ids to arena slots per role through the
 residency map (`moe_resolve@1`, or the policy's variant contract with the policy's device state), every miss gathered
 from the host tier into its slot — a staging slot, or the slot a device-owned policy admitted it into
-(`expert_fetch@1`, F5a). Under exclusive tiers (D10) `moe_tiers@1` then places the call's victims and SSD misses, the
+(`expert_fetch@1`, F5a). Under exclusive tiers (D10) `moe_tiers@2` then places the call's victims and SSD misses, the
 I/O worker reads its SSD pieces (`cpu_task@1`'s copy task), and after the gather the victims are demoted into their RAM
 units and the admitted moved from staging into their slots."""
 from __future__ import annotations
@@ -12,7 +12,7 @@ from .ring import SHORT
 
 RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
 ACTIVATION_LOAN = "activation_loan@1"
-TIERS, CPU_TASK = "moe_tiers@1", "cpu_task@1"
+TIERS, CPU_TASK = "moe_tiers@2", "cpu_task@1"
 
 
 class DeviceResolver:
@@ -114,7 +114,7 @@ class DeviceResolver:
         return slots, cpu
 
     def _tiers(self, ids: torch.Tensor, kinds: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, split: bool):
-        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@1` places; the RAM misses'
+        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@2` places; the RAM misses'
         gather — on the high-priority side stream when the call splits, so a RAM miss never waits behind an SSD read
         —; round 0 of the SSD reads signalled now. Returns `finish`, on the main stream: the read-ahead hits, the rounds
         (each waited, gathered, then the next signalled: rounds of A_od landing rows, as many as the call could need —

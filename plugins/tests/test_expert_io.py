@@ -568,7 +568,7 @@ def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
 @pytest.mark.parametrize("tokens, free, ahead", [(1, 0, False), (6, 3, False), (12, 0, True), (40, 20, False),
                                                  (40, 0, True)])
 def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
-    """`moe_tiers@1` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
+    """`moe_tiers@2` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
     the SSD) or sent to the SSD; decode SSD misses kept the same way; every SSD read listed with its unit; the map, RAM
     units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is

@@ -1,7 +1,7 @@
 """std.tiered.pinned@1: the pinned RAM tier — a class's pieces in a mapped host pool kernels read in place
 (docs/v1-offload.md D10). It holds every piece (inclusive: filled from the checkpoint's extents when the store prepares
 it), unless its `ram` setting caps it — then RAM is exclusive of VRAM, a slower tier (std.tiered.gguf_direct@1) holds
-the rest, and the store places pieces in it in the graph (`moe_tiers@1`).
+the rest, and the store places pieces in it in the graph (`moe_tiers@2`).
 
 Setting (the store's, forwarded: the MoE store's `moe.ram` option): `ram` — units per class, pinned:
 `<class>=<slots or fraction>`, `*` for every class not named (as the store's `cache`); empty: every piece."""

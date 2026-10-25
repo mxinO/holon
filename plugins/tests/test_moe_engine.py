@@ -948,7 +948,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         policy, ("moe_resolve@1", "kernels.expert_io"))
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {variant, ("expert_fetch@1", "kernels.expert_io"),
-                  ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@1", "kernels.expert_io"),
+                  ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@2", "kernels.expert_io"),
                                                                  ("cpu_task@1", "kernels.cpu_task")} if ssd else set())
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native

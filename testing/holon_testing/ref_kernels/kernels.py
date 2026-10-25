@@ -321,7 +321,7 @@ class CpuExperts:
 
 
 class MoeTiers:
-    """`moe_tiers@1`'s oracle, writing in place what the contract writes."""
+    """`moe_tiers@2`'s oracle, writing in place what the contract writes."""
 
     def __init__(self, ctx, **facts) -> None:
         pass

@@ -31,7 +31,7 @@ slots until a record moves them (the delta log has no record for a slot the devi
 never picks an owner (it is not resident).
 
 Under exclusive tiers (its device state `exclusive` = 1, the store's; docs/v1-glm.md D8a) a piece lives in one tier, so
-the call logs what `moe_tiers@1` must place: an owner taking its spare back `(group, OWN = −5, a)` (its RAM units free),
+the call logs what `moe_tiers@2` must place: an owner taking its spare back `(group, OWN = −5, a)` (its RAM units free),
 and each refilled spare's owner, left mapped, `(group, SPARE = −4, v)` (placed as a victim is, its slots demoted into
 its units before the spare is next taken); `heat` is `last`, compared exactly. `lend_tail` releases the spares with a
 slot in the tail's range, then picks the experts holding the range, as placement.lfu's.
@@ -107,7 +107,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
         for a in promoted:
             if a in owner:
                 after[a] = spare[owner[a], 1:]
-                if exclusive:                                           # its RAM units to free (moe_tiers@1)
+                if exclusive:                                           # its RAM units to free (moe_tiers@2)
                     records.append((group, OWN, a))
         free = [s for s in present if s not in used]
         for a in (a for a in promoted if a not in owner):
@@ -156,7 +156,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
         victims = victims[:0 if len(victims) == experts else len(victims) - 1]
         for s, v in zip(absent, victims, strict=False):
             spare[s] = torch.tensor([v + 1, *after[v].tolist()])
-            if exclusive:                                               # still mapped, logged: moe_tiers@1
+            if exclusive:                                               # still mapped, logged: moe_tiers@2
                 records.append((group, SPARE, v))                       # demotes it (D8a)
             else:
                 after[v] = -1

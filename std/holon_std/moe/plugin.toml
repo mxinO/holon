@@ -22,7 +22,7 @@ provides = [
     "op.cpu_task@1",
     "op.cpu_experts@1",
     "op.moe_patch_rows@1",
-    "op.moe_tiers@1",
+    "op.moe_tiers@2",
     "op.activation_loan@1",
 ]
 

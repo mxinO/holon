@@ -283,7 +283,7 @@ class TieredStore:
             self.telemetry = {"counts": self.counts, "routed": self.routed, "misses": self.misses,
                               "errors": self.errors, "edit_errors": self.edit_errors, "delta": self.delta,
                               "n_delta": self.n_delta}
-            if self.exclusive:                   # the step's map: the host mirror's tier codes (`moe_tiers@1` and
+            if self.exclusive:                   # the step's map: the host mirror's tier codes (`moe_tiers@2` and
                 self.telemetry["map"] = self.residency.device          # a parked lend place pieces unlogged)
             self.zeroed = [self.counts, self.routed, self.misses, self.errors, self.edit_errors, self.n_delta]
             self.ring = self.ctx.static(f"{self.name}.ring", shape, torch.int32)      # this step's ring slots
@@ -336,7 +336,7 @@ class TieredStore:
                 self.ahead_slots[g] = self.io.bind(self.reads[-1])
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
-        """The exclusive tiers' device tables (`moe_tiers@1`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
+        """The exclusive tiers' device tables (`moe_tiers@2`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
         classes = list(self.classes.values())
         static = functools.partial(self.ctx.static, dtype=torch.int32)
         self.piece = static(f"{self.name}.piece", shape)
@@ -351,7 +351,7 @@ class TieredStore:
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
                                                                                                        pool="io")
         # SSD reads' landing (docs/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's j-th
-        # SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@1` writes, a round's copied
+        # SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
         # into the I/O worker's view before its signal
         self.landing_rows = min(max(ON_DEMAND, self.staging), self.prefill)
         # read-ahead sets (prompt steps of READ_AHEAD_TOKENS and no decode rows): DEPTH sets of A_ra rows after the
@@ -518,7 +518,7 @@ class TieredStore:
             seed = self.policy.seed(self._profile_counts(), budget)
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
         # Exclusive tiers: the graphed steps' stage list at a pass's width, its first `staging` entries their staging
-        # slots (the rest repeat the last: a graphed step misses no more), so every call's fetch list, `moe_tiers@1`'s
+        # slots (the rest repeat the last: a graphed step misses no more), so every call's fetch list, `moe_tiers@2`'s
         # moves and request rows are one width (F = `prefill`)
         self.stage = self.stages[self.prefill if self.exclusive else classes[0].staging]
         self._stage_slots = classes[0].staging
@@ -568,7 +568,7 @@ class TieredStore:
         return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.landing_rows, 3))
 
     def round_rows(self, r: int) -> None:
-        """Round r's request rows (its count, then rows r·A … (r + 1)·A − 1 of `moe_tiers@1`'s) into the worker's
+        """Round r's request rows (its count, then rows r·A … (r + 1)·A − 1 of `moe_tiers@2`'s) into the worker's
         view, on the current stream."""
         a, view = self.landing_rows, self.io_device()
         rows = self.io_rows[:, 1 + r * a:1 + (r + 1) * a]

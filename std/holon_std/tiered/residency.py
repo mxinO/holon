@@ -17,7 +17,7 @@ import torch
 LAG = 2                       # launches between the commit deciding an edit and the launch applying it
 OWNER = 1                     # the edit error word's bit: a precondition failed
 RETURN = -3                   # a delta record's `a` marking where a step's lent slots came back
-SPARE, OWN = -4, -5           # exclusive tiers' records for `moe_tiers@1` (std.moe.kernels): the map adopts the step's
+SPARE, OWN = -4, -5           # exclusive tiers' records for `moe_tiers@2` (std.moe.kernels): the map adopts the step's
 
 
 class ResidencyMap:

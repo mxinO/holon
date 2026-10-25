@@ -118,7 +118,7 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     return slots.int(), fetch.int(), n_fetch.int(), counts.int(), routed_, errors, cpu, jobs
 
 
-SPARE, OWN = -4, -5        # `moe_tiers@1`'s records from a policy with spares (F10): b's slots became a spare; b took
+SPARE, OWN = -4, -5        # `moe_tiers@2`'s records from a policy with spares (F10): b's slots became a spare; b took
                            # its spare back
 
 
@@ -126,7 +126,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
               stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
               piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
               heat: torch.Tensor | None, rows: int | None = None, ahead: torch.Tensor | None = None) -> dict:
-    """The `moe_tiers@1` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`
+    """The `moe_tiers@2` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`
     (its RAM entries, in order: `n_ram` [R]), `residency`, `host`, `owner` after it, `io` per role (its rows (piece,
     landing row, keep unit or −1)), `ssd` [R, 2, F] (the j-th SSD miss by id: (landing row j % `rows`, its slot)) and
     `n_ssd` [R], `moves` [R, 4, F] (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]; an SSD miss the

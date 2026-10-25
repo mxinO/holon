@@ -58,7 +58,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     from the least recently routed resident; a prefill chunk changes nothing but @1's; the CPU's share (F5b) comes from
     the misses left after promoting. Under exclusive tiers (the policy's `exclusive` flag, docs/v1-glm.md D8a) a
     refilled spare's owner stays mapped and is logged `(group, SPARE, b)`, an owner taking its spare back
-    `(group, OWN, b)`: `moe_tiers@1` places them."""
+    `(group, OWN, b)`: `moe_tiers@2` places them."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)

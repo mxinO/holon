@@ -80,7 +80,7 @@ then `staging` slots, then cache slots.
   resident expert gets its slot, a ring piece its ring slot — a cache slot, in [k + staging, limits[r]); any other is
   corrupt: the entry gets null slot j and `errors[0]` |= `RANGE` —; the layer's distinct missing pieces of role r
   (neither resident nor in the ring), by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]` (or
-  −2 − e where it is −1: a piece no device-readable tier holds, for `moe_tiers@1` to provide),
+  −2 − e where it is −1: a piece no device-readable tier holds, for `moe_tiers@2` to provide),
   `fetch[r, 1, i]` the slot it is gathered into, here `stage[r, i]` (the entries read it; the caller's staging slots, or
   slots lent for the call: distinct). `n_fetch[r]` counts them all, even past F (the caller must prevent it:
   `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past F reads `stage[r, F − 1]`). `counts[e]` += 1
@@ -164,7 +164,7 @@ store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit
 file, always valid), and each layer call runs `moe_resolve → moe_tiers → [the SSD reads: cpu_task@1's copy task;
 signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (moves)`:
 
-- `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
+- `moe_tiers@2`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
   stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
   int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | int32 |
   None, io [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram
@@ -210,7 +210,7 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
   `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI (kernels.cpu_task's
   csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has `copy(roles) -> task`,
   the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8, requests [1 + F, 2] int32)`
-  (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them; the request table `moe_tiers@1`'s
+  (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them; the request table `moe_tiers@2`'s
   `io[r]`): each requested piece's extents read in order into its unit. A role may add `runs [U, X, 2] int64` and `keep
   [K, unit] uint8` (docs/v1-glm.md D8f): its units are then landing rows, each O_DIRECT extent's 4 KiB-aligned superset
   read in place at the row's next aligned offset and (offset in the row, nbytes) of its bytes written to `runs[row, x]`
@@ -241,7 +241,7 @@ MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH, ACTIVATION_LOAN = "expert_prefetch@1", "activation_loan@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
-MOE_TIERS = "moe_tiers@1"
+MOE_TIERS = "moe_tiers@2"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants); the CPU's share past its job table
