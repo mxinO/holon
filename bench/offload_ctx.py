@@ -6,19 +6,19 @@ every engine and round, so an expert cache sees real routing and no prefix cache
 - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),
   one request per context;
 - `--corpus fn` (FN, D11) / `glm` (GLM, docs/v1-glm.md D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in
-  that order and tokenized with Qwen3.8-Flash-Next's / GLM-5.3-Flash's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts
-  (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)
-  moved past it, and `--spans` picks the candidates timed (default the first 3).
+  that order and tokenized with Qwen3.8-Flash-Next's / GLM-5.3-Flash's tokenizer (N tokens); context C (index c in
+  `--contexts`) has the candidate starts (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up
+  span (the corpus's last 2,048 tokens) moved past it, and `--spans` picks the candidates timed (default the first 3).
 The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.
 
 Engines: `llama` = llama-server (`--server`; its own `timings`: prompt_ms, and predicted_ms over the tokens after the
 first); `freetoken` = FreeToken's offline `LLM` in its own venv (`--python`), timed in process as each token reaches
 the frontend; `strata` = Strata's engine (`--strata`) in its `--serve` mode with raw token ids on stdin, timed in
 this client as each verify window's tokens reach stdout (`--eos-ids 999999`, an id outside the vocabulary, so a
-request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `maya` = Project Maya's engine (`--maya`, GLM-5.3-Flash) in
-its `--serve` mode, the same raw-id protocol as Strata's (`--eos-ids 2147483647`, an id no request produces; `DONE`'s
-`reused` must be 0); `holon` = Holon's `Engine` in process (`--holon-python`), stamped as each token reaches the host,
-prefix cache off. An arm's flags are
+request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `maya` = Project
+Maya's engine (`--maya`, GLM-5.3-Flash) in its `--serve` mode, the same raw-id protocol as Strata's (`--eos-ids
+2147483647`, an id no request produces; `DONE`'s `reused` must be 0); `holon` = Holon's `Engine` in process
+(`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
 `holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
 reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.

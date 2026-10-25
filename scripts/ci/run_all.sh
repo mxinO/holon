@@ -17,5 +17,6 @@ python3 check_commit_messages.py "${1:-origin/main}" || rc=1                    
 (cd ../.. && uv lock --check -q) || rc=1                                         # uv.lock matches the pyprojects
 bash check_core_diff.sh "${1:-origin/main}" || true
 python3 check_lock_impact.py "${1:-origin/main}" || true                         # warns: the locks a merge outdates
-if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1; else echo "skip import contracts (import-linter not installed)"; fi
+if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1   # the import contracts: required
+else echo "FAIL import contracts: lint-imports not found (activate the dev venv: import-linter)"; rc=1; fi
 exit $rc
