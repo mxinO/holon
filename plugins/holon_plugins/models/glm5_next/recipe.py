@@ -53,7 +53,8 @@ RULES = (
     *(WeightRule(f"blk.{{i}}.ffn_{g}_shexp.weight", f"layers.{{i}}.ffn.parts.1.{g}_proj.weight")
       for g in ("gate", "up", "down")),
 )
-ROWS = 2048           # D9: the mixers' and the dense / shared FFN's sub-batch (N4: ≈ 113–119 KiB a token)
+ROWS = 2048           # D9: KDA's and the dense / shared FFN's sub-batch (N4: ≈ 113–119 KiB a token)
+DSA_ROWS = 1024       # DSA's query path: its f32 q̃ and context are ≈ 0.4 MiB a row (step 4: ≤ 126 KiB a token at 16K)
 
 
 def facts(c: Mapping[str, Any]) -> dict[str, Any]:
@@ -88,7 +89,7 @@ def recipe(c: Mapping[str, Any], source: str) -> ModelSpec:
               lower_bound=f["lower_bound"], norm_eps=eps, rows=rows)
     dsa = Ref("std.mixers.dsa_mla@1", heads=f["heads"], q_lora=f["q_lora"], kv_lora=f["kv_lora"], nope=f["nope"],
               v=f["v"], index_heads=f["index_heads"], index_head_dim=f["index_head_dim"], ratio=f["ratio"],
-              budget=f["budget"], norm=norm, index_eps=f["index_eps"], rows=rows)
+              budget=f["budget"], norm=norm, index_eps=f["index_eps"], rows=DSA_ROWS)
     swiglu = Ref("std.ffn.swiglu@1", limit=f["limit"], rows=rows)
     moe = Ref("std.moe@1", experts=f["experts"], top_k=f["top_k"], inter=f["inter"], renormalize=f["renormalize"],
               scoring="sigmoid", bias=True, scale=f["scale"], limit=f["limit"])

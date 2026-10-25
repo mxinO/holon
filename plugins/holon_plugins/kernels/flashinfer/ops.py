@@ -68,6 +68,7 @@ class SiluMul:
 
 
 def supports_glu_limit(f: dict) -> bool:
-    """No clamp, or one whose limit the dtype holds exactly (the clamp runs in the activations' dtype)."""
+    """No clamp, or one whose limit the dtype holds exactly (the clamp runs in the activations' dtype). On the CPU:
+    selection runs while the model is built on the meta device."""
     limit = f.get("glu_limit", 0.0)
-    return not limit or torch.tensor(limit, dtype=getattr(torch, f["dtype"])).item() == limit
+    return not limit or torch.tensor(limit, dtype=getattr(torch, f["dtype"]), device="cpu").item() == limit

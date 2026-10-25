@@ -406,3 +406,20 @@ def test_plant_a_looser_gate_bound_fails(batch, monkeypatch):
     h0s = [w if has else None for has in init]
     with pytest.raises(AssertionError):
         judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted")
+
+
+def test_plant_kda_gate_softplus_fails():
+    """§6.3's `kda_gate_softplus`: the recurrent (decode) kernel's gate unbounded (GDN's softplus form per channel)
+    fails the decode L0."""
+    from holon_judge.planted import PLANTS
+
+    h, d = SHAPES["tiny-gpu"]
+    lens, init, slots = [1] * len(DECODE_SLOTS), DECODE_INIT, DECODE_SLOTS
+    x, g = tokens(sum(lens), h, d), gates(h, d)
+    with PLANTS["kda_gate_softplus"]():
+        kernel = kda("tiny-gpu")
+    pool, w = torch.zeros(UNITS, h, d, d, device="cuda"), warm(h, d, g)
+    pool[slots] = w
+    h0s = [w if has else None for has in init]
+    with pytest.raises(AssertionError):
+        judge_rows(run(kernel, x, g, pool, lens, init, slots), pool, x, g, h0s, lens, slots, "planted")

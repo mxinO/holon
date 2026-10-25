@@ -335,9 +335,99 @@ def kda_state_not_carried() -> Iterator[None]:
     print(f"plant kda-state-not-carried fired: {dict(fired)}", file=sys.stderr)
 
 
+@contextlib.contextmanager
+def dsa_decode_select_shift() -> Iterator[None]:
+    """GLM's DSA (§6.3): in decode and verify steps every selected complete pool b read as its successor b + 1 (still
+    complete; the open pool kept), FN's form. Reports how often it fired."""
+    from holon_std.mixers.qsa import units
+
+    forward, fired = units.DSAMLA.forward, collections.Counter()
+
+    def planted(self, x, ctx):
+        plan = getattr(getattr(ctx, "batch", None), "plan", None)
+        if plan is None or getattr(self, "_kv", None) is None or not bool(
+                ((plan.n_query == 1) | (plan.n_logits == plan.n_query)).all()):
+            return forward(self, x, ctx)
+        select, ratio = self._select, self.ratio
+
+        def shifted(q, pooled, table, seq, positions, w):
+            blocks = select(q, pooled, table, seq, positions, w)
+            complete = ((positions + 1) // ratio).to(blocks.dtype)[:, None]
+            fired[_when()] += 1
+            return torch.where((blocks >= 0) & (blocks < complete), torch.minimum(blocks + 1, complete - 1), blocks)
+        self._select = shifted
+        try:
+            return forward(self, x, ctx)
+        finally:
+            self._select = select
+    with mock.patch.object(units.DSAMLA, "forward", planted):
+        yield
+    print(f"plant dsa-decode-select-shift fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def kda_gate_softplus() -> Iterator[None]:
+    """GLM's KDA (§6.3): the recurrent (decode) kernel's gate unbounded — GDN's softplus form per channel, without
+    KDA's `lower_bound · σ` (kernels.fla). Must be active when the engine is built."""
+    from holon_plugins.kernels.fla import plugin
+
+    init = plugin.KDA.__init__
+
+    def planted(self, *args, **kw):
+        init(self, *args, **kw)
+        self._recurrent = {"is_kda": True}
+    with mock.patch.object(plugin.KDA, "__init__", planted):
+        yield
+
+
+@contextlib.contextmanager
+def router_prompt_softmax() -> Iterator[None]:
+    """GLM's router (§6.3): the prompt path's `moe_topk` left at softmax (kernels.ggml_cuda; the fused decode router
+    keeps the sigmoid). Reports how often it fired."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    call, fired = plugin.MoeTopk.__call__, collections.Counter()
+
+    def planted(self, logits, bias=None):
+        sigmoid, self.sigmoid = self.sigmoid, False
+        fired[_when()] += sigmoid
+        try:
+            return call(self, logits, bias)
+        finally:
+            self.sigmoid = sigmoid
+    with mock.patch.object(plugin.MoeTopk, "__call__", planted):
+        yield
+    print(f"plant router-prompt-softmax fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def glu_clamp_off() -> Iterator[None]:
+    """GLM's clamp (§6.3): the decode (mmvq) path of kernels.ggml_cuda's experts without the SwiGLU clamp. Reports how
+    often it fired."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    call, fired = plugin.LinearExperts.__call__, collections.Counter()
+
+    def planted(self, x, parts, ids, *args, **kw):
+        if not self.limit or len(ids) > self.mmvq_tokens:
+            return call(self, x, parts, ids, *args, **kw)
+        limit, self.limit = self.limit, 0.0
+        fired[_when()] += 1
+        try:
+            return call(self, x, parts, ids, *args, **kw)
+        finally:
+            self.limit = limit
+    with mock.patch.object(plugin.LinearExperts, "__call__", planted):
+        yield
+    print(f"plant glu-clamp-off fired: {dict(fired)}", file=sys.stderr)
+
+
 GLM_PLANTS = {"mhc_comb_transposed": mhc_comb_transposed, "mhc_sinkhorn_short": mhc_sinkhorn_short,
               "dsa_pool_ape_off": dsa_pool_ape_off, "router_bias_in_weights": router_bias_in_weights,
               "kda_state_not_carried": kda_state_not_carried}
+# (a′)'s plants (the GPU tiny run, L0): kernel paths the CPU providers do not take
+GLM_GPU_PLANTS = {"dsa_decode_select_shift": dsa_decode_select_shift, "kda_gate_softplus": kda_gate_softplus,
+                  "router_prompt_softmax": router_prompt_softmax, "glu_clamp_off": glu_clamp_off}
 
 
 @contextlib.contextmanager
@@ -2097,7 +2187,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
     "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
     # GLM-5.3-Flash (docs/v1-glm.md §6.3): the tiny CPU model's
-    **GLM_PLANTS,
+    **GLM_PLANTS, **GLM_GPU_PLANTS,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)

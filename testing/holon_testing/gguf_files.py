@@ -1,7 +1,8 @@
 """Tiny GGUF files for tests: an HF Qwen3 or Qwen3-MoE checkpoint written with gguf-py's writer, as llama.cpp's
-converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in]); and the
+converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in]); the
 plumbing the tiny-model tools share (`tokenizer_dir`, `copy_tokenizer`, `convert`: llama.cpp's own converter;
-`load_fixtures`)."""
+`load_fixtures`); and `slice_blocks`, a real file's first blocks as one file (its kernels' real shapes and types, few
+layers)."""
 from __future__ import annotations
 
 import json
@@ -53,6 +54,40 @@ def load_fixtures(path: pathlib.Path) -> tuple[dict, dict[str, str]]:
 
     with safe_open(str(path), "pt") as f:
         return load_file(str(path)), f.metadata()
+
+
+def slice_blocks(first: pathlib.Path, out: pathlib.Path, blocks: int) -> pathlib.Path:
+    """A (split) GGUF's first `blocks` blocks as one file at `out`: every key as stored, but `block_count` (and a
+    per-block array, truncated) set to `blocks`, `nextn_predict_layers` to 0 and the split keys dropped; the tensors
+    outside `blk.` and `blk.<i>.*` for i < `blocks`, their bytes and types as stored."""
+    shards = sorted(first.parent.glob(re.sub(r"-00001-of-(\d+)\.gguf$", r"-*-of-\1.gguf", first.name)))
+    readers = [gguf.GGUFReader(f) for f in shards or [first]]
+    head = readers[0]
+    arch = head.fields[gguf.Keys.General.ARCHITECTURE].contents()
+    old = int(head.fields[f"{arch}.block_count"].contents())
+    writer = gguf.GGUFWriter(out, arch)
+    for field in head.fields.values():
+        if field.name in (gguf.Keys.General.ARCHITECTURE,) or field.name.startswith(("GGUF.", "split.")):
+            continue
+        kind, value = field.types[0], field.contents()
+        sub = field.types[-1] if kind == gguf.GGUFValueType.ARRAY else None
+        if field.name == f"{arch}.block_count":
+            value = blocks
+        elif field.name == f"{arch}.nextn_predict_layers":
+            value = 0
+        elif sub is not None and isinstance(value, list) and len(value) == old and field.name.startswith(arch):
+            value = value[:blocks]
+        writer.add_key_value(field.name, value, kind, sub_type=sub)
+    keep = re.compile(rf"blk\.({'|'.join(map(str, range(blocks)))})\.")
+    for reader in readers:
+        for t in reader.tensors:
+            if not t.name.startswith("blk.") or keep.match(t.name):
+                writer.add_tensor(t.name, np.asarray(t.data), raw_dtype=t.tensor_type)    # (bytes: their rows')
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file()
+    writer.close()
+    return out
 
 
 EXPERT = re.compile(r"model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate|up|down)_proj\.weight")

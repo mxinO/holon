@@ -272,10 +272,11 @@ def test_a_short_row_beside_a_long_one_attends_every_block(tiny):
 
 
 def test_sub_batched_steps_keep_the_tokens_and_the_checkpoints(tiny):
-    """D9's `rows` (patched to 64 here, the KDA rule's chunk; the recipe's 2,048 needs longer prompts): a 124-token
-    prompt runs as two sub-batches through every mixer and the dense / shared FFN — bitwise the unsplit run (the
-    routed experts, whose CPU bits follow a call's rows, see the same rows on both sides: an off-by-one in a piece's
-    bounds or a conv tail not carried cannot hide under a tolerance; on the GPU the bound is the L0's, C-m3); a prefix
+    """D9's `rows` (patched to 64 here, the KDA rule's chunk, and DSA's too; the recipe's 2,048 / 1,024 need longer
+    prompts): a 124-token prompt runs as two sub-batches through every mixer and the dense / shared FFN — bitwise the
+    unsplit run (the routed experts, whose CPU bits follow a call's rows, see the same rows on both sides: an
+    off-by-one in a piece's bounds or a conv tail not carried cannot hide under a tolerance; on the GPU the bound is
+    the L0's, C-m3); a prefix
     hit off a sub-batched prompt resumes at its checkpoint (64, a piece's end) with the recompute's tokens, logprobs
     within 1e-5 (its 46-row step against the recompute's 120: the experts' row-count bits, ≈ 1e-6)."""
     from holon_plugins.models.glm5_next import recipe
@@ -284,10 +285,10 @@ def test_sub_batched_steps_keep_the_tokens_and_the_checkpoints(tiny):
     ids = fixtures["p0.ids"].tolist()
     params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True, logprobs=1)
     plain = _decode(_engine(path, 128), ids[:120], params)
-    with mock.patch.object(recipe, "ROWS", 64):
+    with mock.patch.object(recipe, "ROWS", 64), mock.patch.object(recipe, "DSA_ROWS", 64):
         split = _decode(_engine(path, 128), ids[:120], params)
         engine = _engine(path, 128, prefix=True)
-        assert engine.executor.model.layers[0].mixer.rows == 64
+        assert engine.executor.model.layers[0].mixer.rows == engine.executor.model.layers[3].mixer.rows == 64
         _ask(engine, ids[:100], DECODE)
         hit = _decode(engine, ids[:120], params)
         recompute = _decode(_engine(path, 128), ids[:120], params)
