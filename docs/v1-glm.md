@@ -7,7 +7,7 @@ on-demand sizes apart, the (ii) 32K cell restated with the loan's SSD bytes. Ste
 way (D8). (Rev 6 drew A 1 major + 2 minors, B 1 + 1, C 2 minors; rev 5 drew A 2 + 1 + nit, B 3 minors, C 1 + 1;
 rev 4 drew A 1 major + 2 minors + 1 nit, B 1 + 3, C 2 notes; rev 3 drew A 4 minors + 3 nits, B 2 majors + 2 minors,
 C 1 major + 2 minors; rev 2 drew A 5 majors + 4 minors, B 1 + 8, C 7 + 9; rev 1, A 6 + 12, B 9 + 17, C 3 blockers +
-10 + 13.) Step 0 is under way (N0, N2's decode traces and N4's A5000 probes done; N1 running; §8). In the engine only
+10 + 13.) Step 0 is under way (N0, N1's mode (i), N2's decode traces and N4's A5000 probes done; §8). In the engine only
 step 1's (b)+(e) is built.
 Parameters marked "est." freeze when step 0's evidence lands.
 
@@ -554,8 +554,16 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
 - **Generated ids** (C r6-m1): both workers keep each request's generated ids in the run's rows (from N1's third
   round on), so the degenerate screen and the matched-text ratio run offline. **The screen is validated before the
   gated runs** (C r6-m2): on every N1 (prompt, run) whose hit rate is more than 0.08 above that prompt's median across
-  Maya's runs; if any escapes the ≤ 32-token rule, the period widens to 64, or a pre-registered second trigger (that
-  hit-rate rule, applied pairwise) is added. The result is written into the evidence before the gated runs.
+  Maya's runs.
+  - **N1's result** (120 (prompt, run) rows with ids, `local/tmp/glm/n1_stats.py`): rev 7's end rule (≤ 32 tokens
+    repeated ≥ 4 times at the end) **misses one of the three outliers** — 32K prompt 1, h +0.11, a 175-token period-2
+    loop that broke off before token 256 — and drops 20 of 120 rows, most at their prompt's median h (long list-like
+    periods of 20–30 tokens that do not raise h). Widening the period to 64 catches neither problem.
+  - **The rule, pre-registered now** (the lead's call pending): a (prompt, run) is degenerate if **some run of ≥ 128
+    consecutive generated tokens has a period ≤ 16**, anywhere in its 256. On N1 it flags exactly the three rows more
+    than 0.08 above their prompt's median h (+0.14 at period 1, +0.11 at 2, +0.08 at 9) and nothing else.
+  - **Maya's greedy text varies run to run** (N1: two runs of one prompt diverge after 1–143 tokens, even within one
+    arm), so its decode rate carries a path variance: most of the 1K decode CV.
 - **Corpus and spans:** FN's text corpus tokenized with GLM's tokenizer (184,531 tokens); 8 spans per context (FN's
   six starts and two midpoints), the warm-up span excluded; all 24 requests in one fresh process per run.
 - **Statistics** (fixed now; C R5-M1, lead call 6):
@@ -563,12 +571,12 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     Σ(n − 1) / Σ(t_last − t_first); prefill: Σ C / Σ prompt time), each engine timed from the client;
   - **runs** alternate in ABBA order within an allocation, a discarded warm-up run first;
   - **the cell:** the median over adjacent (Holon, Maya) run pairs of the per-pair ratio;
-  - **rounds per context, sized from N1's runs:** Maya's run-to-run CV (N1: 1K decode 3.7%, 2.3% screened; 4K / 32K
-    decode and every prefill ≤ 1%) and Holon's timing noise give the rounds for a ratio SE ≤ 1% — **≈ 4–5 for 1K
-    decode, 3 elsewhere**; the counts are written into the evidence before the gated runs;
-  - **a pre-registered degenerate-continuation screen:** a (prompt, run) whose 256 generated tokens end in a pattern of
-    ≤ 32 tokens repeated ≥ 4 times consecutively is dropped from that context's cell **for both engines in that pair**,
-    and recorded (N1: one such Maya continuation at 1K moved its run by ≈ 4–8%);
+  - **rounds per context, sized from N1's runs:** Maya's run-to-run CV of the run statistic (N1, 5 runs an arm:
+    decode 2.5% at 1K, 1.2–1.7% at 4K and 32K; prefill ≤ 0.2%) and Holon's timing noise give the rounds for a ratio
+    SE ≤ 1% — **≈ 6–7 for 1K decode, 3 elsewhere**; the counts are written into the evidence before the gated runs;
+  - **a pre-registered degenerate-continuation screen:** a (prompt, run) whose 256 generated tokens hold a run of
+    ≥ 128 consecutive tokens with a period ≤ 16 (N1's validation, above) is dropped from that context's cell **for both
+    engines in that pair**, and recorded (N1: such a Maya continuation at 1K moved its run by ≈ 4–8%);
   - **the gate is each engine's own greedy text** (the owner's "speed ≥ Maya"), unchanged;
   - **report-only diagnostics:** a **matched-hit-rate ratio for every cell** (each engine's per-prompt time moved to
     the other's per-prompt h by its own fitted slope; Maya's is 0.19–0.20 ms a miss, N1 / N2) and, **for a cell within
@@ -809,11 +817,22 @@ reference instead.
 
 ### 7.4 Predicted Holon / Maya ratios per gated cell
 
-**Maya's side** comes from N2's 16-prompt capture (C-r2-m9), confirmed by N1's 72 prompt-runs (**9.96 + 0.197 × misses**,
-residual sd 0.43 ms, C's `n1_var.py`): its 17 `glm stat:` lines fit **ms a token = 10.3 + 0.189
-× misses** (C's `maya_fit.py`, residual sd 0.38 ms), **≈ 28.1 ms a token at h 0.72**; prompts 1.40–1.50 s at 1K and
-1.78–1.80 s at 4K (engine), 10.25 s at 32K (N0, two 16K chunks). Its `--calibrate` kept its defaults (N1). N1's
-calibrated runs replace these when they land.
+**Maya's side is N1's measured mode (i) rows** (`bench/.out/glm0_n1_mode1_rtx-5090`: 5 rounds × 2 arms, each run a
+fresh process over the 24 requests, ABBA; D11's run statistic, median over runs; its `--calibrate` kept the defaults,
+so these are its calibrated rows):
+
+| Maya, mode (i), RTX 5090 | 1K | 4K | 32K |
+|---|---|---|---|
+| decode, default (tok/s; ms a token) | 35.9; 27.8 | 34.0; 29.4 | 34.1; 29.3 |
+| decode, `CKPT_EVERY=0` | 36.7 | 33.9 | 34.3 |
+| prefill, default (tok/s; s, engine ≈ client) | 656; 1.56 | 2,124; 1.93 | 3,233; 10.12 |
+| prefill, `CKPT_EVERY=0` | 658 | 2,122 | **3,458; 9.48** (+6.9%) |
+| hit rate (median) | 0.73 | 0.71 | 0.71 |
+| run-to-run CV, decode / prefill | 2.5% / ≤ 0.2% | 1.5–1.7% / 0.1% | 1.2–1.4% / 0.0% |
+
+Its per-token cost fits **9.96 + 0.197 × misses** ms over N1's prompt-runs (residual sd 0.43 ms, C's `n1_var.py`) and
+**10.3 + 0.189 × misses** over N2's 17 `glm stat:` lines (C's `maya_fit.py`): **≈ 28.1 ms a token at h 0.72**. The
+4K and 32K decode rows are slower than 1K by their lower h, not by context.
 
 **Holon's side** is the first-order model with C's corrected inputs: dense 7.13 GB at 1.55 TB/s × 0.8 = 5.75 ms;
 misses 336 × (1 − h) × 7.11 MB at 47–49 GB/s (Holon's measured in-engine fetch, FN §21.1, §23.8); fixed 2–3 ms
@@ -829,10 +848,10 @@ as ≈ −3%** (rev 1 panel's after-prompt dip estimate: ≈ 1,300 experts refil
 
 | Cell (bar) | Holon | Maya | Predicted ratio: central [band] | What decides it |
 |---|---|---|---|---|
-| (i) decode 1K / 4K / 32K (1.0) | 22–25 ms a token | 28.1 ms (fit); 21.8–33.2 by prompt | **≤ 1.15 [0.85–1.25]** (lead call 8: two-sided until N1 lands) | Holon's fixed part (a model); Maya's calibrated lane; lending (−3%); R3 decides the lane lever at step 0's end |
-| (i) prefill 1K (0.9) | routed misses ≈ 55 GB by the ring of parts' gather at ≈ 45.6 GB/s (FN §21.9) + compute under it: 1.3–1.45 s | 1.40–1.50 s engine, ≈ 1.59 s client | **1.1 [0.95–1.25]** (C-r2-m2) | the gather rate; N4's compute |
-| (i) prefill 4K (0.9) | ≈ 68 GB stream 1.3–1.4 s ∥ compute ≈ 1.2 s: 1.45–1.6 s | 1.78–1.80 s engine, ≈ 2.03 s client | **1.3 [1.0–1.4]** | the same |
-| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.25 s (2 × 16K); the faster `CKPT_EVERY=0` arm 9.48 s (N1: 3,455 tok/s) | **≈ 1.0 [0.85–1.15] at the design's 16,384-row pass** (the A5000's measured 1.42× per-token gain on real routes; against the faster arm, N1's `CKPT_EVERY=0` at +6.8%, ≈ 9.48 s; C r5-m1); **≈ 0.83–0.87 at the 4,096-row fallback** — on the owner list if the 5090's probe does not confirm the 16K gain | the pass size (N4, step 4); the rest of c |
+| (i) decode 1K / 4K / 32K (1.0) | 22–25 ms a token | 27.8 / 29.4 / 29.3 ms (N1, h 0.73 / 0.71 / 0.71); 28.1 at h 0.72 (fit) | **≈ 1.15 [0.95–1.3]** (N1: Maya measured; Holon's side a model, lending's −3% in) | Holon's fixed part (a model); Maya's calibrated lane; lending (−3%); R3 decides the lane lever at step 0's end |
+| (i) prefill 1K (0.9) | routed misses ≈ 55 GB by the ring of parts' gather at ≈ 45.6 GB/s (FN §21.9) + compute under it: 1.3–1.45 s | 1.56 s (N1: 656 tok/s) | **1.1 [0.95–1.25]** (C-r2-m2) | the gather rate; N4's compute |
+| (i) prefill 4K (0.9) | ≈ 68 GB stream 1.3–1.4 s ∥ compute ≈ 1.2 s: 1.45–1.6 s | 1.93 s (N1: 2,124 tok/s) | **1.25 [1.0–1.4]** | the same |
+| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.12 s (N1: 3,233 tok/s, 2 × 16K); the faster `CKPT_EVERY=0` arm 9.48 s (3,458 tok/s) | **≈ 1.0 [0.85–1.15] at the design's 16,384-row pass** (the A5000's measured 1.42× per-token gain on real routes; against the faster arm, N1's `CKPT_EVERY=0` at +6.8%, ≈ 9.48 s; C r5-m1); **≈ 0.83–0.87 at the 4,096-row fallback** — on the owner list if the 5090's probe does not confirm the 16K gain | the pass size (N4, step 4); the rest of c |
 | (ii) decode (1.0) | the mode (i) token + 1.5 r × 1.3 ms (r_Holon ≈ 1.5 r_Maya: +14% SSD-only experts; Maya's own data, +850 RAM experts cut reads ×7.5, C-R2-M7) | 28.1 ms + r × 1.2 ms (8 chunk workers) | **1.05–1.10 [0.85–1.2]** (r_Maya 2 → 1.13–1.18; 5 → 1.04–1.07; 8 → 0.98–1.00) | D8f's rate (N3); r (N1); the cache levers (each +100 VRAM experts ≈ −25% of Holon's reads) |
 | (ii) prefill 1K (0.9) | the routed SSD-only set: a 1K window routes ≈ 80% of the coldest 1,250–1,430 (C's `ssd_routed.py`): ≈ 1,140 experts, 8.1 GB, at N3's rate, beside ≈ 55 GB of PCIe | its routed ≈ 1,000 experts, 7.1 GB | **0.95 [0.75–1.15]** (lead call 5: re-predicted with the 2,048 threshold; Holon reads +14% SSD bytes; both overlap PCIe) | both SSD rates; Holon's cache levers |
 | (ii) prefill 4K (0.9) | the whole SSD-only set (a 4K window routes 98% of it): ≈ 10.2 GB | its ≈ 8.9 GB | **1.0 [0.8–1.2]** | as 1K |
@@ -860,7 +879,7 @@ probes.
 | # | Measure | Status | Decides |
 |---|---|---|---|
 | N0 | The harness: Maya built at `4615f34` (sm_120) and its pack; `offload_ctx`'s Maya backend; `produced` = n; `reused` = 0; the corpus retokenized | **done** (one run: decode 35.9 / 35.6 / 35.9, prefill 646 / 2,016 / 3,195 tok/s at 1K / 4K / 32K; pool 3,360–3,377; h 0.72–0.74) | D11 runnable |
-| N1 | Maya's rows: `--calibrate`, then mode (i) 5 rounds × 2 arms (its run-to-run CV), mode (ii) in a 64 GiB job step (pinned memory in `memory.peak`; the tier in experts; hygiene), the deterministic recipe; the 5080 mode (i); Maya's ledger lines | **calibrate done (kept the defaults); mode (i) running; mode (ii) queued** | the denominators; D10's tier; D11's rounds |
+| N1 | Maya's rows: `--calibrate`, then mode (i) 5 rounds × 2 arms (its run-to-run CV), mode (ii) in a 64 GiB job step (pinned memory in `memory.peak`; the tier in experts; hygiene), the deterministic recipe; the 5080 mode (i); Maya's ledger lines | **calibrate done (kept the defaults); mode (i) done** (5 rounds × 2 arms, §7.4; the screen validated, D11); **mode (ii) queued behind N3 and N4's 5090 probes** | the denominators; D10's tier; D11's rounds |
 | N2 | Maya's route traces: decode (`STRATA_GLM_ROUTE_LOG`) and prompts (`--dump-routing`) on the bench plan and the 72 prompts; the held-out replay at each engine's share; F10 vs deferred admission in mode (ii); MTP verify windows; the routed fraction of the SSD-only set by window | **decode traces done** (bench 8,256 + tasks 27,680 tokens): h above; windows 13.9 / 19.1 / 23.9 distinct experts per layer at 2 / 3 / 4 tokens (D7). **Prompt traces queued.** Lending: not replayable at step 0 (§7.4) | D8's mode (ii) default; D7 (deferred); D9's rules; h |
 | N3 | The SSD microbench on the bar node's NVMe: io_uring (with and without the bounce copy, which copies each extent as it completes into a rotating page-locked 2 GiB region; C n2), native AIO, `pread`, an 8-thread pool; depth 8 / 16 / 32; 256 KiB–1 MiB chunks; 1–8 experts a call (`spikes/glm0/n3_ssd.c`) | **io_uring and native AIO available in the container** (kernel 6.17, `io_uring_disabled` 0); the bench queued after N1 | D8f's interface, chunk and depth; **its rate, decisive for (ii) decode and the (ii) 32K cell** (compute-bound at ≥ ≈ 4.2–4.9 GB/s with the loan; below ≈ 4.5, the owner list, §7.4) |
 | N4 | The roofline per §7.4 row; **the prefill compute probe**, **4K / 8K / 16K MoE passes** (A5000 done on real routes: 10.50 / 8.24 / 7.41 µs a token a layer) (a spike build of the extension at `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072) and **the live set at 4K–32K** | **A5000 done**: MoE GEMMs per 4K pass (D9), the live set unsplit ≈ 326 KiB / sub-batched ≈ 55 KiB a token beyond R at 16K (D9); **the 5090's queued** (real routes from N2's tasks trace; 4K pass, and 8K / 16K with the spike build) | every gated row frozen; a row predicted below its bar goes to the lead before step 1 ends |
