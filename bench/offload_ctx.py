@@ -5,8 +5,8 @@ time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are span
 every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another:
 - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),
   one request per context;
-- `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with
-  Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts
+- `--corpus fn` (FN, D11) / `glm` (GLM, docs/v1-glm.md D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in
+  that order and tokenized with Qwen3.8-Flash-Next's / GLM-5.3-Flash's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts
   (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)
   moved past it, and `--spans` picks the candidates timed (default the first 3).
 The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.
@@ -15,8 +15,10 @@ Engines: `llama` = llama-server (`--server`; its own `timings`: prompt_ms, and p
 first); `freetoken` = FreeToken's offline `LLM` in its own venv (`--python`), timed in process as each token reaches
 the frontend; `strata` = Strata's engine (`--strata`) in its `--serve` mode with raw token ids on stdin, timed in
 this client as each verify window's tokens reach stdout (`--eos-ids 999999`, an id outside the vocabulary, so a
-request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `holon` = Holon's
-`Engine` in process (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
+request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `maya` = Project Maya's engine (`--maya`, GLM-5.3-Flash) in
+its `--serve` mode, the same raw-id protocol as Strata's (`--eos-ids 2147483647`, an id no request produces; `DONE`'s
+`reused` must be 0); `holon` = Holon's `Engine` in process (`--holon-python`), stamped as each token reaches the host,
+prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
 `holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
 reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
@@ -60,11 +62,13 @@ OUTPUT = 256
 # D11's corpus (docs/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
 FN_SETS = ("v1-long.jsonl", "v1-qwen3_5.jsonl", "v1.jsonl")
 FN_TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
+TOKENIZERS = {"fn": FN_TOKENIZER, "glm": ("zai-org/GLM-5.3-Flash", "46a050bec13002ad29ee795c16e61cf4fa3c4a9c")}
 FN_WARMUP = 2048                                        # the warm-up span: the corpus's last 2,048 tokens
 STRATA_NO_EOS = 999999                                  # an id outside the vocabulary: Strata's ignore-EOS
+MAYA_NO_EOS = 2147483647                                # Maya accepts any id in [0, 2^31 - 1] (generate.cpp:524-543)
 # log lines kept in the record: what each engine resolved (placement, cache size, strategy, hit rates)
 KEEP = re.compile(r"(?i)moe.cache|moe strateg|auto-selected|offloaded \d+/\d+ layers|fit|n_cpu_moe|model buffer size|"
-                  r"kv.?cache size|slots|hit rate|load_mode|expert")
+                  r"kv.?cache size|slots|hit rate|load_mode|expert|glm stat|glm fast|cpu lane|ram tier")
 
 
 def prompt(corpus: list[int], context: int) -> list[int]:
@@ -76,11 +80,11 @@ def span(corpus: list[int], start: int, n: int) -> list[int]:
     return [corpus[(start + i) % len(corpus)] for i in range(n)]
 
 
-def fn_corpus() -> list[int]:
+def fn_corpus(name: str = "fn") -> list[int]:
     """D11's corpus: the prompt sets' text concatenated and tokenized with the model's tokenizer (special tokens kept
     as the template wrote them)."""
     from tokenizers import Tokenizer
-    repo, rev = FN_TOKENIZER
+    repo, rev = TOKENIZERS[name]
     hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
                                                                        "~/.cache/huggingface").expanduser() / "hub")
     tok = Tokenizer.from_file(str(hub / f"models--{repo.replace('/', '--')}" / "snapshots" / rev / "tokenizer.json"))
@@ -108,7 +112,7 @@ def plan(a: argparse.Namespace) -> dict:
         reqs = [{"key": str(c), "context": c, "start": OFFSETS.get(c, 0), "ids": prompt(corpus, c)}
                 for c in a.contexts]
     else:
-        corpus = fn_corpus()
+        corpus = fn_corpus(a.corpus)
         warm = {"ids": corpus[-FN_WARMUP:], "output": 64}
         starts = fn_starts(len(corpus), a.contexts, max(6, max(a.spans) + 1))
         reqs = [{"key": f"{c}/{k}", "context": c, "start": starts[c][k], "ids": span(corpus, starts[c][k], c)}
@@ -291,6 +295,63 @@ def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                                          if k in info}}
 
 
+def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
+    """Project Maya's engine (v1.1.27) in `--serve` mode: `READY <ctx> ...`, then `GEN <n> temperature=0 <ids>` on
+    stdin; `T <id>` per token, then `DONE <produced> <prompt_n> <prompt_ms> <decode_ms> <finish> <draft_hits>
+    <draft_steps> <reused> <hits> <lookups>` (My generate.cpp:2063, 2213-2222, 3893-3894, 7005-7041). Its pack is in
+    the arm's flags (`--glm-pack <dir>`); `--kv-resident` equal to the context keeps a 32K configuration unstreamed
+    (docs/v1-glm.md D11). The engine's `glm stat:` stderr lines (decode hit rate, RAM fetches, disk reads, CPU lane,
+    pool and RAM tier use) go to the server log."""
+    cmd = [*shlex.split(a.wrap), a.server, "--serve", "--max-context", str(a.ctx), "--kv-resident", str(a.ctx),
+           "--eos-ids", str(MAYA_NO_EOS), *shlex.split(a.flags)]
+    log = open(a.log, "w") if a.log else subprocess.DEVNULL
+    engine = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1)
+    try:
+        for line in engine.stdout:
+            if line.startswith("READY"):
+                break
+        else:
+            raise RuntimeError(f"maya exited with {engine.wait()} before READY")
+
+        def request(ids: list[int], n: int) -> dict:
+            t0 = time.perf_counter()
+            engine.stdin.write(f"GEN {n} temperature=0 {','.join(map(str, ids))}\n")
+            engine.stdin.flush()
+            stamps = []
+            for line in engine.stdout:
+                now = time.perf_counter()
+                if line.startswith("T "):
+                    stamps.append(now)
+                elif line.startswith("ERR"):
+                    raise RuntimeError(line.strip())
+                elif line.startswith("DONE "):
+                    f = line.split()
+                    break
+            else:
+                raise RuntimeError(f"maya exited with {engine.wait()} during a request")
+            assert len(stamps) == int(f[1]) == n and f[5] == "length", (len(stamps), f[:6])
+            return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0]),
+                    "reused": int(f[8]), "hit_rate": int(f[9]) / max(int(f[10]), 1),
+                    "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4])}
+
+        warm, reqs = requests(a, corpus)
+        request(warm["ids"], warm["output"])
+        results = {r["key"]: {k: round(v, 4) if isinstance(v, float) else v
+                              for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+        assert all(r["reused"] == 0 for r in results.values()), "a timed request reused tokens"
+    finally:
+        try:
+            engine.stdin.write("QUIT\n")
+            engine.stdin.flush()
+            engine.wait(300)
+        except (OSError, subprocess.TimeoutExpired):
+            engine.kill()
+            engine.wait()
+        if a.log:
+            log.close()
+    return {"results": results}
+
+
 def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     """Holon's `Engine` in process (as spikes/x4_gap/ctx.py), a stamp as each token reaches the host; prefix cache
     off, so no request reuses another's tokens."""
@@ -356,7 +417,8 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     return {"results": results}
 
 
-WORKERS = {"llama": llama_worker, "freetoken": freetoken_worker, "strata": strata_worker, "holon": holon_worker}
+WORKERS = {"llama": llama_worker, "freetoken": freetoken_worker, "strata": strata_worker, "maya": maya_worker,
+           "holon": holon_worker}
 
 
 def worker(a: argparse.Namespace) -> None:
@@ -393,8 +455,8 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
     py = {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
     cmd = [py, str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"], "--model", a.model, "--ctx",
            str(a.ctx), f"--flags={arm['flags']}", "--requests", str(log.parent / "requests.json")]   # one '-'-led value
-    if arm["engine"] in ("llama", "strata"):
-        cmd += ["--server", a.server if arm["engine"] == "llama" else a.strata,
+    if arm["engine"] in ("llama", "strata", "maya"):
+        cmd += ["--server", {"llama": a.server, "strata": a.strata, "maya": a.maya}[arm["engine"]],
                 "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(a.gpu), CUDA_DEVICE_ORDER="PCI_BUS_ID", **arm.get("env", {}))
     stop, peak = threading.Event(), [0]
@@ -405,7 +467,7 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
     stop.set()
     text = log.read_text(errors="replace")
-    if arm["engine"] in ("llama", "strata"):
+    if arm["engine"] in ("llama", "strata", "maya"):
         text = log.with_suffix(".server.log").read_text(errors="replace") + text
     line = next((x for x in text.splitlines() if x.startswith("RESULT ")), None)
     if p.returncode or line is None:
@@ -471,7 +533,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("worker")
     w.add_argument("--engine", choices=tuple(WORKERS), required=True)
-    w.add_argument("--server", help="llama-server, or Strata's engine")
+    w.add_argument("--server", help="llama-server, or Strata's or Maya's engine")
     w.add_argument("--requests", help="the orchestrator's requests.json (default: --contexts at the v1 offsets)")
     w.add_argument("--log")
     w.add_argument("--wrap", default="", help="a command prefix for the server (e.g. nsys profile ...)")
@@ -483,13 +545,14 @@ def main() -> None:
     o.add_argument("--server", default=str(ROOT / "bench" / ".envs" / "llama.cpp-offload" / "bin" / "llama-server"))
     o.add_argument("--python", default=str(ROOT / "bench" / ".envs" / "freetoken-offload" / "bin" / "python"))
     o.add_argument("--strata", default=str(ROOT / "bench" / ".envs" / "strata" / "strata"))
+    o.add_argument("--maya", default=str(ROOT / "local" / "build" / "maya-v1.1.27" / "maya"))
     o.add_argument("--holon-python", default=sys.executable)
     o.add_argument("--requests", help="a plan written by `plan` (fn's corpus needs tokenizers, which a bench venv "
                    "may lack)")
     pl = sub.add_parser("plan", help="write requests.json")
     pl.add_argument("--out", required=True)
     for p in (o, pl):
-        p.add_argument("--corpus", choices=("v1", "fn"), default="v1")
+        p.add_argument("--corpus", choices=("v1", "fn", "glm"), default="v1")
         p.add_argument("--spans", type=int, nargs="+", default=[0, 1, 2],
                        help="fn: the candidate starts timed (0-11; past 5 the midpoints between the six D11 starts)")
         p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])
