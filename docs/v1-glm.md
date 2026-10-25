@@ -1,7 +1,8 @@
 # v1 — GLM: GLM-5.3-Flash on Holon, then its expert offload compared with Project Maya
 
-Status: **rev 5 (2026-10-25), for the panel's fifth round.** Rev 4 drew A 1 major + 2 minors + 1 nit, B 1 major + 3
-minors, C 2 probe notes (no majors); §13 answers each, with the lead's calls (§11). (Rev 3 drew A 4 minors + 3 nits,
+Status: **rev 6 (2026-10-25), for the panel's sixth round.** Rev 5 drew A 2 majors + 1 minor + 1 nit, B 3 minors, C 1
+major + 1 minor; §13 answers each, with the lead's calls (§11), converging by simplifying the SSD path. (Rev 4 drew A
+1 major + 2 minors + 1 nit, B 1 + 3, C 2 notes; rev 3 drew A 4 minors + 3 nits,
 B 2 majors + 2 minors, C 1 major + 2 minors; rev 2 drew A 5 majors + 4 minors,
 B 1 + 8, C 7 + 9; rev 1, A 6 + 12, B 9 + 17, C 3 blockers + 10 + 13.) Step 0
 is under way (N0, N2's decode traces and N4's A5000 probes done; N1 running; §8). Nothing in the engine is built.
@@ -345,49 +346,60 @@ it.** The store gains **no new options**; provider options live in their kernel 
   native AIO.
 - **Per layer call:** every SSD miss of the call is submitted at once, each extent as chunks (N3 picks the size);
   completion is the existing `cpu_task@1` signal / wait in the graph. RAM misses go first in their own launch (D8c).
-- **Landing: the RAM tier's own I/O staging units, whole units, the bounce kept** (B3-M2): SSD reads land, as today,
-  in the RAM tier's I/O staging units (`capacity[c] + i` of the class pool, `moe/kernels.py:168-178`; allocated by
-  `std.tiered.pinned` as `held + staging` whole units, `pinned.py:33-34`), in **two disjoint ranges per class**
-  (B4-m2, A R4-m1, lead call 4):
-  - **on demand** `[capacity, capacity + F)`: the misses a call reads itself (decode, and prefill below 2,048 tokens),
-    F = the largest per-layer routed SSD-only count N2's prompt traces show (est. ≈ 48), a constant; a call with more
-    SSD misses than F reads them in rounds of F, in id order;
-  - **read-ahead** `[capacity + F, capacity + F + depth × A)`: depth sets of A units (est. ≈ 48, the same replay's
-    largest per-layer SSD-only set), set g on `g % depth`.
-  - Counted under `host_memory` and mode (ii)'s limit (≈ 1 GB at depth 2); it replaces (e)'s 8 per class in mode (ii).
+- **Landing: the RAM tier's own I/O staging units, whole units, the bounce kept, no rounds** (B3-M2; the lead's
+  call to converge by simplifying, rev 6): SSD reads land, as today, in the RAM tier's I/O staging units
+  (`capacity[c] + i` of the class pool, `moe/kernels.py:168-178`; allocated by `std.tiered.pinned` as `held + staging`
+  whole units, `pinned.py:33-34`), in **two disjoint ranges per class**:
+  - **on demand** `[capacity, capacity + A)`: the misses a call reads itself (decode; prefill steps below 2,048
+    tokens; the step's first `depth` MoE layers, 3 and 4, which no earlier layer reads ahead);
+  - **read-ahead** `[capacity + A, capacity + A + depth × A)`: depth sets of A units, set g on `g % depth`.
+  - **A, derived at `before_materialize` from class sizes, not from any model's traces** (B5-m1): A = ⌈1.5 ×
+    (the class's pieces − its RAM units − its cache cap) / its groups⌉ (1.5 × the mean SSD-only set per layer; ≈ 51 for
+    Maya-S on the 5090 in mode (ii)). N2's traces validate it, they do not set it.
+  - **A is an invariant, not an estimate:** `moe_tiers@1` never lets a layer hold more than A SSD-only experts — a
+    victim that would make its layer exceed A stays in RAM and the next-coldest RAM expert of a layer below A goes
+    instead (deterministic, the same coldest rule otherwise). So a layer's SSD-only set, and any call's SSD misses,
+    always fit A units: **no rounds, no overflow**. (Decode's misses are ≤ k × max_seqs × (1 + drafts) ≤ A anyway.)
+  - Counted under `host_memory` and mode (ii)'s limit: (1 + depth) × A units a class, ≈ 1.1 GB at depth 2; it replaces
+    (e)'s 8 per class in mode (ii).
   - Each extent — **a gate/up piece is two extents (the gate and up tensors), a down piece one** — is read as its 4
     KiB-aligned superset (125 of 129 `_exps` tensors start 32 B past a boundary, G-B §1) and **bounced into its place
-    in the whole unit** by the submitting thread as each extent completes (`cpu_task.cu:437-460` does it per
-    descriptor today); a read goes straight into the unit only when the file offset, the length and the destination are
-    all 4 KiB-aligned. `expert_fetch@1` is unchanged. **Only if N3 shows the bounce breaks the 1.3 ms target** does
-    `expert_fetch@1` gain a per-piece run table (offset, length per extent), a std contract minor with its L0, listed in
-    §4 then.
-- **The fence: stream order, after every reader has joined** (A R4-M1, lead call 1): `cpu_task@1`'s `signal` is a
-  stream op in the graph (`kernels/cpu_task/plugin.py:1-5`; `resolver.py:113`; a system-scope release store after
-  earlier work on its stream, `cpu_task.cu:60, 397-401`). Layer g + depth's read-ahead signal is enqueued **at the end
-  of layer g's MoE call on the main stream, after that call has joined every stream that read set g % depth**: the split
-  fetch (D8c), every pipelined part, the ring's copies and, with F5b on, its CPU share's wait. So io_uring never
-  overwrites a staging unit a pending copy or CPU task still reads. **Every side-stream reader of a staging set waits on
-  the set's `cpu_task` slot on its own stream** (or joins an event recorded after that wait) before its first copy, so
-  no ring or part copy reads units the read has not filled. A replay's signal and its wait sit in one step's stream
-  order, so graph replays and overlap cannot reorder them (panel A, verified).
-  - **Request rows** (B4-m3): the store's request pool (`io_pool`, `[roles, 1 + prefill, 2]`, `store.py:402-403`)
-    becomes depth copies, and group g's copy task is bound to view `g % depth` (`store.py:971-973`), in `std.tiered`;
-    no contract change.
-  - **The read-ahead cap and late SSD-only experts** (A R4-m1, B4-m2): a layer reads ahead at most A experts of its
-    SSD-only set, lowest ids first (deterministic); the rest, and any expert that becomes SSD-only after the snapshot
-    (an admission elsewhere displacing it from RAM, D8b's demotions), are on-demand misses in the on-demand range,
-    read by **a second signal on the same slot after the read-ahead's wait**. Both cases are tested on the vehicle with
-    a capped RAM tier.
-  - Plants, each must make `exact.py` differ on a RAM-short 16K prompt with parts or the ring on:
-    `landing_reuse_unfenced` (the read-ahead signal before the reading layer's fetch), `landing_reuse_side_stream`
-    (after the fetch call but before the parts' join), `landing_fill_unjoined` (a ring or part copy without the slot's
-    wait).
+    in the whole unit** by the submitting thread as each extent completes; a read goes straight into the unit only when
+    the file offset, the length and the destination are all 4 KiB-aligned. `expert_fetch@1` is unchanged. **Only if N3
+    shows the bounce breaks the 1.3 ms target** does `expert_fetch@1` gain a per-piece run table, a std contract minor
+    listed in §4 then.
+- **Two slots a layer, one request each per step; the fence is stream order** (A R5-M2, R5-m1; lead call 1):
+  - **Slots.** Each MoE layer has an **on-demand** `cpu_task` slot and a **read-ahead** slot, each signalled **at most
+    once per step** — so every wait on a slot means exactly one request. (`cpu_task@1`'s wait passes on `word ≥ DONE`
+    with no sequence number, `cpu_task.cu:4-8, 407-419`.)
+  - **Every reader's wait is stream-ordered after its slot's signal**: on main, after the signal, or on a side stream
+    that first joins an event recorded on main after the signal. A wait enqueued earlier could pass on the previous
+    step's DONE; this rule excludes it.
+  - **The read-ahead signal** for layer g + depth is enqueued **at the end of layer g's MoE call on the main stream,
+    after that call has joined every stream that read set g % depth**: the split fetch (D8c), every pipelined part, the
+    ring's copies and, with F5b on, its CPU share's wait. So io_uring never overwrites a unit a pending copy or CPU
+    task still reads. A replay's signal and its wait sit in one step's stream order (panel A, verified).
+  - **The on-demand signal** is in the layer's own call, after its resolve, as today; every copy from the on-demand range
+    (the SSD fetch launch, ring-of-parts copies below 2,048 tokens) is ordered after that slot's wait.
+  - **No late experts:** within a step, `moe_tiers@1` never picks a victim in a layer whose read-ahead snapshot is taken
+    and not yet consumed (layers g + 1 … g + depth), and D8b's lending demotions are done at the step's start, before
+    the first snapshot. So no expert becomes SSD-only after its layer's snapshot, and nothing needs a second request.
+  - **Request rows in their own views** (B5-m2): the store's request pool (`io_pool`, `store.py:402-403`) becomes
+    1 + depth views — one on-demand view (a layer's on-demand read is waited in its own call, before the next layer
+    writes the view) and depth read-ahead views, group g's read-ahead task bound to view `g % depth` — so no request
+    write can clobber another's rows; in `std.tiered`, no contract change.
+  - Plants, each must make `exact.py` differ (or the store's check fail) on a RAM-short 16K prompt with parts or the
+    ring on: `landing_reuse_unfenced` (the read-ahead signal before the reading layer's fetch),
+    `landing_reuse_side_stream` (after the fetch call but before the parts' join), `landing_fill_unjoined` (a ring or
+    part copy whose wait is not ordered after the signal), `read_ahead_window_victim` (a victim taken inside the
+    read-ahead window: a late SSD-only expert read from a stale unit), `ssd_cap_ignored` (the per-layer cap off: the
+    store's per-layer count check fails).
+  - **Why no rounds** (the lead's preference): the per-layer cap bounds every call's SSD misses by A, and the window
+    rule removes late experts, so the two-half round scheme, its second signals and its plants are not needed; the
+    price is a placement constraint that only binds when a layer's SSD-only set would exceed 1.5× the mean.
 - **A read-ahead expert is a plain SSD miss for placement** (A-m2): admission, the `keep` rule and heat see it exactly
-  as an SSD miss; "already read ahead" changes only which staging unit the fetch reads and that no second read is
-  issued. So placement does not depend on whether the read finished first. `moe_tiers@1` gains the read-ahead set's
-  mapping (a layer's SSD-only experts read ahead into fixed staging units; an SSD miss among them maps to its unit and
-  issues no read), listed in §4.
+  as an SSD miss; "already read ahead" changes only which staging unit the fetch reads and that no on-demand read is
+  issued. So placement does not depend on whether the read finished first.
 - **Prefill read-ahead, one threshold:** for steps **≥ 2,048 tokens** (`moe.stream_tokens`, the same line as D9's
   staging), each MoE layer reads the **whole** SSD-only set of the next layer ahead, 2 layers deep, if N2's prompt
   traces show it pays; below 2,048, each layer reads its own routed SSD-only set once routed. Threshold and depth are
@@ -436,17 +448,19 @@ it.** The store gains **no new options**; provider options live in their kernel 
   - **The change, two parts:**
     - **vendor:** `GGML_CUDA_MM_IDS_MAX_PAIRS` 32,768 → 131,072 (`vendor/ggml/src/ggml-cuda/mmid.cuh:8`); calls ≤ 32,768
       pairs keep their paths (the device-wide sort past one block's 16,384 pairs already runs for today's 4K passes);
-    - **plugin** (`kernels.ggml_cuda/plugin.py:79-80, 261-274, 761`): **the default is exactly today's** for every
-      lock without the option — `PASS_ROWS` 4,096 and the `ID_PAIRS` (32,768) arithmetic, `min(_cap, ID_PAIRS //
-      top_k)`, and the support predicate unchanged — and **only an explicitly set `ggml_cuda.pass_rows` may exceed it**,
-      up to the header's limit: `min(option, MAX_PAIRS // top_k, max_step_tokens)` with `MAX_PAIRS` = 131,072. (9
-      committed locks set the option, all ≤ 4,096: unchanged.)
+    - **plugin** (`kernels.ggml_cuda/plugin.py:79-93, 261-274`; A R5-M1, B5-m3, lead call 2): **whenever the option is
+      unset or ≤ `PASS_ROWS` (4,096), today's arithmetic exactly** — `min(_cap, ID_PAIRS // top_k)` with `ID_PAIRS`
+      32,768, so FN's explicit 4,096 at top-10 stays **3,072** and the 30B locks stay 2,048 / 512; **only an option
+      above 4,096 takes the new rule**, `min(option, MAX_PAIRS // top_k, max_step_tokens, the entry's bound)`, where
+      **each `PASS_PROVEN` (SM, type, mode) entry carries its proven row bound** (4,096 for today's entries; 16,384 for
+      IQ2_XXS / IQ2_S / IQ3_XXS on sm_86 and sm_120 once step 4's L0 proves them) and **an option above an entry's
+      bound is refused with a message**.
   - **GLM's lock alone sets `ggml_cuda.pass_rows` = 16,384** (N4's pick).
-  - **Step 4 checks:** an assert (and the launch inventory) that GLM's prompt passes really are 16,384 rows; the
-    vehicle's and FN's MoE locks byte-identical; **an L0 of whole-`CHUNK` row invariance at 16,384 rows on IQ2_XXS /
-    IQ2_S / IQ3_XXS on sm_86 and sm_120** (B4-m1: `PASS_PROVEN` is proven up to 4,096 today); the gate/up class's tail
-    holding the loan, the ≈ 4× pass buffers (≈ +1.5–2 GB lent during prompt steps) and the ring halves (≈ 6–8 GB of
-    ≈ 13.6).
+  - **Step 4 checks:** an assert (and the launch inventory) that GLM's prompt passes really are 16,384 rows; **FN's
+    locks byte-identical with their 3,072-row passes at top-10** and the vehicle's at 2,048 / 512; an L0 of
+    whole-`CHUNK` row invariance at 16,384 rows on IQ2_XXS / IQ2_S / IQ3_XXS on sm_86 and sm_120; an option above an
+    entry's bound refused; the gate/up class's tail holding the loan, the ≈ 4× pass buffers (≈ +1.5–2 GB lent during
+    prompt steps) and the ring halves (≈ 6–8 GB of ≈ 13.6).
 - **The prefill tail skip is deferred** (B3-M1, A-m4, lead call 1): as designed it would compute prompt logprobs from
   stale rows (`logits_index` covers sampled rows only; prompt logprobs read `h` by core-internal `PromptRows`,
   `executor.py:36-43, 376, 624-640`) and break std.hyper's "R complete at every block boundary". It is worth ≈ 2.4% of
@@ -478,20 +492,33 @@ it.** The store gains **no new options**; provider options live in their kernel 
   off; its setup's defaults (`--expert-cache auto --prefill auto --kv-streaming on --expert-profile
   data/expert-profile-glm.bin`); **its own `--calibrate` kept the defaults on the 5090** (N1: PCIe share 0.64 and 8
   lane threads; no sweep beat them by 3%). Built at `4615f34`, sm_120, on the bench host.
-- **Maya's checkpoint cut:** a 32K raw-id prompt is read as 16,384 + 16,384 by default; the 32K cells take the faster
-  of Maya's default and `MAYA_GLM_CKPT_EVERY=0` arms (Q5).
+- **Maya's checkpoint cut:** a 32K raw-id prompt is read as 16,384 + 16,384 by default; **each 32K cell, prefill and
+  decode alike, takes the faster of** Maya's default and `MAYA_GLM_CKPT_EVERY=0` arms for that metric (Q5; N1:
+  `CKPT_EVERY=0` is faster at 32K in both, +6.8% prefill, C r5-m1).
 - **Holon:** its lock's configuration (mode (ii): the override set), `--ctx 33792`, `ignore_eos`; 0 reused tokens per
   timed request.
 - **Corpus and spans:** FN's text corpus tokenized with GLM's tokenizer (184,531 tokens); 8 spans per context (FN's
   six starts and two midpoints), the warm-up span excluded; all 24 requests in one fresh process per run.
-- **Statistics** (fixed now):
+- **Statistics** (fixed now; C R5-M1, lead call 6):
   - **the run's statistic**, per context and metric: total tokens over total time across its 8 prompts (decode:
     Σ(n − 1) / Σ(t_last − t_first); prefill: Σ C / Σ prompt time), each engine timed from the client;
   - **runs** alternate in ABBA order within an allocation, a discarded warm-up run first;
   - **the cell:** the median over adjacent (Holon, Maya) run pairs of the per-pair ratio;
-  - **rounds:** at least 3 (6 pairs); more if N1's measured Maya run-to-run CV needs them for a ratio SE ≤ 1%;
-  - **pass** ≥ bar; **a cell within 3% of its bar is re-run on a second allocation** (another node), and the cell
-    becomes **the median of both allocations' pair ratios together** (C-r2-m6); below the bar → the owner.
+  - **rounds per context, sized from N1's runs:** Maya's run-to-run CV (N1: 1K decode 3.7%, 2.3% screened; 4K / 32K
+    decode and every prefill ≤ 1%) and Holon's timing noise give the rounds for a ratio SE ≤ 1% — **≈ 4–5 for 1K
+    decode, 3 elsewhere**; the counts are written into the evidence before the gated runs;
+  - **a pre-registered degenerate-continuation screen:** a (prompt, run) whose 256 generated tokens end in a pattern of
+    ≤ 32 tokens repeated ≥ 4 times consecutively is dropped from that context's cell **for both engines in that pair**,
+    and recorded (N1: one such Maya continuation at 1K moved its run by ≈ 4–8%);
+  - **the gate is each engine's own greedy text** (the owner's "speed ≥ Maya"), unchanged;
+  - **report-only diagnostics:** a **matched-hit-rate ratio for every cell** (each engine's per-prompt time moved to
+    the other's per-prompt h by its own fitted slope; Maya's is 0.19–0.20 ms a miss, N1 / N2) and, **for a cell within
+    3% of its bar, a matched-text ratio** (Holon decoding forced along Maya's continuations, FN §23.5's
+    `draft_quality.py` method). Holon is deterministic, so its 8-prompt cell carries a fixed path-luck bias (≈ 1–1.3%
+    sd) that more rounds cannot remove; the diagnostics expose it. **If a diagnostic disagrees with the gated ratio by
+    more than the cell's band, the cell goes to the lead with all three;**
+  - **pass** ≥ bar; **a cell within 3% of its bar is re-run on a second allocation** (another node), the cell becoming
+    the median of both allocations' pair ratios together; below the bar → the owner.
 - **Per cell:** expert hit rates (all, and the first 32 decode tokens after a prompt), SSD reads per token and device
   read bytes (mode (ii)), Maya's `glm stat:` and `glm prefill:` lines, peak VRAM and RSS.
 
@@ -573,10 +600,10 @@ on a prompt that ends in it.
 | `ResidencyMap`, the store, `placement.promote`, `kernels.promote` | D8 (a)–(d) |
 | `kernels.ggml_cuda`'s `MoeTopk` / `holon_ggml_topk_moe` and fused router | softmax only, power-of-two E → scoring, bias, scale; E = 288 (D6) |
 | `kernels.cpu_task` | a pread pool (`io_threads`) → one submitting thread (io_uring, else native AIO, chosen and logged; a constructor argument forces either for tests), option `io_depth`; `io_threads` deleted (D8f) |
-| `std.tiered` (store, `pinned`) | I/O staging units: 8 per class (exclusive) → an on-demand range of F and depth read-ahead sets of A, disjoint; the request pool × depth, group g on view `g % depth`; read-ahead signals at the end of the reading layer's MoE call, after every reader's join; side-stream readers wait on the slot (D8f) |
-| `moe_tiers@1` | SSD misses read into staging units per call → also a layer's SSD-only set read ahead into fixed staging units (an SSD miss among them maps to its unit, no read) (D8f) |
+| `std.tiered` (store, `pinned`) | I/O staging units: 8 per class (exclusive) → an on-demand range and depth read-ahead sets, A units each, A derived from class sizes; two `cpu_task` slots a layer (on demand, read-ahead), one request each per step; the request pool as 1 + depth views; read-ahead signals at the end of the reading layer's MoE call, after every reader's join; every wait ordered after its signal (D8f) |
+| `moe_tiers@1` | an SSD miss → staging unit `capacity[c] + i` of its fetch entry i → an SSD miss → its on-demand unit `capacity + j` (j its rank among the call's SSD misses, < A) or, when its layer's set was read ahead, its read-ahead unit `capacity + A + (g % depth)·A + its rank in the layer's SSD-only set` (no read issued); a victim rule that keeps every layer's SSD-only set ≤ A and takes no victim inside the read-ahead window (D8f) |
 | `kernels.ggml_cuda` vendor | `GGML_CUDA_MM_IDS_MAX_PAIRS` 32,768 → 131,072 (D9) |
-| `kernels.ggml_cuda` plugin (`plugin.py:79-80, 261-274`) | `pass_rows` capped at `ID_PAIRS // top_k` (4,096) → unchanged by default; an explicit `ggml_cuda.pass_rows` up to `MAX_PAIRS // top_k` (D9) |
+| `kernels.ggml_cuda` plugin (`plugin.py:79-93, 261-274`) | `pass_rows` from `ID_PAIRS // top_k` → today's arithmetic whenever the option is unset or ≤ 4,096; above 4,096 up to `MAX_PAIRS // top_k` and the `PASS_PROVEN` entry's own row bound, a larger option refused (D9) |
 | `std.weights.gguf` | `glm4` pre-tokenizer, `eom` (D13) |
 
 ## 5. Units, contracts, model plugin
@@ -663,7 +690,9 @@ that check's bound** (lead call 3, A-N2); until then the table gives the runner 
 | `promote_victim_code` | a refill victim's tier code not moved | `exact.py` RAM-short | differs |
 | `landing_reuse_unfenced` | a read-ahead signal enqueued before the reading layer's fetch | `exact.py` RAM-short, 16K prompt, parts / ring on | differs |
 | `landing_reuse_side_stream` | the signal after the fetch call but before the pipelined parts' join | same | differs |
-| `landing_fill_unjoined` | a ring or part copy without the slot's wait | same | differs |
+| `landing_fill_unjoined` | a ring or part copy whose wait is not ordered after its slot's signal | same | differs |
+| `read_ahead_window_victim` | a victim taken inside the read-ahead window (a late SSD-only expert) | same | differs |
+| `ssd_cap_ignored` | the per-layer SSD-only cap off | the store's per-layer count check | fails |
 | `aux_row_padding`, `lent-slot-still-mapped` (existing) | as FN / X | `exact.py` | differs |
 
 ## 7. Memory fit and predictions
@@ -706,7 +735,8 @@ reference instead.
 
 ### 7.4 Predicted Holon / Maya ratios per gated cell
 
-**Maya's side** comes from N2's 16-prompt capture (C-r2-m9): its 17 `glm stat:` lines fit **ms a token = 10.3 + 0.189
+**Maya's side** comes from N2's 16-prompt capture (C-r2-m9), confirmed by N1's 72 prompt-runs (**9.96 + 0.197 × misses**,
+residual sd 0.43 ms, C's `n1_var.py`): its 17 `glm stat:` lines fit **ms a token = 10.3 + 0.189
 × misses** (C's `maya_fit.py`, residual sd 0.38 ms), **≈ 28.1 ms a token at h 0.72**; prompts 1.40–1.50 s at 1K and
 1.78–1.80 s at 4K (engine), 10.25 s at 32K (N0, two 16K chunks). Its `--calibrate` kept its defaults (N1). N1's
 calibrated runs replace these when they land.
@@ -728,11 +758,11 @@ as ≈ −3%** (rev 1 panel's after-prompt dip estimate: ≈ 1,300 experts refil
 | (i) decode 1K / 4K / 32K (1.0) | 22–25 ms a token | 28.1 ms (fit); 21.8–33.2 by prompt | **≤ 1.15 [0.85–1.25]** (lead call 8: two-sided until N1 lands) | Holon's fixed part (a model); Maya's calibrated lane; lending (−3%); R3 decides the lane lever at step 0's end |
 | (i) prefill 1K (0.9) | routed misses ≈ 55 GB by the ring of parts' gather at ≈ 45.6 GB/s (FN §21.9) + compute under it: 1.3–1.45 s | 1.40–1.50 s engine, ≈ 1.59 s client | **1.1 [0.95–1.25]** (C-r2-m2) | the gather rate; N4's compute |
 | (i) prefill 4K (0.9) | ≈ 68 GB stream 1.3–1.4 s ∥ compute ≈ 1.2 s: 1.45–1.6 s | 1.78–1.80 s engine, ≈ 2.03 s client | **1.3 [1.0–1.4]** | the same |
-| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.25 s (2 × 16K); the faster `CKPT_EVERY=0` arm est. ≈ 5% less | **≈ 0.85–0.89 [0.75–1.05]** at 4,096-row passes (≈ 1 point under rev 4's: real routes fill less at 4K, C n1); **≈ 1.0–1.05 at the design's 16,384-row pass** (the A5000's measured 1.42× per-token gain on real routes, fill ≈ 0.87 against Maya's 0.88) — the gated central is the 4,096 figure until the 5090's probe confirms | the pass size (N4, step 4); the rest of c |
+| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.25 s (2 × 16K); the faster `CKPT_EVERY=0` arm 9.48 s (N1: 3,455 tok/s) | **≈ 1.0 [0.85–1.15] at the design's 16,384-row pass** (the A5000's measured 1.42× per-token gain on real routes; against the faster arm, N1's `CKPT_EVERY=0` at +6.8%, ≈ 9.48 s; C r5-m1); **≈ 0.83–0.87 at the 4,096-row fallback** — on the owner list if the 5090's probe does not confirm the 16K gain | the pass size (N4, step 4); the rest of c |
 | (ii) decode (1.0) | the mode (i) token + 1.5 r × 1.3 ms (r_Holon ≈ 1.5 r_Maya: +14% SSD-only experts; Maya's own data, +850 RAM experts cut reads ×7.5, C-R2-M7) | 28.1 ms + r × 1.2 ms (8 chunk workers) | **1.05–1.10 [0.85–1.2]** (r_Maya 2 → 1.13–1.18; 5 → 1.04–1.07; 8 → 0.98–1.00) | D8f's rate (N3); r (N1); the cache levers (each +100 VRAM experts ≈ −25% of Holon's reads) |
 | (ii) prefill 1K (0.9) | the routed SSD-only set: a 1K window routes ≈ 80% of the coldest 1,250–1,430 (C's `ssd_routed.py`): ≈ 1,140 experts, 8.1 GB, at N3's rate, beside ≈ 55 GB of PCIe | its routed ≈ 1,000 experts, 7.1 GB | **0.95 [0.75–1.15]** (lead call 5: re-predicted with the 2,048 threshold; Holon reads +14% SSD bytes; both overlap PCIe) | both SSD rates; Holon's cache levers |
 | (ii) prefill 4K (0.9) | the whole SSD-only set (a 4K window routes 98% of it): ≈ 10.2 GB | its ≈ 8.9 GB | **1.0 [0.8–1.2]** | as 1K |
-| (ii) prefill 32K (0.9), 16K steps | 2 × max(SSD set ≈ 10.2 GB / rate, stream, compute) | its 2 × 16K | **≈ 0.85–0.89 [0.7–1.05]** at 4,096-row passes, ≈ 1.0 at 16,384 (compute-bound at ≥ 2.5 GB/s, as (i)) | the pass size; the SSD rate below ≈ 2.5 GB/s |
+| (ii) prefill 32K (0.9), 16K steps | 2 × max(SSD set ≈ 10.2 GB / rate, stream, compute) | its 2 × 16K | **≈ 1.0 [0.8–1.15] at 16,384-row passes**, ≈ 0.83–0.87 at the 4,096 fallback (compute-bound at ≥ 2.5 GB/s, as (i)) | the pass size; the SSD rate below ≈ 2.5 GB/s |
 
 **Cells with a band below their bar go to the lead at step 0's end** (N4's rule), with levers and costs:
 - **(i) decode** — R3's exact CPU row (decided at step 0's end); MTP with its head's experts pinned (D7: 0.89–1.09×,
@@ -766,7 +796,7 @@ probes.
 | 1 | D8 in order: (b)+(e), then (a), then (c); D8f (after N3): the one-thread async I/O worker (both backends tested), `io_depth`, staging units sized for the read-ahead depth, the stream-order fence, `io_threads` deleted — on the Qwen3-30B-A3B vehicle with RAM capped | `exact.py` capped vs uncapped (A5000, then the 5090 node's NVMe); **FN's rows RAM-vs-SSD identity** (B2-m2); the vehicle's offload lock trace byte-identical; the D8 plants incl. `landing_reuse_unfenced`; core diff empty | 6 |
 | 2 | The oracle: `golden-glm`; both fixtures (tie wrappers, randomised init, peaked combs, power-of-two MLA dims; the Q8_0 copy); the tokenizer round-trip corpus; the quantized-load test (A-m1) | the HF driver bitwise vs HF's whole forward on the tiny model; the load test | 3 |
 | 3 | Std units and contracts with references and CPU providers (D3–D6, D13) in their packages, `std.ffn.swiglu@1(rows)`, `gdn_rewind@1` generalised (−inf); the model plugin; the import-linter contracts | §6.1 CPU rows; **every existing lock's trace byte-identical** (`rows` = 0, the masked value); core diff empty | 6 |
-| 4 | Kernels (D12): the router on both paths (`MoeTopk` included) and the clamp; KDA (chunked vendored; recurrent through the `IS_KDA` branch); mHC (split over h); `dsa_index`, `qsa_select` weights, `mla_attend`; the mixers' sub-batching (behind `rows > 0`); `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072 and the plugin's explicit-only larger `pass_rows`; the launch inventory; `test_reserve.py`'s tiny-GLM case | acceptance 3; §6.1's GPU row (a′); **the vehicle's and FN's MoE locks byte-identical** after the router and pass-size changes; GLM's passes asserted at 16,384 rows; the 16,384-row whole-`CHUNK` invariance L0 (IQ2_XXS / IQ2_S / IQ3_XXS, sm_86, sm_120); the gate/up tail holds loan + passes + ring halves; the slot-0 test | 7 |
+| 4 | Kernels (D12): the router on both paths (`MoeTopk` included) and the clamp; KDA (chunked vendored; recurrent through the `IS_KDA` branch); mHC (split over h); `dsa_index`, `qsa_select` weights, `mla_attend`; the mixers' sub-batching (behind `rows > 0`); `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072 and the plugin's explicit-only larger `pass_rows`; the launch inventory; `test_reserve.py`'s tiny-GLM case | acceptance 3; §6.1's GPU row (a′); **the vehicle's (2,048 / 512) and FN's (3,072 at top-10) MoE locks byte-identical** after the router and pass-size changes; an option above a `PASS_PROVEN` bound refused; GLM's passes asserted at 16,384 rows; the 16,384-row whole-`CHUNK` invariance L0 (IQ2_XXS / IQ2_S / IQ3_XXS, sm_86, sm_120); the gate/up tail holds loan + passes + ring halves; the slot-0 test | 7 |
 | 5 | The full model on the RTX PRO 6000 (all-resident) then the 5090: gates (c), (d), (e), (f); exactness; the clamp bind rate, comb spread, tie counts; `route_dump` profile; Holon's own traces re-check N2, **and lending's effect on h** | acceptance 1(b), 2; §6.3's plants | 4 |
 | 6 | Offload on the bar cards: mode (i), and mode (ii) with the pre-registered override set; the placement default by N2's rule confirmed; the SSD path on the node's NVMe | acceptance 2 on both cards; fit vs §7 | 4 |
 | 7 | Perf closure: per-component breakdown vs Maya (nsys), fusions, CUDA rewrites by D12's rule; a per-change perf smoke | every gated row within its band, or the gap explained | 6 |
@@ -852,6 +882,15 @@ types (D9, §9); 4. a deterministic read-ahead cap, disjoint on-demand units, a 
 wait, the request pool × depth (D8f); 5. real routes in the 5090 probe, N3's bounce fixed, the 4K fallback ≈ 1 point
 lower (§7.4, §8); 6. §11's rev-3 tail-skip line marked superseded.
 
+**The lead's calls on rev 5's review (2026-10-25), to converge by simplifying:** 1. two `cpu_task` slots a layer (on
+demand, read-ahead), one request each per step, every wait ordered after its signal; no rounds — a per-layer SSD-only
+cap of A and a read-ahead window with no victims make every call fit and remove late experts (D8f); 2. today's pass
+arithmetic whenever the option is ≤ 4,096 (FN's 3,072 at top-10 named in step 4), the new rule only above, each
+`PASS_PROVEN` entry's own bound (D9); 3. A derived from class sizes (D8f); 4. the `moe_tiers@1` mapping in §4, request
+rows in their own views (D8f); 5. layers 3 and 4 on demand (D8f); 6. D11's rounds from N1, the paired degenerate
+screen, report-only matched-h and matched-text ratios, the gate unchanged (D11); 7. the 32K centrals ≈ 1.0 / 0.83–0.87,
+the faster arm per metric (§7.4, D11).
+
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
 | # | Question | Recommended default |
@@ -897,6 +936,25 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 
 
 ## 13. Review log
+
+### Rev 5 → rev 6 (the same panel)
+
+Rev 5 drew A 2 majors + 1 minor + 1 nit (R4-M1 resolved), B 3 minors (no major; every round-4 item resolved), C 1 major
++ 1 minor (its round-4 notes resolved). The lead asked to converge by simplifying the SSD path. Dispositions:
+
+| Finding | Disposition |
+|---|---|
+| A R5-M1 the explicit-option rule changes FN's 3,072-row passes | **Accepted** (D9, §4, §9; lead call 2): today's arithmetic whenever the option is ≤ 4,096; the new rule only above; step 4 names FN's 3,072 at top-10 and the vehicle's 2,048 / 512 |
+| A R5-M2 a side-stream wait cannot tell a slot's second request from its first | **Accepted, removed structurally** (D8f; lead call 1): two slots a layer, each signalled at most once per step; every wait ordered after its signal; no second request exists — a per-layer SSD-only cap of A bounds every call, and no victim is taken inside the read-ahead window, so no late experts; plants `read_ahead_window_victim`, `ssd_cap_ignored` replace the late-read and round-reuse cases, which cannot occur |
+| A R5-m1 rounds of F need the read-ahead's fence | **Moot** (D8f): no rounds |
+| A nit the step's first `depth` MoE layers | **Accepted** (D8f): layers 3 and 4 on demand |
+| B5-m1 F and A fixed from GLM's traces in generic std code | **Accepted** (D8f): A from class sizes at `before_materialize` (1.5 × the mean SSD-only set a layer), an enforced invariant; N2 validates it |
+| B5-m2 the rounds and read-ahead rows change `moe_tiers@1`; request write order | **Accepted** (§4, D8f): the mapping listed in §4 (no rounds); request rows in their own views, 1 + depth |
+| B5-m3 an option above 4,096 for unproven (SM, type, mode) | **Accepted** (D9, §4; lead call 2): each `PASS_PROVEN` entry carries its row bound; a larger option refused |
+| C R5-M1 D11's decode statistic: rounds, outliers, Holon's path luck | **Accepted** (D11; lead call 6): rounds per context from N1 (≈ 4–5 for 1K decode, 3 elsewhere); a pre-registered paired degenerate screen; report-only matched-h (every cell) and matched-text (cells within 3%) ratios; the gate unchanged; disagreement beyond the band goes to the lead |
+| C r5-m1 N1's measured `CKPT_EVERY=0` gain; the faster arm per metric | **Accepted** (§7.4, D11): the 32K centrals ≈ 1.0 at 16K passes, 0.83–0.87 at the fallback; the faster arm taken per metric |
+
+No finding was rejected.
 
 ### Rev 4 → rev 5 (the same panel)
 
