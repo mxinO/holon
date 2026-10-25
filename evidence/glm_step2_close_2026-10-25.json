@@ -7,28 +7,41 @@
   "llama_cpp": "27c7a76",
   "cpu": {
    "gguf": "f32",
-   "sha256": "f554d84e8a4562618ce3b525b34315042d9782db291017513857e166e52594f5",
+   "sha256": "7114e563b206c3aaccfae604f73158eb3514147b11f72be0b087a7c90ec64e79",
    "rebuilt_twice_identical": true,
    "stats": {
-    "comb_peaked": 0.9359,
+    "comb_peaked": 0.9357,
     "dense gate": 0.1653,
+    "dense gate elements": 0.0028,
     "dense up+": 0.0847,
-    "dense up-": 0.1371,
-    "routed gate": 0.1385,
-    "routed up+": 0.1348,
-    "routed up-": 0.1282,
-    "shared gate": 0.1342,
-    "shared up+": 0.1296,
-    "shared up-": 0.1256
+    "dense up+ elements": 0.0014,
+    "dense up-": 0.129,
+    "dense up- elements": 0.0022,
+    "routed gate": 0.1371,
+    "routed gate elements": 0.0023,
+    "routed up+": 0.1354,
+    "routed up+ elements": 0.0023,
+    "routed up-": 0.1285,
+    "routed up- elements": 0.0022,
+    "shared gate": 0.1354,
+    "shared gate elements": 0.0023,
+    "shared up+": 0.1285,
+    "shared up+ elements": 0.0023,
+    "shared up-": 0.1267,
+    "shared up- elements": 0.0022
    },
    "boundary_ties_per_prompt": [
-    3,
-    3
+    4,
+    5
+   ],
+   "router_ties_per_prompt": [
+    0,
+    0
    ]
   },
   "gpu": {
    "gguf": "Q8_0 by llama-quantize (1 thread)",
-   "sha256": "1eb41f3f690c577efcfbc66378a897de7bb87ee2762f9ea90a886866917c98fe",
+   "sha256": "8f439ffad222f0fb7284510dc5219f5fde1eb032fc6e446bfe001bba8b1f7d86",
    "rebuilt_twice_identical": true,
    "logit_std": 2.59,
    "stats": {
@@ -55,7 +68,8 @@
     "router"
    ]
   },
-  "committed": "testing/holon_testing/glm5next_fixtures.safetensors (88 KB): ids, the head's input x, each DSA layer's selected tokens, per CPU prompt"
+  "committed": "testing/holon_testing/glm5next_fixtures.safetensors (88 KB): ids, the head's input x, each DSA layer's selected tokens, per CPU prompt",
+  "rebuilt_after_review": "step 2's review folds (b6a43fd2) rebuilt both fixtures: the F32 tensors kept f32, the CPU references computed from the GGUF's own state, router ties and per-element clamp rates recorded. The checksums and the CPU stats above are the rebuilt files' (were cpu f554d84e8a456261…, gpu 1eb41f3f690c577e…); the GPU stats are the first build's (its file's meta is not kept), re-measured at step 4 when the GPU fixture is first served; `rebuilt_twice_identical` is the first build's check."
  },
  "checks": {
   "judge/tests/test_golden_glm5next.py (golden venv)": "4 passed: the converted file reads back as the checkpoint (every tensor equal, A_log within 6e-8 through -exp and log); the streamed golden equals HF's whole forward over the same weights bit for bit (top-20 ids and target logprobs) under the tie rule, ties exercised; the GPU fixture pinned with logit std >= 2 and D2's init; the committed fixtures are the tool's",
