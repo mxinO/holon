@@ -539,7 +539,7 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
     slots). With `moe.stream_tokens` 20, a step of 10 to 19 prompt tokens stages its routed misses in large passes
     instead, under the same terms (its tail lent, its rounds' slots its staging). The plant that leaves the tail's
     experts mapped fires and fails parity. A configuration whose tail class cannot stage a pass outside the range, and
-    every policy without `lend_tail`, are refused at bind."""
+    every policy without `lend_tail` (F11 and F10 have it), are refused at bind."""
     from holon_judge.placement import parity, route_dump
     from holon_judge.planted import tail_unmap_undone
     from holon_plugins.placement.lfu.reference import replay
@@ -573,7 +573,7 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
     assert fired > 0 and parity(trace)["first_differing_step"] is not None
     with pytest.raises(ValueError, match="cannot stage a prefill pass"):
         _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.cache": "*=0.5"})
-    for policy in ("placement.lru@1", "placement.promote@1", "placement.profile_decay@1"):
+    for policy in ("placement.lru@1", "placement.profile_decay@1"):      # (F10 lends a tail: docs/v1-glm.md D8a)
         with pytest.raises(ValueError, match="does not lend a tail"):
             _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.placement": policy})
 
@@ -871,7 +871,8 @@ def _gpu_engine(model, **kw) -> Engine:
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
                                            ("", "*=0.25 split"), ("", "*=0.75 pipe"),
                                            ("", "*=0.25 ssd"), ("", "*=0.25 ssd1"),
-                                           ("std.tiered.static@1", "*=0.25 ssd")])
+                                           ("std.tiered.static@1", "*=0.25 ssd"),
+                                           ("placement.promote@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
@@ -935,9 +936,12 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
     assert all(a == b for a, b in routed) and max(routed)[0] > (0 if one else 8)   # top-2 x 4 layers; no padding
-    variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
+    variant = {"": ("moe_resolve.lfu@1", "kernels.expert_io"),
+               "placement.lru@1": ("moe_resolve.lru@1", "kernels.expert_io"),
+               "placement.promote@1": ("moe_resolve.promote@1", "kernels.promote")}.get(
+        policy, ("moe_resolve@1", "kernels.expert_io"))
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
-            } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),
+            } == {variant, ("expert_fetch@1", "kernels.expert_io"),
                   ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@1", "kernels.expert_io"),
                                                                  ("cpu_task@1", "kernels.cpu_task")} if ssd else set())
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
@@ -1063,15 +1067,16 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe):
+@pytest.mark.parametrize("policy", ["", "placement.promote@1"])
+def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, policy):
     """`moe.lend_peak = require` (docs/v1-glm.md D9): a mode (ii)-shaped layout — RAM holding a quarter of the experts,
     three quarters cached, tail lending — starts, its large steps stage (no ring under exclusive tiers) with their
-    activations in the lent tail, and serves the resident store's bits; a layout that would lend none refuses to start,
-    naming why."""
+    activations in the lent tail, and serves the resident store's bits — under F11 and under F10 (its spares in the
+    tail released: docs/v1-glm.md D8a); a layout that would lend none refuses to start, naming why."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.placement": policy}
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
     store = engine.ctx.shared_objects[KEY]
     ranges, use = [], store._loan.use

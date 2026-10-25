@@ -15,6 +15,8 @@ namespace {
 
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
 constexpr int OVERFLOW = 2;                            // error bit: a delta record past the log
+constexpr int SPARE = -4, OWN = -5;                    // exclusive tiers' records (moe_tiers@1): b's slots a spare; b
+                                                       // took its spare back (docs/v1-glm.md D8a)
 constexpr int THREADS = 256;
 constexpr int MAX_SPARES = 8;
 
@@ -45,7 +47,7 @@ __device__ inline bool cached(const Layer & L, int e, int roles, int lo) {
 __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ routed, int32_t * __restrict__ errors, int32_t * __restrict__ delta,
                           int32_t * __restrict__ n_delta, int cap, int group, int32_t * __restrict__ out, int tokens,
-                          int k, int experts, int roles, int staging) {
+                          int k, int experts, int roles, int staging, const int32_t * __restrict__ exclusive) {
     extern __shared__ int32_t shared[];
     int32_t * first = shared;                          // [E]: its first DECODE entry (INT_MAX: none)
     int32_t * live = first + experts;                  // [E]: routed by a live entry
@@ -157,6 +159,16 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
                     L.residency[a * roles + r] = slots[r];
                 }
             }
+            if (b == -1 && *exclusive) {               // an owner back in its spare: its RAM units to free (D8a)
+                if (base + records < cap) {
+                    delta[(base + records) * 3] = group;
+                    delta[(base + records) * 3 + 1] = OWN;
+                    delta[(base + records) * 3 + 2] = a;
+                } else {
+                    atomicOr(errors, OVERFLOW);
+                }
+                ++records;
+            }
             if (b != -1) {
                 if (base + records < cap) {
                     delta[(base + records) * 3] = group;
@@ -186,7 +198,9 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
 // one, none in a layer holding every expert).
 __global__ void k_settle(const int32_t * __restrict__ out, Layer L, const int32_t * __restrict__ host,
                          int32_t * __restrict__ fetch, int32_t * __restrict__ n_fetch, int32_t * __restrict__ misses,
-                         int F, int k, int experts, int roles, int staging) {
+                         int F, int k, int experts, int roles, int staging, const int32_t * __restrict__ exclusive,
+                         int32_t * __restrict__ delta, int32_t * __restrict__ n_delta, int cap, int group,
+                         int32_t * __restrict__ errors) {
     extern __shared__ int32_t shared[];
     int32_t * key = shared;                            // [E]: a resident's last stamp (-1: not a resident)
     __shared__ int absent[MAX_SPARES], n_absent, n_res;
@@ -223,7 +237,7 @@ __global__ void k_settle(const int32_t * __restrict__ out, Layer L, const int32_
         }
     }
     __syncthreads();
-    const int n_take = n_res == experts ? 0 : min(n_absent, n_res - 1);
+    const int n_take = n_res == experts ? 0 : min(n_absent, n_res - 1), base = *n_delta, excl = *exclusive;
     for (int e = tid; e < experts && n_take > 0; e += blockDim.x) {   // least recently routed, ties by expert id
         if (key[e] >= 0) {
             int rank = 0;
@@ -235,10 +249,24 @@ __global__ void k_settle(const int32_t * __restrict__ out, Layer L, const int32_
                 row[0] = e + 1;
                 for (int r = 0; r < roles; ++r) {
                     row[1 + r] = L.residency[e * roles + r];
-                    L.residency[e * roles + r] = -1;
+                    if (!excl) {
+                        L.residency[e * roles + r] = -1;
+                    }
+                }
+                if (excl && base + rank < cap) {       // exclusive tiers: still mapped, logged; moe_tiers@1 demotes
+                    delta[(base + rank) * 3] = group;  // it (D8a)
+                    delta[(base + rank) * 3 + 1] = SPARE;
+                    delta[(base + rank) * 3 + 2] = e;
                 }
             }
         }
+    }
+    __syncthreads();
+    if (tid == 0 && excl && n_take > 0) {
+        if (base + n_take > cap) {
+            atomicOr(errors, OVERFLOW);
+        }
+        *n_delta = base + n_take;
     }
 }
 
@@ -270,7 +298,7 @@ cudaStream_t stream() { return at::cuda::getCurrentCUDAStream().stream(); }
 void promote(const at::Tensor & ids, const at::Tensor & kinds, at::Tensor & residency, const at::Tensor & limits,
              const at::Tensor & empty, at::Tensor & n_empty, at::Tensor & routed, at::Tensor & errors,
              at::Tensor & delta, at::Tensor & n_delta, int64_t group, at::Tensor & last, at::Tensor & clock,
-             at::Tensor & spare, at::Tensor & out, int64_t staging) {
+             at::Tensor & spare, at::Tensor & out, int64_t staging, const at::Tensor & exclusive) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && delta.dim() == 2, "ids [T, k] on CUDA, delta [D, 3]");
     const int64_t tokens = ids.size(0), k = ids.size(1), experts = residency.size(0);
@@ -281,18 +309,20 @@ void promote(const at::Tensor & ids, const at::Tensor & kinds, at::Tensor & resi
     check(delta, ids, at::kInt, {delta.size(0), 3}, "delta");
     check(n_delta, ids, at::kInt, {1}, "n_delta");
     check(out, ids, at::kInt, {1 + experts}, "out");
+    check(exclusive, ids, at::kInt, {1}, "exclusive");
     const Layer L = layer(ids, residency, limits, empty, n_empty, last, clock, spare);
     k_promote<<<1, THREADS, 4 * experts * sizeof(int32_t), stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), L, routed.data_ptr<int32_t>(), errors.data_ptr<int32_t>(),
         delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(), int(delta.size(0)), int(group), out.data_ptr<int32_t>(),
-        int(tokens), int(k), int(experts), int(residency.size(1)), int(staging));
+        int(tokens), int(k), int(experts), int(residency.size(1)), int(staging), exclusive.data_ptr<int32_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void settle(const at::Tensor & out, at::Tensor & residency, const at::Tensor & host, const at::Tensor & limits,
             const at::Tensor & empty, at::Tensor & n_empty, at::Tensor & fetch, at::Tensor & n_fetch,
             at::Tensor & misses, at::Tensor & last, at::Tensor & clock, at::Tensor & spare,
-            int64_t top_k, int64_t staging) {
+            int64_t top_k, int64_t staging, const at::Tensor & exclusive, at::Tensor & delta, at::Tensor & n_delta,
+            int64_t group, at::Tensor & errors) {
     const c10::cuda::CUDAGuard guard(out.device());
     const int64_t experts = residency.size(0), roles = residency.size(1);
     TORCH_CHECK(out.is_cuda() && fetch.dim() == 3, "out on CUDA, fetch [R, 2, F]");
@@ -302,10 +332,16 @@ void settle(const at::Tensor & out, at::Tensor & residency, const at::Tensor & h
     check(fetch, out, at::kInt, {roles, 2, width}, "fetch");
     check(n_fetch, out, at::kInt, {roles}, "n_fetch");
     check(misses, out, at::kInt, {1}, "misses");
+    check(exclusive, out, at::kInt, {1}, "exclusive");
+    check(delta, out, at::kInt, {delta.size(0), 3}, "delta");
+    check(n_delta, out, at::kInt, {1}, "n_delta");
+    check(errors, out, at::kInt, {1}, "errors");
     const Layer L = layer(out, residency, limits, empty, n_empty, last, clock, spare);
     k_settle<<<1, THREADS, experts * sizeof(int32_t), stream()>>>(
         out.data_ptr<int32_t>(), L, host.data_ptr<int32_t>(), fetch.data_ptr<int32_t>(), n_fetch.data_ptr<int32_t>(),
-        misses.data_ptr<int32_t>(), int(width), int(top_k), int(experts), int(roles), int(staging));
+        misses.data_ptr<int32_t>(), int(width), int(top_k), int(experts), int(roles), int(staging),
+        exclusive.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(), int(delta.size(0)),
+        int(group), errors.data_ptr<int32_t>());
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

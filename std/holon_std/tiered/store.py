@@ -555,6 +555,8 @@ class TieredStore:
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
+        if self.exclusive and "exclusive" in self.state:     # a policy's own flag: its resolve logs what exclusive
+            self.state["exclusive"].fill_(1)                 # tiers must place (F10's refills: docs/v1-glm.md D8a)
         self._written, self.peak_misses = 0, 0
         self._sized = False                     # the arena's size is checked at the first launch after a materialize
         self.borrowed = dict.fromkeys(self.borrowed, 0)
@@ -940,7 +942,7 @@ class TieredStore:
         groups, items, roles = res.shape
         n, (c_n, u_n) = groups * items, owner.shape
         dev = res.device
-        heat = (self.heat.float() if self.heat is not None else torch.zeros(groups, items, device=dev)).reshape(-1)
+        heat = (self.heat.double() if self.heat is not None else torch.zeros(groups, items, device=dev)).reshape(-1)
         lent = picked.reshape(-1)
         cls = classes[:, None, :].expand(groups, items, roles).reshape(n, roles)            # each piece's class
         slots, units = res.reshape(n, roles), host.reshape(n, roles)

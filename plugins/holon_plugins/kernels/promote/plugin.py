@@ -13,6 +13,8 @@ from __future__ import annotations
 import torch
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins.placement.promote import reference
+
 from . import extension
 
 OP, RESOLVE = "moe_resolve.promote", "moe_resolve@1"
@@ -26,14 +28,14 @@ class Resolve:
         self.resolve = ctx.select_kernel(RESOLVE, site="kernels.promote", **facts).impl(ctx, **facts)
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, last, clock, spare):
+                 errors, delta, n_delta, group, plan, jobs, last, clock, spare, exclusive):
         out = torch.empty(1 + self.experts, dtype=torch.int32, device=ids.device)   # the promoted, in order
         self.lib.promote(ids, kinds, residency, limits, empty, n_empty, routed, errors, delta, n_delta, group, last,
-                         clock, spare, out, self.staging)
+                         clock, spare, out, self.staging, exclusive)
         slots, fetch, n_fetch, cpu = self.resolve(ids, kinds, residency, host, limits, counts, routed, ring, stage,
                                                   empty, n_empty, misses, errors, delta, n_delta, group, plan, jobs)
         self.lib.settle(out, residency, host, limits, empty, n_empty, fetch, n_fetch, misses, last, clock, spare,
-                        self.top_k, self.staging)
+                        self.top_k, self.staging, exclusive, delta, n_delta, group, errors)
         return slots, fetch, n_fetch, cpu
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor,
@@ -49,6 +51,12 @@ class Resolve:
         take = (held & (held.cumsum(0) <= need.to(key.device)[None])).any(1)
         picked = torch.zeros_like(whole).scatter_(0, order, take)
         return picked.view(experts, groups).t()
+
+    def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
+                  spare: torch.Tensor, **state) -> torch.Tensor:
+        """The experts holding class `cls`'s last n slots, after the spares there are released (docs/v1-glm.md D8a);
+        device ops, no host sync."""
+        return reference.release_tail(cls, n, residency, classes, limits, spare)
 
 
 class Plugin:

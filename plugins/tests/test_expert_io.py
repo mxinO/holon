@@ -513,6 +513,57 @@ def _tiered(seed: int, groups: int = 3, experts: int = 32, free: int = 3) -> dic
 
 
 @pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("free", [0, 2])
+def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
+    """docs/v1-glm.md D8a: a policy with spares (F10) under exclusive tiers — a spare refilled, its owner still mapped
+    (`(g, SPARE, b)`): b placed as a victim is (free units, else over RAM's coldest by the int32 heat, else the SSD),
+    its slots demoted; an owner back in its spare (`(g, OWN, b)`): its RAM units free; a promotion into a spare whose
+    owner left VRAM before: as into empty slots (no staging, no placement) — the oracle's, exactly."""
+    experts, layer = 32, 2
+    t = _tiered(5, free=free)
+    heat = (t["heat"] * 2).int()                                # an int32 heat (placement.promote's `last`)
+    res = t["residency"][layer]
+    vram = (res >= 0).all(-1).nonzero().flatten().tolist()
+    ram = ((res == -1).all(-1) & (t["host"][layer] >= 0).all(-1)).nonzero().flatten().tolist()
+    v, back, gone = vram[0], ram[0], ram[1]                     # a refill victim; an owner back; a spare's owner
+    res[back] = K + E + 100                                     # (back in its spare's slots)
+    a = (res == -2).all(-1).nonzero().flatten()[0].item()       # promoted into gone's spare, from the SSD
+    res[a] = K + E + 101
+    ids = torch.tensor([[a, v]], dtype=torch.int32)
+    kinds = torch.tensor([DECODE], dtype=torch.uint8)
+    fetch = torch.full((ROLES, 2, E), -1, dtype=torch.int32)
+    fetch[:, 0, 0], fetch[:, 1, 0] = -2 - a, K + E + 101
+    n_fetch = torch.ones(ROLES, dtype=torch.int32)
+    stage = (K + torch.arange(E)).expand(ROLES, E).int().contiguous()
+    records = [(layer, -5, back), (layer, a, gone), (layer, -4, v)]
+    want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
+                               t["piece"], t["classes"], t["owner"], t["capacity"], heat, 4)
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
+    delta = torch.tensor(records, dtype=torch.int32)
+    dev = {n: x.clone().to(device) for n, x in (t | {"fetch": fetch, "n_fetch": n_fetch, "stage": stage, "ids": ids,
+                                                     "kinds": kinds, "delta": delta, "heat": heat}).items()}
+    out = {"io": torch.zeros(ROLES, 1 + E, 3, dtype=torch.int32), "moves": torch.zeros(ROLES, 4, E, dtype=torch.int32),
+           "n_moves": torch.zeros(ROLES, 2, dtype=torch.int32), "ssd": torch.full((ROLES, 2, E), -1, dtype=torch.int32),
+           "n_ssd": torch.zeros(ROLES, dtype=torch.int32), "n_ram": torch.zeros(ROLES, dtype=torch.int32),
+           "hit": torch.full((ROLES, 2, E), -1, dtype=torch.int32), "n_hit": torch.zeros(ROLES, dtype=torch.int32)}
+    out = {n: x.to(device) for n, x in out.items()}
+    tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
+          torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([3], dtype=torch.int32, device=device),
+          dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"], dev["heat"],
+          out["io"], out["moves"], out["n_moves"], out["ssd"], out["n_ssd"], out["n_ram"], 4, None, out["hit"],
+          out["n_hit"])
+    for name in ("residency", "host", "owner"):
+        assert torch.equal(dev[name].cpu(), want[name]), name
+    assert torch.equal(out["n_moves"].cpu(), want["n_moves"]) and torch.equal(out["ssd"][:, :, :1].cpu(),
+                                                                              want["ssd"][:, :, :1])
+    assert (want["host"][layer, back] == -1).all() and not (want["owner"] == layer * experts + back).any()
+    assert int(want["n_moves"][0, 1]) == 0 and want["ssd"][0, 1, 0] == K + E + 101    # a: straight into its slots
+    assert (want["residency"][layer, v] < 0).all() and int(want["n_moves"][0, 0]) == int(
+        (want["residency"][layer, v] == -1).all())                                     # v placed, demoted if in RAM
+
+
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("policy", ["lfu", ""])
 @pytest.mark.parametrize("tokens, free, ahead", [(1, 0, False), (6, 3, False), (12, 0, True), (40, 20, False),
                                                  (40, 0, True)])

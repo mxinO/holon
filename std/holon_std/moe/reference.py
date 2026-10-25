@@ -118,6 +118,10 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
     return slots.int(), fetch.int(), n_fetch.int(), counts.int(), routed_, errors, cpu, jobs
 
 
+SPARE, OWN = -4, -5        # `moe_tiers@1`'s records from a policy with spares (F10): b's slots became a spare; b took
+                           # its spare back
+
+
 def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.Tensor, n_fetch: torch.Tensor,
               stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
               piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
@@ -155,7 +159,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
             for e in range(experts):
                 if (residency[gg, e] == -1).all() and (host[gg, e] >= 0).all() and (gg, e) not in placed and \
                         not (gg == g and e in routed):
-                    key = (float(heat[gg, e]), gg, e)
+                    key = (heat[gg, e].item(), gg, e)                # (an int32 heat compares exactly)
                     best = key if best is None or key < best else best
         return None if best is None or not best[0] < than else best[1:]
 
@@ -163,7 +167,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
         """Expert e of this layer into RAM: `units` if given, else free units, else the coldest's; None: the SSD."""
         if units is None:
             units = free_units()
-        if units is None and (x := coldest(float(heat[g, e]) if heat is not None else 0.0)) is not None:
+        if units is None and (x := coldest(heat[g, e].item() if heat is not None else 0.0)) is not None:
             units = host[x[0], x[1]].tolist()
             residency[x[0], x[1]] = -2
             host[x[0], x[1]] = -1
@@ -181,9 +185,25 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
     entry = {(r, int(fetch[r, 1, i])): i for r in range(roles) for i in range(min(int(n_fetch[r]), width))}
     j = 0
     for _, a, b in records:                                              # 1. admissions, in record order
+        if a == SPARE:                                                   # b's slots became a policy's spare: b
+            slots = [int(residency[g, b, r]) for r in range(roles)]      # placed, its slots demoted into its units
+            units = place(b, None)
+            if units is not None:
+                for r in range(roles):
+                    moves[r, 0:2, n_moves[r, 0]] = torch.tensor([slots[r], units[r]])
+                    n_moves[r, 0] += 1
+            continue
+        if a == OWN:                                                     # b took its spare back: its RAM units free
+            for r, c in enumerate(cls):
+                if int(host[g, b, r]) >= 0:
+                    owner[c, int(host[g, b, r])] = -1
+            host[g, b] = -1
+            continue
         if a < 0:
             continue
-        slots = [int(residency[g, a, r]) for r in range(roles)]          # a's new slots (b's, or empty ones)
+        if b >= 0 and ((host[g, b] >= 0).all() or (residency[g, b] == -2).all()):
+            b = -2                                                       # b left VRAM before (a spare's owner):
+        slots = [int(residency[g, a, r]) for r in range(roles)]          # a into its slots as into empty ones
         source = [int(fetch[r, 0, entry[r, slots[r]]]) for r in range(roles)]
         for r, c in enumerate(cls):
             if b >= 0:                                                   # into a victim's slot: staged, then moved

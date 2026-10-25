@@ -636,7 +636,8 @@ struct Tiers {
     const int32_t * piece, * classes;                  // [G, E, R], [G, R]
     int32_t * owner;                                   // [C, U]
     const int32_t * capacity;                          // [C]
-    const float * heat;                                // [G, E] or null
+    const float * heat;                                // [G, E] or null (or, int32, `heat_i`: the fact heat = i32)
+    const int32_t * heat_i;
     int32_t * io, * moves, * n_moves;                  // [R, 1 + F, 3], [R, 4, F], [R, 2]
     int32_t * ssd, * n_ssd, * n_ram;                   // [R, 2, F], [R], [R]: the landing rows' fetch list, the RAM's
     const int32_t * ahead;                             // [E] or null: the layer's read-ahead row of each expert, or −1
@@ -645,6 +646,8 @@ struct Tiers {
 };
 
 constexpr int TIER_THREADS = 256;
+constexpr int SPARE = -4, OWN = -5;                    // records of a policy with spares (F10): b's slots a spare; b
+                                                       // took its spare back
 constexpr int FREED = -2;                              // an owner freed by the call: reusable from the next one
 
 // The first free unit of class c (-1: none), every thread joining.
@@ -671,9 +674,13 @@ __device__ int first_free(const Tiers & T, int c, int * red) {
 
 // RAM's coldest whole expert of layer g's classes, strictly colder than `than`, not routed by the call in layer g and
 // not placed by it (-1: none): its index g' * E + e', least (heat, index).
-__device__ int coldest(const Tiers & T, int g, int roles, int experts, float than, const int32_t * flags,
-                       float * hk, int * ik) {
-    float bh = INFINITY;
+__device__ __forceinline__ double heat_at(const Tiers & T, int x) {     // (an int32 heat exact in a double)
+    return T.heat_i ? double(T.heat_i[x]) : double(T.heat[x]);
+}
+
+__device__ int coldest(const Tiers & T, int g, int roles, int experts, double than, const int32_t * flags,
+                       double * hk, int * ik) {
+    double bh = INFINITY;
     int bi = INT_MAX;
     for (int x = threadIdx.x; x < T.groups * experts; x += blockDim.x) {
         const int gg = x / experts, e = x % experts;
@@ -683,7 +690,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
                  T.host[x * roles + r] >= 0;
         }
         if (ok) {
-            const float h = T.heat[x];
+            const double h = heat_at(T, x);
             if (h < bh || (h == bh && x < bi)) {
                 bh = h;
                 bi = x;
@@ -695,7 +702,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
     __syncthreads();
     for (int w = blockDim.x / 2; w > 0; w /= 2) {
         if (threadIdx.x < w) {
-            const float h = hk[threadIdx.x + w];
+            const double h = hk[threadIdx.x + w];
             const int i = ik[threadIdx.x + w];
             if (h < hk[threadIdx.x] || (h == hk[threadIdx.x] && i < ik[threadIdx.x])) {
                 hk[threadIdx.x] = h;
@@ -704,7 +711,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
         }
         __syncthreads();
     }
-    const float h = hk[0];
+    const double h = hk[0];
     const int i = ik[0];
     __syncthreads();
     return i != INT_MAX && h < than ? i : -1;
@@ -713,7 +720,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
 // Expert e of layer g into RAM: `given` units (one per role) if not null, else free units of every class, else the
 // coldest's (displaced to the SSD), else the SSD. Thread 0 writes; `units` gets the result (-1: the SSD).
 __device__ void place(const Tiers & T, int g, int e, int roles, int experts, const int * given, int32_t * flags,
-                      int * units, int * red, float * hk) {
+                      int * units, int * red, double * hk) {
     __shared__ int ok;
     if (given == nullptr) {
         if (threadIdx.x == 0) {
@@ -728,7 +735,8 @@ __device__ void place(const Tiers & T, int g, int e, int roles, int experts, con
             __syncthreads();
         }
         if (!ok) {
-            const int x = T.heat ? coldest(T, g, roles, experts, T.heat[g * experts + e], flags, hk, red) : -1;
+            const int x = T.heat || T.heat_i ? coldest(T, g, roles, experts, heat_at(T, g * experts + e), flags, hk,
+                                                       red) : -1;
             if (threadIdx.x == 0) {
                 for (int r = 0; r < roles; ++r) {
                     units[r] = x >= 0 ? T.host[x * roles + r] : -1;
@@ -766,7 +774,7 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                         const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
     extern __shared__ int32_t flags[];                 // [experts]: 1 routed, 2 by a DECODE row, 4 placed, 8 admitted,
     __shared__ int red[TIER_THREADS];                  // 16 an SSD miss
-    __shared__ float hk[TIER_THREADS];
+    __shared__ double hk[TIER_THREADS];
     __shared__ int units[8], src[8], staged[8], n_adm;
     const int tid = threadIdx.x, entries = tokens * k, n_rec = *n_delta - *start;
     for (int e = tid; e < experts; e += blockDim.x) {
@@ -804,11 +812,57 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
     }
     __syncthreads();
     int j = 0;
+    __shared__ int gone;
     for (int i = 0; i < n_rec; ++i) {                  // 1. admissions (uniform: every thread reads the same record)
         const int * rec = delta + (*start + i) * 3;
-        const int a = rec[1], b = rec[2];
+        const int a = rec[1];
+        int b = rec[2];
+        if (a == SPARE) {                              // b's slots became a policy's spare: b placed, demoted
+            __shared__ int victim[8];
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    victim[r] = T.residency[(g * experts + b) * roles + r];
+                }
+            }
+            __syncthreads();
+            place(T, g, b, roles, experts, nullptr, flags, units, red, hk);
+            if (tid == 0 && units[0] >= 0) {
+                for (int r = 0; r < roles; ++r) {
+                    const int m = T.n_moves[r * 2]++;
+                    T.moves[(r * 4) * F + m] = victim[r];
+                    T.moves[(r * 4 + 1) * F + m] = units[r];
+                }
+            }
+            __syncthreads();
+            continue;
+        }
+        if (a == OWN) {                                // b took its spare back: its RAM units free
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    const int u = T.host[(g * experts + b) * roles + r];
+                    if (u >= 0) {
+                        T.owner[T.classes[g * roles + r] * T.units + u] = -1;
+                    }
+                    T.host[(g * experts + b) * roles + r] = -1;
+                }
+            }
+            __syncthreads();
+            continue;
+        }
         if (a < 0) {
             continue;
+        }
+        if (tid == 0) {                                // b left VRAM before (a spare's owner): a as into empty slots
+            bool in_ram = b >= 0, on_ssd = b >= 0;
+            for (int r = 0; r < roles && b >= 0; ++r) {
+                in_ram = in_ram && T.host[(g * experts + b) * roles + r] >= 0;
+                on_ssd = on_ssd && T.residency[(g * experts + b) * roles + r] == -2;
+            }
+            gone = in_ram || on_ssd;
+        }
+        __syncthreads();
+        if (gone) {
+            b = -2;
         }
         if (tid == 0) {
             for (int r = 0; r < roles; ++r) {
@@ -976,12 +1030,17 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
     check(moves, ids, at::kInt, {roles, 4, F}, "moves");
     check(n_moves, ids, at::kInt, {roles, 2}, "n_moves");
     const float * h = nullptr;
-    if (heat.has_value()) {
-        check(*heat, ids, at::kFloat, {groups, experts}, "heat");
-        h = heat->data_ptr<float>();
+    const int32_t * hi = nullptr;
+    if (heat.has_value()) {                            // f32, or int32 (the fact heat = i32)
+        check(*heat, ids, heat->scalar_type() == at::kInt ? at::kInt : at::kFloat, {groups, experts}, "heat");
+        if (heat->scalar_type() == at::kInt) {
+            hi = heat->data_ptr<int32_t>();
+        } else {
+            h = heat->data_ptr<float>();
+        }
     }
     Tiers T{residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(), piece.data_ptr<int32_t>(),
-            classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h,
+            classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h, hi,
             io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), ssd.data_ptr<int32_t>(),
             n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), ah, hit.data_ptr<int32_t>(),
             n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows)};

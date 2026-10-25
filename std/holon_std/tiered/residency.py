@@ -17,6 +17,7 @@ import torch
 LAG = 2                       # launches between the commit deciding an edit and the launch applying it
 OWNER = 1                     # the edit error word's bit: a precondition failed
 RETURN = -3                   # a delta record's `a` marking where a step's lent slots came back
+SPARE, OWN = -4, -5           # exclusive tiers' records for `moe_tiers@1` (std.moe.kernels): the map adopts the step's
 
 
 class ResidencyMap:
@@ -79,6 +80,8 @@ class ResidencyMap:
             flat[index] = value
         back: list[list[np.ndarray]] = [[] for _ in self.empty]
         for g, a, b in records.tolist():
+            if a in (SPARE, OWN):                # (exclusive tiers: the step's map says where b went)
+                continue
             if a == RETURN:                      # the lent slots came back here (`Lent`'s marker), before what follows
                 self.empty[g] += back[g]
                 back[g] = []

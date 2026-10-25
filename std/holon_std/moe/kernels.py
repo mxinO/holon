@@ -165,9 +165,9 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
 
 - `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
   stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
-  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None, io
-  [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram [R]
-  int32, rows: int, ahead [E] int32 | None, hit [R, 2, F] int32, n_hit [R] int32)`, one layer call after its resolve
+  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | int32 |
+  None, io [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram
+  [R] int32, rows: int, ahead [E] int32 | None, hit [R, 2, F] int32, n_hit [R] int32)`, one layer call after its resolve
   (the resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
   each layer's role classes, each class's RAM units (`owner[c, u]`: the piece g·E + e, −1 free; units [0,
   `capacity[c]`)), and the policy's heat (None: no displacement); SSD reads land in the class's landing rows
@@ -180,7 +180,11 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
      b's slot → that unit, after the fetch read it), else a free unit of each of its classes, else the units of RAM's
      coldest expert of its classes (least heat, then group, then id; not routed by the call, not placed by it) when b
      is strictly hotter — that expert goes to the SSD —, else the SSD. An admission into an empty slot (b ≤ −2) needs
-     no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them).
+     no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them). An
+     admission whose b already left VRAM (a spare's owner: code −2, or −1 with RAM units) is one into empty slots.
+     A policy with spares (docs/v1-glm.md D8a) logs `(group, SPARE = −4, b)`: b's slots became its spare, b still
+     mapped — b is placed as a victim is and its slots demoted into its units —; and `(group, OWN = −5, b)`: b took
+     its spare back — its RAM units are freed.
   2. Its SSD misses (fetch sources −2 − e) routed by a `DECODE` row and not admitted, in a call with one: kept in RAM
      (D10's keep rule) as b would be placed (free units, else the coldest when strictly colder), else not.
   3. The SSD reads: the call's j-th SSD miss by id lands in landing row j % `rows` (round ⌊j / rows⌋): per role

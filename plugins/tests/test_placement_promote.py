@@ -29,7 +29,8 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
     every spare absent (a seed's)."""
     g = torch.Generator().manual_seed(seed)
     state = {"last": torch.randint(0, 6, (E,), generator=g).int(), "clock": torch.tensor([7], dtype=torch.int32),
-             "spare": torch.zeros(reference.SPARES, 1 + ROLES, dtype=torch.int32)}
+             "spare": torch.zeros(reference.SPARES, 1 + ROLES, dtype=torch.int32),
+             "exclusive": torch.zeros(1, dtype=torch.int32)}
     if steady:
         live = case["ids"][(case["kinds"] != PADDING)[:, None] & (case["ids"] >= 0)]
         routed = case["ids"][(case["kinds"] == DECODE)[:, None] & (case["ids"] >= 0)].unique().tolist() or \
@@ -46,7 +47,8 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize("steady", [False, True])
 @pytest.mark.parametrize("sources", ["staging", "ring"])
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
-                                           (64, "prefill"), (6, "overflow"), (64, "narrow")])
+                                           (64, "prefill"), (6, "overflow"), (64, "narrow"), (6, "exclusive"),
+                                           (12, "mixed exclusive")])
 def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, kinds):  # noqa: F811
     """Every output and write: slots, the fetch list (staged misses by id, then the promoted into their slots), counts,
     misses, the map, the empty slots left, the state (stamps, clock, spares), the delta log after the records already
@@ -54,21 +56,25 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     entries (all counted, only the first 16 written). A promoted owner takes its spare back unlogged, the others
     take the empty slots (with a ring), then the spares, logged; each absent spare (all of them at a seed) is refilled
     from the least recently routed resident; a prefill chunk changes nothing but @1's; the CPU's share (F5b) comes from
-    the misses left after promoting."""
+    the misses left after promoting. Under exclusive tiers (the policy's `exclusive` flag, docs/v1-glm.md D8a) a
+    refilled spare's owner stays mapped and is logged `(group, SPARE, b)`, an owner taking its spare back
+    `(group, OWN, b)`: `moe_tiers@1` places them."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)
-    if kinds in ("decode", "overflow", "narrow"):
+    exclusive = "exclusive" in kinds
+    if kinds in ("decode", "overflow", "narrow", "exclusive"):
         case["kinds"][:] = DECODE
     elif kinds == "prefill":
         case["kinds"][:] = PREFILL
     state, stage = _state(case, steady, tokens), _stage(case, E, ring)
+    state["exclusive"][0] = int(exclusive)
     if kinds == "narrow":
         stage = stage[:, :16].contiguous()
     plan, jobs = _share(tokens, device, kinds == "mixed")
     want = reference.moe_resolve_promote(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"],
-                                         E, *state.values(), 3, case["ring"], stage, case["empty"],
-                                         int(case["n_empty"][0]), plan.cpu())
+                                         E, state["last"], state["clock"], state["spare"], 3, case["ring"], stage,
+                                         case["empty"], int(case["n_empty"][0]), plan.cpu(), exclusive)
     overflow = kinds == "overflow" and bool(want["records"])
     capacity = 2 + (len(want["records"]) - 1 if overflow else E)
     delta, n_delta = _log(capacity, 2, device)
@@ -90,7 +96,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     earlier[:3] = 3
     assert torch.equal(routed.cpu(), want["routed"] | earlier) and int(dev["n_empty"][0]) == want["n_empty"]
     assert torch.equal(dev["residency"].cpu(), want["residency"])
-    for name in state:
+    for name in ("last", "clock", "spare"):
         assert torch.equal(dev[name].cpu(), want[name].to(dev[name].dtype)), name
     records = torch.tensor(want["records"], dtype=torch.int32).view(-1, 3)
     assert int(n_delta[0]) == 2 + len(records) and torch.equal(delta[2:2 + len(records)].cpu(), records[:capacity - 2])
@@ -103,7 +109,9 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         return
     spare = want["spare"]
     owners = spare[:, 0][spare[:, 0] > 0] - 1
-    assert len(owners) == reference.SPARES and (want["residency"][owners] == -1).all()   # refilled, unmapped
+    assert len(owners) == reference.SPARES                         # refilled: unmapped, or (exclusive) still mapped
+    assert (want["residency"][owners] == -1).all() if not exclusive else \
+        {b for _, a, b in want["records"] if a == reference.SPARE} <= set(owners.tolist())
     resident = (want["residency"] >= 0).all(-1)        # refilled by the least recently routed
     assert want["last"][resident].min() >= want["last"][int(spare[1, 0]) - 1]
     before = {int(o) - 1 for o in state["spare"][:, 0] if o > 0}
@@ -111,8 +119,9 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     if steady:
         o = int(state["spare"][0, 0]) - 1
         assert not (want["residency"][o] >= 0).all() or (want["residency"][o] == K + 1250).all()
-    for _, a, _ in want["records"]:          # each promoted expert fetched straight into its slots (where it is,
-        held = want["residency"][a]           # or, refilled at once — every expert routed —, the spare it owns)
+    for _, a, _ in (x for x in want["records"] if x[1] >= 0):   # each promoted expert fetched straight into its
+        held = want["residency"][a]           # slots (where it is, or, refilled at once — every expert routed —,
+        #                                       the spare it owns)
         held = held if (held >= 0).all() else spare[spare[:, 0] == a + 1][0, 1:]
         for r in range(ROLES):
             row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
@@ -141,6 +150,29 @@ def test_lend_matches_the_oracle(plugins, need):  # noqa: F811
     finally:
         torch.cuda.set_sync_debug_mode("default")
     assert torch.equal(got.cpu(), want) and not (want & ~(residency >= 0).all(-1)).any()
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_lend_tail_releases_the_spares_in_the_tail(plugins, device):  # noqa: F811
+    """`lend_tail` (docs/v1-glm.md D8a): the spares with a slot of the class among its last n are released (absent),
+    the others kept, and the experts holding such a slot picked — as the oracle; no spare slot is left in the range."""
+    resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
+    g = torch.Generator().manual_seed(4)
+    limits = torch.full((6, ROLES), K + E + 200, dtype=torch.int32)
+    residency = (K + E + torch.randperm(200, generator=g)[:E]).int()[None, :, None].expand(6, E, ROLES).clone()
+    classes = torch.tensor([[0, 1], [0, 1], [0, 2], [0, 1], [0, 2], [0, 2]])
+    spare = torch.zeros(6, reference.SPARES, 1 + ROLES, dtype=torch.int32)
+    spare[:, :, 0] = torch.arange(1, 1 + reference.SPARES)
+    spare[:, :, 1:] = torch.tensor([K + E + 195, K + E + 10, K + E + 199])[None, :, None]   # in, out, in the tail
+    want_spare = spare.clone()
+    want = reference.release_tail(0, 8, residency, classes, limits, want_spare)
+    dev = {n: t.to(device) for n, t in (("residency", residency), ("classes", classes), ("limits", limits),
+                                        ("spare", spare))}
+    got = resolve.lend_tail(0, 8, dev["residency"], dev["classes"], dev["limits"], spare=dev["spare"],
+                            last=torch.zeros(6, E, dtype=torch.int32, device=device))
+    assert torch.equal(got.cpu(), want) and torch.equal(dev["spare"].cpu(), want_spare)
+    assert (want_spare[:, [0, 2], 0] == 0).all() and (want_spare[:, 1, 0] == 2).all()
+    assert want.any() and not ((want_spare[..., 1:] >= (limits - 8)[:, None]) & (want_spare[..., :1] > 0)).any()
 
 
 @contextlib.contextmanager
