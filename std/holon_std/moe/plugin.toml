@@ -43,7 +43,7 @@ module = "reference"
 "moe.ring_tokens" = { help = "prompt tokens of a step from which it streams every layer's missing experts through lent ring slots, in large expert passes (0: never)", default = "512" }
 "moe.stream_tokens" = { help = "prompt tokens of a large-pass step from which it streams every missing expert; below, it stages only its routed misses (0: always streams)", default = "0" }
 "moe.pipeline" = { help = "a staging step's large passes fetch their routed misses in this many parts on a side stream, computing the resident entries first and each part as it lands (1: off)", default = "1" }
-"moe.lend_peak" = { help = "a tail store (moe.ring_lend=tail) lends its streaming steps their activations from the tail, so the engine reserves only a smaller step's peak (more cache): on or off", default = "off" }
+"moe.lend_peak" = { help = "a tail store (moe.ring_lend=tail) lends its streaming steps their activations from the tail, so the engine reserves only a smaller step's peak (more cache): on, off, or require (as on, and the store refuses to start where it would lend none)", default = "off" }
 "moe.ring_copy" = { help = "how the ring's copies run: sm (a small kernel beside the pass, no host sync) or dma (copy engines, one host sync per streaming step to read the copy list)", default = "sm", choices = ["sm", "dma"] }
 "moe.ring_lend" = { help = "what a streaming step lends: coldest (the policy's coldest whole experts) or tail (first the experts holding the last slots of the largest class arena, a contiguous range its expert passes take their buffers from, then the coldest; a policy with lend_tail: placement.lfu@1; where no step streams, e.g. a pinned cache too small to lend a pass's staging, nothing is lent and the passes allocate their buffers)", default = "coldest", choices = ["coldest", "tail"] }
 "moe.route_transform" = { help = "approx: a route transform's name (its plugin's contract moe_route_transform.<name>@1); offload store only" }
@@ -51,4 +51,5 @@ module = "reference"
 "moe.cpu_plan" = { help = "F5b, the CPU's share of a pass's misses: plan[1],…,plan[N] (the CPU takes plan[n] of n; past N the last entry's share; empty: none)", default = "" }
 "moe.cpu_min_tokens" = { help = "F5b: the fewest tokens of a pass that takes the CPU's share (2 at batch 1: verify passes only)", default = "1" }
 "moe.cpu_isa" = { help = "the CPU tier the split was measured on (from tune): on a host of another tier the split is off", default = "" }
+"moe.read_ahead" = { help = "exclusive tiers: the landing rows of a layer's read-ahead set — its first SSD-only experts read two layers ahead in prompt steps of 2048 tokens or more", default = "the graphed steps' staging" }
 "moe.ram" = { help = "the RAM tier's units per class (the store forwards it to its first tier): <class>=<slots or fraction>,… (* for the rest); fewer than every piece makes RAM exclusive (a slower tier in moe.tiers holds the rest)", default = "every piece" }

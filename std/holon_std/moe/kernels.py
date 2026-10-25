@@ -165,10 +165,10 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
 
 - `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
   stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
-  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None,
-  io [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram [R]
-  int32, rows: int, ahead [E] int32 | None, hit [R, 2, F] int32, n_hit [R] int32)`, one layer call after its resolve (the
-  resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
+  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None, io
+  [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram [R]
+  int32, rows: int, ahead [E] int32 | None, hit [R, 2, F] int32, n_hit [R] int32)`, one layer call after its resolve
+  (the resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
   each layer's role classes, each class's RAM units (`owner[c, u]`: the piece g·E + e, −1 free; units [0,
   `capacity[c]`)), and the policy's heat (None: no displacement); SSD reads land in the class's landing rows
   (docs/v1-glm.md D8f), `rows` of them a round.
