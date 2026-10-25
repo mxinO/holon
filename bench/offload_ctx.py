@@ -301,7 +301,8 @@ def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     <draft_steps> <reused> <hits> <lookups>` (My generate.cpp:2063, 2213-2222, 3893-3894, 7005-7041). Its pack is in
     the arm's flags (`--glm-pack <dir>`); `--kv-resident` equal to the context keeps a 32K configuration unstreamed
     (docs/v1-glm.md D11). The engine's `glm stat:` stderr lines (decode hit rate, RAM fetches, disk reads, CPU lane,
-    pool and RAM tier use) go to the server log."""
+    pool and RAM tier use) go to the server log, one after each request (the warm-up's first); each timed request's
+    is kept in its row (`stat`: per decode token, as the engine counts them)."""
     cmd = [*shlex.split(a.wrap), a.server, "--serve", "--max-context", str(a.ctx), "--kv-resident", str(a.ctx),
            "--eos-ids", str(MAYA_NO_EOS), *shlex.split(a.flags)]
     log = open(a.log, "w") if a.log else subprocess.DEVNULL
@@ -350,7 +351,31 @@ def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             engine.wait()
         if a.log:
             log.close()
+    if a.log:                                  # the requests' `glm stat:` lines, in order after the warm-up's
+        stats = [_maya_stat(x) for x in pathlib.Path(a.log).read_text().splitlines() if x.startswith("glm stat:")]
+        if len(stats) == 1 + len(results):
+            for res, st in zip(results.values(), stats[1:], strict=True):
+                res["stat"] = st
     return {"results": results}
+
+
+def _maya_stat(line: str) -> dict:
+    """A `glm stat:` line's per-token counters (My generate.cpp:2227-2238)."""
+    num = r"([0-9.]+)"
+    keys = (("decode_ms", rf"decode {num} ms/tok"), ("vram_hit_pct", rf"vram hit {num}%"),
+            ("ram_fetches", rf"ram fetches {num}/tok"), ("disk_reads", rf"disk {num} reads/tok"),
+            ("disk_waits", rf"in {num} waits/tok"), ("disk_ms", rf"waits/tok, {num} ms/tok"),
+            ("promotions", rf"promotions {num}/tok"), ("cpu_lane", rf"cpu lane {num}/tok"),
+            ("cpu_lane_ms", rf"cpu lane {num}/tok in {num} ms/tok"))
+    out = {}
+    for k, pat in keys:
+        m = re.search(pat, line)
+        if m:
+            out[k] = float(m.groups()[-1])
+    m = re.search(r"vram (\d+)/(\d+) ram (\d+)/(\d+)", line)
+    if m:
+        out["vram_used"], out["vram_slots"], out["ram_used"], out["ram_slots"] = map(int, m.groups())
+    return out
 
 
 def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
@@ -486,7 +511,8 @@ def summary(rows: list[dict]) -> dict:
     out = {}
     for r in rows:
         for c, m in r.get("results", {}).items():
-            for k, v in m.items():
+            flat = m | {f"stat.{k}": v for k, v in m.get("stat", {}).items()}     # (Maya's `glm stat:` counters)
+            for k, v in flat.items():
                 if isinstance(v, (int, float)):           # (the generated ids are kept in the rows, not summarized)
                     out.setdefault(r["arm"], {}).setdefault(c, {}).setdefault(k, []).append(v)
     return {arm: {c: {k: {"median": round(statistics.median(v), 2), "min": round(min(v), 2), "max": round(max(v), 2),
