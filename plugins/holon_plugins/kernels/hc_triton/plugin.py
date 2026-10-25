@@ -1,13 +1,14 @@
-"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/v1-flash-next.md D3, D10) in Triton, float32
-products with IEEE sums."""
+"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/v1-flash-next.md D3, D10), `hc_mhc_mix@1` and
+`hc_mhc_writeback@1` (docs/v1-glm.md D3, D12) in Triton, float32 products with IEEE sums."""
 from __future__ import annotations
 
 import torch
 from holon.api import Constraint, KernelSpec
 
+from . import mhc
 from .kernel import BK, hc_gr_combine, hc_gr_mix
 
-MIX, COMBINE = "hc_gr_mix", "hc_gr_combine"
+MIX, COMBINE, MHC_MIX, MHC_WRITEBACK = "hc_gr_mix", "hc_gr_combine", "hc_mhc_mix", "hc_mhc_writeback"
 
 
 class Mix:
@@ -31,9 +32,35 @@ class Combine:
         hc_gr_combine(r, y, w)
 
 
+class MhcMix:
+    def __init__(self, ctx, *, streams: int, hidden: int, eps: float, hc_eps: float, iters: int, dtype: str) -> None:
+        self.hidden, self.eps, self.hc_eps, self.iters, self.dtype = hidden, eps, hc_eps, iters, getattr(torch, dtype)
+
+    def __call__(self, r, fn, base, scale, y_prev=None, post_prev=None, comb_prev=None):
+        return mhc.hc_mhc_mix(r, fn, base, scale, y_prev, post_prev, comb_prev, self.hidden, self.eps, self.hc_eps,
+                              self.iters, self.dtype)
+
+
+class MhcWriteback:
+    def __init__(self, ctx, *, streams: int, hidden: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, r, y, post, comb):
+        mhc.hc_mhc_writeback(r, y, post, comb)
+
+
+def _mhc(f: dict) -> bool:
+    """n = 4 streams; whole `_collapse` blocks, a power-of-two number of `_dots` chunks; at least one iteration."""
+    chunks = f["hidden"] // mhc.BK
+    return (f["streams"] == mhc.N_STREAMS and f["hidden"] % mhc.BH == 0 and chunks & (chunks - 1) == 0
+            and f.get("iters", 1) >= 1)
+
+
 class Plugin:
     def register(self, regs) -> None:
-        for op, impl in ((MIX, Mix), (COMBINE, Combine)):
+        for op, impl, supports in ((MIX, Mix, lambda f: f["hidden"] % BK == 0),
+                                   (COMBINE, Combine, lambda f: f["hidden"] % BK == 0),
+                                   (MHC_MIX, MhcMix, _mhc), (MHC_WRITEBACK, MhcWriteback, _mhc)):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.hc_triton", impl=impl,
-                                            requires=Constraint(sm_min=80), supports=lambda f: f["hidden"] % BK == 0,
+                                            requires=Constraint(sm_min=80), supports=supports,
                                             props=frozenset({"graph_safe", "deterministic"})))
