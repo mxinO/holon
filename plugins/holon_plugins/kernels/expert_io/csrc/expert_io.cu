@@ -639,6 +639,8 @@ struct Tiers {
     const float * heat;                                // [G, E] or null
     int32_t * io, * moves, * n_moves;                  // [R, 1 + F, 3], [R, 4, F], [R, 2]
     int32_t * ssd, * n_ssd, * n_ram;                   // [R, 2, F], [R], [R]: the landing rows' fetch list, the RAM's
+    const int32_t * ahead;                             // [E] or null: the layer's read-ahead row of each expert, or −1
+    int32_t * hit, * n_hit;                            // [R, 2, F], [R]: the misses read ahead (row, slot)
     int groups, units, rows;                           // rows: the on-demand landing rows (a round's)
 };
 
@@ -864,9 +866,25 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
     // 2. keeps, 3. the reads (uniform: shared flags): the j-th SSD miss by id into landing row j % rows (its round
     // ⌊j / rows⌋), its io row (piece, row, keep: its RAM unit if kept, else −1) and its landing fetch entry (row, slot);
     // the fetch list keeps the RAM entries, in order (n_ram)
-    int j3 = 0;
+    int j3 = 0, h3 = 0;
     for (int e = 0; e < experts; ++e) {
         if (!(flags[e] & 16)) {
+            continue;
+        }
+        if (T.ahead != nullptr && T.ahead[e] >= 0) {     // read ahead: its row as it is (no read, never kept)
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    int at = 0;
+                    while (fetch[(r * 2) * F + at] != -2 - e) {
+                        ++at;
+                    }
+                    T.hit[(r * 2) * F + h3] = T.ahead[e];
+                    T.hit[(r * 2 + 1) * F + h3] = fetch[(r * 2 + 1) * F + at];
+                    fetch[(r * 2) * F + at] = INT_MIN;
+                }
+            }
+            ++h3;
+            __syncthreads();
             continue;
         }
         bool kept = false;
@@ -906,6 +924,7 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
             }
             T.n_ram[r] = w;
             T.n_ssd[r] = j3;
+            T.n_hit[r] = h3;
         }
     }
     for (int r = 0; r < roles; ++r) {                  // the units freed by the call: free from the next one
@@ -923,7 +942,7 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
            at::Tensor & residency, at::Tensor & host, const at::Tensor & piece, const at::Tensor & classes,
            at::Tensor & owner, const at::Tensor & capacity, const c10::optional<at::Tensor> & heat, at::Tensor & io,
            at::Tensor & moves, at::Tensor & n_moves, at::Tensor & ssd, at::Tensor & n_ssd, at::Tensor & n_ram,
-           int64_t rows) {
+           int64_t rows, const c10::optional<at::Tensor> & ahead, at::Tensor & hit, at::Tensor & n_hit) {
     const c10::cuda::CUDAGuard guard(ids.device());
     const int64_t tokens = ids.size(0), k = ids.size(1), groups = residency.size(0), experts = residency.size(1),
                   roles = residency.size(2), F = stage.size(1);
@@ -947,6 +966,13 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
     check(n_ssd, ids, at::kInt, {roles}, "n_ssd");
     check(n_ram, ids, at::kInt, {roles}, "n_ram");
     TORCH_CHECK(rows >= 1, "rows >= 1");
+    check(hit, ids, at::kInt, {roles, 2, F}, "hit");
+    check(n_hit, ids, at::kInt, {roles}, "n_hit");
+    const int32_t * ah = nullptr;
+    if (ahead.has_value()) {
+        check(*ahead, ids, at::kInt, {experts}, "ahead");
+        ah = ahead->data_ptr<int32_t>();
+    }
     check(moves, ids, at::kInt, {roles, 4, F}, "moves");
     check(n_moves, ids, at::kInt, {roles, 2}, "n_moves");
     const float * h = nullptr;
@@ -957,7 +983,8 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
     Tiers T{residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(), piece.data_ptr<int32_t>(),
             classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h,
             io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), ssd.data_ptr<int32_t>(),
-            n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows)};
+            n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), ah, hit.data_ptr<int32_t>(),
+            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows)};
     k_tiers<<<1, TIER_THREADS, experts * sizeof(int32_t), stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), int(group), fetch.data_ptr<int32_t>(),
         n_fetch.data_ptr<int32_t>(), stage.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), start.data_ptr<int32_t>(),

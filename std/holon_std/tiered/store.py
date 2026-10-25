@@ -53,6 +53,8 @@ from .ring import ROUNDS, Lent
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
 ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (docs/v1-glm.md D8f)
+DEPTH = 2                                    # layers read ahead (D8f): layer g + DEPTH's set at layer g's end
+READ_AHEAD_TOKENS = 2048                     # a prompt step reads ahead from this many prompt tokens (D8f)
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
@@ -121,8 +123,10 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "") -> None:
+                 ram: str = "", read_ahead: int = 0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
+        self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
+        self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
         # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
@@ -323,9 +327,11 @@ class TieredStore:
                 continue
             g = self._order[r.group_id]
             r.attach(g, {n: t[g] for n, t in self.state.items()})
-            if self.exclusive:                   # its SSD reads: a copy task on the I/O worker, bound after materialize
-                self.reads.append(_Reads(self, g))
-                r.io_slot = self.io.bind(self.reads[-1])
+            if self.exclusive:                   # its SSD reads, copy tasks on the I/O worker (bound at materialize):
+                self.reads.append(_Reads(self, g))                  # on demand (urgent), and its read-ahead set's
+                r.io_slot = self.io.bind(self.reads[-1], urgent=True)
+                self.reads.append(_Reads(self, g, ahead=True))
+                self.ahead_slots[g] = self.io.bind(self.reads[-1])
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
         """The exclusive tiers' device tables (`moe_tiers@1`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
@@ -346,13 +352,21 @@ class TieredStore:
         # SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@1` writes, a round's copied
         # into the I/O worker's view before its signal
         self.landing_rows = min(max(ON_DEMAND, self.staging), self.prefill)
+        # read-ahead sets (prompt steps of READ_AHEAD_TOKENS and no decode rows): DEPTH sets of A_ra rows after the
+        # on-demand ones, set g % DEPTH layer g's: the first A_ra of its SSD-only set, lowest ids first
+        self.ahead_rows = min(self._read_ahead or self.staging, self.items)
+        self.ahead_map = static(f"{self.name}.ahead", (shape[0], self.items))      # a layer's read-ahead row, or −1
+        self.ahead_slots: dict[int, int] = {}
         self.landing: dict[str, tuple] = {}
         self.runs: dict[str, object] = {}
         self.ssd = static(f"{self.name}.ssd", (self.roles, 2, self.prefill))
         self.n_ssd = static(f"{self.name}.n_ssd", (self.roles,))
         self.n_ram = static(f"{self.name}.n_ram", (self.roles,))
         self.io_rows = static(f"{self.name}.io_rows", (self.roles, 1 + self.prefill, 3))
+        self.hit = static(f"{self.name}.hit", (self.roles, 2, self.prefill))       # misses read ahead (row, slot)
+        self.n_hit = static(f"{self.name}.n_hit", (self.roles,))
         self.ssd_peak = static(f"{self.name}.ssd_peak", (1,))          # the most SSD misses of a call (tests)
+        self.hits = static(f"{self.name}.hits", (1,))                  # misses found read ahead, so far (tests)
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
         self.parked = torch.zeros((), dtype=torch.int64, device=self.ctx.device)   # lent pieces parked in RAM, so far
@@ -426,6 +440,9 @@ class TieredStore:
             rows = 3 * (1 + self.landing_rows)                     # a round's request rows, the worker's view
             self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
                                     pref_units=self.roles, device="host", mapped=True)
+            rows = 3 * (1 + self.ahead_rows)                       # each read-ahead set's request rows
+            self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
+                                       pref_units=DEPTH * self.roles, device="host", mapped=True)
             self.descriptors = {}
             for c in classes:
                 rows = []
@@ -442,12 +459,11 @@ class TieredStore:
                 # its landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in
                 # place (the copy task's runs), a row as wide as the widest piece's supersets
                 row = max(sum(_superset(x) for x in piece) for piece in rows)
-                self.landing[c.name] = (ctx.pool(f"{self.name}.landing.{c.name}", unit_bytes=row,
-                                                 min_units=self.landing_rows, pref_units=self.landing_rows,
-                                                 device="host", mapped=True), row, width)
-                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
-                                             min_units=self.landing_rows, pref_units=self.landing_rows, device="host",
-                                             mapped=True)
+                n = self.landing_rows + DEPTH * self.ahead_rows
+                self.landing[c.name] = (ctx.pool(f"{self.name}.landing.{c.name}", unit_bytes=row, min_units=n,
+                                                 pref_units=n, device="host", mapped=True), row, width)
+                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width, min_units=n,
+                                             pref_units=n, device="host", mapped=True)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
@@ -558,9 +574,32 @@ class TieredStore:
     def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
         pool, row, width = self.landing[name]
+        n = self.landing_rows + DEPTH * self.ahead_rows
         view = (lambda p, *a: p.device_view(*a)) if device else (lambda p, *a: p.view(*a))
-        return (view(pool, torch.uint8, (self.landing_rows, row)),
-                view(self.runs[name], torch.int64, (self.landing_rows, width, 2)))
+        return view(pool, torch.uint8, (n, row)), view(self.runs[name], torch.int64, (n, width, 2))
+
+    def ahead_view(self, device: bool = True) -> torch.Tensor:
+        """The read-ahead sets' request rows [DEPTH, roles, 1 + A_ra, 3] (mapped)."""
+        shape = (DEPTH, self.roles, 1 + self.ahead_rows, 3)
+        return self.ahead_pool.device_view(torch.int32, shape) if device else self.ahead_pool.view(torch.int32, shape)
+
+    def read_ahead(self, g: int) -> None:
+        """Layer g's read-ahead (docs/v1-glm.md D8f), on the current stream: the first A_ra of its SSD-only set,
+        lowest ids first, into its set's rows (its map `ahead_map[g]`), requested, signalled."""
+        a, base = self.ahead_rows, self.landing_rows + (g % DEPTH) * self.ahead_rows
+        only = (self.residency.device[g] == -2).all(-1)                            # [E]
+        rank = only.int().cumsum(0) - 1
+        take = only & (rank < a)
+        self.ahead_map[g].copy_(torch.where(take, base + rank, -1))
+        view = self.ahead_view()[g % DEPTH]                                        # [roles, 1 + A_ra, 3]
+        at = torch.where(take, 1 + rank, a + 1).long()                             # (+ a sink row past the view)
+        for r in range(self.roles):
+            rows = torch.zeros(a + 2, 3, dtype=torch.int32, device=view.device)
+            rows.index_copy_(0, at, torch.stack([self.piece[g, :, r], base + rank.int(),
+                                                 torch.full_like(rank, -1).int()], 1))
+            rows[0, 0] = take.sum()
+            view[r].copy_(rows[:a + 1])
+        self.io.signal(self.ahead_slots[g])
 
     def _piece_index(self, c: SlotClass, g: int, i: int, r: int) -> int:
         """The class's index of group g's (in map order) item i's role r."""
@@ -636,6 +675,9 @@ class TieredStore:
             kinds[at:at + q] = DECODE if d else PREFILL
             at += q
         prompt = int(sum(q for q, d in zip(step.n_query.tolist(), decode, strict=True) if not d))
+        # a prompt step of READ_AHEAD_TOKENS with no decode or verify row reads its SSD-only sets ahead (D8f: a decode
+        # row's keep would land a read-ahead piece's RAM unit unread)
+        self._ahead = self.exclusive and prompt >= self.read_ahead_tokens and not any(decode)
         if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
@@ -725,12 +767,15 @@ class TieredStore:
                 and self.prefill >= self.items)
 
     def begin(self) -> None:
-        """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any."""
+        """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any; then
+        a read-ahead step's first DEPTH layers' sets (docs/v1-glm.md D8f)."""
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
             self.lent = Lent(self, self._mode, self._step_tail, self._parts)
             self.lent.begin()
+        for g in range(min(DEPTH, self.borrowing_groups) if self._ahead else 0):
+            self.read_ahead(g)
 
     def lend_activations(self, peak: int) -> int:
         """The core's ActivationLender, at the startup profile: a tail store (`lend_peak`) lends its tail steps — from
@@ -829,6 +874,8 @@ class TieredStore:
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
     def layer_done(self, g: int) -> None:
+        if self._ahead and g + DEPTH < self.borrowing_groups:     # the layer two on: its set, now its readers ran
+            self.read_ahead(g + DEPTH)
         if self.lent is not None:
             self.lent.done(g)
             if g == self.borrowing_groups - 1:
@@ -1114,13 +1161,14 @@ class _Reads:
     """A layer's SSD reads (exclusive tiers): `cpu_task@1`'s copy task over its roles' descriptors, RAM tier pools and
     request rows, bound once the pools exist (the I/O worker reads `native` when it starts, after this)."""
 
-    def __init__(self, store: TieredStore, g: int) -> None:
-        self.store, self.g, self.task = store, g, None
+    def __init__(self, store: TieredStore, g: int, ahead: bool = False) -> None:
+        self.store, self.g, self.ahead, self.task = store, g, ahead, None
 
     def bind(self) -> None:
         if self.task is None:                   # landing rows, their runs, kept pieces into the RAM units
             s = self.store
-            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.landing_rows, 3))
+            io = s.ahead_view(device=False)[self.g % DEPTH] if self.ahead else \
+                s.io_pool.view(torch.int32, (s.roles, 1 + s.landing_rows, 3))
             self.task = s.io.copy([(s.descriptors[c.name], *s.landing_view(c.name, device=False)[:1], io[r],
                                     s.landing_view(c.name, device=False)[1], c.host_view())
                                    for r, c in enumerate(s.layer_classes[self.g])])

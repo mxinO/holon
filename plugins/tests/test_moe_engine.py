@@ -880,7 +880,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; at one
     sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
     coldest or sent to the SSD, while its own staging slots stay a graphed step's, and its SSD reads land in landing
-    rows of two, a call's in rounds: docs/v1-glm.md D8b+e, D8f). F11's
+    rows of two, a call's in rounds, its prompt steps of 8 tokens or more reading the next layers' sets ahead:
+    docs/v1-glm.md D8b+e, D8f). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -909,6 +910,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
             | ({"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {})
             | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
+    if one:                                          # (ssd1: prompt steps of 8 tokens or more read ahead)
+        store.read_ahead_tokens = 8
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
     store.after_commit = lambda step, t: routed.append((int(step.n_query[np.isin(step.row_kind, (    # its decode and
         RowKind.DECODE, RowKind.VERIFY))].sum()) * 2 * 4, int(t["counts"].sum()))) or commit(step, t)   # verify rows
@@ -942,6 +945,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert store.exclusive and io.served() > 0 and io.flag() == 0
         # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/v1-glm.md D8f)
         assert not one or (store.landing_rows == 2 and int(store.ssd_peak) > 2), int(store.ssd_peak)
+        assert not one or int(store.hits) > 0    # ssd1: prompt steps of 8 tokens or more read their sets ahead
     if one:                                          # exclusive tiers lend their prompt steps' staging (GLM D8b+e)
         assert store.staging < store.prefill and store.lending and store.borrowed["stage"] > 0, store.borrowed
         assert int(store.parked) > 0                 # lent experts parked in RAM (D8b), read back by later misses

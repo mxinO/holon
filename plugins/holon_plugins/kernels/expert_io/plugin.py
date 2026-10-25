@@ -159,9 +159,9 @@ class MoeTiers:
         self.lib = modules(ctx.fingerprint.sm)
 
     def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows) -> None:
+                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit) -> None:
         self.lib.tiers(ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                       owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows)
+                       owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit)
 
 
 class ActivationLoan:

@@ -109,7 +109,8 @@ class DeviceResolver:
             store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
                           store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
                           store.classes32, store.owner, store.capacity, store.heat, store.io_rows, store.moves,
-                          store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows)
+                          store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
+                          store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
             # the SSD misses in rounds of A_od landing rows (docs/v1-glm.md D8f): as many as the call could need (no
             # host sync; a round past them is empty), each signalled after the last one's gather; a graphed step's
             # misses fit one round (the decode bound ≤ A_od), so its graph holds one
@@ -117,7 +118,11 @@ class DeviceResolver:
             rounds = -(-min(store.items, store.top_k * len(ids)) // a)
             store.ssd_peak.copy_(torch.maximum(store.ssd_peak, store.n_ssd[:1]))
             store.errors.bitwise_or_((store.n_ssd[:1] > rounds * a).int() * SHORT)
-            self._gather(fetch, store.n_ram)                         # the RAM misses, then the landed SSD ones
+            self._gather(fetch, store.n_ram)                         # the RAM misses, then the landed SSD ones:
+            if store._ahead:                                         # read ahead (its set signalled two layers
+                store.io.wait(store.ahead_slots[g])                  # back, or at the step's start), then on demand
+                self._gather(store.hit, store.n_hit, landed=True, part=None)
+                store.hits.add_(store.n_hit[:1])
             for r in range(rounds):
                 store.round_rows(r)
                 store.io.signal(self.io_slot)
@@ -181,24 +186,24 @@ class DeviceResolver:
                 store.errors.bitwise_or_(((2 * q > w) & (n[r:r + 1].clamp(max=width) > w)).int() * SHORT)
         return slots, part, [lambda i=i: landed(i) for i in range(parts)]
 
-    def _gather(self, fetch: torch.Tensor, n: torch.Tensor, landed: bool = False, part: int = 0) -> None:
+    def _gather(self, fetch: torch.Tensor, n: torch.Tensor, landed: bool = False, part: int | None = 0) -> None:
         """The listed misses into their slots: from the RAM units, or (`landed`) round `part`'s from the landing rows by
-        their runs (entries [part·A, (part + 1)·A), A the store's landing rows)."""
+        their runs (entries [part·A, (part + 1)·A), A the store's on-demand rows; `part` None: every entry)."""
         store = self.store
         srcs, runs = ([c.units() for c in self.classes], None) if not landed else \
             map(list, zip(*(store.landing_view(c.name) for c in self.classes), strict=True))
         a = store.landing_rows if landed else 0
+        rounds = {"part": part, "size": a} if landed and part is not None else {}
         roles = getattr(self._fetch[0], "gather_roles", None)
         if roles is not None:                    # every role's misses in one launch
-            roles(fetch, n, srcs, [c.slots() for c in self.classes],
-                  **({"runs": runs, "part": part, "size": a} if landed else {}))
+            roles(fetch, n, srcs, [c.slots() for c in self.classes], **({"runs": runs} if landed else {}), **rounds)
         else:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
-                if landed:                       # the round's slice of the list
+                if rounds:                       # the round's slice of the list
                     gather(fetch[r][:, part * a:(part + 1) * a], (n[r:r + 1] - part * a).clamp(0, a), srcs[r],
                            c.slots(), runs[r])
                 else:
-                    gather(fetch[r], n[r:r + 1], srcs[r], c.slots())
+                    gather(fetch[r], n[r:r + 1], srcs[r], c.slots(), *([runs[r]] if landed else []))
 
     def done(self) -> None:
         """After the layer's expert passes (the step's ring moves on)."""

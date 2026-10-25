@@ -121,11 +121,12 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
 def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.Tensor, n_fetch: torch.Tensor,
               stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
               piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
-              heat: torch.Tensor | None, rows: int | None = None) -> dict:
+              heat: torch.Tensor | None, rows: int | None = None, ahead: torch.Tensor | None = None) -> dict:
     """The `moe_tiers@1` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`
     (its RAM entries, in order: `n_ram` [R]), `residency`, `host`, `owner` after it, `io` per role (its rows (piece,
     landing row, keep unit or −1)), `ssd` [R, 2, F] (the j-th SSD miss by id: (landing row j % `rows`, its slot)) and
-    `n_ssd` [R], `moves` [R, 4, F] (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]."""
+    `n_ssd` [R], `moves` [R, 4, F] (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]; an SSD miss the
+    layer read ahead (`ahead[e]` ≥ 0, its row) is neither read nor kept: `hit` [R, 2, F] (row, slot), `n_hit` [R]."""
     from .kernels import DECODE, PADDING
 
     g, (_, experts, roles) = group, residency.shape
@@ -204,7 +205,16 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
     ssd = sorted({-2 - int(fetch[r, 0, i]) for r in range(roles) for i in range(min(int(n_fetch[r]), width))
                   if int(fetch[r, 0, i]) <= -2})
     lists = torch.full((roles, 2, width), -1, dtype=torch.int32)
-    landed = set()
+    hits = torch.full((roles, 2, width), -1, dtype=torch.int32)
+    landed, h = set(), 0
+    ahead_of = {e: int(ahead[e]) for e in ssd if ahead is not None and int(ahead[e]) >= 0}
+    for e in [e for e in ssd if e in ahead_of]:                          # read ahead: its row as it is
+        for r in range(roles):
+            i = next(i for i in range(min(int(n_fetch[r]), width)) if int(fetch[r, 0, i]) == -2 - e)
+            hits[r, :, h] = torch.tensor([ahead_of[e], int(fetch[r, 1, i])])
+            landed.add((r, i))
+        h += 1
+    ssd = [e for e in ssd if e not in ahead_of]
     for j, e in enumerate(ssd):                                          # 2. keeps, 3. the reads
         kept = None
         if e not in admitted and e in decode:
@@ -222,8 +232,8 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
         ram[r, :, :len(keep)] = fetch[r][:, keep]
         n_ram[r] = len(keep)
     return {"fetch": ram, "n_ram": n_ram, "residency": residency, "host": host, "owner": owner, "io": io,
-            "ssd": lists, "n_ssd": torch.full((roles,), len(ssd), dtype=torch.int32), "moves": moves,
-            "n_moves": n_moves}
+            "ssd": lists, "n_ssd": torch.full((roles,), len(ssd), dtype=torch.int32), "hit": hits,
+            "n_hit": torch.full((roles,), h, dtype=torch.int32), "moves": moves, "n_moves": n_moves}
 
 
 def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, ring: torch.Tensor,

@@ -20,6 +20,8 @@ the policy's coldest whole experts, X's; `tail`, first the experts holding the l
 a contiguous range its expert passes take their buffers from, then the coldest: docs/v1-moe-prefill.md D10, D11;
 default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
+`moe.read_ahead` (exclusive tiers: the landing rows of a layer's read-ahead set, the first of its SSD-only experts read
+two layers ahead in prompt steps of 2,048 tokens or more; default the graphed steps' staging: docs/v1-glm.md D8f),
 `moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
 reserving only the worst smaller step's peak; `require`: as `on`, and the store refuses to start where it would lend
 none; default `off`), `moe.route_transform`
@@ -57,7 +59,7 @@ def _store(ctx, experts: int, top_k: int):
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
-                        ram=str(opts.get("moe.ram", ""))))
+                        ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0))))
 
 
 def _rows(ctx) -> int:
