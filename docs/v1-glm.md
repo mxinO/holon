@@ -322,17 +322,17 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     borrowing and parking asserted; without the copies its streams differ) and on the vehicle (A5000, one sequence,
     `moe.ram = *=0.25`, prompts of 5,000 / 700 / 3,000 tokens and 64 generated each: capped vs uncapped identical in
     streams and top-3 prompt logprobs, 9 borrowing steps, 257 experts parked). **The host mirror is tier-exact under
-    exclusive tiers** (B8-m1, then the parking commit): parked lends, like `moe_tiers@1`'s demotions and keeps, place
+    exclusive tiers** (B8-m1, then the parking commit): parked lends, like `moe_tiers@2`'s demotions and keeps, place
     pieces unlogged, so the step's map rides in its telemetry (≈ 100 KB a step at GLM's sizes) and the commit adopts it,
     still replaying the step's records for the per-layer empty-slot lists; `ssd1` checks mirror = device, tier codes
     too. Every mirror reader reads slots ≥ 0 only (the policies' `after_commit`, the bench's tap, `route_dump`'s
     `device_is_mirror`). Under exclusive tiers the ring and pipelined parts stay off (`resolver.py:81-82`) until D8f.
 - **(a) F10 with RAM short — the full requirement set:**
-  - a **heat**: `moe_tiers@1`'s heat input gains a fact `heat = "i32"` (default f32, so today's facts do not move)
+  - a **heat**: `moe_tiers@2`'s heat input gains a fact `heat = "i32"` (default f32, so today's facts do not move)
     and `placement.promote@1` passes its recency (`last`, int32 device state) unconverted (B2-m8: no f32 copy, no
     precision limit on a long-running server);
   - a **victim rank** for the spare refill: the layer's LRU resident (Maya's rule);
-  - **refill evictions go through `moe_tiers@1`**: each victim is demoted D2H into a free RAM unit, else over RAM's
+  - **refill evictions go through `moe_tiers@2`**: each victim is demoted D2H into a free RAM unit, else over RAM's
     coldest when hotter, else SSD-only, in the graph, before the spare's next promotion;
   - `kernels.promote`'s CUDA resolve emits the delta record "push b's slots onto the layer's empty stack", replayed by
     `ResidencyMap.commit` outside borrowing steps;
@@ -388,7 +388,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   `g % depth`). **The RAM pool stays exactly as today** — canonical `unit_bytes` rows, its I/O staging units no longer
   used — and so does every RAM-miss gather (the main fetch, the staging ring of parts, D8c's split) and
   `cpu_experts@1`'s whole-unit reads.
-  - **Placement is unchanged:** `moe_tiers@1` places exactly as today — no per-layer cap, no window rule. (Rev 6's cap
+  - **Placement is unchanged:** `moe_tiers@2` places exactly as today — no per-layer cap, no window rule. (Rev 6's cap
     was infeasible under lending: a 16K step's loan sends ≈ 1,400–1,850 more experts out of VRAM, ≈ 70 SSD-only a
     layer against A ≈ 51, and undefined for fill arenas, where the cache size is unknown at `before_materialize`.)
   - **Two sizes, staging choices, not invariants** (rev 8: C R7-M1, B7-m1); nothing's correctness depends on either:
@@ -405,7 +405,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     layer's SSD-only set, lowest ids first** (deterministic), 2 layers deep; **layers 3 and 4 (the first two MoE
     layers) are read at the step's start**, under the dense layers 0–2's ≈ 0.3 s of compute (C r7-m2), each later
     layer g + 2 after layer g's last pass.
-  - **No read-ahead in a step that carries a decode or verify row** (A R7-M2, the simplest fix): `moe_tiers@1`'s keep
+  - **No read-ahead in a step that carries a decode or verify row** (A R7-M2, the simplest fix): `moe_tiers@2`'s keep
     rule lands a kept SSD miss's read in its RAM unit (`moe/kernels.py:180-183`), and a read-ahead expert's bytes sit
     only in its read-ahead unit, so a kept read-ahead expert's RAM unit would never be filled. Such a step (`max_seqs`
     > 1, a long chunk beside a decode row) reads on demand; at the locks' `max_seqs` 1 it never arises.
@@ -423,7 +423,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
       slots and computed as its own part; round r + 1 is signalled after round r's gather and computed after round r
       (the same slots, main-stream order). **No part ever waits on a round**, so A R7-M1's cycle cannot form, and the
       round's read overlaps the RAM stream (C: serialized, the (ii) 1K cell would fall from ≈ 1.2 to ≈ 0.9).
-    - **Rounds of exactly A_od** (A R8-m1): `moe_tiers@1` writes the call's SSD-miss fetch entries in rank order j,
+    - **Rounds of exactly A_od** (A R8-m1): `moe_tiers@2` writes the call's SSD-miss fetch entries in rank order j,
       contiguously after its RAM misses (D8c's split); entry j lands in on-demand unit `capacity + (j mod A_od)` in
       round ⌊j / A_od⌋ (a kept piece in its RAM unit, as today). Round r's gather is `expert_fetch@1`'s
       `gather_roles(..., part = r, size = A_od)`, a small additive form (a fixed part size; §4). Before round r's
@@ -445,7 +445,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     an extent there), rounded to 4 KiB; each extent's destination is asserted 4 KiB-aligned.
   - **A kept piece** (D10's keep rule) is read into its landing unit like any other SSD miss, and **the submitting
     thread copies it landing → its canonical RAM unit** once its extents are in, before it answers the request (a
-    7.1 MB copy, ≈ 0.5 ms, beside the request's other reads; decode keeps only). `moe_tiers@1`'s `io` rows name the
+    7.1 MB copy, ≈ 0.5 ms, beside the request's other reads; decode keeps only). `moe_tiers@2`'s `io` rows name the
     landing unit; its keep moves the RAM unit's owner as today. One launch, one source pool, one layout (B9-m1).
 - **Two slots a layer; the fence is stream order** (A R5-M2, R6-m1):
   - **Slots.** Each MoE layer has an **on-demand** `cpu_task` slot, signalled **once per round of an expert pass**,
@@ -714,14 +714,14 @@ on a prompt that ends in it.
 | `gated_rmsnorm@1` | rounds before the weight → fact `round = "none"` (D4) |
 | `causal_conv1d@1` | weight dtype unstated → weights in their stored dtype (D4) |
 | new `kda@1` (gdn), `dsa_index@1`, `mla_attend@1` (qsa), `hc_mhc_mix@1`, `hc_mhc_writeback@1` (hyper) | — |
-| `moe_tiers@1` | f32 heat → fact `heat = "i32"` (D8a) |
+| `moe_tiers@1` → `@2` (BS1-M1) | f32 heat → fact `heat = "i32"` (D8a) |
 | `ResidencyMap`, the store, `placement.promote`, `kernels.promote` | D8 (a)–(d); `lend_tail` in `placement.promote@1`'s resolve, its reference and `kernels.promote` (D8a) |
 | `kernels.ggml_cuda`'s `MoeTopk` / `holon_ggml_topk_moe` and fused router | softmax only, power-of-two E → scoring, bias, scale; E = 288 (D6) |
 | `kernels.cpu_task` | a pread pool (`io_threads`) → one completion-driven submitting thread (io_uring, else native AIO, chosen and logged; a constructor argument forces either for tests), option `io_depth`; `io_threads` deleted; an urgent request ahead of every chunk not yet submitted (D8f) |
 | `cpu_task@1` | `bind(task)` → `bind(task, urgent=False)`, additive, a hint: a worker serves an urgent slot's request before requests it has not yet started, and may ignore it (D8f); the copy task takes a second destination pool, the RAM pool for a kept piece's copy (B10-m1); signal / wait unchanged |
 | `expert_fetch@1` | `gather_roles(..., part, parts)` → also `gather_roles(..., part, size)`: part r the entries [r·size, (r + 1)·size); a call passes exactly one of `parts` and `size` (additive, B9); a per-piece run table for a source pool of superset rows: each extent read at its offset in the piece's aligned superset (D8f; only the SSD fetch launch, from the landing pool) |
 | `std.tiered` (store, `pinned`) | I/O staging units: a pass's per class in the RAM pool (exclusive) → **a landing pool per class at the superset width** (general sizing, alignment asserted), the RAM pool unchanged: an on-demand range of A_od = max(32, the decode bound) rows (≥ the graphed steps' SSD misses, checked at bind) and depth read-ahead sets of A_ra; a kept piece copied landing → RAM unit by the submitting thread; `moe.lend_peak = require` (the store raises where the tail cannot lend); **one new option, `moe.read_ahead`** (A_ra, default the decode bound); two `cpu_task` slots a layer (the on-demand one urgent); SSD entries in device slots outside the ring (A_od, + A_ra when reading ahead, lent); round 0 signalled at the resolve and waited after the RAM parts, rounds of exactly A_od in eager prompt steps only, each a `gather_roles(part, size)` slice with its rows copied into the on-demand view; no read-ahead in a step with a decode or verify row; layers 3–4 read at the step's start; the request pool as 1 + depth views; read-ahead signals on main after the reading layer's last pass (D8f); the host mirror from the step's map under exclusive tiers (D8) |
-| `moe_tiers@1` | an SSD miss → staging unit `capacity[c] + i` of the RAM pool (its fetch entry i; a kept piece its RAM unit) → **its landing row** (a separate pool, a fact of the call): an SSD miss not read ahead → its fetch entry in rank order j after the RAM misses, landing row `j mod A_od` in round ⌊j / A_od⌋, a kept piece too (its RAM unit's owner moved as today; the copy is the worker's: `io`'s request rows gain the keep unit, B10-m1), or, read ahead, row `A_od + (g % depth)·A_ra + its rank among the first A_ra of the layer's SSD-only set` (no read issued); placement unchanged (D8f) |
+| `moe_tiers@1` → `@2` (BS1-M1) | an SSD miss → staging unit `capacity[c] + i` of the RAM pool (its fetch entry i; a kept piece its RAM unit) → **its landing row** (a separate pool, a fact of the call): an SSD miss not read ahead → its fetch entry in rank order j after the RAM misses, landing row `j mod A_od` in round ⌊j / A_od⌋, a kept piece too (its RAM unit's owner moved as today; the copy is the worker's: `io`'s request rows gain the keep unit, B10-m1), or, read ahead, row `A_od + (g % depth)·A_ra + its rank among the first A_ra of the layer's SSD-only set` (no read issued); placement unchanged (D8f) |
 | `kernels.ggml_cuda` vendor | `GGML_CUDA_MM_IDS_MAX_PAIRS` 32,768 → 131,072 (D9) |
 | `kernels.ggml_cuda` plugin (`plugin.py:79-93, 261-274`) | `pass_rows` from `ID_PAIRS // top_k` → today's arithmetic whenever the option is unset or ≤ 4,096; above 4,096 up to `MAX_PAIRS // top_k` and the `PASS_PROVEN` entry's own row bound, a larger option refused (D9) |
 | `std.weights.gguf` | `glm4` pre-tokenizer, `eom` (D13) |

@@ -833,10 +833,9 @@ class TieredStore:
             return None
         if self.exclusive:                       # its lent experts parked before the forward writes the loan
             self.start_step(early=True)
-        if self._step_tail is not None:
-            cls, n = self._step_tail
-            c = list(self.classes.values())[cls]
-            loan = c.slots()[c.size - n:].view(-1)[-self._step_loan:]
+        if (tail := self._loan_slots()) is not None:
+            cls, first = tail
+            loan = list(self.classes.values())[cls].slots()[first:].view(-1)[-self._step_loan:]
         else:                                   # a staging layout's own tail, its last bytes
             at, n = self._own_tail
             loan = self.arena.view(torch.uint8, (self.arena.capacity * self.granule,))[at:at + n][-self._step_loan:]
@@ -1006,14 +1005,20 @@ class TieredStore:
                   .view(groups, items, roles).int())
         host.copy_(torch.where(lent[:, None], to, torch.where(dropped[:, None], -1, units)).view(groups, items, roles))
 
-    def _in_loan(self, cls: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
-        """[n] bool: the pieces' experts holding a slot of this step's activation loan (`activations`: the tail's
-        class, its last slots' bytes)."""
+    def _loan_slots(self) -> tuple[int, int] | None:
+        """This step's activation loan in its tail: (the tail's class, the first slot the loan's bytes touch — the
+        class's last `_step_loan` bytes; `activations` aligns the start up, never below); None without one."""
         if not self._step_loan or self._step_tail is None:
+            return None
+        cls, _ = self._step_tail
+        c = list(self.classes.values())[cls]
+        return cls, (c.size * c.unit_bytes - self._step_loan) // c.unit_bytes
+
+    def _in_loan(self, cls: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
+        """[n] bool: the pieces' experts holding a slot of this step's activation loan (`_loan_slots`)."""
+        if (tail := self._loan_slots()) is None:
             return torch.zeros(slots.shape[0], dtype=torch.bool, device=slots.device)
-        c, _ = self._step_tail
-        size, unit = list(self.classes.values())[c].size, list(self.classes.values())[c].unit_bytes
-        first = size - (-(-self._step_loan // unit) + 1)                 # (+ one: the loan's 512-byte alignment)
+        c, first = tail
         return ((cls == c) & (slots >= first)).any(1)
 
     def _copy_parked(self, cls: torch.Tensor, slots: torch.Tensor, to: torch.Tensor, placed: torch.Tensor) -> None:

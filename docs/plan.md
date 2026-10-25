@@ -757,6 +757,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
     - deferred levers: D4's fused q8_1 store, attention at 4K steps, D6 on resident locks;
     - bench method: per-call A/Bs of sub-50 µs kernels swing ±1–8% between processes; read them over many
       interleaved rounds, or by SASS when the question is "unchanged".
+- **Contract signature hashes (GLM step 1's review, B):** `check_abi.py --write` stores a short hash of each contract's signature beside its name in `contracts.txt`, so a non-additive change at the same major fails CI (today it compares names; `moe_tiers@2` was bumped by hand).
 - **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree
   (`27c7a76`, which has Q2_0, type 42), but a user's install resolves std's `gguf>=0.17` from PyPI, whose 0.19.0 stops
   at Q1_0, so reading Qwen3.8-Flash-Next's files fails there. Before a release that serves FN: either std carries its

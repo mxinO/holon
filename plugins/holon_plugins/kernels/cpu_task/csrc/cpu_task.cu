@@ -1028,10 +1028,9 @@ void watch(std::shared_ptr<State> st) {
             }
             if (st->flag() || now - since[s] > std::chrono::nanoseconds(st->timeout_ns)) {
                 st->cpu_flag().fetch_or(TIMEOUT, __ATOMIC_RELAXED);
-                uint32_t req = REQ;
-                if (st->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE)) {
-                    st->abandons[s].fetch_add(1, std::memory_order_release);   // its request's answer: none
-                }
+                uint32_t req = REQ;               // the epoch first: no answer of its request lands between the two
+                st->abandons[s].fetch_add(1, std::memory_order_acq_rel);   // (a failed CAS: its request was answered)
+                st->word(s).compare_exchange_strong(req, ABANDONED, __ATOMIC_RELEASE);
             }
         }
     }
