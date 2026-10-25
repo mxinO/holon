@@ -21,7 +21,8 @@ a contiguous range its expert passes take their buffers from, then the coldest: 
 default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
 `moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
-reserving only the worst smaller step's peak; default `off`), `moe.route_transform`
+reserving only the worst smaller step's peak; `require`: as `on`, and the store refuses to start where it would lend
+none; default `off`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
 the CPU's share of the misses: `cpu.py`)."""
@@ -52,7 +53,7 @@ def _store(ctx, experts: int, top_k: int):
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
                         stream_tokens=int(opts.get("moe.stream_tokens", 0)),
                         pipeline=int(opts.get("moe.pipeline", 1)),
-                        lend_peak=str(opts.get("moe.lend_peak", "off")) == "on",
+                        lend_peak=str(opts.get("moe.lend_peak", "off")),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,

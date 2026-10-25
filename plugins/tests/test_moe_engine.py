@@ -1054,6 +1054,27 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe):
+    """`moe.lend_peak = require` (docs/v1-glm.md D9): a mode (ii)-shaped layout — RAM holding a quarter of the experts,
+    three quarters cached, tail lending — starts, its large steps stage (no ring under exclusive tiers) with their
+    activations in the lent tail, and serves the resident store's bits; a layout that would lend none refuses to start,
+    naming why."""
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    ranges, use = [], store._loan.use
+    store._loan.use = lambda r: (ranges.append(r.numel()), use(r))[1]
+    assert _served(engine, prompts) == want
+    assert store.exclusive and ranges and store.borrowed["stage"] and not store.borrowed["ring"], store.borrowed
+    engine.close()
+    with pytest.raises(RuntimeError, match="require.*moe.ring_lend is not tail"):
+        _gpu_engine(file, host_memory=1 << 27, plugin_options=opts | {"moe.ring_lend": "coldest"})
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     """F5b on the native path (kernels.expert_io's resolve and row patch, kernels.cpu_task's worker in decode graphs,
     kernels.ggml_cpu's experts): steps of up to 4 tokens give the CPU half the misses (rounded up) at a quarter cached;

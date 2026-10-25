@@ -118,7 +118,7 @@ class SlotClass:
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
-                 lend_peak: bool = False, pipeline: int = 1, policy: Ref | str = "",
+                 lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -153,7 +153,11 @@ class TieredStore:
         self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
         # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
         # ActivationLender), so the engine reserves only the worst step that streams nothing
-        self.lend_peak, self._loan, self._loan_bytes, self._loaned = lend_peak, None, 0, False
+        # (`require`: as `on`, and the store raises where it would lend nothing: docs/v1-glm.md D9)
+        if lend_peak not in ("off", "on", "require"):
+            raise ValueError(f"{name}: moe.lend_peak is off, on or require, not {lend_peak!r}")
+        self.lend_peak, self._require_loan = lend_peak != "off", lend_peak == "require"
+        self._loan, self._loan_bytes, self._loaned = None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
@@ -248,11 +252,9 @@ class TieredStore:
                 self.staging = self.prefill
                 for c in self.classes.values():
                     c.staging = self.prefill
-            elif self.exclusive:
-                # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM,
-                # parked in RAM (its slots copied into its units first) or for the SSD (the file always holds it:
-                # `_park`). No step streams yet: the ring copies RAM units only, and an SSD-only piece has none.
-                self.ring_tokens = 0
+            # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM, parked
+            # in RAM (its slots copied into its units first) or for the SSD (the file always holds it: `_park`). Its
+            # large steps stage (`before_launch`): the ring copies RAM units only, and an SSD-only piece has none.
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
@@ -585,6 +587,8 @@ class TieredStore:
                 if self._own_tail is None:
                     raise RuntimeError(f"{self.name}: the engine reserved activations for a lent tail "
                                        "(moe.lend_peak), but this layout neither lends nor keeps a tail")
+                self._no_loan("this layout stages (its cache cannot lend a prompt step's staging): the loan would "
+                              "stay reserved in the pool's own tail")
                 print(f"holon: {self.name}: this layout stages (its cache cannot lend a prompt step's staging): the "
                       "step-peak loan (moe.lend_peak) stays reserved, in the pool's own tail")
         self._step, kinds, at = step.step, self._kinds, 0
@@ -599,7 +603,7 @@ class TieredStore:
         if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
-            self._mode = "ring" if prompt >= self.stream_tokens else "stage"
+            self._mode = "ring" if prompt >= self.stream_tokens and not self.exclusive else "stage"
         elif prompt and min(self.top_k * at, self.prefill) > self.stage_slots:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
@@ -697,15 +701,21 @@ class TieredStore:
         `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`,
         `LOAN_SLACK`) past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak`
         is the worst step's, of `max_step_tokens`), where its device has `activation_loan@1`; 0 where it lends none."""
-        if not (self.lend_peak and self.ring_lend == "tail" and self.ring_tokens and self.policy.device_owned
-                and self.ctx.candidates(ACTIVATION_LOAN, {})):
-            return 0
+        missing = [why for why, ok in (("moe.lend_peak is off", self.lend_peak),
+                                       ("moe.ring_lend is not tail", self.ring_lend == "tail"),
+                                       ("moe.ring_tokens is 0", self.ring_tokens),
+                                       ("the placement policy is a host policy", self.policy.device_owned),
+                                       ("the device has no activation_loan@1",
+                                        self.ctx.candidates(ACTIVATION_LOAN, {}))) if not ok]
+        if missing:
+            return self._no_loan(", ".join(missing))
         loan = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
         self._loan_bytes = loan
         try:
             tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
         except ValueError:                             # its class cannot hold it beside a pass's staging
             self._loan_bytes = 0
+            self._no_loan("the tail's class cannot hold the step-peak loan beside a prefill pass's staging")
             print(f"holon: {self.name}: the tail's class cannot hold the step-peak loan (moe.lend_peak) beside a "
                   "prefill pass's staging: the activations stay reserved")
             return 0
@@ -714,6 +724,12 @@ class TieredStore:
         self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
         self.tail = tail
         return self.ring_tokens
+
+    def _no_loan(self, why: str) -> int:
+        """Where the store lends no step its activations: 0, or (`moe.lend_peak = require`) a refusal naming why."""
+        if self._require_loan:
+            raise RuntimeError(f"{self.name}: moe.lend_peak = require, but no step's activations would be lent: {why}")
+        return 0
 
     def activations(self, step):
         """The core's ActivationLender, at an eager step's launch: a tail step's forward allocates from the tail's
