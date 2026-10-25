@@ -1079,6 +1079,25 @@ def test_a_lent_steps_loan_holds_its_fixed_bytes(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_loan_overflow_is_counted_and_said_once(gpu_moe, capsys):
+    """Step 5's review B m1: a lent step whose activations outgrow its loan (here its per-token share forced to 0 and
+    its fixed bytes the 20 MiB floor) takes the device's own memory; the store counts each such step and its most bytes,
+    and says so once, naming `moe.loan_fixed_mib`. The resident store's bits."""
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on"}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    store._loan_per_token, store._loan_fixed = 0.0, 1 << 20        # (a loan of 1 MiB: every lent step overflows)
+    assert _served(engine, prompts) == want
+    engine.add([3] * 4, GREEDY)                                     # (a lent step is counted at the next)
+    while engine.has_work():
+        engine.step()
+    said = capsys.readouterr().out
+    assert store.loan_overflows >= 1 and store.loan_overflow_most > 0 and said.count("moe.loan_fixed_mib") == 1
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("cache, kept", [("*=0.7", "own tail"), ("*=0.5", "reserved")])
 def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, kept):
     """`moe.lend_peak` where the layout cannot lend (decided at build, never refused at a launch): a cache too small to

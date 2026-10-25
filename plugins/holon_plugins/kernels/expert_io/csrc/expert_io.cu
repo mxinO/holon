@@ -1254,6 +1254,7 @@ void loan_set(int64_t ptr, int64_t nbytes) {
     loan.cap = size_t(nbytes) & ~size_t(511);
     loan.free.clear();
     loan.free[0] = loan.cap;
+    loan.most = 0;                                                   // `loan_overflow`: per use
 }
 
 int64_t loan_live() { return loan.live; }
@@ -1317,7 +1318,8 @@ void holon_loan_free(void * ptr, ssize_t size, int, cudaStream_t) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_set", &loan_set, "activation_loan@1: the range the loan's segments are cut from (none out)");
     m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
-    m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once");
+    m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once, "
+          "since the last loan_set");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
     m.def("tiers", &tiers, "moe_tiers@2: the call's admissions and SSD misses through the exclusive RAM tier");

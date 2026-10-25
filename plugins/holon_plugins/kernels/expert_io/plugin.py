@@ -191,6 +191,10 @@ class ActivationLoan:
         return 0 if self.pool is None else sum(b["size"] for seg in self.pool.snapshot() for b in seg["blocks"]
                                                if b["state"] == "active_allocated")
 
+    def overflow(self) -> int:
+        """The most bytes the current use's segments took outside its range at once (the device's own memory)."""
+        return self.lib.loan_overflow()
+
 
 class Plugin:
     def register(self, regs) -> None:

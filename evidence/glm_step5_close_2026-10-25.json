@@ -141,8 +141,8 @@
    }
   },
   "verdicts": {
-   "kda_state_not_carried": "pre-registered (chunked p50 16x clean)",
-   "dsa_decode_select_shift": "not pre-registrable for (c) (decode p50 3.0x clean); the cover's"
+   "kda_state_not_carried": "pre-registered (chunked p50 0.073-0.075: 10.5-10.7x the 0.007 bound)",
+   "dsa_decode_select_shift": "not pre-registrable for (c) (decode p50 0.0135-0.0139: 1.9-2.0x the bound); the cover's"
   }
  },
  "gate_f": {

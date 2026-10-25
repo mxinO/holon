@@ -163,7 +163,8 @@ then `staging` slots, then cache slots.
   instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
   `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
   — `held() -> int`, the bytes allocated in it still alive, and `release()`: the range free again (nothing held). An
-  allocation the range cannot hold fails.
+  allocation the range cannot hold fails, or (a provider with `overflow() -> int`) takes the device's own memory,
+  `overflow()` then the most bytes out that way at once in the current use.
 
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's

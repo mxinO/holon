@@ -132,6 +132,7 @@ class TieredStore:
         # device's own memory, which the reserve does not hold (GLM step 5: 5K-8K-token steps with prompt logprobs ran
         # out of memory at the deployment's fraction)
         self._loan_fixed = max(loan_fixed, LOAN_SLACK)
+        self.loan_overflows, self.loan_overflow_most = 0, 0        # lent steps that overflowed; the most bytes
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
@@ -719,6 +720,7 @@ class TieredStore:
                                "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
                                "it)")
         if self._loaned:
+            self._loan_overflowed()
             self._loan.release()
         self._loaned = False
         self._step_loan = 0
@@ -833,6 +835,21 @@ class TieredStore:
         self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
         self.tail = tail
         return self.ring_tokens
+
+    def _loan_overflowed(self) -> None:
+        """The last lent step's overflow (`activation_loan@1`'s `overflow`, where its provider counts it): counted in
+        `loan_overflows` (steps) and `loan_overflow_most` (bytes), said once — the loan's fixed bytes are too few for
+        a step's fixed costs (`moe.loan_fixed_mib`), and the overflow takes the device's own memory, which the reserve
+        does not hold."""
+        over = getattr(self._loan, "overflow", lambda: 0)()
+        if over <= 0:
+            return
+        self.loan_overflows += 1
+        self.loan_overflow_most = max(self.loan_overflow_most, over)
+        if self.loan_overflows == 1:
+            print(f"holon: {self.name}: a {self.step_tokens}-token step's activations overflowed its loan by "
+                  f"{over / 2**20:.0f} MiB into the device's own memory: raise moe.loan_fixed_mib (now "
+                  f"{self._loan_fixed >> 20} MiB) before a smaller --memory-fraction margin runs out of it")
 
     def _no_loan(self, why: str) -> int:
         """Where the store lends no step its activations: 0, or (`moe.lend_peak = require`) a refusal naming why."""

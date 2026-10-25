@@ -68,10 +68,13 @@ def main() -> None:
                 snap = snapshot.record(e, trace)
                 stats = e.stats()
         except RuntimeError as err:          # a plant the store's own checks catch (its error words): it failed
-            if not plant:
+            # — but only the store's own refusals count: an out-of-memory error or a CUDA error (a dead context) is
+            # not a catch, it fails the run and stops it (step 5's review A m1)
+            if not plant or isinstance(err, (torch.OutOfMemoryError, torch.AcceleratorError)) or \
+                    "CUDA error" in str(err) or not str(err).startswith("moe"):
                 raise
             out["runs"].append({"config": name, "run": i, "plant": plant, "identical": False,
-                                "first_difference": f"raised: {str(err)[:300]}"})
+                                "first_difference": f"the store refused: {str(err)[:300]}"})
             print(json.dumps(out["runs"][-1]), flush=True)
             continue
         finally:

@@ -304,5 +304,6 @@ def test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction(fraction):
             e.step()
     finally:
         e.close()
+    store = e.ctx.shared_objects["std.moe.offload"]
     print(f"fraction {fraction}: least free {min(least) / 2**20:.0f} MiB over {len(least)} steps")
-    assert min(least) > 0
+    assert store.loan_overflows == 0 and min(least) >= 128 << 20    # no step overflowed its loan; a margin left
