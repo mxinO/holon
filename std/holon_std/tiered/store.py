@@ -341,6 +341,13 @@ class TieredStore:
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
                                                                                                        pool="io")
+        # SSD reads' landing (docs/v1-glm.md D8f): rows a class, a call's j-th SSD miss in row j % rows
+        self.landing_rows = self.prefill
+        self.landing: dict[str, tuple] = {}
+        self.runs: dict[str, object] = {}
+        self.ssd = static(f"{self.name}.ssd", (self.roles, 2, self.prefill))
+        self.n_ssd = static(f"{self.name}.n_ssd", (self.roles,))
+        self.n_ram = static(f"{self.name}.n_ram", (self.roles,))
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
         self.parked = torch.zeros((), dtype=torch.int64, device=self.ctx.device)   # lent pieces parked in RAM, so far
@@ -371,9 +378,8 @@ class TieredStore:
             if not 0 <= c.cap <= len(c.pieces):
                 raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
             extents = [x for *_, x in c.pieces]
-            # (exclusive: a pass's SSD reads land in the tier's staging units, `moe_tiers@1`'s `capacity[c] + i`)
-            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=self.prefill if self.exclusive else 0,
-                                  granule=self.granule)
+            # (exclusive: SSD reads land in landing rows of their own, `landing`, below)
+            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=0, granule=self.granule)
             for t in self.tiers[1:]:
                 t.prepare(ctx, c.name, c.unit_bytes, extents)
             c.host = self.tiers[0].units(c.name)
@@ -412,7 +418,7 @@ class TieredStore:
             self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
                                 for row in np.unique(self.class_table, axis=0)]
             self._class_fetch = {c.name: f for r in self.resolvers for c, f in zip(r.classes, r._fetch, strict=True)}
-            rows = 2 * (1 + self.prefill)
+            rows = 3 * (1 + self.prefill)
             self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
                                     pref_units=self.roles, device="host", mapped=True)
             self.descriptors = {}
@@ -428,6 +434,15 @@ class TieredStore:
                 width = max(map(len, rows))
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)
+                # its landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in
+                # place (the copy task's runs), a row as wide as the widest piece's supersets
+                row = max(sum(_superset(x) for x in piece) for piece in rows)
+                self.landing[c.name] = (ctx.pool(f"{self.name}.landing.{c.name}", unit_bytes=row,
+                                                 min_units=self.landing_rows, pref_units=self.landing_rows,
+                                                 device="host", mapped=True), row, width)
+                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
+                                             min_units=self.landing_rows, pref_units=self.landing_rows, device="host",
+                                             mapped=True)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
@@ -525,7 +540,14 @@ class TieredStore:
 
     def io_device(self) -> torch.Tensor:
         """The SSD reads' request rows, as `moe_tiers@1` writes them (mapped)."""
-        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.prefill, 2))
+        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.prefill, 3))
+
+    def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+        """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
+        pool, row, width = self.landing[name]
+        view = (lambda p, *a: p.device_view(*a)) if device else (lambda p, *a: p.view(*a))
+        return (view(pool, torch.uint8, (self.landing_rows, row)),
+                view(self.runs[name], torch.int64, (self.landing_rows, width, 2)))
 
     def _piece_index(self, c: SlotClass, g: int, i: int, r: int) -> int:
         """The class's index of group g's (in map order) item i's role r."""
@@ -537,15 +559,16 @@ class TieredStore:
         staging units), then RAM: F2's order past the VRAM items, as far as every role's class has units (the RAM
         units reloaded where they hold something else); every other piece on the SSD."""
         groups, classes = list(self._order), list(self.classes.values())
-        for c in classes:                                   # VRAM, a staging batch at a time
-            arena, units = arenas[c.name]
-            batch, host = pending[c.name], units.numpy()
-            for at in range(0, len(batch), self.prefill):          # (the tier's staging units: `prepare`)
-                part = batch[at:at + self.prefill]
-                files.read([(e, host[c.held + j, o:o + e.nbytes]) for j, (n, _) in enumerate(part)
+        for c in classes:                                   # VRAM, a batch of landing rows at a time
+            arena, _ = arenas[c.name]
+            batch, (rows, _) = pending[c.name], self.landing_view(c.name, device=False)
+            land = rows.numpy()
+            for at in range(0, len(batch), self.landing_rows):
+                part = batch[at:at + self.landing_rows]
+                files.read([(e, land[j, o:o + e.nbytes]) for j, (n, _) in enumerate(part)
                             for e, o in _offsets(c.pieces[n][3])])
                 for j, (_, slot) in enumerate(part):
-                    arena[slot].copy_(units[c.held + j])
+                    arena[slot].copy_(rows[j, :c.unit_bytes])
         vram, used = set(seed), dict.fromkeys(self.classes, 0)
         host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
                                                                                         dtype=np.int32)
@@ -1057,6 +1080,14 @@ class _Budget:
         return floor + [(int(group[x]), int(item[x])) for x in rest if (int(group[x]), int(item[x])) not in taken]
 
 
+def _superset(desc: tuple) -> int:
+    """A descriptor (fd, O_DIRECT, offset, nbytes)'s bytes in a landing row: its 4 KiB-aligned superset (O_DIRECT),
+    else its own, rounded to 4 KiB."""
+    _, direct, offset, nbytes = desc
+    lo, hi = (offset // ALIGN * ALIGN, -(-(offset + nbytes) // ALIGN) * ALIGN) if direct else (0, nbytes)
+    return -(-(hi - lo) // ALIGN) * ALIGN if nbytes else 0
+
+
 def _offsets(extents: list[Extent]) -> list[tuple[Extent, int]]:
     """Each extent with its offset in the piece (the pieces are their extents, concatenated)."""
     out, at = [], 0
@@ -1074,10 +1105,11 @@ class _Reads:
         self.store, self.g, self.task = store, g, None
 
     def bind(self) -> None:
-        if self.task is None:
+        if self.task is None:                   # landing rows, their runs, kept pieces into the RAM units
             s = self.store
-            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.prefill, 2))
-            self.task = s.io.copy([(s.descriptors[c.name], c.host_view(), io[r])
+            io = s.io_pool.view(torch.int32, (s.roles, 1 + s.prefill, 3))
+            self.task = s.io.copy([(s.descriptors[c.name], *s.landing_view(c.name, device=False)[:1], io[r],
+                                    s.landing_view(c.name, device=False)[1], c.host_view())
                                    for r, c in enumerate(s.layer_classes[self.g])])
 
     @property

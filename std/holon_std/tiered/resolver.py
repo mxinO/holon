@@ -109,10 +109,13 @@ class DeviceResolver:
             store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
                           store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
                           store.classes32, store.owner, store.capacity, store.heat, store.io_device(), store.moves,
-                          store.n_moves)
+                          store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows)
             store.io.signal(self.io_slot)
             store.io.wait(self.io_slot)
-        self._gather(fetch, n)
+            self._gather(fetch, store.n_ram)                         # the RAM misses, then the landed SSD ones
+            self._gather(store.ssd, store.n_ssd, landed=True)
+        else:
+            self._gather(fetch, n)
         if store.exclusive:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
                 gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
@@ -169,13 +172,17 @@ class DeviceResolver:
                 store.errors.bitwise_or_(((2 * q > w) & (n[r:r + 1].clamp(max=width) > w)).int() * SHORT)
         return slots, part, [lambda i=i: landed(i) for i in range(parts)]
 
-    def _gather(self, fetch: torch.Tensor, n: torch.Tensor) -> None:
+    def _gather(self, fetch: torch.Tensor, n: torch.Tensor, landed: bool = False) -> None:
+        """The listed misses into their slots: from the RAM units, or (`landed`) the landing rows by their runs."""
+        store = self.store
+        srcs, runs = ([c.units() for c in self.classes], None) if not landed else \
+            map(list, zip(*(store.landing_view(c.name) for c in self.classes), strict=True))
         roles = getattr(self._fetch[0], "gather_roles", None)
         if roles is not None:                    # every role's misses in one launch
-            roles(fetch, n, [c.units() for c in self.classes], [c.slots() for c in self.classes])
+            roles(fetch, n, srcs, [c.slots() for c in self.classes], **({"runs": runs} if landed else {}))
         else:
             for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
-                gather(fetch[r], n[r:r + 1], c.units(), c.slots())
+                gather(fetch[r], n[r:r + 1], srcs[r], c.slots(), *([runs[r]] if landed else []))
 
     def done(self) -> None:
         """After the layer's expert passes (the step's ring moves on)."""

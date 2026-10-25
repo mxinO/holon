@@ -121,10 +121,11 @@ def moe_resolve(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor,
 def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.Tensor, n_fetch: torch.Tensor,
               stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
               piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
-              heat: torch.Tensor | None) -> dict:
-    """The `moe_tiers@1` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`,
-    `residency`, `host`, `owner` after it, `io` per role (n, then (piece, unit) pairs, as rows), `moves` [R, 4, F]
-    (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]."""
+              heat: torch.Tensor | None, rows: int | None = None) -> dict:
+    """The `moe_tiers@1` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`
+    (its RAM entries, in order: `n_ram` [R]), `residency`, `host`, `owner` after it, `io` per role (its rows (piece,
+    landing row, keep unit or −1)), `ssd` [R, 2, F] (the j-th SSD miss by id: (landing row j % `rows`, its slot)) and
+    `n_ssd` [R], `moves` [R, 4, F] (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]."""
     from .kernels import DECODE, PADDING
 
     g, (_, experts, roles) = group, residency.shape
@@ -199,19 +200,29 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
             j += 1
         host[g, a] = -1
     io = [[] for _ in range(roles)]
+    rows = rows or width
     ssd = sorted({-2 - int(fetch[r, 0, i]) for r in range(roles) for i in range(min(int(n_fetch[r]), width))
                   if int(fetch[r, 0, i]) <= -2})
-    for e in ssd:                                                        # 2. keeps, 3. the reads
+    lists = torch.full((roles, 2, width), -1, dtype=torch.int32)
+    landed = set()
+    for j, e in enumerate(ssd):                                          # 2. keeps, 3. the reads
         kept = None
         if e not in admitted and e in decode:
             kept = place(e, None)
-        for r, c in enumerate(cls):
+        for r in range(roles):
             i = next(i for i in range(min(int(n_fetch[r]), width)) if int(fetch[r, 0, i]) == -2 - e)
-            unit = kept[r] if kept is not None else int(capacity[c]) + i
-            io[r].append((int(piece[g, e, r]), unit))
-            fetch[r, 0, i] = unit
+            io[r].append((int(piece[g, e, r]), j % rows, kept[r] if kept is not None else -1))
+            lists[r, :, j] = torch.tensor([j % rows, int(fetch[r, 1, i])])
+            landed.add((r, i))
     owner[owner == -2] = -1
-    return {"fetch": fetch, "residency": residency, "host": host, "owner": owner, "io": io, "moves": moves,
+    ram = fetch.clone()
+    n_ram = torch.zeros(roles, dtype=torch.int32)
+    for r in range(roles):                                              # the RAM entries, in order
+        keep = [i for i in range(min(int(n_fetch[r]), width)) if (r, i) not in landed]
+        ram[r, :, :len(keep)] = fetch[r][:, keep]
+        n_ram[r] = len(keep)
+    return {"fetch": ram, "n_ram": n_ram, "residency": residency, "host": host, "owner": owner, "io": io,
+            "ssd": lists, "n_ssd": torch.full((roles,), len(ssd), dtype=torch.int32), "moves": moves,
             "n_moves": n_moves}
 
 

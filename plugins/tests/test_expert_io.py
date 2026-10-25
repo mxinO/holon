@@ -520,7 +520,8 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
     the SSD) or sent to the SSD; decode SSD misses kept the same way; every SSD read listed with its unit; the map, RAM
     units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is
-    displaced."""
+    displaced. SSD reads land in landing rows (docs/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
+    its io row (piece, row, keep unit), its own fetch list; the RAM entries stay in the fetch list, in order."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -541,23 +542,31 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
         records, after = [], residency
     t["residency"][layer] = after
     heat = t["heat"] if policy else None
+    rows = 3
     want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
-                               t["piece"], t["classes"], t["owner"], t["capacity"], heat)
+                               t["piece"], t["classes"], t["owner"], t["capacity"], heat, rows)
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
     delta = torch.tensor([(layer, a, b) for _, a, b in records] or [[0, 0, 0]], dtype=torch.int32).view(-1, 3)
     dev = {n: v.clone().to(device) for n, v in (t | {"fetch": fetch, "n_fetch": n_fetch, "stage": stage, "ids": ids,
                                                        "kinds": kinds, "delta": delta}).items()}
-    io = torch.zeros(ROLES, 1 + E, 2, dtype=torch.int32, device=device)
+    io = torch.zeros(ROLES, 1 + E, 3, dtype=torch.int32, device=device)
     moves = torch.zeros(ROLES, 4, E, dtype=torch.int32, device=device)
     n_moves = torch.zeros(ROLES, 2, dtype=torch.int32, device=device)
+    ssd = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
+    n_ssd, n_ram = (torch.zeros(ROLES, dtype=torch.int32, device=device) for _ in range(2))
     tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
           torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
                                                                          device=device),
           dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"],
-          dev["heat"] if policy else None, io, moves, n_moves)
-    for name in ("fetch", "residency", "host", "owner", "n_moves"):
-        assert torch.equal(dev[name].cpu() if name in dev else n_moves.cpu(), want[name]), name
+          dev["heat"] if policy else None, io, moves, n_moves, ssd, n_ssd, n_ram, rows)
+    for name in ("residency", "host", "owner"):
+        assert torch.equal(dev[name].cpu(), want[name]), name
+    assert torch.equal(n_moves.cpu(), want["n_moves"]) and torch.equal(n_ram.cpu(), want["n_ram"])
+    assert torch.equal(n_ssd.cpu(), want["n_ssd"])
+    for r in range(ROLES):
+        assert torch.equal(dev["fetch"][r, :, :int(n_ram[r])].cpu(), want["fetch"][r, :, :int(n_ram[r])])
+        assert torch.equal(ssd[r, :, :int(n_ssd[r])].cpu(), want["ssd"][r, :, :int(n_ssd[r])])
     for r in range(ROLES):
         assert io[r, 0, 0] == len(want["io"][r]) and io[r, 1:1 + len(want["io"][r])].cpu().tolist() == \
             [list(x) for x in want["io"][r]]
@@ -571,6 +580,8 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
     assert ((res == -1) == (host >= 0)).all() and ((res >= 0) | (res == -1) | (res == -2)).all()
     reads = sum(len(x) for x in want["io"])
     assert reads == sum(int((fetch[r, 0, :int(n_fetch[r])] <= -2).sum()) for r in range(ROLES))
+    assert all(int(want["n_ram"][r] + want["n_ssd"][r]) == int(n_fetch[r]) for r in range(ROLES))
+    assert all(row == j % rows for x in want["io"] for j, (_, row, _) in enumerate(x))
     if policy and tokens == 1:                                    # (the cases' coverage, checked once)
         assert records and (want["n_moves"][:, 0] > 0).all()         # victims demoted
     if tokens == 40:

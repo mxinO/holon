@@ -166,10 +166,12 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
 - `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
   stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
   int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None,
-  io [R, 1 + F, 2] int32, moves [R, 4, F] int32, n_moves [R, 2] int32)`, one layer call after its resolve (the
+  io [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram [R]
+  int32, rows: int)`, one layer call after its resolve (the
   resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
   each layer's role classes, each class's RAM units (`owner[c, u]`: the piece g·E + e, −1 free; units [0,
-  `capacity[c]`), then the class's I/O staging units capacity[c] + i), and the policy's heat (None: no displacement).
+  `capacity[c]`)), and the policy's heat (None: no displacement); SSD reads land in the class's landing rows
+  (docs/v1-glm.md D8f), `rows` of them a round.
   It provides the call's pieces no device-readable tier holds and keeps its RAM tier exclusive, in this order (ties
   by expert id; one writer: a call's decisions see the earlier ones):
   1. Its admissions (the records (group, a, b ≥ 0), in order): a is staged — its fetch entry gathers into a staging
@@ -181,9 +183,9 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
      no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them).
   2. Its SSD misses (fetch sources −2 − e) routed by a `DECODE` row and not admitted, in a call with one: kept in RAM
      (D10's keep rule) as b would be placed (free units, else the coldest when strictly colder), else not.
-  3. The SSD reads: per role the pieces (`piece`) and the units they land in — a kept piece its RAM unit, any other
-     the staging unit capacity[c] + i of its fetch entry i — in `io[r]` (n, then (piece, unit) pairs); those fetch
-     entries read that unit.
+  3. The SSD reads: the call's j-th SSD miss by id lands in landing row j % `rows` (round ⌊j / rows⌋): per role
+     `io[r]` (n, then (piece, row, keep) rows: keep its RAM unit if kept, else −1) and `ssd[r, :, j]` = (row, its
+     fetch entry's slot), `n_ssd[r]` of them; `fetch[r]`'s first `n_ram[r]` entries are its RAM entries, in order.
   The map, `host` and `owner` take the call's result (a resident, b and kept pieces in RAM or on the SSD, displaced
   experts on the SSD). `n_moves[r]` = (demotions, moves). Deterministic. Facts: experts, top_k, roles.
 
