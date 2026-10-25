@@ -241,14 +241,18 @@ class TieredStore:
                                           f"hold the rest, and the policy ({self.policy_ref}) own the cache on the "
                                           "device naming the heat it ranks by, or never edit it (host edits would "
                                           "copy from RAM units the graph moves)")
-            if not self.policy.device_owned or any(cap < self.prefill for cap in pinned) or self.exclusive:
-                # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging, an
-                # exclusive RAM tier would demote what it lends (not built): the staging slots hold a prefill pass's
-                # misses, and no step streams.
+            if not self.policy.device_owned or any(cap < self.prefill for cap in pinned):
+                # A host policy lends two-phase (not built), a small pinned cache cannot lend a pass's staging: the
+                # staging slots hold a prefill pass's misses, and no step streams.
                 self.ring_tokens = 0
                 self.staging = self.prefill
                 for c in self.classes.values():
                     c.staging = self.prefill
+            elif self.exclusive:
+                # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM for
+                # the SSD (its code −2, no RAM unit: the file always holds it), so its slots are free to overwrite at
+                # once. No step streams: the ring copies RAM units only, and an SSD-only piece has none.
+                self.ring_tokens = 0
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
@@ -362,7 +366,8 @@ class TieredStore:
             if not 0 <= c.cap <= len(c.pieces):
                 raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
             extents = [x for *_, x in c.pieces]
-            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=c.staging if self.exclusive else 0,
+            # (exclusive: a pass's SSD reads land in the tier's staging units, `moe_tiers@1`'s `capacity[c] + i`)
+            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=self.prefill if self.exclusive else 0,
                                   granule=self.granule)
             for t in self.tiers[1:]:
                 t.prepare(ctx, c.name, c.unit_bytes, extents)
@@ -432,7 +437,7 @@ class TieredStore:
         # that many of its hottest items first (`floors`), if its cap allows: a few cache slots more for it, where
         # staging slots of a pass's size in every class would hold more and cache nothing.
         # A staging layout keeps its own tail at the pool's end (`own_tail`): the large passes' buffers.
-        can_lend = self.policy.device_owned and not self.exclusive
+        can_lend = self.policy.device_owned
         # Beside fill classes, a pinned class (`cache`: an MTP head's experts, kept whole) is floored at its pins: a
         # profile that never counted its group would otherwise seed it last, F2's few of it only.
         pinned = {c.name: c.cap for c in classes if c.cache is not None} if self._pinned is None else {}
@@ -465,7 +470,11 @@ class TieredStore:
             budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
             seed = self.policy.seed(self._profile_counts(), budget)
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
-        self.stage = self.stages[classes[0].staging]
+        # Exclusive tiers: the graphed steps' stage list at a pass's width, its first `staging` entries their staging
+        # slots (the rest repeat the last: a graphed step misses no more), so every call's fetch list, `moe_tiers@1`'s
+        # moves and request rows are one width (F = `prefill`)
+        self.stage = self.stages[self.prefill if self.exclusive else classes[0].staging]
+        self._stage_slots = classes[0].staging
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
         free, arenas, at = {}, {}, 0
         for c in classes:
@@ -495,7 +504,8 @@ class TieredStore:
         self.residency.seed()
         self._copies.clear()
         self.ring.fill_(-1)
-        self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).expand(self.roles, -1))
+        self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).clamp(max=self.stage_slots - 1)
+                         .expand(self.roles, -1))
         self._mode, self.lent, self._parts = None, None, 1
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
@@ -521,8 +531,8 @@ class TieredStore:
         for c in classes:                                   # VRAM, a staging batch at a time
             arena, units = arenas[c.name]
             batch, host = pending[c.name], units.numpy()
-            for at in range(0, len(batch), c.staging):
-                part = batch[at:at + c.staging]
+            for at in range(0, len(batch), self.prefill):          # (the tier's staging units: `prepare`)
+                part = batch[at:at + self.prefill]
                 files.read([(e, host[c.held + j, o:o + e.nbytes]) for j, (n, _) in enumerate(part)
                             for e, o in _offsets(c.pieces[n][3])])
                 for j, (_, slot) in enumerate(part):
@@ -583,7 +593,7 @@ class TieredStore:
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
             self._mode = "ring" if prompt >= self.stream_tokens else "stage"
-        elif prompt and min(self.top_k * at, self.prefill) > self.stage.shape[1]:
+        elif prompt and min(self.top_k * at, self.prefill) > self.stage_slots:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
@@ -624,7 +634,7 @@ class TieredStore:
                                "1 = a task failed, 2 = a wait timed out)")
         mode = self._borrowing.pop(step.step, None)
         misses = int(telemetry["misses"][0])
-        width = int(telemetry["stage_width"][0]) if mode else self.stage.shape[1]
+        width = int(telemetry["stage_width"][0]) if mode else self.stage_slots
         self.peak_misses = max(self.peak_misses, misses)
         if misses > width:
             raise RuntimeError(f"{self.name}: a layer had {misses} distinct misses, {width} slots to stage them")
@@ -714,6 +724,12 @@ class TieredStore:
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     @property
+    def stage_slots(self) -> int:
+        """The staging slots of a step that borrows none: its stage list's (exclusive tiers pad theirs to a pass's
+        width with its last slot: `after_materialize`)."""
+        return self._stage_slots if self.exclusive else self.stage.shape[1]
+
+    @property
     def parts(self) -> int:
         """This step's staging ring of parts (`Lent`): its parts, or 1."""
         return self._parts
@@ -790,7 +806,7 @@ class TieredStore:
         call's number."""
         self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
         self.lent_call.masked_fill_(picked, call)
-        self.residency.device.masked_fill_(picked[..., None], -1)
+        self.residency.device.masked_fill_(picked[..., None], -2 if self.exclusive else -1)   # exclusive: to the SSD
         groups, items = picked.shape
         sink = self.delta.shape[1]
         at = (self.n_delta[:, None] + picked.cumsum(1) - 1).long()           # each group's records after its own

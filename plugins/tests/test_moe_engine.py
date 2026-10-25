@@ -867,14 +867,16 @@ def _gpu_engine(model, **kw) -> Engine:
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
                                            ("", "*=0.25 split"), ("", "*=0.75 pipe"),
-                                           ("", "*=0.25 ssd"),
+                                           ("", "*=0.25 ssd"), ("", "*=0.25 ssd1"),
                                            ("std.tiered.static@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
     """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
-    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs). F11's
+    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; at one
+    sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts going to the SSD, while its
+    own staging slots stay a graphed step's: docs/v1-glm.md D8b+e). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -885,11 +887,16 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
     file, prompts, want = gpu_moe
     cache, ring = cache.partition(" ")[::2]          # "ring" / "dma": steps of 32 prompt tokens or more stream (D8),
-    ssd, split = ring == "ssd", ring == "split"      # their copies on SMs / copy engines, "tail" lending a tail (D11)
+    one = ring == "ssd1"                             # (one sequence: a graphed step's staging below a pass's)
+    if one:                                          # the resident store at one sequence (GPU bits follow the rows)
+        resident = _gpu_engine(file, max_seqs=1)
+        want = _served(resident, prompts)
+        resident.close()
+    ssd, split = ring in ("ssd", "ssd1"), ring == "split"   # their copies on SMs / copy engines, "tail" a tail (D11)
     ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
     pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
                                                      # "pipe": prompt steps stage, their misses in 4 fetched parts
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
+    engine = _gpu_engine(file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
         "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
         "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"} | (
@@ -897,8 +904,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
     store = engine.ctx.shared_objects[KEY]
     commit, routed = store.after_commit, []          # per step: its decode rows' routes, and the counts the step left
-    store.after_commit = lambda step, t: routed.append((int(step.n_query.sum()) * 2 * 4 * bool(
-        (step.n_query == step.n_logits).all()), int(t["counts"].sum()))) or commit(step, t)   # decode, verify steps
+    store.after_commit = lambda step, t: routed.append((int(step.n_query[np.isin(step.row_kind, (    # its decode and
+        RowKind.DECODE, RowKind.VERIFY))].sum()) * 2 * 4, int(t["counts"].sum()))) or commit(step, t)   # verify rows
     mode = "warn" if ring == "dma" else "error"                   # "dma": one sync per streaming step, counted
     from holon_std.tiered.resolver import DeviceResolver
     piped, pipelined, rings = [], DeviceResolver._pipelined, []
@@ -918,7 +925,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     syncs = [w for w in syncs if "called a synchronizing" in str(w.message)]
     assert len(syncs) == (store.borrowed["ring"] if ring == "dma" else 0), (len(syncs), store.borrowed)
     assert engine.stats()["graphs"] > 0 and (store.peak_misses > 0) == (cache != "")
-    assert all(a == b for a, b in routed) and max(routed)[0] > 8      # top-2 x 4 layers; graph padding never counts
+    assert all(a == b for a, b in routed) and max(routed)[0] > (0 if one else 8)   # top-2 x 4 layers; no padding
     variant = {"": "moe_resolve.lfu@1", "placement.lru@1": "moe_resolve.lru@1"}.get(policy, "moe_resolve@1")
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {(variant, "kernels.expert_io"), ("expert_fetch@1", "kernels.expert_io"),
@@ -927,6 +934,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0
+    if one:                                          # exclusive tiers lend their prompt steps' staging (GLM D8b+e)
+        assert store.staging < store.prefill and store.lending and store.borrowed["stage"] > 0, store.borrowed
     if not policy:
         report = parity(trace)
         assert report["first_differing_step"] is None and (report["admissions"] > 0) == (cache != "" and cache != "*=0")
