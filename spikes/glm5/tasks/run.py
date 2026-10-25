@@ -10,7 +10,8 @@ degenerate = the limit hit inside the reasoning, no answer, or a 40-character sp
   temperature=0 <ids>`, `T <id>` per token, `DONE ...`), one request at a time, its end-of-turn ids given
   (`--eos-ids`); `--maya-flags` its step-0 default arm's, `--maya-env` that arm's environment.
 - `score`: per engine and category; the bar, stated before the first run (§6.2): Holon within 5 items of Maya's
-  score, and no Holon answer degenerate where Maya's is not (pooled rates, the owner's ruling of 2026-10-24);
+  score, and no Holon answer degenerate where Maya's is not, judged on pooled rates (the owner's ruling of
+  2026-10-24: Holon-only degenerate items are variance; the clause is met when Holon's rate does not exceed Maya's);
   `--samples` a short Markdown dump of 8 chosen items' Holon answers (e).
 
     python spikes/glm5/tasks/run.py generate --engine holon --model <...-00001-of-00003.gguf> --holon-flags '...' \\
@@ -162,8 +163,11 @@ def score(a) -> None:
     if {"holon", "maya"} <= set(runs):
         h, m = totals["holon"], totals["maya"]
         only = [i for i in rows if table["holon"][i]["degenerate"] and not table["maya"][i]["degenerate"]]
-        out["bar"] = {"tolerance_items": 5, "difference": h["correct"] - m["correct"], "holon_only_degenerate": only,
-                      "pass": h["correct"] >= m["correct"] - 5 and not only}
+        out["bar"] = {"tolerance_items": 5, "difference": h["correct"] - m["correct"],
+                      "degenerate_rates": [h["degenerate"] / h["of"], m["degenerate"] / m["of"]],
+                      "holon_only_degenerate": only,           # reported: variance, judged on the pooled rates
+                      "pass": (h["correct"] >= m["correct"] - 5
+                               and h["degenerate"] / h["of"] <= m["degenerate"] / m["of"])}
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps({"totals": totals, "bar": out.get("bar")}, indent=1))
     if a.samples and "holon" in runs:
