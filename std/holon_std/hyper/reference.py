@@ -49,12 +49,12 @@ def hc_mhc_mix(r: torch.Tensor, fn: torch.Tensor, base: torch.Tensor, scale: tor
     for _ in range(iters - 1):
         comb = comb / (comb.sum(dim=-1, keepdim=True) + hc_eps)
         comb = comb / (comb.sum(dim=-2, keepdim=True) + hc_eps)
-    out = (pre[:, :, None] * x.view(t, n, -1)).sum(dim=1).to(dtype)
+    out = (pre[:, :, None] * x.view(t, n, r.shape[1] // n)).sum(dim=1).to(dtype)
     return out, post, comb
 
 
 def hc_mhc_writeback(r: torch.Tensor, y: torch.Tensor, post: torch.Tensor, comb: torch.Tensor) -> None:
     """In place: R'_d = post_d · y + Σ_s comb[s, d] · R_s (HF's `post · y + combᵀ @ R`)."""
     n = post.shape[1]
-    rs = r.view(len(r), n, -1)
+    rs = r.view(len(r), n, r.shape[1] // n)
     rs.copy_(post[:, :, None] * y.float()[:, None, :] + torch.matmul(comb.transpose(-1, -2), rs))
