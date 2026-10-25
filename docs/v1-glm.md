@@ -338,8 +338,9 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     `ResidencyMap.commit` outside borrowing steps;
   - `LOG` (`store.py:56`) sized for the records;
   - **`lend_tail`** in `placement.promote@1`'s resolve (rev 9, B7-M1's first option, the lead's call): its CPU
-    reference and `kernels.promote`'s CUDA resolve release the policy's spares in the tail's range and unmap the
-    experts holding it, as `moe_resolve.lfu@1` does (`kernels/expert_io/plugin.py:81-89`; the contract's spares
+    reference and `kernels.promote`'s CUDA resolve release the policy's spares — as built, every spare of a lending
+    layer, its owner mapped back to its slots and lent (step 1's review A S1-M1) — and unmap the experts holding the
+    tail's range, as `moe_resolve.lfu@1` does (`kernels/expert_io/plugin.py:81-89`; the contract's spares
     clause, `moe/kernels.py:121-130`); an L0 against the reference and `exact.py` (F10 + exclusive tiers + tail lending,
     capped vs uncapped) — so F10 takes D9's 32K loan; the reference asserts ownership after a lending step's return
     (no slot both a spare and on the layer's empty stack or lent; A's nit);
@@ -431,9 +432,10 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
       a trailing round is empty — count 0, answered DONE at once, an empty gather and part.
     - **A graphed step never needs a second round** (its misses ≤ the decode bound ≤ A_od, asserted in the graph's
       resolve: a second round in a graphed step sets the store's error word).
-  - Counted under `host_memory` and mode (ii)'s limit: the landing pool's (depth × A_ra + A_od) rows a class,
-    **≈ 272–302 at A_ra 120–135 (≈ 1.9–2.1 GB pinned; §7.1)**; the RAM pool's I/O staging units go (`moe_tiers@1`'s
-    staging indices name landing rows now).
+  - Counted under `host_memory` and mode (ii)'s limit: the landing pool's (depth × A_ra + A_od) rows a role — one
+    pool a role, its classes sharing it (a layer's role is of one class; step 1's review C S1-m2), a row as wide as
+    the role's widest piece —, **≈ 272–302 at A_ra 120–135 (≈ 2.1–2.3 GB pinned: 4.34 + 3.22 MB a row; §7.1)**; the
+    RAM pool's I/O staging units go (`moe_tiers@2`'s staging indices name landing rows now).
   - **No bounce copy** (rev 9: D8f's own trigger fired, N3: the bounce costs 7% of a one-expert read; rev 10's
     layout, B9-M1). Each extent — **a gate/up piece is two extents (the gate and up tensors), a down piece one** — is
     read as its 4 KiB-aligned superset straight into its landing unit, and **the SSD fetch launch alone** (D8c's split:
@@ -465,12 +467,15 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     overwrite), `ondemand_round_unjoined` (round r + 1 signalled before round r's gather; its target configuration
     forces two rounds: a 250-token chunk with parts on and the on-demand range forced small by a test-only
     constructor argument), `graphed_round` (a graphed step forced past one round: the store's error word), and
-    `keep_read_ahead_unfilled` (A R7-M2's case: `max_seqs` 2, a 4K chunk beside a decode row, keep on), which **must
-    pass**: the case cannot arise. Rev 8's `landing_reuse_side_stream` and `landing_fill_unjoined` are dropped: no
+    `keep_copy_skipped` (a kept extent's copy into its RAM unit dropped: the copy task's L0 and the SSD bitwise runs
+    fail). A R7-M2's case (a read-ahead hit in a step that keeps) is an L0 of `moe_tiers@2`, not a plant: a hit is
+    never read or kept (step 1's review A S1-m2, C S1-m3). Rev 8's `landing_reuse_side_stream` and `landing_fill_unjoined` are dropped: no
     side stream reads SSD units now. **The two-round test runs under `exact.py` against the uncapped run.**
-- **A read-ahead expert is a plain SSD miss for placement** (A-m2): admission, the `keep` rule and heat see it exactly
-  as an SSD miss; "already read ahead" changes only which staging unit the fetch reads and that no on-demand read is
-  issued. So placement does not depend on whether the read finished first.
+- **A read-ahead expert is an SSD miss for admission and heat** (A-m2), **and never kept** (as built; step 1's review
+  A S1-m2): `moe_tiers@2` takes the hits off the SSD list before its keep step, so a hit stays SSD-only; "already read
+  ahead" changes which unit the fetch reads, that no on-demand read is issued, and that the piece is not kept. Placement
+  does not depend on whether the read finished first; the rule that a step with a decode row never reads ahead then
+  only keeps the keeps independent of read-ahead in mixed steps.
 - **Prefill read-ahead, one threshold:** for steps **≥ 2,048 tokens** (a constant, the line D9 used for its staging
   until rev 9), each MoE layer reads the next layer's SSD-only set ahead (its first A_ra: the whole set at GLM's A_ra,
   sized to the largest), 2 layers deep; below 2,048, each layer reads its own routed SSD-only set once routed, in
@@ -574,7 +579,9 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   with the file tier; `moe.ram` (experts per class, as above); `--host-memory`; the placement policy (F10 spares with
   keep once its `lend_tail` lands, else F11 with deferred admission and keep, D8), with `moe.ring_lend = tail` and
   `moe.lend_peak` stated explicitly at the lock's values; `moe.stream_tokens` above the step (the staging ring of
-  parts at every step size, D9); `moe.read_ahead` (A_ra, D8f); `kernels.cpu_task.io_depth` (N3). The step size is the
+  parts at every step size, D9); `moe.read_ahead` (A_ra, D8f); `kernels.cpu_task.io_depth` (N3); `moe.split = on`
+  (decode's RAM misses beside the hits' passes, on the high-priority stream, while the SSD reads run: step 1's review
+  C S1-M1). The step size is the
   lock's (32K). Nothing else differs from the lock.
 
 **D11 — The comparison protocol: FN's D11 as closed, with the run as the unit.**
@@ -804,7 +811,8 @@ that check's bound** (lead call 3, A-N2); until then the table gives the runner 
 | `landing_reuse_unfenced` | a read-ahead signal enqueued before the reading layer's gather | `exact.py` RAM-short, a 32K prompt, the staging ring of parts | differs |
 | `ssd_slots_in_ring` | rev 8's form: SSD entries staged in ring slots the RAM parts then overwrite | `exact.py` RAM-short, a 250-token chunk with parts on, two rounds | differs |
 | `ondemand_round_unjoined` | round r + 1 of an on-demand read signalled before round r's gather on main | `exact.py` RAM-short, a 250-token chunk with parts on, the on-demand range forced small (two rounds) | differs |
-| `keep_read_ahead_unfilled` | not a mutation: A R7-M2's case, `max_seqs` 2, a 4K chunk beside a decode row, keep on | `exact.py` RAM-short | **passes** (no read-ahead in a step with a decode row: the case cannot arise) |
+| `keep_copy_skipped` | a kept extent's copy into its RAM unit dropped (the I/O worker) | the copy task's L0, the SSD bitwise runs | fails, differs |
+| `parking_unwaited` | the step's first resolve does not wait for the parking copies | the parked test's fence check | fails (structural: the tiny copies finish first) |
 | `graphed_round` | a graphed step forced past one on-demand round | the store's error word | fails |
 | `aux_row_padding`, `lent-slot-still-mapped` (existing) | as FN / X | `exact.py` | differs |
 
@@ -840,7 +848,7 @@ The 5090's measured total is **31.448 GiB** (FN `evidence/fn_close_2026-10-24.js
   | Item | GiB | Note |
   |---|---|---|
   | RAM tier | ≈ 50.0 | equal to Maya's in experts (D10): ≈ 7,550 at its default 50 |
-  | I/O staging (D8f) | ≈ 1.8–2.0 | (2 × A_ra + A_od) = 272–302 units a class at A_ra 120–135 (1.9–2.1 GB) |
+  | I/O staging (D8f) | ≈ 1.9–2.1 | (2 × A_ra + A_od) = 272–302 rows a role at A_ra 120–135, 7.56 MB a row pair (2.1–2.3 GB) |
   | token table | 0.5 | `rows.place = token_embd:host` |
   | the process | ≈ 3–5 | est. |
   | **total** | **≈ 55–58 of 64** | |
@@ -1121,6 +1129,10 @@ parts loop gets one part for the hits and one per round, each gathered and compu
 admitted misses are staged in outside slots. 2. **Layers 3–4 read at the step's true start: deferred to step 7** (today
 at the first MoE resolve, ≈ 0.1–0.3 s exposed per long prompt); no hook used for what it does not mean — if it
 matters, a proper forward-start point is found or proposed then, with no core line unless the owner takes it.
+3. **Step 7's parts design is required, not optional** (step 1's review C): until the staging ring of parts lands
+under exclusive tiers, a mode (ii) prompt step gathers every miss before computing, and (ii) 32K reads ≈ 0.83–0.87
+against its 0.9 bar. 4. **The step-1 review's fix round** (A, B, C; §13): the order A's blocker and major, B's
+blocker and major, C's majors, then the minors; step 1's close checks re-run with parking and the loan together.
 
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
@@ -1167,6 +1179,19 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 
 
 ## 13. Review log
+
+### Step 1's code review (panels A, B, C; the lead's order, §11 call 4)
+
+| Finding | Disposition |
+|---|---|
+| A S1-B1 parking copies lent slots after the activation loan wrote them | **Fixed:** a loan step's lending and parking run before the loan is handed to the forward (`activations` starts the step); a lent expert holding a loan slot goes to the SSD; the copies on the fetch stream, waited at the first resolve; the bytes test with free RAM units, `parked` > 0 and the loan required |
+| A S1-M1 F10's `lend_tail` leaks released spares' slots | **Fixed:** every spare of a lending layer is released, its owner mapped back to its slots and lent, so its slots return at the step's end (a spare outside the tail also held slots the staging could not borrow: the required-loan test's second serve fell short); the reference asserts conservation; the GPU test checks it across a second serve |
+| B BS1-B1 kernels.promote imported placement.promote; `run_all.sh` skipped the import contracts | **Fixed:** kernels.promote's own `lend_tail`; `run_all.sh` fails without `lint-imports` |
+| B BS1-M1 `moe_tiers@1` changed non-additively | **Fixed:** `moe_tiers@2`; the contract checker still compares names (contracts are prose: a text fingerprint would flag additive changes too) |
+| C S1-M1 round 0 signalled after the RAM gather | **Fixed:** signalled right after `moe_tiers`; the SSD bitwise test checks the order; `moe.split = on` in mode (ii)'s override set (D10); the nsys check on the next 5090 slot |
+| C S1-M2 parking on the critical path | **Fixed with S1-B1:** a loan step (every mode (ii) lending step) parks at its start on the fetch stream (8 CTAs, beside dense layers 0–2), waited at layer 3's resolve |
+| C S1-M3 no in-engine I/O evidence | **Fixed:** the worker's counters (`io_stats`: bytes, busy time, latency by request size), a timed completion wait instead of the 10 µs sleep; the attribution arms on the next 5090 slot |
+| Minors: A S1-m1 (abandon epoch), A S1-m2 (a hit never kept), B BS1-m1 (test-only counters), BS1-m2 (`exclusive_flag`), BS1-m3 (one-thread copy task, `io_threads` guard), the `fetches()` nit, C S1-m1 (per-extent keeps), S1-m2 (a landing pool a role, §7.1, the exclusive reserve test), S1-m3 (the L0 and `keep_copy_skipped`) | **Fixed** as each finding asks (D8f, §6.2's plants, §7.1) |
 
 ### During step 1 (the lead's calls, §11)
 
