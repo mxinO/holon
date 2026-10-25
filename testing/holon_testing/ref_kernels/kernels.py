@@ -312,11 +312,13 @@ class CpuTask:
 class CpuExperts:
     """`cpu_experts@1`'s oracle; a task over fixed buffers runs it (synchronous only: no `native`)."""
 
-    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, **facts) -> None:
-        self.gate_up, self.down, self.inter, self.top_k = gate_up, down, inter, top_k
+    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, glu_limit: float = 0.0,
+                 **facts) -> None:
+        self.gate_up, self.down, self.inter, self.top_k, self.limit = gate_up, down, inter, top_k, glu_limit
 
     def __call__(self, jobs, x, gate_up, down, rows, threads: int = 1) -> None:
-        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k))
+        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k,
+                                   self.limit))
 
     def task(self, jobs, x, gate_up, down, rows):
         return lambda: self(jobs, x, gate_up, down, rows)

@@ -228,11 +228,13 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
   and down piece `down[v]`, applied to x[entry // k] for each of its entries, into `rows[entry]`; rows of other entries
   are left as they are. Each input row is quantized to gate/up's ggml-cpu `vec_dot_type` (Q8_K for the k- and
   i-quants, Q8_0 for Q4_0, Q5_0, Q8_0, IQ4_NL), each (weight row, token) one ggml-cpu dot, `silu(g) · u` in f32 as
-  `g / (1 + exp(−g)) · u`, quantized to down's `vec_dot_type`, one dot per (row, token). A token's row is bitwise the
-  same whatever the other tokens of its job, the other jobs and the thread count (rows are split across threads,
-  never K): D7. `task(jobs, x, gate_up, down, rows)`: a `cpu_task@1` task over those buffers (host memory the device
-  maps, fixed for the engine's life). Facts: gate_up, down (their layouts), hidden, inter, top_k, tokens (T), jobs
-  (J). Providers carry the CPU's tier (`Constraint.cpu_isa`): ggml-cpu's reductions differ by ISA. The oracle
+  `g / (1 + exp(−g)) · u` (with the fact `glu_limit` L, given only when set: g = min(g, L), u = clamp(u, −L, L)
+  first, as `linear_experts@2`'s; docs/v1-glm.md D6), quantized to down's `vec_dot_type`, one dot per (row, token). A
+  token's row is bitwise the same whatever the other tokens of its job, the other jobs and the thread count (rows are
+  split across threads, never K): D7. `task(jobs, x, gate_up, down, rows)`: a `cpu_task@1` task over those buffers
+  (host memory the device maps, fixed for the engine's life). Facts: gate_up, down (their layouts), hidden, inter,
+  top_k, tokens (T), jobs (J)[, glu_limit]. Providers carry the CPU's tier (`Constraint.cpu_isa`): ggml-cpu's
+  reductions differ by ISA. The oracle
   (`reference.cpu_experts`) dequantizes the weights and quantizes the activations as ggml-cpu does, accumulating in
   float64: it bounds a kernel within the L0 budget; ggml-cpu itself is the bitwise reference.
 - `moe_patch_rows@1`: instance `publish(x [T, H], cpu [T, k] int32, out [T', H] f32)`: `out[t]` = x[t] in f32 for every

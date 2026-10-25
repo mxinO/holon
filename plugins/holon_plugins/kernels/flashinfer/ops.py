@@ -1,4 +1,5 @@
-"""FlashInfer kernels for the small per-token ops: rmsnorm, add_rmsnorm, rope (std.ops) and silu_mul (std.ffn).
+"""FlashInfer kernels for the small per-token ops: rmsnorm, add_rmsnorm, rope (std.ops) and silu_mul (std.ffn; its
+clamp, `glu_limit`, a torch clamp before FlashInfer's kernel).
 
 Op contracts are documented next to their references (std.ops.kernels, std.ffn.kernels). FlashInfer's norms take
 2-D input, so leading dimensions are flattened. RoPE uses a cos/sin cache computed with the reference's formula, so
@@ -48,8 +49,25 @@ class Rope:
 
 
 class SiluMul:
-    def __init__(self, ctx, *, inter: int, dtype: str) -> None:
-        pass
+    """`silu_mul@1`; with `glu_limit` L (docs/v1-glm.md D6) gate and up first clamped, in one torch clamp against
+    per-column bounds (gate's at L, up's at ±L: a named static, L exact in the dtype, `supports_glu_limit`), so
+    FlashInfer's silu_and_mul then computes silu(min(gate, L)) · clamp(up, −L, L) from the clamped values exactly (a
+    NaN kept, as the reference's clamp)."""
+
+    def __init__(self, ctx, *, inter: int, dtype: str, glu_limit: float = 0.0) -> None:
+        self.bounds = None
+        if glu_limit:
+            self.bounds = ctx.static(f"flashinfer.glu_bounds[{inter},{glu_limit},{dtype}]", (2, 2 * inter),
+                                     getattr(torch, dtype))
+            self.bounds[0, :inter], self.bounds[0, inter:], self.bounds[1] = -float("inf"), -glu_limit, glu_limit
 
     def __call__(self, gate_up: torch.Tensor) -> torch.Tensor:
+        if self.bounds is not None:
+            gate_up = torch.clamp(gate_up, self.bounds[0], self.bounds[1])
         return flashinfer.silu_and_mul(gate_up)
+
+
+def supports_glu_limit(f: dict) -> bool:
+    """No clamp, or one whose limit the dtype holds exactly (the clamp runs in the activations' dtype)."""
+    limit = f.get("glu_limit", 0.0)
+    return not limit or torch.tensor(limit, dtype=getattr(torch, f["dtype"])).item() == limit

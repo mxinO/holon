@@ -31,14 +31,17 @@ bool ggml_cuda_should_use_topk_moe(const ggml_tensor * gating_op,
                                    const ggml_tensor * ids);
 
 // Holon: the MoE router in one launch (topk-moe.cu), for up to HOLON_ROUTER_MAX_ROWS rows: weights and ids of the top
-// `n_expert_used` of the softmax over x · Wᵀ in f32 (x [n_rows, hidden] bf16 or f32, W [n_experts, hidden] f32;
-// hidden a multiple of 4 · WARP_SIZE · HOLON_ROUTER_WARPS), divided by their sum clamped at `clamp_val` (-INFINITY: not
-// renormalised); `logits` [n_rows, n_experts] f32 its scratch, `done` one zeroed counter per HOLON_ROUTER_ROWS rows,
-// left zeroed; `x_q8_1`, unless NULL, receives x as quantize_row_q8_1_cuda writes it (the experts' mmvq input).
+// `n_expert_used` of the softmax (or, `sigmoid`, the sigmoid) over x · Wᵀ in f32 (x [n_rows, hidden] bf16 or f32, W
+// [n_experts, hidden] f32; hidden a multiple of 4 · WARP_SIZE · HOLON_ROUTER_WARPS), chosen by score + `bias` [n_experts]
+// where given (NULL: by score), divided by their sum clamped at `clamp_val` (-INFINITY: not renormalised), times
+// `scale`: topk_moe_cuda's arithmetic; `logits` [n_rows, n_experts] f32 its scratch, `done` one zeroed counter per
+// HOLON_ROUTER_ROWS rows, left zeroed; `x_q8_1`, unless NULL, receives x as quantize_row_q8_1_cuda writes it (the
+// experts' mmvq input).
 #define HOLON_ROUTER_WARPS 4
 #define HOLON_ROUTER_ROWS 4
 #define HOLON_ROUTER_MAX_ROWS 16
 
 void ggml_cuda_holon_moe_router(const void * x, bool x_bf16, const void * w, bool w_bf16, int n_rows, int hidden,
                                 int n_experts, int n_expert_used, float clamp_val, float * logits, unsigned int * done,
-                                float * weights, int32_t * ids, void * x_q8_1, cudaStream_t stream);
+                                float * weights, int32_t * ids, void * x_q8_1, const float * bias, bool sigmoid,
+                                float scale, cudaStream_t stream);

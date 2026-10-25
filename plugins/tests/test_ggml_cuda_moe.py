@@ -65,11 +65,13 @@ from holon_plugins.kernels.ggml_cuda.plugin import (
     IDS_J_TOKENS,
     IDS_J_TOKENS_DEFAULT,
     NATIVE_FP4,
+    PASS_OPTION,
     PASS_PROVEN,
     PASS_ROWS,
     PREC,
     TYPES,
     Prepared,
+    pass_rows,
     q8_1_bytes,
 )
 from holon_std.moe import reference
@@ -149,11 +151,12 @@ def stack(name: str, experts: int, out: int, k: int, seed: int, blocks: np.ndarr
 
 
 def experts(ctx, name: str, k: int, out: int, rows_per_token: int, glu: str = "none", n: int = E,
-            act_dtype: str = "bfloat16", act_quant: str = "a8"):
-    """A `linear_experts` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula."""
+            act_dtype: str = "bfloat16", act_quant: str = "a8", **extra):
+    """A `linear_experts` of ggml type `name` (or of an HF layout, `"nvfp4/hf"`), held to its workspace formula;
+    `extra` facts (`glu_limit`)."""
     facts = {"layout": name if "/" in name else f"ggml.{name}/gguf.native", "experts": n, "in": k, "out": out,
              "top_k": K, "rows_per_token": rows_per_token, "glu": glu, "act_dtype": act_dtype, "out_dtype": "float32",
-             "act_quant": act_quant}
+             "act_quant": act_quant} | extra
     spec = ctx.select_kernel("linear_experts@2", site="l0", **facts)
     assert spec.provider == "kernels.ggml_cuda" and {"graph_safe", "deterministic"} <= spec.props
     kernel, device = spec.impl(ctx, **facts), torch.cuda.current_device()
@@ -217,16 +220,17 @@ def check(y: torch.Tensor, ref: torch.Tensor, k: int, what: str, special: bool =
 
 
 def check_swiglu(lib, fused, none, s: Stack, x: torch.Tensor, ids: torch.Tensor, what: str,
-                 fused_parts: dict | None = None) -> None:
+                 fused_parts: dict | None = None, limit: float = 0.0) -> None:
     """`glu="swiglu"` against our SwiGLU of the `glu="none"` output: bitwise where mmq ran, within the fp32 budget
     where mmvq's fused gate did. `fused_parts`: the fused kernel's (the stack's with its [2, E] scale2), the scales
-    then applied by ours."""
+    then applied by ours; `limit`: the fused kernel's `glu_limit`, then ours."""
     fused_parts = s.parts if fused_parts is None else fused_parts
     y, gate_up = fused(x, fused_parts, ids), none(x, s.parts, ids)
     ours = torch.empty_like(y)
     scale2 = fused_parts.get("scale2")
     if len(y):
-        lib.swiglu(gate_up, ours, *((None,) * 3 if scale2 is None else (scale2[0], scale2[1], ids.view(-1))))
+        lib.swiglu(gate_up, ours, *((None,) * 3 if scale2 is None else (scale2[0], scale2[1], ids.view(-1))),
+                   limit=limit)
     for a in range(0, len(ids), CHUNK):
         c = slice(a, a + CHUNK)
         if len(ids[c]) > fused.mmvq_tokens:
@@ -282,6 +286,56 @@ def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
     if kernel.pass_rows > CHUNK:
         ids, x = uniform(9 * CHUNK, n, seed=9), gate_up_input(9 * CHUNK, seed=9)
         check_pass_rows(kernel, s.parts, x, ids, name)
+
+
+def test_pass_rows_rule():
+    """docs/v1-glm.md D9's pass size: an option unset or at most PASS_ROWS keeps today's arithmetic exactly (FN's
+    4,096 at top-10: 3,072; a 2,048-token step budget: 2,048; an unproven pair: CHUNK); only an option above
+    PASS_ROWS takes the new rule (the option within the step budget, MAX_PAIRS // top_k and the entry's proven rows),
+    and an option past the entry's rows is refused, naming them."""
+    def rows(sm, name, top_k, option=None, step=None):
+        options = {"plugins": {} if option is None else {PASS_OPTION: option}} | (
+            {} if step is None else {"max_step_tokens": step})
+        return pass_rows(types.SimpleNamespace(fingerprint=types.SimpleNamespace(sm=sm), options=options), name,
+                         "q8_1", top_k)
+
+    assert rows(86, "iq3_s", 10, 4096) == rows(120, "iq2_s", 10, 4096) == 3072            # FN's
+    assert rows(86, "q4_k", 8) == rows(86, "q4_k", 8, 4096) == PASS_ROWS
+    assert rows(86, "q4_k", 8, step=2048) == rows(89, "q4_k", 8, 2048) == 2048
+    assert rows(86, "q5_k", 8, 16384) == CHUNK                                              # unproven: CHUNK
+    assert rows(86, "iq2_xxs", 8, 16384, 32768) == 16384                                    # GLM's
+    assert rows(86, "iq3_xxs", 8, 16384, 8192) == 8192
+    assert rows(86, "iq2_s", 10, 16384, 32768) == 25 * CHUNK                                # MAX_PAIRS // 10
+    assert rows(86, "iq2_xxs", 8, 8192, 32768) == 8192
+    with pytest.raises(ValueError, match="past the 4096 rows q4_k"):
+        rows(86, "q4_k", 8, 8192)
+    with pytest.raises(ValueError, match="past the 16384 rows iq2_xxs"):
+        rows(86, "iq2_xxs", 8, 32768)
+
+
+@pytest.mark.parametrize("name", ["iq2_xxs", "iq2_s", "iq3_xxs"])
+def test_passes_of_16384_rows(sm, name):
+    """D9's L0 for PASS_PROVEN's 16,384-row entries (GLM's expert types): under `ggml_cuda.pass_rows` = 16,384 a
+    call of whole CHUNKs up to 16,384 rows — 131,072 (token, expert) pairs at top-8, the id helper's MAX_PAIRS, its
+    device-wide sort — gives each row its own 512-row chunk's bits (holon_testing's check), for GLM's gate/up (merged,
+    SwiGLU clamped) and down (an input row per slot), 128 experts. Run on an SM whose entry is not yet 16,384 it proves
+    one (the entry patched for the run)."""
+    bound = PASS_PROVEN.get((sm, name, "q8_1"))
+    if bound is None:
+        pytest.skip(f"sm_{sm}: {name} is not PASS_PROVEN")
+    rows = 16384
+    ctx16 = BuildContext(PluginSet(discover()), torch.device("cuda"),
+                         options={"max_step_tokens": rows, "plugins": {PASS_OPTION: rows}})
+    with mock.patch.dict(PASS_PROVEN, {(sm, name, "q8_1"): rows}):
+        gate_up = experts(ctx16, name, H, 2 * INTER, 1, "swiglu", n=EQ, glu_limit=8.0)
+        down = experts(ctx16, name, INTER, H, K, n=EQ)
+    assert gate_up.pass_rows == down.pass_rows == rows
+    ids = uniform(rows, EQ, seed=31)
+    sg, sd = stack(name, EQ, 2 * INTER, H, seed=32), stack(name, EQ, H, INTER, seed=33)
+    check_pass_rows(gate_up, sg.parts, gate_up_input(rows, seed=34), ids, f"{name} gate/up")
+    check_pass_rows(down, sd.parts, down_input(rows, seed=35), ids, f"{name} down")
+    if bound != rows:
+        print(f"sm_{sm}: {name} holds its chunks' bits at {rows} rows (PASS_PROVEN's entry: {bound})")
 
 
 @pytest.mark.parametrize("name", ["q4_k", "iq3_xxs", "q6_k", "q4_0", "q2_k"])
@@ -941,7 +995,7 @@ def test_moe_router(ctx, lib, n, hidden):
                     continue
                 def logits_of(rows_: torch.Tensor) -> torch.Tensor:
                     out = torch.full((len(rows_), n), float("nan"), device="cuda")
-                    lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n), *out.shape,
+                    lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n, hidden), *out.shape,
                                                                      device="cuda"), out)
                     return out
                 gemm = logits_of(x)
@@ -961,9 +1015,91 @@ def test_moe_router(ctx, lib, n, hidden):
             gemm = None
             if n % 64 == 0:
                 gemm = torch.empty(len(x), n, device="cuda")
-                lib.moe_router_logits(x, r, torch.empty(lib.moe_router_partials(n), *gemm.shape, device="cuda"), gemm)
+                lib.moe_router_logits(x, r, torch.empty(lib.moe_router_partials(n, hidden), *gemm.shape, device="cuda"),
+                                      gemm)
             held.append((logits, w[:, :min(K, n)], ids[:, :min(K, n)], gemm))
         assert all(bitwise(a, b) for a, b in zip(*held, strict=True) if a is not None), "a bf16 router's bits"
+
+
+GLM = {"scoring": "sigmoid", "bias": True, "scale": 2.5}          # docs/v1-glm.md D6's routing facts
+
+
+def check_sigmoid(logits: torch.Tensor, weights: torch.Tensor, ids: torch.Tensor, k: int, bias: torch.Tensor,
+                  scale: float, exact_weights: bool = True) -> None:
+    """D6's routing against the reference: picks up to near-ties of score + bias (fast-math `__expf` moves a score by
+    a few ulps), ids unique and in range; with `exact_weights` (no near-ties) the reference's weights within 1e-5."""
+    want_w, want_ids = reference.moe_topk(logits, k, True, "sigmoid", bias, scale)
+    assert ids.dtype == torch.int32 and ids.is_contiguous() and weights.is_contiguous()
+    assert all(len(set(row)) == k and 0 <= min(row) and max(row) < logits.shape[1] for row in ids.tolist())
+    choice = torch.sigmoid(logits.double()) + bias.double()
+    got, want = choice.gather(1, ids.long()), choice.gather(1, want_ids.long())
+    tied = (got - want).abs() <= TIE * want.abs().clamp_min(1)
+    assert tied.all(), f"picks differ beyond near-ties at {(~tied).nonzero()[:4].tolist()}"
+    if exact_weights:
+        torch.testing.assert_close(weights, want_w, rtol=TIE, atol=1e-7)
+
+
+@pytest.mark.parametrize("n,k,hidden", [(288, 8, 4096), (8, 2, 512), (128, K, H)])
+def test_glm_routing(ctx, lib, n, k, hidden):
+    """docs/v1-glm.md D6 on both routing paths: sigmoid scores, a selection bias (choosing only), renormalised, × 2.5.
+    `moe_topk` against the reference (picks up to near-ties, weights within 1e-5; near-tie logits; E = 288 too, a
+    topk-moe.cu instance that is not a power of 2). The fused router (up to `rows` tokens, `HOLON_ROUTER_CASE(288)`):
+    its logits within the f32 budget of the f64 product, row-invariant (1- to 16-row calls), its weights and ids
+    bitwise `moe_topk`'s on those logits. Prompt chunks (E a multiple of 32: the router GEMM, at 288 its 32-expert tile
+    and 4 chains of 1,024): the GEMM's logits within the f32 budget and row-invariant across calls of 512 rows and
+    more, the plugin's routing bitwise `moe_topk` on them; a calling site without the bias it was bound with, or with
+    one it was bound without, is refused."""
+    gen = torch.Generator().manual_seed(n + k)
+    router = (torch.randn(n, hidden, generator=gen) / hidden ** 0.5).cuda()
+    bias = (0.5 * torch.randn(n, generator=gen)).cuda()
+    x = torch.randn(CHUNK + 188, hidden, generator=gen).bfloat16().cuda()
+    facts = {"experts": n, "top_k": k, "renormalize": True} | GLM
+    choose = select(ctx, "moe_topk@1", **facts)
+    route = select(ctx, "moe_router@1", hidden=hidden, dtype="bfloat16", **facts)
+    for tokens in (1, 13, 256):
+        logits = (2 * torch.randn(tokens, n, generator=gen)).cuda()
+        check_sigmoid(logits, *choose(logits, bias), k, bias, 2.5)
+        near = (torch.randn(tokens, n, generator=gen).round(decimals=1) + 1e-6 * torch.randn(tokens, n,
+                                                                                          generator=gen)).cuda()
+        check_sigmoid(near, *choose(near, bias), k, bias, 2.5, exact_weights=False)
+    want = x.double() @ router.double().T
+    rows = lib.moe_router_rows()
+    done = torch.zeros(lib.moe_router_tiles(rows), dtype=torch.int32, device="cuda")
+
+    def fused(rows_: torch.Tensor):
+        logits = torch.full((len(rows_), n), float("nan"), device="cuda")
+        w, ids = torch.empty(len(rows_), k, device="cuda"), torch.empty(len(rows_), k, dtype=torch.int32,
+                                                                            device="cuda")
+        lib.moe_router(rows_, router, logits, done, w, ids, True, sigmoid=True, bias=bias, scale=2.5)
+        return logits, w, ids
+    logits, w, ids = fused(x[:rows])
+    r = l0.check(logits, want[:rows], torch.float32, hidden)
+    assert r.passed, r
+    assert all(map(bitwise, choose(logits, bias), (w, ids)))
+    assert all(map(bitwise, route(x[:rows], router, bias), (w, ids)))
+    for a, b in ((0, 1), (5, 8), (13, 16)):                                  # row-invariant
+        assert all(map(bitwise, fused(x[a:b]), (logits[a:b], w[a:b], ids[a:b]))), f"rows {a}:{b}"
+    assert not done.any(), "tile counters left set"
+    if n % 32:
+        assert all(map(bitwise, route(x, router, bias), choose(torch.nn.functional.linear(x.float(), router), bias)))
+    else:
+        assert route.prefill and lib.moe_router_partials(n, hidden) == {288: 4, 128: 16}[n]
+
+        def gemm(rows_: torch.Tensor) -> torch.Tensor:
+            out = torch.full((len(rows_), n), float("nan"), device="cuda")
+            lib.moe_router_logits(rows_, router, torch.empty(lib.moe_router_partials(n, hidden), *out.shape,
+                                                             device="cuda"), out)
+            return out
+        whole = gemm(x)
+        r = l0.check(whole, want, torch.float32, hidden)
+        assert r.passed, f"router GEMM: {r}"
+        for a, b in ((0, CHUNK), (len(x) - CHUNK, len(x)), (3, 70)):
+            assert bitwise(gemm(x[a:b]), whole[a:b]), f"router GEMM rows {a}:{b}"
+        assert all(map(bitwise, route(x[:CHUNK], router, bias), choose(whole[:CHUNK], bias)))
+    with pytest.raises(ValueError, match="selection bias"):
+        route(x[:1], router)
+    with pytest.raises(ValueError, match="selection bias"):
+        select(ctx, "moe_topk@1", experts=n, top_k=k, renormalize=True)(logits, bias)
 
 
 def test_the_router_prepares_the_gate_up_input(ctx, lib):
@@ -1051,6 +1187,39 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
     gb, ub = x[:, :INTER].bfloat16(), x[:, INTER:].bfloat16()
     want = g / (1 + torch.exp(-g)) * u
     assert not l0.check((torch.nn.functional.silu(gb) * ub).float(), want, torch.float32, 1).passed
+    limit = 7.0                                    # docs/v1-glm.md D6's clamp: binding on a sizeable share of both
+    assert (g > limit).double().mean() >= 0.05 and (u.abs() > limit).double().mean() >= 0.05
+    lib.swiglu(x, y, limit=limit)
+    gl, ul = g.clamp(max=limit), u.clamp(-limit, limit)
+    r = l0.check(y, gl / (1 + torch.exp(-gl)) * ul, torch.float32, 1)
+    assert r.passed, f"clamped: {r}"
+    # ggml's fminf / fmaxf drop a NaN (min(NaN, L) = L) where the reference's clamp keeps it: recorded, not matched
+    nan = x[:1].clone()
+    nan[0, 0] = nan[0, INTER] = float("nan")
+    lib.swiglu(nan, y[:1], limit=limit)
+    assert torch.isfinite(y[0, 0]) and torch.isnan(reference.swiglu(nan[0, :1], nan[0, INTER:INTER + 1], limit)).all()
+
+
+@pytest.mark.parametrize("name", ["q8_0", "iq2_xxs", "iq2_s", "iq3_xxs"])
+def test_swiglu_clamp_on_every_path(ctx, lib, name):
+    """docs/v1-glm.md D6's clamp, `glu_limit` (GLM's expert types and the tiny model's Q8_0): the clamped merged
+    stack against our SwiGLU, clamped (as ggml's SWIGLU_CLAMP), of the `glu="none"` output — bitwise where mmq ran
+    (its fused store where the stack takes it, else our kernel), within the fp32 budget where mmvq's fused gate did —
+    at 1, t, t + 1, 64 and 513 tokens, with a limit binding on ≥ 5% of the gate values and ≥ 5% of the up values; the
+    unclamped stack's output differs (the clamp is applied)."""
+    none = experts(ctx, name, H, 2 * INTER, 1)
+    s = stack(name, E, 2 * INTER, H, seed=21)
+    probe = none(gate_up_input(64, seed=22), s.parts, uniform(64, E, seed=22))
+    limit = float(probe.abs().quantile(0.75))
+    gate, up = probe[..., :INTER], probe[..., INTER:]
+    assert (gate > limit).float().mean() >= 0.05 and (up.abs() > limit).float().mean() >= 0.05, "the clamp binds"
+    fused = experts(ctx, name, H, 2 * INTER, 1, "swiglu", glu_limit=limit)
+    plain = experts(ctx, name, H, 2 * INTER, 1, "swiglu")
+    t = fused.mmvq_tokens
+    for tokens in (1, t, t + 1, 64, CHUNK + 1):
+        ids, x = uniform(tokens, E, seed=tokens), gate_up_input(tokens, seed=tokens)
+        check_swiglu(lib, fused, none, s, x, ids, f"{name} T={tokens} clamped at {limit:.3g}", limit=limit)
+        assert not torch.equal(fused(x, s.parts, ids), plain(x, s.parts, ids)), f"{name} T={tokens}: not clamped"
 
 
 def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
@@ -1064,7 +1233,7 @@ def test_router_logits_within_the_fp32_budget(ctx, monkeypatch):
     want = x.double() @ unit.router.double().T
     seen = []
     route = unit._router.topk
-    monkeypatch.setattr(unit._router, "topk", lambda logits: seen.append(logits.clone()) or route(logits))
+    monkeypatch.setattr(unit._router, "topk", lambda logits, bias=None: seen.append(logits.clone()) or route(logits))
 
     def logits() -> torch.Tensor:
         seen.clear()

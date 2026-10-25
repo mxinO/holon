@@ -5,8 +5,10 @@ other side, so the budget is tight for nine rows in ten and one such flip's size
 and a token's row bitwise the same alone (one job, one thread) as grouped with other tokens and jobs at 1 and 7
 threads — the batch-invariance check, which catches a kernel that splits K for grouped tokens (L0's own mutation
 test); a malformed job table fails the task instead of reading past a buffer. Synthetic Q8_0 / Q4_0 experts always,
-and Q8_0 / Q2_0 (FN's down type); the development vehicle's own classes (Q4_K with Q6_K or Q4_K down, UD-IQ3_XXS's)
-and FN IQ2_XS's three (inter 640) when their files are cached. Prebuild links each tier in its own process."""
+and Q8_0 / Q2_0 (FN's down type), and Q8_0 / Q4_0 with GLM's clamp (docs/v1-glm.md D6: `glu_limit`, binding on a
+sizeable share of the gate and up values; ggml's SWIGLU_CLAMP form); the development vehicle's own classes (Q4_K with
+Q6_K or Q4_K down, UD-IQ3_XXS's) and FN IQ2_XS's three (inter 640) when their files are cached. Prebuild links each tier
+in its own process."""
 import pathlib
 
 import gguf
@@ -19,7 +21,7 @@ from huggingface_hub.constants import HF_HUB_CACHE
 
 VEHICLE = pathlib.Path(HF_HUB_CACHE) / "models--unsloth--Qwen3-30B-A3B-GGUF" / "snapshots"
 FN = pathlib.Path(HF_HUB_CACHE) / "models--ISTA-DASLab--Qwen3.8-Flash-Next-GSQ-RCO-GGUF" / "snapshots"
-CASES = [("synthetic", None, None), ("synthetic", None, "q2_0"),
+CASES = [("synthetic", None, None), ("synthetic", None, "q2_0"), ("synthetic-clamped", None, None),
          ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 0),   # Q6_K down
          ("Q4_K_M", "Qwen3-30B-A3B-Q4_K_M.gguf", 6), ("UD-IQ3_XXS", "Qwen3-30B-A3B-UD-IQ3_XXS.gguf", 0),
          # FN's IQ2_XS (inter 640, not a multiple of 256): IQ2_S, IQ2_XXS and IQ1_M gate/up with Q2_0 down
@@ -84,14 +86,21 @@ def _table(spec: list[tuple[int, list[int]]]) -> torch.Tensor:
 def test_cpu_experts_match_the_oracle_and_a_token_is_bitwise_alone_or_grouped(plugin, name, file, layer):
     plugin, tier = plugin
     gu_layout, dn_layout, hidden, inter, gu, dn = _experts(name, file, layer)
+    limit = 0.6 if name.endswith("-clamped") else 0.0
     kernel = plugin.CpuExperts(plugin.Modules(), tier, None, gate_up=gu_layout, down=dn_layout, hidden=hidden,
-                               inter=inter, top_k=K, tokens=T, jobs=J)
+                               inter=inter, top_k=K, tokens=T, jobs=J, **({"glu_limit": limit} if limit else {}))
     x = torch.randn(T, hidden, generator=torch.Generator().manual_seed(1))
     e = len(gu)
     spec = [(1 % e, [0, 9, 18]), (2 % e, [1]), (e - 1, [2, 11, 20, 29, 38, 47, 56, 63]), (0, [3, 12])]
     jobs, used = _table(spec), [x for _, entries in spec for x in entries]
     rows = torch.full((T * K, hidden), 7.0)
-    want = reference.cpu_experts(jobs, x, gu, dn, rows, gu_layout, dn_layout, inter, K)
+    want = reference.cpu_experts(jobs, x, gu, dn, rows, gu_layout, dn_layout, inter, K, limit)
+    if limit:                          # the clamp binds, and changes the rows
+        g = torch.stack([torch.from_numpy(gguf.quants.dequantize(gu[ex].numpy(), gguf.GGMLQuantizationType.Q8_0))
+                         .reshape(2 * inter, hidden).double() @ x[en[0] // K].double() for ex, en in spec])
+        assert (g[:, :inter] > limit).double().mean() >= 0.05 and (g[:, inter:].abs() > limit).double().mean() >= 0.05
+        assert not torch.equal(want[used], reference.cpu_experts(jobs, x, gu, dn, rows, gu_layout, dn_layout, inter,
+                                                                 K)[used])
     alone = rows.clone()
     for expert, entries in spec:
         for entry in entries:
@@ -129,3 +138,27 @@ def test_prebuild_links_each_tier_in_its_own_process(monkeypatch, tmp_path):
     calls.clear()
     prebuild.main(["--tier", "x86-avx512"])                                             # one tier: in this process
     assert calls == [("in-process", "x86-avx512")]
+
+
+def test_the_cpu_share_binds_the_clamp():
+    """docs/v1-glm.md D6: std.moe's CPU share binds `cpu_experts@1` with the gate/up stack's `glu_limit` where it is
+    set (GLM's experts), and without the fact where it is not (every other site's facts as they were)."""
+    import types
+
+    from holon_std.moe.cpu import CpuShare
+
+    bound = []
+    ctx = types.SimpleNamespace(
+        static=lambda name, shape, dtype: torch.zeros(shape, dtype=dtype),
+        select_kernel=lambda op, site, **facts: bound.append((op, facts)) or types.SimpleNamespace(
+            impl=lambda ctx, **f: types.SimpleNamespace(bind=lambda layer: 0, errors=None)),
+        dtype=torch.bfloat16)
+    store = types.SimpleNamespace(top_k=K, items=8, watch=lambda errors: None)
+    share = CpuShare(ctx, store, plan=[0, 1, 1, 2, 2, 3, 3, 4, 4], tokens=T)
+    for limit in (10.0, 0.0):
+        gate_up = types.SimpleNamespace(in_features=512, out=512, cls=None, glu_limit=limit,
+                                        layout_fact=lambda ctx: "ggml.q8_0/gguf.native")
+        down = types.SimpleNamespace(cls=None, layout_fact=lambda ctx: "ggml.q4_0/gguf.native")
+        share.bind(ctx, gate_up, down)
+        facts = next(f for op, f in reversed(bound) if op == "cpu_experts@1")
+        assert facts.get("glu_limit") == (limit or None), facts
