@@ -1,7 +1,10 @@
 {
  "date": "2026-10-25",
  "doc": "docs/v1-glm.md §9 step 3, §6.1, §13 (step 3)",
- "commits": ["1bb7fb15 std units, contracts, references", "8cd4eaf3 models.glm5_next, bundle, CPU proof"],
+ "commits": [
+  "1bb7fb15 std units, contracts, references",
+  "8cd4eaf3 models.glm5_next, bundle, CPU proof"
+ ],
  "core_diff_lines_vs_merge_base": 0,
  "fixtures_after_step2_folds": {
   "note": "step 2's review folds (b6a43fd2) rebuilt both fixtures (F32 tensors kept f32, references from the GGUF's own state); these pins replace the step-2 evidence's",
@@ -45,5 +48,83 @@
  "static": {
   "run_all.sh": "the static checks pass (contract listings regenerated); lint-imports 8 kept, 0 broken",
   "check_lock_impact": "warns: the branch outdates committed locks (merge with the propagation round)"
+ },
+ "review_folds": {
+  "note": "step 3's review minors folded at step 4's start (docs/v1-glm.md §13, step 3's code review); CPU, the pinned tiny f32 GGUF",
+  "clean (prompt and decode logprobs, top-1, DSA sets incl. decode rows, greedy tokens)": {
+   "chunk 128": {
+    "logprob": 1.9e-06,
+    "top1": 0,
+    "sets": 0,
+    "tokens": 0
+   },
+   "chunk 7": {
+    "logprob": 9.5e-07,
+    "top1": 0,
+    "sets": 0,
+    "tokens": 0
+   },
+   "chunk 13": {
+    "logprob": 1.9e-06,
+    "top1": 0,
+    "sets": 0,
+    "tokens": 0
+   }
+  },
+  "comb vs float64 Sinkhorn (chunk 13, prompt 0)": {
+   "clean": 1.7e-06,
+   "bound": 1e-05,
+   "mhc_sinkhorn_short": 0.0073
+  },
+  "plants (chunk 13; detector, floor, measured)": {
+   "mhc_comb_transposed": [
+    "logprob",
+    0.1,
+    {
+     "logprob": 0.544,
+     "top1": 49,
+     "sets": 188,
+     "tokens": 31
+    }
+   ],
+   "router_bias_in_weights": [
+    "logprob",
+    0.1,
+    {
+     "logprob": 0.355,
+     "top1": 99,
+     "sets": 279,
+     "tokens": 46
+    }
+   ],
+   "kda_state_not_carried": [
+    "logprob",
+    0.1,
+    {
+     "logprob": 0.376,
+     "top1": 3,
+     "sets": 9,
+     "tokens": 0
+    }
+   ],
+   "dsa_pool_ape_off": [
+    "sets",
+    50,
+    {
+     "logprob": 0.0016,
+     "top1": 0,
+     "sets": 289,
+     "tokens": 0
+    }
+   ],
+   "mhc_sinkhorn_short": [
+    "comb",
+    0.001,
+    {
+     "comb": 0.0073
+    }
+   ]
+  },
+  "sub-batched vs unsplit (rows 64)": "bitwise (tokens and logprobs) at 1 and 32 threads"
  }
 }

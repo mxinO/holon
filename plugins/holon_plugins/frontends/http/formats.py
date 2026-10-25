@@ -340,7 +340,8 @@ class GlmXML(QwenXML):
     """glm_xml@1 (GLM-5.3-Flash, docs/v1-glm.md D13): `<tool_call>NAME<arg_key>KEY</arg_key><arg_value>VALUE
     </arg_value>…</tool_call>`, no newlines. The arguments stream as JSON a pair at a time, as qwen_xml@2's: the
     template writes strings raw and other values as JSON (`tojson`); a value that does not read as one of its
-    schema's types stays a string."""
+    schema's types stays a string. Without a schema type, a raw string that parses as JSON (`123`, `true`) reads as
+    typed: the format writes strings unquoted, so it cannot tell them apart."""
 
     MARKERS = {"name": (ARG_KEY, END_CALL), "args": (ARG_KEY, END_CALL), "key": (END_ARG_KEY,),
                "open": (ARG_VALUE,), "value": (END_ARG_VALUE,)}

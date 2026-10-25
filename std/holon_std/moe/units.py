@@ -138,7 +138,8 @@ class ExpertLinear(nn.Module):
                 "out": self.out_features, "top_k": self.top_k, "rows_per_token": self.rows_per_token,
                 "glu": self.glu, "act_dtype": _dtype(self.act_dtype), "out_dtype": "float32",
                 "act_quant": "a16" if self.layout is None else _act_quant(ctx)} | (
-            {"glu_limit": float(self.glu_limit)} if self.glu and self.glu_limit else {})     # (only when set: D6)
+            {"glu_limit": float(self.glu_limit)} if self.glu_limit else {})    # only when set (D6); an unmerged gate
+        #                                       stack carries it too: the offload arena takes its facts from the gate
 
     @property
     def kernel(self):

@@ -228,7 +228,9 @@ state specs, replay buffers, in-step conv publishes and rewind flow; kernels fro
   **one masked value for both, `−inf`** (A-n4): for KDA `g = −5 · σ(−inf) = −0` exactly for any `A_log`, for GDN
   `softplus(−inf) = 0` and `σ(−inf) = 0`, the same bits as today's −1e4 — so GDN's locks advance byte-identical (checked
   at the step). `β = 0` on masked rows. Tests: a masked row leaves the state bitwise unchanged on the chunked path
-  (FLA's 16-row sub-chunks) and the recurrent path.
+  (FLA's 16-row sub-chunks) and the recurrent path. **Kept ahead of MTP on purpose** (step 3's review, B3-m2): no KDA
+  rewind runs while MTP is deferred (D7), but the generalised contract is tested and bit-identical for GDN, and MTP
+  needs it as it stands.
 - **o_norm:** `gated_rmsnorm@1` gains a fact `round = "none"` (passed only for KDA): the norm stays f32 through the
   weight and gate (HFm:385-397).
 - **The whole mixer is sub-batched** (D9): the unit runs its projections, convs, gates, kernel, gated norm and
@@ -1235,6 +1237,23 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | the router's `torch.topk` breaks ties as HF leaves them | wrapped per router call with the stable descending sort, beside the indexer's `Tensor.topk` (D2) |
 | §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
 | the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
+
+### Step 3's code review (panels A, B, C: clean; minors folded into step 4)
+
+| Finding | Disposition |
+|---|---|
+| A m1 decode checked by its tokens only | **Fixed:** the greedy run's logprobs per token against the fixture's head input (1e-4) and its decode rows' DSA sets |
+| B3-m1 the bundle copied without `derived_from` | **Fixed:** `derived_from = models.qwen4_exp`, scoped to the bundle's `Tokenizer` and `_parsed` |
+| B3-m2 `gdn_rewind@1` generalised ahead of MTP | **Kept on purpose** (D4) |
+| B3-m3 `causal_conv1d@1`'s f32 weights without a fact | **Fixed:** fact `weight_dtype` (only when not `dtype`), refused by `kernels.gdn_triton` until its L0 covers f32 weights (step 4) |
+| B3-m4 duplicated state views, conv publish, call pages | **Fixed:** `_state_views`, `_publish_conv`, `_fresh_rows` (gdn), `_call_pages` (qsa) |
+| B systemic: providers ignore unknown facts | plan §10's follow-ups (a core change) |
+| C m1 `mhc_sinkhorn_short` caught by 5.8× on logprob only | **Fixed:** every mix's comb against HF's formula in float64 (clean 1.7e-6, the plant 7.3e-3) |
+| C m2 plants record no margin | **Fixed:** a pre-registered detector and floor per plant; the measured margins in the step-3 evidence |
+| C m3 the CPU split bound | **Fixed:** split vs unsplit bitwise on the CPU; the GPU's bound is the L0's, not 1e-5 |
+| C m4 step 4 kernel notes | Step 4: the mHC comb and its normalisations stay f32; KDA's chunked kernel keeps FLA's 16-row sub-chunks (cumulative log-decay ≤ ≈ 80 nats at the −5 bound), with a gate-at-the-bound case in its L0; the GPU indexer's set check accepts a swap at the top-k edge within a recorded ε |
+| C m5 `torch.cat` of sub-batch outputs | **Fixed:** one preallocated output, written a piece at a time (KDA, DSA's query path, the FFN) |
+| Nits (`glu_limit` guard, `glm_xml` untyped values, `adopt_weights`' reason, KDA's shared state names) | **Fixed** (docstrings and the guard) |
 
 ### Step 3 (units, contracts, the model plugin)
 

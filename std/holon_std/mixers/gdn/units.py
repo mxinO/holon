@@ -114,6 +114,36 @@ def _facts(params: dict, dtype: str) -> dict:
             "dtype": dtype}
 
 
+def _state_views(state: tuple, conv_dtype: torch.dtype, conv_shape: tuple, ssm_shape: tuple, conv_pool=None,
+                 ssm_pool=None) -> tuple[torch.Tensor, torch.Tensor]:
+    """A layer's view of the conv and delta-rule pools (the specs' own, or payload pools of their layout): conv states
+    [units, *conv_shape] of `conv_dtype`, delta-rule states [units, *ssm_shape] f32. `state`: (conv bound, ssm bound,
+    the layer's index among the specs' layers), as GDN and KDA hold it."""
+    (conv_spec, own_conv), (_, own_ssm), index = state
+    conv_pool, ssm_pool, n = conv_pool or own_conv, ssm_pool or own_ssm, len(conv_spec.layers)
+    conv = conv_pool.view(conv_dtype, (n, conv_pool.capacity, *conv_shape))
+    return conv[index], ssm_pool.view(torch.float32, (n, ssm_pool.capacity, *ssm_shape))[index]
+
+
+def _publish_conv(target: torch.Tensor, x: torch.Tensor, rows: torch.Tensor, units: torch.Tensor, kernel: int) -> None:
+    """In-step conv checkpoints: the K−1 inputs before each checkpointed position (`rows`, K−1 per unit), into
+    `target`'s `units`."""
+    window = x.index_select(0, rows).view(len(units), kernel - 1, x.shape[1]).transpose(1, 2)
+    target.index_copy_(0, units, window.to(target.dtype))
+
+
+def _fresh_rows(x: torch.Tensor, ctx, conv_shape: tuple, ssm_shape: tuple):
+    """A model-only build's rows, each a whole sequence from zero state: (lens, query_start, conv states, delta-rule
+    states, slots, has_init)."""
+    qs = ctx.batch.dev.query_start
+    lens = qs.diff().tolist()
+    rows = len(lens)
+    conv = x.new_zeros(rows, *conv_shape)
+    ssm = torch.zeros(rows, *ssm_shape, dtype=torch.float32, device=x.device)
+    return (lens, qs, conv, ssm, torch.arange(rows, device=x.device),
+            torch.zeros(rows, dtype=torch.bool, device=x.device))
+
+
 class GDN(nn.Module):
     @classmethod
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
@@ -187,10 +217,8 @@ class GDN(nn.Module):
 
     def _states(self, conv_pool=None, ssm_pool=None) -> tuple[torch.Tensor, torch.Tensor]:
         """This layer's view of the conv and delta-rule pools (the specs' own, or payload pools of their layout)."""
-        (conv_spec, own_conv), (_, own_ssm), index = self._state
-        ssm_pool, n = ssm_pool or own_ssm, len(conv_spec.layers)
-        ssm = ssm_pool.view(torch.float32, (n, ssm_pool.capacity, self.hv, self.dv, self.dk))
-        return self._conv_states(conv_pool or own_conv)[index], ssm[index]
+        return _state_views(self._state, self.conv_weight.dtype, (self.channels, self.kernel - 1),
+                            (self.hv, self.dv, self.dk), conv_pool, ssm_pool)
 
     def _conv_states(self, pool) -> torch.Tensor:
         """Every layer's conv states in `pool`: [layers, units, C, K-1]."""
@@ -210,13 +238,8 @@ class GDN(nn.Module):
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         t = x.shape[0]
         if self._state is None:
-            qs = ctx.batch.dev.query_start
-            lens = qs.diff().tolist()
-            rows = len(lens)
-            conv_state = x.new_zeros(rows, self.channels, self.kernel - 1)
-            ssm_state = torch.zeros(rows, self.hv, self.dv, self.dk, dtype=torch.float32, device=x.device)
-            slots = torch.arange(rows, device=x.device)
-            has_init = torch.zeros(rows, dtype=torch.bool, device=x.device)
+            lens, qs, conv_state, ssm_state, slots, has_init = _fresh_rows(
+                x, ctx, (self.channels, self.kernel - 1), (self.hv, self.dv, self.dk))
             rule, handle = self._rule, self._rule.plan(lens)
         else:
             meta = ctx.meta(GROUP)
@@ -242,8 +265,7 @@ class GDN(nn.Module):
         if self._state is not None:
             if meta.conv is not None:                       # in-step conv checkpoints: the inputs before each position
                 pool, rows, units = meta.conv
-                window = qkv.index_select(0, rows).view(len(units), self.kernel - 1, self.channels).transpose(1, 2)
-                self._states(conv_pool=ctx.pool(pool))[0].index_copy_(0, units, window.to(conv_state.dtype))
+                _publish_conv(self._states(conv_pool=ctx.pool(pool))[0], qkv, rows, units, self.kernel)
             if meta.ssm_pool is not None:
                 snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
         if self._state is not None and meta.chunks is not None:     # a mixed step: decode rows, then the chunks
@@ -365,7 +387,9 @@ class KDA(nn.Module):
     "none"`) → `o_proj`. Its state is GDN's two `Slot` specs (the conv windows of q, k, v in the model dtype; the
     recurrent [H, Dv, Dk] f32), GDN's planner and in-step checkpoints. With `rows` > 0 a prompt step runs as sub-batches
     of at most `rows` tokens (D9, `KDAPlanner`): bitwise the unsplit recurrence (the rule's contract), the projections'
-    bits per sub-batch. Speculative verify rows (MTP, deferred by D7) are not served."""
+    bits per sub-batch. Speculative verify rows (MTP, deferred by D7) are not served. Its state group and specs are
+    GDN's names (`recurrent`, `CONV` / `SSM`): one model cannot mix GDN and KDA layers (the group would be declared
+    twice); none does."""
 
     @classmethod
     def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
@@ -413,7 +437,8 @@ class KDA(nn.Module):
         self.A_log, self.dt_bias, self.norm_weight = f32(heads), f32(width), f32(head_dim)
         dtype = str(ctx.dtype).removeprefix("torch.")
         site = f"std.mixers.kda[layer={layer}]"
-        conv = {"channels": self.channels, "kernel_size": conv_kernel, "dtype": dtype}
+        conv = {"channels": self.channels, "kernel_size": conv_kernel, "dtype": dtype} | (
+            {"weight_dtype": "float32"} if dtype != "float32" else {})        # (the convs stay f32; not dtype)
         norm = {"dim": head_dim, "eps": norm_eps, "dtype": dtype, "out_gate": "sigmoid", "round": "none"}
         self._conv = ctx.select_kernel(kernels.CAUSAL_CONV1D, site=site, **conv).impl(ctx, **conv)
         self._norm = ctx.select_kernel(kernels.GATED_RMSNORM, site=site, **norm).impl(ctx, **norm)
@@ -431,25 +456,25 @@ class KDA(nn.Module):
             self.conv_q = self.conv_k = self.conv_v = None
 
     def _states(self, conv_pool=None, ssm_pool=None) -> tuple[torch.Tensor, torch.Tensor]:
-        (conv_spec, own_conv), (_, own_ssm), index = self._state
-        conv_pool, ssm_pool, n = conv_pool or own_conv, ssm_pool or own_ssm, len(conv_spec.layers)
-        conv = conv_pool.view(self._dtype, (n, conv_pool.capacity, self.channels, self.kernel - 1))
-        ssm = ssm_pool.view(torch.float32, (n, ssm_pool.capacity, self.h, self.d, self.d))
-        return conv[index], ssm[index]
+        return _state_views(self._state, self._dtype, (self.channels, self.kernel - 1), (self.h, self.d, self.d),
+                            conv_pool, ssm_pool)
 
     def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
         if self._state is None:
             return self._whole_sequences(x, ctx)
         meta = ctx.meta(GROUP)
-        if meta.subs:
-            return torch.cat([self._sub_batch(x[s.lo:s.hi], s, meta, ctx) for s in meta.subs])
+        if meta.subs:                                       # into one output: a piece's at a time (C-m5)
+            out = x.new_empty(x.shape)
+            for s in meta.subs:
+                out[s.lo:s.hi] = self._sub_batch(x[s.lo:s.hi], s, meta, ctx)
+            return out
         conv_state, ssm_state = self._states()
         qkv, f, b, gate_in = self._project(x)
         mixed = self._conv(qkv, self.conv_weight, conv_state, meta.slots, meta.query_start, meta.has_init)
         snapshot = None
         if meta.conv is not None:                           # in-step conv checkpoints: the inputs before each position
             pool, rows, units = meta.conv
-            self._publish_conv(qkv, rows, units, pool, ctx)
+            _publish_conv(self._states(conv_pool=ctx.pool(pool))[0], qkv, rows, units, self.kernel)
         if meta.ssm_pool is not None:
             snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1]
         if meta.chunks is not None:                         # a mixed step: decode rows, then the chunks
@@ -468,17 +493,12 @@ class KDA(nn.Module):
         qkv, f, b, gate_in = self._project(x)
         mixed = self._conv(qkv, self.conv_weight, conv_state, sub.slots, sub.query_start, sub.has_init)
         if sub.conv is not None:
-            self._publish_conv(qkv, *sub.conv, meta.conv_pool, ctx)
+            _publish_conv(self._states(conv_pool=ctx.pool(meta.conv_pool))[0], qkv, *sub.conv, self.kernel)
         snapshot = self._states(ssm_pool=ctx.pool(meta.ssm_pool))[1] if meta.ssm_pool is not None else None
         o = self._rule_call(meta.rule, sub.handle, mixed, f, b, ssm_state, sub.slots, sub.has_init, snapshot)
         for i, unit in sub.at_end:                          # a checkpoint at a piece's end: the state it left
             snapshot[unit].copy_(ssm_state[sub.slots[i]])
         return self._out(o, gate_in)
-
-    def _publish_conv(self, qkv: torch.Tensor, rows: torch.Tensor, units: torch.Tensor, pool: str, ctx) -> None:
-        window = qkv.index_select(0, rows).view(len(units), self.kernel - 1, self.channels).transpose(1, 2)
-        target = self._states(conv_pool=ctx.pool(pool))[0]
-        target.index_copy_(0, units, window.to(target.dtype))
 
     def _project(self, x: torch.Tensor):
         qkv = torch.cat([self.q_proj(x), self.k_proj(x), self.v_proj(x)], dim=-1)
@@ -498,11 +518,8 @@ class KDA(nn.Module):
 
     def _whole_sequences(self, x: torch.Tensor, ctx) -> torch.Tensor:
         """A model-only build: each sequence from zero state."""
-        lens = ctx.batch.dev.query_start.diff().tolist()
-        rows, qs = len(lens), ctx.batch.dev.query_start
-        conv_state = x.new_zeros(rows, self.channels, self.kernel - 1)
-        ssm_state = torch.zeros(rows, self.h, self.d, self.d, dtype=torch.float32, device=x.device)
-        slots, has_init = torch.arange(rows, device=x.device), torch.zeros(rows, dtype=torch.bool, device=x.device)
+        lens, qs, conv_state, ssm_state, slots, has_init = _fresh_rows(
+            x, ctx, (self.channels, self.kernel - 1), (self.h, self.d, self.d))
         qkv, f, b, gate_in = self._project(x)
         mixed = self._conv(qkv, self.conv_weight, conv_state, slots, qs, has_init)
         o = self._rule_call(self._rule, self._rule.plan(lens), mixed, f, b, ssm_state, slots, has_init)

@@ -10,9 +10,12 @@ with prompt logprobs, one-shot and in chunks of 7 and 13 tokens, and as its 100-
 - The F32 tensors the release keeps (the selection bias, A_log, dt_bias, the convs, mHC base and scale) load as f32
   with the file's bits (A_log through its −exp, as the judge reads it).
 - Prefix hit vs recompute: bitwise. A short row beside a long one attends every block it sees, as alone (D5).
-  Sub-batched (`rows`, D9): the same greedy tokens and logprobs within 1e-5, unsplit and off a prefix hit.
+  Sub-batched (`rows`, D9): bitwise the unsplit run; off a prefix hit, the same tokens, logprobs within 1e-5.
+- The decode run's tokens are HF's, each one's logprob within 1e-4 of the fixture's, its DSA sets HF's (A-m1).
+- mHC's comb against HF's formula in float64 (C-m1).
 - §6.3's plants the tiny CPU runs (`mhc_comb_transposed`, `mhc_sinkhorn_short`, `dsa_pool_ape_off`,
-  `router_bias_in_weights`, `kda_state_not_carried`) each fail the HF check.
+  `router_bias_in_weights`, `kda_state_not_carried`) are each caught by a pre-registered detector, by at least its
+  floor (C-m2).
 - The quantized loads `llama-quantize` leaves f32 in the fixtures (A-m1): a GGUF with Q6_K `attn_k_b` / `attn_v_b` and
   Q8_0 indexer and KDA-gate tensors, loaded through the recipe, against gguf-py's dequantization, bitwise.
 
@@ -42,6 +45,7 @@ pytestmark = pytest.mark.skipif(GGUF is None, reason=SKIP)
 CHUNKS = (128, 7, 13)
 DECODE = SamplingParams(temperature=0.0, max_tokens=g.DECODE, ignore_eos=True)
 PROMPT_LP = SamplingParams(temperature=0.0, max_tokens=1, ignore_eos=True, prompt_logprobs=1)
+DECODE_LP = SamplingParams(temperature=0.0, max_tokens=g.DECODE, ignore_eos=True, logprobs=1)
 
 
 @pytest.fixture(scope="module")
@@ -76,52 +80,129 @@ def _record(engine: Engine) -> dict:
 
 
 def _ask(engine: Engine, ids: list[int], params: SamplingParams):
-    rid, tokens, lp = engine.add(ids, params), [], None
+    """Run one request: its generated tokens, its prompt logprobs (or None), its generated tokens' logprobs."""
+    rid, tokens, lp, decode = engine.add(ids, params), [], None, []
     while engine.has_work():
         for d in engine.step():
             if d.rid == rid:
                 tokens += d.token_ids
                 lp = d.prompt_logprobs if d.prompt_logprobs is not None else lp
-    return tokens, lp
+                decode += d.logprobs.token if d.logprobs is not None else []
+    return tokens, lp, decode
 
 
 @pytest.mark.parametrize("chunk", CHUNKS)
 def test_the_engine_matches_hf(tiny, chunk):
-    _check(tiny, chunk)
+    stats = _check(tiny, chunk)
+    assert stats["logprob"] <= 1e-4, stats                         # f32 against f32 HF: summation order only
+    assert stats["top1"] == stats["sets"] == stats["tokens"] == 0, stats
 
 
-@pytest.mark.parametrize("plant", ["mhc_comb_transposed", "mhc_sinkhorn_short", "dsa_pool_ape_off",
-                                   "router_bias_in_weights", "kda_state_not_carried"])
+# Each plant's pre-registered detector and floor (C-m2): the check that must catch it, and by how much at least.
+# Measured at step 3's close (chunk 13): evidence/glm_step3_close_2026-10-25.json, `plants`.
+PLANT_FLOORS = {"mhc_comb_transposed": ("logprob", 0.1), "router_bias_in_weights": ("logprob", 0.1),
+                "kda_state_not_carried": ("logprob", 0.1), "dsa_pool_ape_off": ("sets", 50),
+                "mhc_sinkhorn_short": ("comb", 1e-3)}
+
+
+@pytest.mark.parametrize("plant", sorted(PLANT_FLOORS))
 def test_plants_fail(tiny, plant):
-    """§6.3's plants the tiny CPU model runs: each leaves HF's logits, tokens or selections (chunked, 13)."""
+    """§6.3's plants the tiny CPU model runs (chunked, 13): each is caught by its pre-registered detector by at least
+    its floor — the clean run sits at ≤ 2e-6 in logprob, 0 sets and 1.7e-6 in comb (`test_the_engine_matches_hf`,
+    `test_the_comb_is_a_float64_sinkhorns`)."""
     from holon_judge.planted import PLANTS
 
-    with PLANTS[plant](), pytest.raises(AssertionError):
-        _check(tiny, 13)
+    detector, floor = PLANT_FLOORS[plant]
+    with PLANTS[plant]():
+        stats = _comb_error(tiny) if detector == "comb" else _check(tiny, 13)
+    print(f"plant {plant}: {stats}")
+    assert (stats if detector == "comb" else stats[detector]) >= floor, (plant, stats)
 
 
-def _check(tiny, chunk: int) -> None:
+def _check(tiny, chunk: int) -> dict:
+    """The engine against the fixtures, per prompt: the greedy run (its tokens and each one's logprob, its DSA sets),
+    then the prompt-logprob run over the 124 ids (each position's logprob, top-1, DSA sets). Returns the largest
+    |Δ logprob| and the counts of top-1 flips, set mismatches and token mismatches."""
     path, fixtures, _, head = tiny
+    stats = {"logprob": 0.0, "top1": 0, "sets": 0, "tokens": 0}
     for p, prompt in enumerate(g.prompts()):
         ids, x = fixtures[f"p{p}.ids"].tolist(), fixtures[f"p{p}.x"]
-        engine = _engine(path, chunk)
-        assert _ask(engine, prompt, DECODE)[0] == ids[len(prompt):]                       # greedy: HF's tokens
-        seen = _record(engine)
-        _, lp = _ask(engine, ids, PROMPT_LP)
         want = torch.log_softmax(x @ head.T, dim=-1)                                       # the fixture's logits
-        got = torch.tensor(lp.token)
         ref = want[torch.arange(len(ids) - 1), torch.tensor(ids[1:])]
-        assert (got - ref).abs().max() <= 1e-4, (chunk, p, (got - ref).abs().max())
-        assert [t[0] for t in lp.top_ids] == want[:-1].argmax(-1).tolist()
-        for layer in (3, 7):                                                               # DSA's token sets
-            sets, chosen = fixtures[f"p{p}.sets.{layer}"], {}
-            for positions, blocks in seen[layer]:
-                for t, row in zip(positions.tolist(), blocks.tolist(), strict=True):
-                    chosen[t] = {4 * b + i for b in row if b >= 0 for i in range(4) if 4 * b + i <= t}
-            for t in range(len(ids)):
-                want_set = {s for s in sets[t].tolist() if s >= 0}
-                assert chosen.get(t, set(range(t + 1))) == want_set, (chunk, p, layer, t)
+        engine = _engine(path, chunk)
+        seen = _record(engine)
+        tokens, _, decode = _ask(engine, prompt, DECODE_LP)
+        n = len(prompt)
+        stats["tokens"] += sum(a != b for a, b in zip(tokens, ids[n:], strict=True))
+        if tokens == ids[n:]:                                  # decode logprobs: of HF's tokens, at their positions
+            _worst(stats, torch.tensor(decode) - ref[n - 1:])
+        _sets(stats, fixtures, p, seen, range(n, len(ids) - 1))     # the decode rows' (the last token is not fed)
+        for calls in seen.values():
+            calls.clear()
+        _, lp, _ = _ask(engine, ids, PROMPT_LP)
+        _worst(stats, torch.tensor(lp.token) - ref)
+        stats["top1"] += sum(a[0] != b for a, b in zip(lp.top_ids, want[:-1].argmax(-1).tolist(), strict=True))
+        _sets(stats, fixtures, p, seen, range(len(ids)))
         engine.close()
+    return stats
+
+
+def _worst(stats: dict, delta: torch.Tensor) -> None:
+    stats["logprob"] = max(stats["logprob"], float(delta.abs().max()))
+
+
+def _sets(stats: dict, fixtures: dict, p: int, seen: dict, positions: range) -> None:
+    """Count the positions whose selected tokens (DSA layers 3 and 7) are not HF's (a dense step: every earlier one)."""
+    for layer in (3, 7):
+        sets, chosen = fixtures[f"p{p}.sets.{layer}"], {}
+        for at, blocks in seen[layer]:
+            for t, row in zip(at.tolist(), blocks.tolist(), strict=True):
+                chosen[t] = {4 * b + i for b in row if b >= 0 for i in range(4) if 4 * b + i <= t}
+        stats["sets"] += sum(chosen.get(t, set(range(t + 1))) != {s for s in sets[t].tolist() if s >= 0}
+                             for t in positions)
+
+
+def test_the_comb_is_a_float64_sinkhorns(tiny):
+    """C-m1: every mHC mix's comb (the kernel's output, chunked at 13) against HF's formula in float64 from the same
+    R and weights, the iteration count read from the GGUF: within 1e-5 (fp32 against f64: 1.7e-6 measured, its
+    logits' matmul included); one iteration short is 7.3e-3 (`test_plants_fail`'s floor: 1e-3)."""
+    assert _comb_error(tiny) <= 1e-5
+
+
+def _comb_error(tiny) -> float:
+    """The largest |comb − comb_f64| over every mHC mix of prompt 0's prompt-logprob run, chunked at 13."""
+    import gguf
+    from holon_std.hyper import units
+
+    path, fixtures, _, _ = tiny
+    fields = gguf.GGUFReader(path).fields
+    iters = int(fields["glm5-next.hyper_connection.sinkhorn_iterations"].parts[-1][0])
+    engine, worst = _engine(path, 13), [0.0]
+    for m in engine.executor.model.modules():
+        if isinstance(m, units._MHC):
+            def spy(r, pending=None, m=m):
+                out = type(m).mix(m, r, pending)                  # the class's (a plant patches it)
+                k = m._mix
+                want = _sinkhorn64(r, m.fn, m.base, m.scale, k.streams, k.eps, k.hc_eps, iters)
+                worst[0] = max(worst[0], float((out[2].double() - want).abs().max()))
+                return out
+            m.mix = spy
+    _ask(engine, fixtures["p0.ids"].tolist(), PROMPT_LP)
+    engine.close()
+    return worst[0]
+
+
+def _sinkhorn64(r, fn, base, scale, n: int, eps: float, hc_eps: float, iters: int) -> torch.Tensor:
+    """HF's mHC comb in float64, from the R the mix read (after any pending write-back)."""
+    x = r.double()
+    m = torch.nn.functional.linear(x * torch.rsqrt(x.square().mean(-1, keepdim=True) + eps), fn.double())
+    logits = m[:, 2 * n:].view(-1, n, n) * scale[2].double() + base[2 * n:].double().view(n, n)
+    comb = logits.softmax(-1) + hc_eps
+    comb = comb / (comb.sum(-2, keepdim=True) + hc_eps)
+    for _ in range(iters - 1):
+        comb = comb / (comb.sum(-1, keepdim=True) + hc_eps)
+        comb = comb / (comb.sum(-2, keepdim=True) + hc_eps)
+    return comb
 
 
 def test_the_release_f32_tensors_load_with_their_bits(tiny):
@@ -192,10 +273,11 @@ def test_a_short_row_beside_a_long_one_attends_every_block(tiny):
 
 def test_sub_batched_steps_keep_the_tokens_and_the_checkpoints(tiny):
     """D9's `rows` (patched to 64 here, the KDA rule's chunk; the recipe's 2,048 needs longer prompts): a 124-token
-    prompt runs as two sub-batches through every mixer and the dense / shared FFN — the same greedy tokens, logprobs
-    within 1e-5 of the unsplit run; a prefix hit off a sub-batched prompt resumes at its checkpoint (64, a piece's end)
-    with the recompute's tokens, logprobs within 1e-5 (bitwise but where the CPU's matmul bits follow a call's
-    rows)."""
+    prompt runs as two sub-batches through every mixer and the dense / shared FFN — bitwise the unsplit run (the
+    routed experts, whose CPU bits follow a call's rows, see the same rows on both sides: an off-by-one in a piece's
+    bounds or a conv tail not carried cannot hide under a tolerance; on the GPU the bound is the L0's, C-m3); a prefix
+    hit off a sub-batched prompt resumes at its checkpoint (64, a piece's end) with the recompute's tokens, logprobs
+    within 1e-5 (its 46-row step against the recompute's 120: the experts' row-count bits, ≈ 1e-6)."""
     from holon_plugins.models.glm5_next import recipe
 
     path, fixtures, _, _ = tiny
@@ -209,8 +291,7 @@ def test_sub_batched_steps_keep_the_tokens_and_the_checkpoints(tiny):
         _ask(engine, ids[:100], DECODE)
         hit = _decode(engine, ids[:120], params)
         recompute = _decode(_engine(path, 128), ids[:120], params)
-    assert [t for t, _ in split] == [t for t, _ in plain]
-    assert np.abs(np.array([x for _, x in split]) - np.array([x for _, x in plain])).max() <= 1e-5
+    assert split == plain
     assert [t for t, _ in hit] == [t for t, _ in recompute]
     assert np.abs(np.array([x for _, x in hit]) - np.array([x for _, x in recompute])).max() <= 1e-5
 

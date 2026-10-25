@@ -355,7 +355,7 @@ class MoePatchRows:
 
 
 class CausalConv1d:
-    def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str) -> None:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str, weight_dtype: str | None = None) -> None:
         pass
 
     def __call__(self, x, weight, state, slots, query_start, has_init):

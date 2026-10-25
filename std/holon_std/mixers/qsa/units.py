@@ -28,6 +28,16 @@ GQA = "std.mixers.gqa@1"
 LINEAR = "std.ops.linear@1"
 
 
+
+def _call_pages(query_start: torch.Tensor, positions: torch.Tensor, page: int):
+    """Pages made for one call (a model-only build: one table row per sequence, each its whole length): (units, the
+    table [rows, pages] int32, each token's sequence [T] int32, its unit and offset)."""
+    lens = query_start.diff()
+    rows, pages = len(lens), -(-int(lens.max()) // page)
+    table = torch.arange(rows * pages, dtype=torch.int32, device=positions.device).view(rows, pages)
+    seq = torch.repeat_interleave(torch.arange(rows, device=positions.device), lens).to(torch.int32)
+    return rows * pages, table, seq, table[seq.long(), positions // page].long(), positions % page
+
 @dataclasses.dataclass(eq=False)
 class IndexMeta:
     """One step's indexer metadata for every QSA layer: the idx pages, whether the step attends densely, and (from
@@ -182,19 +192,15 @@ class QSA(nn.Module):
         """A model-only build: dense through gqa when every sequence fits `dense_limit`, else sparse over pages made
         for this call (one table row per sequence)."""
         dev = ctx.batch.dev
-        lens = dev.query_start.diff().tolist()
-        if max(lens) <= self.limit:
+        if max(dev.query_start.diff().tolist()) <= self.limit:
             return self.attn(x, ctx)
-        page, t, rows = self.page, x.shape[0], len(lens)
-        pages = -(-max(lens) // page)
-        table = torch.arange(rows * pages, dtype=torch.int32, device=x.device).view(rows, pages)
-        seq = torch.repeat_interleave(torch.arange(rows, device=x.device), dev.query_start.diff()).to(torch.int32)
-        unit, off = table[seq.long(), dev.positions // page].long(), dev.positions % page
+        page, t = self.page, x.shape[0]
+        units, table, seq, unit, off = _call_pages(dev.query_start, dev.positions, page)
         q, gate, k, v = self.attn.project(x, ctx)
-        kv = x.new_zeros(rows * pages, 2, self.attn.kv_heads, page, self.attn.head_dim)
+        kv = x.new_zeros(units, 2, self.attn.kv_heads, page, self.attn.head_dim)
         kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v
-        raw = x.new_zeros(rows * pages, page, self.dk)
-        pooled = torch.zeros(rows * pages, page // self.ratio, self.dk, device=x.device)
+        raw = x.new_zeros(units, page, self.dk)
+        pooled = torch.zeros(units, page // self.ratio, self.dk, device=x.device)
         iq, ik = self._indexer(x, dev.positions)
         self._index(ik, raw, pooled, table, seq, dev.positions, self.index_k_norm, self.cos_sin)
         blocks = self._select(iq, pooled, table, seq, dev.positions)
@@ -299,7 +305,8 @@ class DSAMLA(nn.Module):
 
     def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
         """A quantized `k_b` / `v_b` (the release's Q6_K) dequantized at load into the model dtype (D5: a recorded
-        rounding, as Maya's pack makes; gguf-py's dequantization, the GGUF oracle)."""
+        rounding, as Maya's pack makes; gguf-py's dequantization, the GGUF oracle). Here, not as a value transform:
+        the core refuses transforms on quantized tensors, so this is the core-free path (B3 nit)."""
         if name not in ("k_b", "v_b") or index is not None or not q.layout.scheme.elem.startswith("ggml."):
             return False
         import gguf
@@ -358,8 +365,13 @@ class DSAMLA(nn.Module):
         blocks = (all_blocks(dev.positions, self.ratio, self.width) if meta.dense else
                   self._select(iq, pooled, meta.pages.table, meta.seq, dev.positions, w))
         table, step = latent_meta.pages.table, self.rows or len(x)
-        return torch.cat([self._attention(q_r[a:a + step], kv, blocks[a:a + step], table, meta.seq[a:a + step],
-                                          dev.positions[a:a + step]) for a in range(0, len(x), step)])
+        if step >= len(x):
+            return self._attention(q_r, kv, blocks, table, meta.seq, dev.positions)
+        out = x.new_empty(x.shape)                          # into one output: a piece's at a time (C-m5)
+        for a in range(0, len(x), step):
+            out[a:a + step] = self._attention(q_r[a:a + step], kv, blocks[a:a + step], table, meta.seq[a:a + step],
+                                              dev.positions[a:a + step])
+        return out
 
     def write_kv(self, x: torch.Tensor, ctx) -> None:
         """The step's latent and index keys written at its positions, without attending."""
@@ -373,20 +385,16 @@ class DSAMLA(nn.Module):
 
     def _whole_sequences(self, x: torch.Tensor, ctx) -> torch.Tensor:
         """A model-only build: each sequence over pages made for this call."""
-        dev = ctx.batch.dev
-        lens = dev.query_start.diff().tolist()
-        page, rows = self.page, len(lens)
-        pages = -(-max(lens) // page)
-        table = torch.arange(rows * pages, dtype=torch.int32, device=x.device).view(rows, pages)
-        seq = torch.repeat_interleave(torch.arange(rows, device=x.device), dev.query_start.diff()).to(torch.int32)
-        unit, off = table[seq.long(), dev.positions // page].long(), dev.positions % page
-        kv = x.new_zeros(rows * pages, page, self.dc)
+        dev, page = ctx.batch.dev, self.page
+        units, table, seq, unit, off = _call_pages(dev.query_start, dev.positions, page)
+        kv = x.new_zeros(units, page, self.dc)
         q_r = self.q_a_norm(self.q_a(x))
         kv[unit, off] = self.kv_a_norm(self.kv_a(x)).to(kv.dtype)
         iq, w, k, gate = self._indexer(x, q_r)
-        raw, gates = x.new_zeros(rows * pages, page, self.dk), x.new_zeros(rows * pages, page, self.dk)
-        pooled = torch.zeros(rows * pages, page // self.ratio, self.dk, device=x.device)
+        raw, gates = x.new_zeros(units, page, self.dk), x.new_zeros(units, page, self.dk)
+        pooled = torch.zeros(units, page // self.ratio, self.dk, device=x.device)
         self._index(k, gate, raw, gates, pooled, self.ape, table, seq, dev.positions)
-        blocks = (all_blocks(dev.positions, self.ratio, self.width) if max(lens) <= self.limit else
+        dense = int(dev.query_start.diff().max()) <= self.limit
+        blocks = (all_blocks(dev.positions, self.ratio, self.width) if dense else
                   self._select(iq, pooled, table, seq, dev.positions, w))
         return self._attention(q_r, kv, blocks, table, seq, dev.positions)

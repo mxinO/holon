@@ -31,7 +31,8 @@ def _half(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
-        for op, impl, supports in ((CONV, CausalConv1d, lambda f: _half(f) and 2 <= f["kernel_size"] <= 8),
+        for op, impl, supports in ((CONV, CausalConv1d, lambda f: _half(f) and 2 <= f["kernel_size"] <= 8
+                                    and "weight_dtype" not in f),     # (KDA's f32 weights: docs/v1-glm.md step 4)
                                    (NORM, GatedRMSNorm, lambda f: _half(f) and f["dim"] in (64, 128, 256)
                                     and f.get("out_gate", "silu") in ("silu", "sigmoid")
                                     and "round" not in f)):        # (KDA's f32 norm: docs/v1-glm.md step 4)

@@ -35,8 +35,11 @@ class SwiGLU(nn.Module):
             self._gate_up.use_glu("swiglu")                                     # fused into it where its kernel can
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.rows and x.shape[0] > self.rows:
-            return torch.cat([self._swiglu(x[a:a + self.rows]) for a in range(0, x.shape[0], self.rows)])
+        if self.rows and x.shape[0] > self.rows:          # into one output: a sub-batch's at a time (D9, C-m5)
+            out = x.new_empty(x.shape)
+            for a in range(0, x.shape[0], self.rows):
+                out[a:a + self.rows] = self._swiglu(x[a:a + self.rows])
+            return out
         return self._swiglu(x)
 
     def _swiglu(self, x: torch.Tensor) -> torch.Tensor:

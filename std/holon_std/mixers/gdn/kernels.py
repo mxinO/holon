@@ -10,7 +10,8 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
   has_init [R]) -> y [T, C]`: per row, a depthwise causal convolution of the row's tokens continuing the K-1 inputs in
   `state[slots[r]]` (zeros without `has_init`), `y = silu(conv)` in f32, cast to x's dtype; then `state[slots[r]]`
   holds the last K-1 inputs of (previous ‖ row). The weights are used in their stored dtype (f32 for KDA's convs,
-  docs/v1-glm.md D4; the model dtype for GDN's). Facts: channels, kernel_size, dtype.
+  docs/v1-glm.md D4; the model dtype for GDN's). Facts: channels, kernel_size, dtype[, weight_dtype: only when the
+  weights' dtype is not `dtype`].
 - `gated_delta_rule@1`: instance with `plan(lens: list[int], snapshots=(), per_token=False) -> handle` (host, once
   per step: per-row token counts; `snapshots` (row, offset, unit): every provider writes row's state after its first
   `offset` tokens, a multiple of 64 with 0 < offset < the row's length, to `snapshot[unit]` — an in-step checkpoint;
