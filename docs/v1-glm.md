@@ -1107,6 +1107,21 @@ exactness at its own lock's step; §7.3 at 32K with its 16K fallback; general la
 assert; `lend_tail`'s reference asserts ownership (§6.2, §7.3, D8f, D8a, A R9-m1, R9-m2, nits); 5. `gather_roles`
 takes exactly one of `parts` and `size` (§4). After B checks B9-M1's fix the design is closed.
 
+**The lead's calls during step 1 (2026-10-25):** 1. **the staging ring of parts under exclusive tiers is deferred to
+step 7** (perf closure): a performance lever only (correctness holds without it: under exclusive tiers the parts stay
+off and every miss has its own staging slot), and it needs a contract change the design had not named — `moe_resolve@1`
+and its variants assign a miss `stage[r, i]` by its rank among all the call's misses, so SSD misses interleaved with RAM
+misses break the ring's "part i + 1 reuses part i − 1's slots" and sit in ring slots the RAM parts overwrite (A R8-M1
+again), and exclusive tiers' admissions are staged in ring positions too. Until step 7, (ii) 4K and 32K carry the
+as-designed numbers (§7.4: ≈ 1.0 and ≈ 0.95–1.0). **If step 7's measurement puts either below its bar, the design
+kept for it:** the resolve providers (@1, `lfu`, `lru`, promote's) take `outside [R, A_od + A_ra]` (out-of-ring slots)
+and `ahead [E]` (the layer's read-ahead rows) under exclusive tiers — a RAM miss of RAM rank k gets `stage[r, k]`, a
+read-ahead miss of rank h `outside[r, A_od + h]`, an on-demand SSD miss of rank j (by id) `outside[r, j % A_od]` —; the
+parts loop gets one part for the hits and one per round, each gathered and computed before the next reuses its slots;
+admitted misses are staged in outside slots. 2. **Layers 3–4 read at the step's true start: deferred to step 7** (today
+at the first MoE resolve, ≈ 0.1–0.3 s exposed per long prompt); no hook used for what it does not mean — if it
+matters, a proper forward-start point is found or proposed then, with no core line unless the owner takes it.
+
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
 | # | Question | Recommended default |
@@ -1152,6 +1167,13 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 
 
 ## 13. Review log
+
+### During step 1 (the lead's calls, §11)
+
+| Finding | Disposition |
+|---|---|
+| The build: the ring of parts under exclusive tiers needs the resolve to place SSD misses outside the ring (its slot assignment by all-miss rank breaks the ring and A R8-M1's fix) | **Deferred to step 7** (lead's call 1 during step 1), the design kept there |
+| The build: layers 3–4 at the step's true start need a forward-start point the store does not have | **Deferred to step 7** (lead's call 2 during step 1); no borrowed hook |
 
 ### Rev 9 → rev 10, the final design (the same panel)
 
