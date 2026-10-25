@@ -407,8 +407,11 @@ it.** The store gains **no new options**; provider options live in their kernel 
   Maya's routing a 4,096-row pass gives ≈ 114 rows per expert, a column fill of 0.63 — **N4's measured 1.5× grouping
   overhead** (A5000, `spikes/moe_prefill/gemm.py` on Maya-S's layers 10 and 3: 24.0 ms gate / up + 15.8 / 13.1 ms down
   per 4K pass of one layer) — while Maya's 16K chunk fills 0.88 (C's `tile_fill.py`). At `pass_rows` 4,096 Holon's
-  routed GEMMs run ≈ 1.39× Maya's inside a 16K step: c ≈ 1.2 on the 32K cells (§7.4). **N4's 5090 probe times 4K, 8K
-  and 16K passes** on real routing against a dense GEMM; **step 4 raises `GGML_CUDA_MM_IDS_MAX_PAIRS` to 131,072**
+  routed GEMMs run ≈ 1.39× Maya's inside a 16K step: c ≈ 1.2 on the 32K cells (§7.4). **Measured on the A5000** (N4,
+  a spike copy of the plugin at `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072, outside the tree; `gemm.py` on layers 10 and 3):
+  per token per layer the routed GEMMs take **9.82 / 8.52 / 7.41 µs at 4K / 8K / 16K passes** (column fill 0.67 / 0.76 /
+  0.875, grouping overhead 1.51–1.57 / 1.31–1.37 / 1.13–1.20) — the 16K pass is **1.33× faster** than the 4K, C's
+  1.39× from fill alone; the 16K calls ran clean. **N4's 5090 probe repeats it**; **step 4 raises `GGML_CUDA_MM_IDS_MAX_PAIRS` to 131,072**
   (`vendor/ggml/src/ggml-cuda/mmid.cuh:8`; the device-wide sort past one block's 16,384 pairs exists) in
   `vendor.patch`, so **GLM's lock alone sets `ggml_cuda.pass_rows`** to N4's pick (16,384 expected). Existing locks keep
   4,096 and their bits (checked at step 4). The pass buffers grow ≈ 4× (≈ +1.5–2 GB lent during prompt steps): step 4
@@ -691,7 +694,7 @@ as ≈ −3%** (rev 1 panel's after-prompt dip estimate: ≈ 1,300 experts refil
 | (i) decode 1K / 4K / 32K (1.0) | 22–25 ms a token | 28.1 ms (fit); 21.8–33.2 by prompt | **≤ 1.15 [0.85–1.25]** (lead call 8: two-sided until N1 lands) | Holon's fixed part (a model); Maya's calibrated lane; lending (−3%); R3 decides the lane lever at step 0's end |
 | (i) prefill 1K (0.9) | routed misses ≈ 55 GB by the ring of parts' gather at ≈ 45.6 GB/s (FN §21.9) + compute under it: 1.3–1.45 s | 1.40–1.50 s engine, ≈ 1.59 s client | **1.1 [0.95–1.25]** (C-r2-m2) | the gather rate; N4's compute |
 | (i) prefill 4K (0.9) | ≈ 68 GB stream 1.3–1.4 s ∥ compute ≈ 1.2 s: 1.45–1.6 s | 1.78–1.80 s engine, ≈ 2.03 s client | **1.3 [1.0–1.4]** | the same |
-| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.25 s (2 × 16K); the faster `CKPT_EVERY=0` arm est. ≈ 5% less | **≈ 0.86–0.90 [0.75–1.05]** at 4,096-row passes; **≈ 1.0–1.08 at 16,384** (C R3-M1) — the central stays 0.86–0.90 until N4's 5090 pass probe lands | the pass size (N4, step 4); the rest of c |
+| (i) prefill 32K (0.9), 16K steps | 2 × max(stream ≈ 1.4 s, compute ≈ 4.7 s × c); c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.25 s (2 × 16K); the faster `CKPT_EVERY=0` arm est. ≈ 5% less | **≈ 0.86–0.90 [0.75–1.05]** at 4,096-row passes; **≈ 1.0–1.05 at the design's 16,384-row pass** (the A5000's measured 1.33× per-token gain, fill 0.875 against Maya's 0.88) — the gated central is the 4,096 figure until the 5090's probe confirms | the pass size (N4, step 4); the rest of c |
 | (ii) decode (1.0) | the mode (i) token + 1.5 r × 1.3 ms (r_Holon ≈ 1.5 r_Maya: +14% SSD-only experts; Maya's own data, +850 RAM experts cut reads ×7.5, C-R2-M7) | 28.1 ms + r × 1.2 ms (8 chunk workers) | **1.05–1.10 [0.85–1.2]** (r_Maya 2 → 1.13–1.18; 5 → 1.04–1.07; 8 → 0.98–1.00) | D8f's rate (N3); r (N1); the cache levers (each +100 VRAM experts ≈ −25% of Holon's reads) |
 | (ii) prefill 1K (0.9) | the routed SSD-only set: a 1K window routes ≈ 80% of the coldest 1,250–1,430 (C's `ssd_routed.py`): ≈ 1,140 experts, 8.1 GB, at N3's rate, beside ≈ 55 GB of PCIe | its routed ≈ 1,000 experts, 7.1 GB | **0.95 [0.75–1.15]** (lead call 5: re-predicted with the 2,048 threshold; Holon reads +14% SSD bytes; both overlap PCIe) | both SSD rates; Holon's cache levers |
 | (ii) prefill 4K (0.9) | the whole SSD-only set (a 4K window routes 98% of it): ≈ 10.2 GB | its ≈ 8.9 GB | **1.0 [0.8–1.2]** | as 1K |
@@ -717,7 +720,7 @@ probes.
 | N1 | Maya's rows: `--calibrate`, then mode (i) 5 rounds × 2 arms (its run-to-run CV), mode (ii) in a 64 GiB job step (pinned memory in `memory.peak`; the tier in experts; hygiene), the deterministic recipe; the 5080 mode (i); Maya's ledger lines | **calibrate done (kept the defaults); mode (i) running; mode (ii) queued** | the denominators; D10's tier; D11's rounds |
 | N2 | Maya's route traces: decode (`STRATA_GLM_ROUTE_LOG`) and prompts (`--dump-routing`) on the bench plan and the 72 prompts; the held-out replay at each engine's share; F10 vs deferred admission in mode (ii); MTP verify windows; the routed fraction of the SSD-only set by window | **decode traces done** (bench 8,256 + tasks 27,680 tokens): h above; windows 13.9 / 19.1 / 23.9 distinct experts per layer at 2 / 3 / 4 tokens (D7). **Prompt traces queued.** Lending: not replayable at step 0 (§7.4) | D8's mode (ii) default; D7 (deferred); D9's rules; h |
 | N3 | The SSD microbench on the bar node's NVMe: io_uring (with and without the bounce copy), native AIO, `pread`, an 8-thread pool; depth 8 / 16 / 32; 256 KiB–1 MiB chunks; 1–8 experts a call (`spikes/glm0/n3_ssd.c`) | **io_uring and native AIO available in the container** (kernel 6.17, `io_uring_disabled` 0); the bench queued after N1 | D8f's interface, chunk and depth; its rate |
-| N4 | The roofline per §7.4 row; **the prefill compute probe**, **4K / 8K / 16K MoE passes** (a spike build of the extension at `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072) and **the live set at 4K–32K** | **A5000 done**: MoE GEMMs per 4K pass (D9), the live set unsplit ≈ 326 KiB / sub-batched ≈ 55 KiB a token beyond R at 16K (D9); **the 5090's queued** (4K pass now; 8K / 16K with the spike build) | every gated row frozen; a row predicted below its bar goes to the lead before step 1 ends |
+| N4 | The roofline per §7.4 row; **the prefill compute probe**, **4K / 8K / 16K MoE passes** (A5000 done: 9.82 / 8.52 / 7.41 µs a token a layer) (a spike build of the extension at `GGML_CUDA_MM_IDS_MAX_PAIRS` 131,072) and **the live set at 4K–32K** | **A5000 done**: MoE GEMMs per 4K pass (D9), the live set unsplit ≈ 326 KiB / sub-batched ≈ 55 KiB a token beyond R at 16K (D9); **the 5090's queued** (4K pass now; 8K / 16K with the spike build) | every gated row frozen; a row predicted below its bar goes to the lead before step 1 ends |
 | N5 | (½ day) FlashInfer 0.6.12's fa2 MLA with `head_dim_kpe = 0` on sm_120, and the non-absorbed prefill form, against a Triton prototype of `mla_attend` | to build | D5's dense path |
 | N6 | Maya's answers to the 72 items on the 5090 (its defaults, the same rendered ids), saved as gate (d)'s reference | after N1 | gate (d) ready at step 5 |
 
@@ -747,7 +750,7 @@ independent of the model and merges into the branch first (D15).
   proves the rate before step 1 builds it (io_uring and native AIO both available in the bar node's container).
 - **R2 — 32K prefill** in both modes needs 16K steps (D9) and Holon's prefill compute at Maya's: at 4,096-row passes
   the routed GEMMs fill 0.63 of mmq's column tiles against Maya's 0.88 (c ≈ 1.2; both 32K cells ≈ 0.86–0.90). The
-  lever is the 16,384-row pass (step 4); if N4's 5090 probe does not lift the cells, they go on the step-0 owner list
+  lever is the 16,384-row pass (step 4; 1.33× faster per token on the A5000); if N4's 5090 probe does not lift the cells, they go on the step-0 owner list
   with the curve.
 - **R3 — Maya's CPU lane** (36 experts a token at N0; calibrated at 8 threads, 0.64 PCIe share). Holon stays exact by
   default. If (i) decode's band after N1 still reaches below 1.0, the lever — an exact fast CPU row under F5b's bounded
