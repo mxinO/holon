@@ -706,6 +706,7 @@ struct IoRequest {
     bool urgent = false, failed = false;
     uint32_t epoch = 0;                               // the slot's abandons when it started
     Clock::time_point since;
+    nvtxRangeId_t range = 0;                          // its span as nsys shows it (signal seen → answered)
     Plan plan;
     std::vector<int> pending;                         // per extent: its chunks in flight
     std::vector<uint8_t *> buf;                       // per extent: its bounce buffer, while it is read
@@ -780,6 +781,7 @@ void IoEngine::start(size_t s) {
     auto r = std::make_unique<IoRequest>();
     r->urgent = urgent_[s];
     r->since = Clock::now();
+    r->range = nvtxRangeStartA("io_request");
     r->epoch = st_->abandons[s].load(std::memory_order_acquire);
     if (st_->flag() != 0 || plan_copy(copies_[s]->roles(), r->plan) != 0) {
         r->failed = true;
@@ -916,6 +918,7 @@ void IoEngine::answer(size_t s) {
     const int b = r.plan.rows <= 1 ? 0 : r.plan.rows < 4 ? 1 : 2;
     st_->lat_ns[b].fetch_add((Clock::now() - r.since).count(), std::memory_order_relaxed);
     st_->requests[b].fetch_add(1, std::memory_order_relaxed);
+    nvtxRangeEnd(r.range);
     active_[s].reset();
     order_.erase(std::find(order_.begin(), order_.end(), s));
 }

@@ -1165,6 +1165,28 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
     engine.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
+    """Step 1's review C S1-m2 (docs/v1-glm.md D8f): the down role of two classes (layer 3's Q8_0, the others' Q4_0,
+    as GLM's two down types) reads its SSD misses into one landing pool, each class's rows as wide as its own pieces'
+    supersets; the streams are the resident store's."""
+    file, prompts, _ = gpu_moe
+    mixed = tmp_path / "mixed.gguf"
+    write(file.parent / "hf", mixed, Q.Q8_0, types={"3.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q4_0})
+    resident = _gpu_engine(mixed)
+    want = _served(resident, prompts)
+    resident.close()
+    engine = _gpu_engine(mixed, host_memory=1 << 27, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
+        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+    store = engine.ctx.shared_objects[KEY]
+    assert _served(engine, prompts) == want
+    down = {name: store.landing[name] for name, c in store.classes.items() if c.pieces[0][2] == 1}
+    assert len(down) == 2 and len({id(x[0]) for x in down.values()}) == 1 and len({x[1] for x in down.values()}) == 2
+    assert store.exclusive and engine.ctx.shared_objects["cpu_task.io"].native.io_stats()["bytes"] > 0
+    engine.close()
+
+
 def _ram_units_hold_their_pieces(store) -> int:
     """Every RAM-resident expert's units hold its pieces' bytes, as the file has them (exclusive tiers); how many."""
     from holon_std.tiered import files

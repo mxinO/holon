@@ -280,7 +280,8 @@ def test_the_io_worker_reads_asynchronously_and_serves_urgent_requests_first(lib
 def test_an_abandoned_read_never_answers_the_slots_next_request(lib, tmp_path):
     """Step 1's review A S1-m1: the memop watchdog abandons a request whose read is still in flight (a FIFO with no
     data yet); the slot is signalled again; when the old read lands, its answer is not the new request's — the new one
-    is started after the old one drains, and fails at once under the timeout flag."""
+    is started after the old one drains and fails at once under the timeout flag (or the flagged watchdog abandons it
+    first)."""
     import os
 
     words = torch.zeros(2 * LINE, dtype=torch.uint8)
@@ -306,6 +307,7 @@ def test_an_abandoned_read_never_answers_the_slots_next_request(lib, tmp_path):
     t0 = time.perf_counter()
     while int(word[0]) == 1 and time.perf_counter() - t0 < 5:
         time.sleep(0.01)
-    assert int(word[0]) == 3                                # FAILED (the flag): not DONE by the old read's answer
+    assert int(word[0]) in (3, 4)                           # FAILED (the flag) or abandoned (the watchdog, flagged):
+    #                                                         never DONE by the old read's answer
     worker.stop()
     os.close(fd)

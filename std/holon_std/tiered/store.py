@@ -468,9 +468,9 @@ class TieredStore:
                                 device="host", mapped=True)
                 runs = ctx.pool(f"{self.name}.runs.{role}", unit_bytes=16 * width, min_units=n, pref_units=n,
                                 device="host", mapped=True)
-                for name, (r, row, width) in shape.items():
+                for name, (r, own, x) in shape.items():
                     if r == role:
-                        self.landing[name], self.runs[name] = (pool, row, width), runs
+                        self.landing[name], self.runs[name] = (pool, own, x, row, width), runs
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
@@ -583,10 +583,12 @@ class TieredStore:
 
     def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
-        pool, row, width = self.landing[name]
+        pool, row, width, pool_row, pool_width = self.landing[name]      # (the role's pools: the widest class's)
         n = self.landing_rows + DEPTH * self.ahead_rows
         view = (lambda p, *a: p.device_view(*a)) if device else (lambda p, *a: p.view(*a))
-        return view(pool, torch.uint8, (n, row)), view(self.runs[name], torch.int64, (n, width, 2))
+        rows = view(pool, torch.uint8, (n * pool_row,))[:n * row].view(n, row)
+        runs = view(self.runs[name], torch.int64, (n * pool_width * 2,))[:n * width * 2].view(n, width, 2)
+        return rows, runs
 
     def ahead_view(self, device: bool = True) -> torch.Tensor:
         """The read-ahead sets' request rows [DEPTH, roles, 1 + A_ra, 3] (mapped)."""
