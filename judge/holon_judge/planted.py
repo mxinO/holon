@@ -1560,6 +1560,144 @@ def exclusive_lent_not_demoted() -> Iterator[None]:
     print(f"plant exclusive-lent-not-demoted fired: {dict(fired)}", file=sys.stderr)
 
 
+def _call_spares(store, g: int) -> torch.Tensor:
+    """[L] bool: group g's delta records of the current call (from `call_start`) that make a spare (F10's refills
+    under exclusive tiers, `moe_tiers@2`'s SPARE: the slots' old owner to be placed in RAM)."""
+    from holon_std.tiered.residency import SPARE
+
+    d = store.delta[g]
+    i = torch.arange(len(d), device=d.device)
+    return (i >= store.call_start) & (i < store.n_delta[g]) & (d[:, 1] == SPARE)
+
+
+@contextlib.contextmanager
+def promote_spare_unlogged() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8a): F10's refill records dropped under exclusive tiers — the call's SPARE records turned
+    into no-ops before `moe_tiers@2` reads them, so a refilled spare's old owner is never placed in RAM and keeps
+    naming the slots the spare now holds. Reports how often it fired."""
+    from holon_std.tiered import resolver
+
+    tiers, fired = resolver.DeviceResolver._tiers, collections.Counter()
+
+    def planted(self, *args):
+        d = self.store.delta[self.group]
+        d[:, 1].copy_(torch.where(_call_spares(self.store, self.group), -6, d[:, 1]))   # (a < 0: skipped)
+        fired[_when()] += 1
+        return tiers(self, *args)
+    with mock.patch.object(resolver.DeviceResolver, "_tiers", planted):
+        yield
+    print(f"plant promote-spare-unlogged fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def promote_victim_code() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8a): a refill victim's tier code not moved — `moe_tiers@2` demotes F10's refilled spare's
+    old owner into RAM, but its map entry is put back to the slots the spare now holds. Reports how often it fired."""
+    from holon_std.tiered import resolver
+
+    tiers, fired = resolver.DeviceResolver._tiers, collections.Counter()
+
+    def planted(self, *args):
+        store, g = self.store, self.group
+        res = store.residency.device[g]                                  # [E, roles]
+        before = torch.cat([res, res[:1]]).clone()                       # (+ a sink row)
+        finish = tiers(self, *args)
+        spares = _call_spares(store, g)
+        at = torch.where(spares, store.delta[g][:, 2].long(), len(res))
+        out = torch.cat([res, res[:1]])
+        out.index_copy_(0, at, before.index_select(0, at))
+        res.copy_(out[:len(res)])
+        fired[_when()] += 1
+        return finish
+    with mock.patch.object(resolver.DeviceResolver, "_tiers", planted):
+        yield
+    print(f"plant promote-victim-code fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def landing_reuse_unfenced() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8f): the read-ahead of layer g + 2 signalled at layer g's first pass, before layer g's
+    gather of its own set from the same rows (made to land first), instead of after its last pass. Reports how often
+    it fired."""
+    from holon_std.tiered import store as tiered
+
+    sources, done, fired = tiered.TieredStore.sources, tiered.TieredStore.layer_done, collections.Counter()
+
+    def early(self, g):
+        if self._ahead and g + tiered.DEPTH < self.borrowing_groups:
+            self.read_ahead(g + tiered.DEPTH)
+            self.io.wait(self.ahead_slots[g + tiered.DEPTH])
+            fired[_when()] += 1
+        return sources(self, g)
+
+    def late(self, g):
+        ahead, self._ahead = self._ahead, False                         # (its read-ahead went at the layer's start)
+        try:
+            return done(self, g)
+        finally:
+            self._ahead = ahead
+    with mock.patch.object(tiered.TieredStore, "sources", early), mock.patch.object(tiered.TieredStore, "layer_done",
+                                                                                     late):
+        yield
+    print(f"plant landing-reuse-unfenced fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def ondemand_round_unjoined() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8f): round r + 1 of a call's on-demand SSD reads signalled before round r's gather on main
+    (made to land first: its rows are round r's). Reports how often it fired."""
+    from holon_std.tiered import resolver
+
+    tiers, fired = resolver.DeviceResolver._tiers, collections.Counter()
+
+    def planted(self, ids, kinds, fetch, n, split):
+        store, slot = self.store, self.io_slot
+        rounds = -(-min(store.items, store.top_k * len(ids)) // store.landing_rows)
+        finish, at = tiers(self, ids, kinds, fetch, n, split), {"r": 0}
+        wait, rows = store.io.wait, store.round_rows
+
+        def round_rows(r):
+            at["r"] = r
+            rows(r)
+
+        def unjoined(s):
+            wait(s)
+            if s == slot and at["r"] + 1 < rounds:
+                rows(at["r"] + 1)                                        # the next round's reads, into these rows
+                store.io.signal(slot)
+                wait(slot)
+                fired[_when()] += 1
+
+        def planted_finish():
+            store.io.wait, store.round_rows = unjoined, round_rows
+            try:
+                finish()
+            finally:
+                del store.io.wait, store.round_rows
+        return planted_finish
+    with mock.patch.object(resolver.DeviceResolver, "_tiers", planted):
+        yield
+    print(f"plant ondemand-round-unjoined fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def keep_copy_skipped() -> Iterator[None]:
+    """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
+    cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
+    often it fired."""
+    from holon_std.tiered import store as tiered
+
+    rows, fired = tiered.TieredStore.round_rows, collections.Counter()
+
+    def planted(self, r):
+        rows(self, r)
+        self.io_device()[:, 1:, 2].fill_(-1)
+        fired[_when()] += 1
+    with mock.patch.object(tiered.TieredStore, "round_rows", planted):
+        yield
+    print(f"plant keep-copy-skipped fired: {dict(fired)}", file=sys.stderr)
+
+
 @contextlib.contextmanager
 def tail_unmap_undone() -> Iterator[None]:
     """A tail step's lending (docs/v1-moe-prefill.md D11) logs the range's experts unmapped but leaves them mapped:
@@ -2193,7 +2331,9 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
                                              lambda r, c: int(sum(c[g, b] > 0 for g, _, b in r.tolist()))),
     "lfu-shared-victim": lambda: _lfu_kernel(2, "lfu-shared-victim", _shared),
     "lent-slot-still-mapped": lent_slot_still_mapped, "tail-unmap-undone": tail_unmap_undone,
-    "exclusive_lent_not_demoted": exclusive_lent_not_demoted,
+    "exclusive_lent_not_demoted": exclusive_lent_not_demoted, "promote_spare_unlogged": promote_spare_unlogged,
+    "promote_victim_code": promote_victim_code, "landing_reuse_unfenced": landing_reuse_unfenced,
+    "ondemand_round_unjoined": ondemand_round_unjoined, "keep_copy_skipped": keep_copy_skipped,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
