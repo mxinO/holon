@@ -23,16 +23,20 @@ counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate a
 up to the type's limit (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else
 mmq with ids into f32, followed for swiglu by our f32 SwiGLU — or, where mmq can (`mmq_glu`: the stack's rows in whole
 tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/v1-moe-prefill.md D4: no f32 gate/up
-output). `pass_rows` is 512 (llama.cpp's ubatch), or on an (SM, type, mode) whose L0 proves a row's bits the same in any
-call of whole 512-row chunks (`PASS_PROVEN`) up to `PASS_ROWS`, capped by the id helper's pairs, the step budget and the
-`ggml_cuda.pass_rows` option; a call's last partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for
+output). The fact `glu_limit` (docs/v1-glm.md D6) clamps the SwiGLU on every path, as ggml's
+GGML_GLU_OP_SWIGLU_CLAMP: `silu(min(gate, L)) · clamp(up, −L, L)` with `fminf` / `fmaxf`, which drop a NaN where the
+reference's clamp keeps it. `pass_rows` is 512 (llama.cpp's ubatch), or on an (SM, type, mode) whose L0 proves a row's
+bits the same in any call of whole 512-row chunks (`PASS_PROVEN`, each with the most rows proven) up to `PASS_ROWS`,
+capped by the id helper's pairs (`ID_PAIRS`), the step budget and the `ggml_cuda.pass_rows` option; an option above
+`PASS_ROWS` (docs/v1-glm.md D9) takes `MAX_PAIRS` and the entry's proven rows instead, and an option past those rows is
+refused. A call's last partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for
 `pass_rows`) holds mmq's id maps besides the activations; gate/up's f32 output, where SwiGLU is not in mmq's store,
 comes from the caller's `scratch` (`scratch_bytes`, docs/v1-moe-prefill.md D10) or is allocated, and a call writes into
-the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel
-beside it (the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
-`moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16 into
-the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md §14, step
-3c).
+the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax or sigmoid scores, an optional selection bias, top k,
+renormalised, scaled), `moe_router` our router kernel beside it (the f32 router GEMV from bf16 activations, then
+`moe_topk`'s selection, in one launch), and `moe_combine` `moe-weighted-reduction.cu`, both patched to the contracts'
+layouts (ids at row stride k; the combine stores bf16 into the caller's `out`, and its `add` the residual stream plus
+the rounded sum, rounded again: docs/v1-offload.md §14, step 3c).
 
 Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
@@ -76,7 +80,8 @@ QLINEAR, QLINEAR_GLU, QEMBEDDING = "qlinear", "qlinear_glu", "qembedding"
 LINEAR_EXPERTS, MOE_TOPK, MOE_ROUTER, MOE_COMBINE = "linear_experts", "moe_topk", "moe_router", "moe_combine"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
-ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
+ID_PAIRS = 32768                # the (token, expert) pairs a pass of up to PASS_ROWS takes per call (docs/v1-glm.md D9)
+MAX_PAIRS = 131072              # the most pairs mmq's id helper sorts per call (mmid.cuh's GGML_CUDA_MM_IDS_MAX_PAIRS)
 PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/v1-offload.md D8)
 PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest [options]; KV capacity per class)
 # An expert pass of a prefill chunk (docs/v1-moe-prefill.md D0, D1; v1-offload.md D8): mmq with ids takes the pass's
@@ -86,11 +91,15 @@ PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest 
 # activation mode) pairs whose L0 shows a row's bits the same in a call of any whole number of CHUNKs as in its own
 # chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
 # classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
-# (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
+# (docs/v1-flash-next.md D1′). Each entry maps to the most rows its L0 proved: PASS_ROWS, or 16,384 for GLM's expert
+# types (docs/v1-glm.md D9: IQ2_XXS, IQ2_S, IQ3_XXS) on sm_86 (sm_120's after its L0 run). Every other pair keeps CHUNK.
 _FN_TYPES = ("iq1_m", "iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs", "q2_0")
-PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
-                        | {(89, t, "q8_1") for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
-                        | {(120, t, "q8_1") for t in ("q4_k", "q5_k", "q6_k", *_FN_TYPES)})
+_GLM_TYPES = ("iq2_xxs", "iq2_s", "iq3_xxs")
+PASS_PROVEN: dict[tuple[int, str, str], int] = (
+    {(86, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q6_k", *_FN_TYPES)}
+    | {(89, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
+    | {(120, t, "q8_1"): PASS_ROWS for t in ("q4_k", "q5_k", "q6_k", *_FN_TYPES)}
+    | {(86, t, "q8_1"): 16384 for t in _GLM_TYPES})
 # The bits mmq's id helper ors into `LinearExperts.errors` for a violated precondition (GGML_CUDA_MM_IDS_ERR_*)
 ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `LinearExperts.slots`
              "range": 2,        # an id outside the stack's slots
@@ -265,13 +274,35 @@ def _cap(ctx) -> int:
     return min(int(c) for c in caps if c is not None)
 
 
+def _large(ctx) -> int | None:
+    """The `ggml_cuda.pass_rows` option where it is above PASS_ROWS (docs/v1-glm.md D9: explicit only), else None."""
+    option = ctx.options.get("plugins", {}).get(PASS_OPTION)
+    return int(option) if option is not None and int(option) > PASS_ROWS else None
+
+
+def _pass_cap(ctx) -> int:
+    """`_cap`, or under an option above PASS_ROWS the option within the build's `max_step_tokens`."""
+    if (option := _large(ctx)) is None:
+        return _cap(ctx)
+    step = ctx.options.get("max_step_tokens")
+    return option if step is None else min(option, int(step))
+
+
 def pass_rows(ctx, name: str, mode: str, top_k: int) -> int:
     """The most rows a `linear_experts` call of ggml type `name` in mmq activation mode `mode` takes at its CHUNK-row
     calls' bits (D0): CHUNK unless (SM, type, mode) is in PASS_PROVEN, else the most whole CHUNKs within `_cap` and
-    the id helper's pairs."""
-    if (ctx.fingerprint.sm, name, mode) not in PASS_PROVEN:
+    the id helper's pairs at a pass of up to PASS_ROWS (`ID_PAIRS`) — or, under an option above PASS_ROWS
+    (docs/v1-glm.md D9), within the option, the step budget, `MAX_PAIRS` and the rows the entry proved, an option past
+    those refused."""
+    proven = PASS_PROVEN.get((ctx.fingerprint.sm, name, mode))
+    if proven is None:
         return CHUNK
-    return max(CHUNK, min(_cap(ctx), ID_PAIRS // top_k) // CHUNK * CHUNK)
+    if (option := _large(ctx)) is None:
+        return max(CHUNK, min(_cap(ctx), ID_PAIRS // top_k) // CHUNK * CHUNK)
+    if option > proven:
+        raise ValueError(f"kernels.ggml_cuda: {PASS_OPTION} = {option} is past the {proven} rows {name} ({mode}) is "
+                         f"proven at on sm_{ctx.fingerprint.sm} (PASS_PROVEN)")
+    return max(CHUNK, min(_pass_cap(ctx), MAX_PAIRS // top_k) // CHUNK * CHUNK)
 
 
 def calls(rows: int, size: int) -> list[tuple[int, int]]:
@@ -478,6 +509,7 @@ class LinearExperts(_Matmul):
         super().__init__(ext, act, ctx, facts)
         self.ext, self.rows_per_token = ext, facts["rows_per_token"]
         self.experts, self.top_k, self.swiglu = facts["experts"], facts["top_k"], facts["glu"] == "swiglu"
+        self.limit = float(facts.get("glu_limit", 0.0)) if self.swiglu else 0.0     # SwiGLU's clamp (D6; 0: none)
         # over an arena, slots below top_k are null slots (zero weights, std.moe.kernels): mmvq stores their entries'
         # zeros without reading them (a pass of the resident entries, or of the fetched ones, costs its own work only)
         self.null_slots = self.top_k if arena else 0
@@ -608,7 +640,7 @@ class LinearExperts(_Matmul):
             if tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), x, ids, y, self.swiglu, gate_scale,
-                                 up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
+                                 up_scale, self.workspace, xq=xq, null_slots=self.null_slots, glu_limit=self.limit)
             return y
         self._check_buffers(x, tokens, out, scratch)
         y = torch.empty(tokens, self.top_k, self.out_y, device=x.device) if out is None else out
@@ -619,7 +651,8 @@ class LinearExperts(_Matmul):
             if len(ids_c) <= self.mmvq_tokens:
                 self._count("mmvq")
                 self.lib.mmvq_id(self.type, blocks.view(-1, blocks.shape[-1]), xs, ids_c, ys, self.swiglu,
-                                 gate_scale, up_scale, self.workspace, xq=xq, null_slots=self.null_slots)
+                                 gate_scale, up_scale, self.workspace, xq=xq, null_slots=self.null_slots,
+                                 glu_limit=self.limit)
                 continue
             self._count("mmq")
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
@@ -631,7 +664,7 @@ class LinearExperts(_Matmul):
                 continue
             if self.glu_store:
                 self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, ws, self.slots, self.errors,
-                                    gate_scale, up_scale, self.ids_j_tokens)
+                                    gate_scale, up_scale, self.ids_j_tokens, glu_limit=self.limit)
                 continue
             self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], ws, self.slots,
                             self.errors, self.ids_j_tokens)
@@ -645,21 +678,29 @@ class LinearExperts(_Matmul):
         y.mul_(torch.where(ids >= 0, scale[ids.clamp_min(0)], 1.0)[..., None])
 
     def _swiglu(self, gate_up: torch.Tensor, y: torch.Tensor, gate_scale, up_scale, ids: torch.Tensor) -> None:
-        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any); rows of −1
-        entries untouched."""
-        self.lib.swiglu(gate_up, y, gate_scale, up_scale, ids.reshape(-1))
+        """Our f32 SwiGLU of mmq's gate/up rows, each half first scaled by its row's expert scale (if any), clamped
+        (D6); rows of −1 entries untouched."""
+        self.lib.swiglu(gate_up, y, gate_scale, up_scale, ids.reshape(-1), limit=self.limit)
 
 
 class MoeTopk:
-    def __init__(self, ext: Extension, ctx, *, experts: int, top_k: int, renormalize: bool) -> None:
+    def __init__(self, ext: Extension, ctx, *, experts: int, top_k: int, renormalize: bool, scoring: str = "softmax",
+                 bias: bool = False, scale: float = 1.0) -> None:
         self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
+        self.sigmoid, self.bias, self.scale = scoring == "sigmoid", bias, float(scale)
 
-    def __call__(self, logits: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        logits = logits.contiguous()
+    def _bias(self, bias: torch.Tensor | None) -> torch.Tensor | None:
+        if (bias is None) == self.bias:
+            raise ValueError(f"kernels.ggml_cuda: moe_topk bound {'with' if self.bias else 'without'} a selection bias")
+        return bias
+
+    def __call__(self, logits: torch.Tensor, bias: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor]:
+        logits, bias = logits.contiguous(), self._bias(bias)
         weights = torch.empty(len(logits), self.top_k, device=logits.device)
         ids = torch.empty(len(logits), self.top_k, dtype=torch.int32, device=logits.device)
         if len(logits):
-            self.lib.topk_moe(logits, weights, ids, self.renormalize)
+            self.lib.topk_moe(logits, weights, ids, self.renormalize, sigmoid=self.sigmoid, bias=bias,
+                              scale=self.scale)
         return weights, ids
 
 
@@ -676,45 +717,50 @@ class MoeRouter:
     workspace, its tile counters a static buffer each call leaves zeroed."""
 
     def __init__(self, ext: Extension, ctx, *, hidden: int, experts: int, top_k: int, renormalize: bool,
-                 dtype: str, router_dtype: str = "float32") -> None:
+                 dtype: str, router_dtype: str = "float32", scoring: str = "softmax", bias: bool = False,
+                 scale: float = 1.0) -> None:
         self.top_k, self.renormalize, self.lib = top_k, renormalize, ext(ctx.fingerprint.sm)
-        self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize)
+        self.topk = MoeTopk(ext, ctx, experts=experts, top_k=top_k, renormalize=renormalize, scoring=scoring,
+                            bias=bias, scale=scale)
         self.rows = self.lib.moe_router_rows()
         self.logits = ctx.workspace(f"ggml_cuda.router[experts={experts}]", self.rows * experts * 4)
         self.done = ctx.static("ggml_cuda.router_done", (self.lib.moe_router_tiles(self.rows),), torch.int32)
-        # the router GEMM's expert tile and hidden steps
-        self.prefill = experts % 64 == 0 and hidden % (32 * self.lib.moe_router_partials(experts)) == 0
+        # the router GEMM's expert tile (64, or 32: csrc/api.cu's router_bn) and hidden steps
+        self.prefill = experts % 32 == 0 and hidden % (32 * self.lib.moe_router_partials(experts, hidden)) == 0
         # D3′: the GEMM is row-invariant, so a call of whole CHUNKs gives each row its chunk's bits, up to an expert
         # pass (std.moe.kernels' `pass_rows` term: std routes a pass in one call)
-        self.pass_rows = max(CHUNK, _cap(ctx) // CHUNK * CHUNK) if self.prefill else CHUNK
+        self.pass_rows = max(CHUNK, _pass_cap(ctx) // CHUNK * CHUNK) if self.prefill else CHUNK
 
-    def __call__(self, x: torch.Tensor, router: torch.Tensor, xq: torch.Tensor | None = None):
+    def __call__(self, x: torch.Tensor, router: torch.Tensor, bias: torch.Tensor | None = None,
+                 xq: torch.Tensor | None = None):
         if len(x) >= CHUNK and self.prefill:
-            return self.topk(self._logits(x, router))
+            return self.topk(self._logits(x, router), bias)
         if not 0 < len(x) <= self.rows:
-            return self.topk(torch.nn.functional.linear(x.float(), router.float()))
+            return self.topk(torch.nn.functional.linear(x.float(), router.float()), bias)
+        bias = self.topk._bias(bias)
         x = x.contiguous()
         if x.data_ptr() % 16:                                # the kernel's vector loads
             x = x.clone()
         weights = torch.empty(len(x), self.top_k, device=x.device)
         ids = torch.empty(len(x), self.top_k, dtype=torch.int32, device=x.device)
         logits = self.logits.view(torch.float32)[:len(x) * router.shape[0]].view(len(x), -1)
-        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq)
+        self.lib.moe_router(x, router, logits, self.done, weights, ids, self.renormalize, xq=xq,
+                            sigmoid=self.topk.sigmoid, bias=bias, scale=self.topk.scale)
         return weights, ids
 
     def _logits(self, x: torch.Tensor, router: torch.Tensor) -> torch.Tensor:
         """A prompt chunk's f32 logits [T, E] (the router GEMM, D3)."""
         logits = torch.empty(len(x), router.shape[0], device=x.device)
-        partials = torch.empty(self.lib.moe_router_partials(len(router)), *logits.shape, device=x.device)
+        partials = torch.empty(self.lib.moe_router_partials(len(router), x.shape[1]), *logits.shape, device=x.device)
         self.lib.moe_router_logits(x.contiguous(), router.contiguous(), partials, logits)
         return logits
 
-    def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts):
+    def route_prepare(self, x: torch.Tensor, router: torch.Tensor, experts, bias: torch.Tensor | None = None):
         """`moe_router@1`'s result and the experts' input `x[:, None]`: for this provider's `linear_experts` instance
         `experts` on its mmvq path, a handle to x's q8_1 activations written by the router's launch (no quantize of
         its own; std.moe.kernels), else the tensor."""
         buffer = experts.prepare_buffer(len(x)) if isinstance(experts, LinearExperts) and len(x) <= self.rows else None
-        weights, ids = self(x, router, buffer)
+        weights, ids = self(x, router, bias, buffer)
         return weights, ids, x[:, None] if buffer is None else experts.prepared(x, buffer)
 
 
@@ -758,13 +804,13 @@ def _supports_linear_experts(f: dict, act_quant=ACT_QUANT, types=TYPES) -> bool:
     swiglu = f["glu"] == "swiglu"
     return (_supports_matmul(f, act_quant, types) and f["out_dtype"] == "float32" and f["glu"] in ("none", "swiglu")
             and f["out"] % (8 if swiglu else 4) == 0 and f["rows_per_token"] in (1, f["top_k"])
-            and CHUNK * f["top_k"] <= ID_PAIRS and "glu_limit" not in f)        # (the clamp: docs/v1-glm.md step 4)
+            and CHUNK * f["top_k"] <= ID_PAIRS)
 
 
 def _supports_moe_topk(f: dict) -> bool:
     e = f["experts"]
-    return (0 < e <= 512 and e & (e - 1) == 0 and 0 < f["top_k"] <= e     # topk-moe.cu's instances; softmax only
-            and not {"scoring", "bias", "scale"} & f.keys())                # (sigmoid / bias / scale: GLM's step 4)
+    return ((0 < e <= 512 and e & (e - 1) == 0 or e == 288) and 0 < f["top_k"] <= e     # topk-moe.cu's instances
+            and f.get("scoring", "softmax") in ("softmax", "sigmoid"))
 
 
 def _supports_moe_router(f: dict) -> bool:

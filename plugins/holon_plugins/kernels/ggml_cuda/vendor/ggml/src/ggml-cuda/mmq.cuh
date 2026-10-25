@@ -2,7 +2,7 @@
 
 // Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 // x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
-// gate_scale, up_scale and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
+// gate_scale, up_scale, glu_limit and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
 // through process_tile, mul_mat_q, launch_mul_mat_q and mul_mat_q_switch_J.
 
 #include "common.cuh"
@@ -574,9 +574,10 @@ template<ggml_type type, int J, bool fallback, ggml_prec prec_src1>
 static __device__ __forceinline__ void ggml_cuda_mmq_write_back_glu(
             const float * __restrict__ sum, const int * __restrict__ ids_dst, float * __restrict__ dst,
             const float * __restrict__ y_scale, const int stride, const int j_max,
-            const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert) {
+            const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert,
+            const float glu_limit) {
 #if defined(AMD_MFMA_AVAILABLE) || defined(AMD_WMMA_AVAILABLE) || !defined(TURING_MMA_AVAILABLE)
-    GGML_UNUSED_VARS(sum, ids_dst, dst, y_scale, stride, j_max, gate_scale, up_scale, expert);
+    GGML_UNUSED_VARS(sum, ids_dst, dst, y_scale, stride, j_max, gate_scale, up_scale, expert, glu_limit);
     NO_DEVICE_CODE;
 #else
     typedef tile<16, 8, int> tile_C;
@@ -613,7 +614,8 @@ static __device__ __forceinline__ void ggml_cuda_mmq_write_back_glu(
                                 u *= up_scale[expert];
                                 gate *= gate_scale[expert];
                             }
-                            dst[ids_dst[j]*stride + i] = u * ggml_cuda_op_silu_single(gate);
+                            dst[ids_dst[j]*stride + i] = glu_limit > 0.0f ? // Holon: GLM's clamp (swiglu_f32's)
+                                ggml_cuda_op_swiglu_clamp_single(gate, u, glu_limit) : u * ggml_cuda_op_silu_single(gate);
                         }
                     }
                 }
@@ -1015,8 +1017,10 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         const int stride_row_x, const int ncols_y, const int stride_col_dst,
         const int tile_x_max_i, const int tile_y_max_j, const int kb0_start, const int kb0_stop,
         const float * __restrict__ x_scale, const bool dst_bf16, const bool stage_end, // Holon: dst's store; stage_end below
-        const int split, const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert) {
-        // Holon: glu, the fused gate/up store (ggml_cuda_mmq_write_back_glu) of rows `split` apart, `expert`'s scales
+        const int split, const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert,
+        const float glu_limit) {
+        // Holon: glu, the fused gate/up store (ggml_cuda_mmq_write_back_glu) of rows `split` apart, `expert`'s scales,
+        // the clamp (glu_limit > 0: docs/v1-glm.md D6)
 
     constexpr int              warp_size  = ggml_cuda_get_physical_warp_size();
     constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
@@ -1088,7 +1092,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         write_back(sum, ids_dst, tmp_fixup + ((fixup ? 0 : gridDim.x) + blockIdx.x)*(J*I), y_scale, I, I, J, nullptr, false);
     } else if constexpr (glu) {
         ggml_cuda_mmq_write_back_glu<type, J, fallback, prec_src1>(sum, ids_dst, dst, y_scale, stride_col_dst, tile_y_max_j,
-                                                                   gate_scale, up_scale, expert);
+                                                                   gate_scale, up_scale, expert, glu_limit);
     } else {
         write_back(sum, ids_dst, dst, y_scale, stride_col_dst, tile_x_max_i, tile_y_max_j, x_scale, dst_bf16);
     }
@@ -1148,7 +1152,8 @@ static __global__ void mul_mat_q(
         const uint3 channel_ratio, const uint3 nchannels_y, const int stride_channel_x, const int stride_channel_y, const int stride_channel_dst,
         const uint3 sample_ratio, const uint3 nsamples_y, const int stride_sample_x, const int stride_sample_y, const int stride_sample_dst,
         const uint3 ntx, const float * __restrict__ x_scale, const bool dst_bf16, // Holon: dst's store (mmq_store)
-        const float * __restrict__ gate_scale, const float * __restrict__ up_scale) { // Holon: glu's scales
+        const float * __restrict__ gate_scale, const float * __restrict__ up_scale, // Holon: glu's scales
+        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
 
     // Skip unused template specializations for faster compilation:
     if (ggml_cuda_mmq_get_config(type, J, fallback, prec_src1).type == GGML_TYPE_COUNT) {
@@ -1256,7 +1261,7 @@ static __global__ void mul_mat_q(
             (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
              stride_row_x, ncols_y, stride_col_dst,
              tile_x_max_i, tile_y_max_j, 0, blocks_per_ne00.z, x_scale, dst_bf16, false,
-             split, gate_scale, up_scale, channel_x);
+             split, gate_scale, up_scale, channel_x, glu_limit);
         return;
     }
 
@@ -1347,7 +1352,7 @@ static __global__ void mul_mat_q(
             (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
              stride_row_x, ncols_y, stride_col_dst,
              tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop, x_scale, dst_bf16, !ids_dst && kb0_start != 0,
-             split, gate_scale, up_scale, channel_x);
+             split, gate_scale, up_scale, channel_x, glu_limit);
 
         kbc += blocks_per_ne00.z;
         kbc -= fastmodulo(kbc, blocks_per_ne00);
@@ -1426,7 +1431,7 @@ static __global__ void mul_mat_q(
         (x, offset_x, y + offset_y, ids_dst_shared, mmq_dst_at(dst, offset_dst, dst_bf16), tmp_fixup, y_scale_tile,
          stride_row_x, ncols_y, stride_col_dst,
          tile_x_max_i, tile_y_max_j, kb0_start, kb0_stop, x_scale, dst_bf16, false,
-         split, gate_scale, up_scale, channel_x);
+         split, gate_scale, up_scale, channel_x, glu_limit);
 }
 
 template <ggml_type type, int J, bool fallback, ggml_prec prec_src1>
@@ -1582,6 +1587,7 @@ struct mmq_args {
     bool glu = false; // Holon: the fused gate/up store (with ids; docs/v1-moe-prefill.md D4), and its scale2 per expert
     const float * gate_scale = nullptr;
     const float * up_scale = nullptr;
+    float glu_limit = 0.0f; // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
 };
 
 static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const int cc) {
@@ -1645,7 +1651,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
              blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
              channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,
              sample_ratio_fd, nsamples_y_fd, args.stride_sample_x, args.stride_sample_y, args.stride_sample_dst,
-             ntx_fd, args.x_scale, args.dst_bf16, args.gate_scale, args.up_scale);
+             ntx_fd, args.x_scale, args.dst_bf16, args.gate_scale, args.up_scale, args.glu_limit);
         return;
     }
 
@@ -1680,7 +1686,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
          blocks_per_ne00_fd, args.nrows_x, args.ncols_dst, args.stride_row_x, args.ncols_y, args.nrows_dst,
          channel_ratio_fd, nchannels_y_fd, args.stride_channel_x, args.stride_channel_y, args.stride_channel_dst,
          sample_ratio_fd, nsamples_y_fd, args.stride_sample_x, args.stride_sample_y, args.stride_sample_dst,
-         ntx_fd, args.x_scale, args.dst_bf16, args.gate_scale, args.up_scale);
+         ntx_fd, args.x_scale, args.dst_bf16, args.gate_scale, args.up_scale, args.glu_limit);
 
     if (!fixup_needed) {
         return;
@@ -1829,7 +1835,8 @@ void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
         const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr,
         bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr, // Holon: glu (D4)
-        int64_t ids_j_tokens = INT64_MAX); // Holon: J against the tokens up to this many (D2); upstream: always
+        int64_t ids_j_tokens = INT64_MAX, // Holon: J against the tokens up to this many (D2); upstream: always
+        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/v1-glm.md D6)
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 

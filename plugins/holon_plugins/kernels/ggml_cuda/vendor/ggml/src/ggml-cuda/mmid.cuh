@@ -4,8 +4,8 @@
 #define GGML_CUDA_MM_IDS_BLOCK_PAIRS 16384
 
 // Holon: the most (token, expert) pairs one call sorts: past GGML_CUDA_MM_IDS_BLOCK_PAIRS, the device-wide path (an
-// eager prefill pass of up to 4,096 rows at top-8, docs/v1-offload.md D8)
-#define GGML_CUDA_MM_IDS_MAX_PAIRS 32768
+// eager prefill pass of up to 4,096 rows at top-8, docs/v1-offload.md D8; 16,384 at top-8, docs/v1-glm.md D9)
+#define GGML_CUDA_MM_IDS_MAX_PAIRS 131072
 
 // Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
 size_t ggml_cuda_mm_ids_scratch_bytes(int n_pairs);

@@ -1,6 +1,6 @@
 // Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 // src1's type to the q8_1 quantizers (bf16 activations); x_scale and the bf16 dst in mmq_args; glu, gate_scale,
-// up_scale and ids_j_tokens through ggml_cuda_mul_mat_q to the launch.
+// up_scale, ids_j_tokens and glu_limit through ggml_cuda_mul_mat_q to the launch.
 
 #include "common.cuh"
 #include "mmq.cuh"
@@ -143,7 +143,8 @@ void ggml_cuda_mul_mat_q(
         ggml_backend_cuda_context & ctx, const ggml_tensor * src0, const ggml_tensor * src1, const ggml_tensor * ids, ggml_tensor * dst,
         const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
         const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
-        const int64_t ids_j_tokens) { // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
+        const int64_t ids_j_tokens, // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
+        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -373,6 +374,8 @@ void ggml_cuda_mul_mat_q(
     args.glu = glu;
     args.gate_scale = gate_scale;
     args.up_scale = up_scale;
+    GGML_ASSERT(glu || glu_limit == 0.0f); // Holon: the clamp is the fused store's
+    args.glu_limit = glu_limit;
 
     ggml_cuda_mul_mat_q_switch_type(ctx, args, stream, prec_src1);
 }
