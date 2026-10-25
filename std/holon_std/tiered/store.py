@@ -124,13 +124,14 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_min_tokens: int = 0) -> None:
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
-        # `loan_min_tokens` (`moe.loan_min_tokens`): a lent step's loan is its share of the worst step's by its prompt
-        # tokens, at least that many tokens' share (0: none) — a step's fixed costs (sub-batches' temporaries, the
-        # prompt-logprob head) do not shrink with it, and a loan's overflow takes the device's own memory, not the
-        # reserve (GLM step 5: a 2K-token step with prompt logprobs ran out of memory at the deployment's fraction)
-        self._loan_min_tokens = loan_min_tokens
+        # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
+        # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
+        # prompt-logprob head's full-vocabulary chunks) do not shrink with its tokens, and a loan's overflow takes the
+        # device's own memory, which the reserve does not hold (GLM step 5: 5K-8K-token steps with prompt logprobs ran
+        # out of memory at the deployment's fraction)
+        self._loan_fixed = max(loan_fixed, LOAN_SLACK)
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
@@ -1114,10 +1115,9 @@ class TieredStore:
         return -(-nbytes // self._align) * self._align
 
     def _step_loan_bytes(self, at: int) -> int:
-        """The loan of a step of `at` prompt tokens: its share of the worst step's (of at least `loan_min_tokens`),
-        aligned (at most the worst's: the caller's `min`)."""
-        return -(-(int(self._loan_per_token * max(at, self._loan_min_tokens)) + LOAN_SLACK) // self._align) * \
-            self._align
+        """The loan of a step of `at` prompt tokens: its share of the worst step's plus the fixed bytes, aligned (at
+        most the worst's: the caller's `min`)."""
+        return -(-(int(self._loan_per_token * at) + self._loan_fixed) // self._align) * self._align
 
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
