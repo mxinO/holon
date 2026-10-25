@@ -313,23 +313,20 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   returning 2.94 GB of VRAM and as much pinned host memory in mode (ii). Pipelined parts stay as in the RAM-holds-all
   layout. Tested on Qwen3-30B-A3B with `moe.ram` capped (`exact.py`: capped vs uncapped identical) and the plant
   `exclusive_lent_not_demoted`, forced to bite by a RAM tier small enough that the stale unit is reused.
-  - **Built first (step 1, rev 8):** a prompt step under exclusive tiers borrows its staging from the cache and a lent
-    piece goes **SSD-only** (its code −2: the file always holds it, so its slot is free at once; no RAM unit is
-    written); the graphed steps' staging slots return to the decode bound; the host I/O staging units stay a pass's
-    until D8f sizes them. Exact on the GPU tiny model at one sequence (`test_moe_engine.py`'s `ssd1`: bitwise the
-    resident store, borrowing asserted; it fails on the store before the change) and on the vehicle (A5000, one
-    sequence, `moe.ram = *=0.25`, prompts of 5,000 / 700 / 3,000 tokens and 64 generated each: capped vs uncapped
-    identical in streams and top-3 prompt logprobs, the capped arm borrowing its staging in 9 prompt steps). Under
-    exclusive tiers the ring stays off (it copies RAM units only) and pipelined parts stay off (`resolver.py:81-82`)
-    until D8f, which runs SSD rounds before the parts. **Parking a lent piece in RAM** by the rule above is the item's
-    next commit (a `moe_tiers@1` demote entry); C's loan model assumes it, and the SSD-only count is the same either way
-    (parking moves RAM's coldest to the SSD instead). **The host mirror records a lent piece's code** (−2 under
-    exclusive tiers; B8-m1, `bbe68fd9`): `ssd1` checks the mirror equals the device map, tier codes too, once its prompt
-    steps are committed (it failed before). **The parking commit makes the mirror tier-exact** under exclusive tiers:
-    a parked lend, like `moe_tiers@1`'s demotions and keeps, places pieces unlogged, so the step's map rides in its
-    telemetry and the commit adopts that map, still replaying the step's records for the per-layer empty-slot lists
-    (≈ 100 KB a step at GLM's sizes); every mirror reader still reads slots ≥ 0 only
-    (the policies' `after_commit`, the bench's tap, `route_dump`'s `device_is_mirror`).
+  - **Built (step 1):** a prompt step under exclusive tiers borrows its staging from the cache, and the graphed steps'
+    staging slots return to the decode bound; the host I/O staging units stay a pass's until D8f's landing pool. **A
+    lent expert parks in RAM** by the rule above (`93199117`): hottest first, into free units of its classes, else over
+    RAM's coldest of the same classes when strictly hotter, else onto the SSD (the file holds it); its slots are copied
+    into its units (one `expert_fetch@1` launch a class) before the step's staging overwrites them, on the device, no
+    host sync. Exact on the GPU tiny model at one sequence (`test_moe_engine.py`'s `ssd1`: bitwise the resident store,
+    borrowing and parking asserted; without the copies its streams differ) and on the vehicle (A5000, one sequence,
+    `moe.ram = *=0.25`, prompts of 5,000 / 700 / 3,000 tokens and 64 generated each: capped vs uncapped identical in
+    streams and top-3 prompt logprobs, 9 borrowing steps, 257 experts parked). **The host mirror is tier-exact under
+    exclusive tiers** (B8-m1, then the parking commit): parked lends, like `moe_tiers@1`'s demotions and keeps, place
+    pieces unlogged, so the step's map rides in its telemetry (≈ 100 KB a step at GLM's sizes) and the commit adopts it,
+    still replaying the step's records for the per-layer empty-slot lists; `ssd1` checks mirror = device, tier codes
+    too. Every mirror reader reads slots ≥ 0 only (the policies' `after_commit`, the bench's tap, `route_dump`'s
+    `device_is_mirror`). Under exclusive tiers the ring and pipelined parts stay off (`resolver.py:81-82`) until D8f.
 - **(a) F10 with RAM short — the full requirement set:**
   - a **heat**: `moe_tiers@1`'s heat input gains a fact `heat = "i32"` (default f32, so today's facts do not move)
     and `placement.promote@1` passes its recency (`last`, int32 device state) unconverted (B2-m8: no f32 copy, no
