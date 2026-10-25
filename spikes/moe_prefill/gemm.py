@@ -15,7 +15,9 @@ module, against two bounds of the same work, CUDA-event timed (median of `--iter
 - `--j-check`: whether mmq's column-tile width J changes a row's bits — the first n tokens' rows of one call of T
   tokens (J = 128) against a call of those n tokens alone (J chosen against n: 16 → 16, 32 → 32, 64 → 64), both stacks.
 - Routing: per token k distinct experts drawn without replacement with popularity ∝ rank^-s (s = 0.5: the top 10% of
-  experts take ≈ 27% of routes, M6's measured range 23–36%), a fixed seed.
+  experts take ≈ 27% of routes, M6's measured range 23–36%), a fixed seed; or, with `--routes <trace.npz>`, a real
+  trace's ids (`spikes/x0_offload/m6`'s form, e.g. `spikes/glm0/maya_routes.py`'s): the first T rows of the layer
+  `--layer` names among the trace's `info.layers`.
 
     python spikes/moe_prefill/gemm.py --model <gguf> [--layer 0] [--tokens 512 1024 2048 4096] [--freetoken | --j-check]
         [--json out]
@@ -53,6 +55,21 @@ def routing(tokens: int, experts: int, k: int, s: float, gen: torch.Generator) -
     return (logp + gumbel).topk(k, dim=1).indices.to(torch.int32)
 
 
+def trace_routing(path: str, layer: int):
+    """A real trace's ids for one layer, as `routing`'s caller takes them (the first `tokens` rows)."""
+    import json
+
+    import numpy as np
+    z = np.load(path)
+    layers = json.loads(str(z["info"])).get("layers") or list(range(z["ids"].shape[1]))
+    ids = torch.from_numpy(z["ids"][:, layers.index(layer)].astype("int32"))
+
+    def take(tokens: int, *_):
+        assert tokens <= len(ids), f"the trace has {len(ids)} rows, not {tokens}"
+        return ids[:tokens].contiguous()
+    return take
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", required=True)
@@ -65,7 +82,11 @@ def main() -> None:
     ap.add_argument("--f32", action="store_true", help="--freetoken with f32 activations (and so f32 out)")
     ap.add_argument("--j-check", action="store_true")
     ap.add_argument("--json")
+    ap.add_argument("--routes", help="a trace .npz whose ids replace the synthetic routing")
     a = ap.parse_args()
+    if a.routes:
+        global routing
+        routing = trace_routing(a.routes, a.layer)
     dev = torch.device("cuda")
     tensors = {t.name: t for t in gguf.GGUFReader(a.model).tensors}
     blk = f"blk.{a.layer}."
@@ -77,7 +98,7 @@ def main() -> None:
               "down": (int(down.tensor_type), torch.from_numpy(down.data.copy()).to(dev), inter, hidden, a.top_k)}
     gen = torch.Generator().manual_seed(0)
     rows = (freetoken if a.freetoken else j_check if a.j_check else holon)(a, stacks, e, gen, dev)
-    out = {"gpu": torch.cuda.get_device_name(), "layer": a.layer, "experts": e, "top_k": a.top_k, "inter": inter,
+    out = {"gpu": torch.cuda.get_device_name(), "routes": a.routes or f"synthetic s={a.skew}", "layer": a.layer, "experts": e, "top_k": a.top_k, "inter": inter,
            "hidden": hidden, "skew": a.skew, "engine": "freetoken" if a.freetoken else "holon",
            "activations": "f32" if a.f32 else "as the engine calls it", "rows": rows}
     if a.json:

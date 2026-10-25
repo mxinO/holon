@@ -6,8 +6,10 @@
 // completion. Modes:
 //   uring  one thread, one io_uring (raw syscalls, no SQPOLL), every chunk of the call submitted at once up to `depth`
 //          in flight; the submitter blocks in io_uring_enter
-//   uringb uring, plus the bounce copy: each extent read as an aligned superset, then memcpy'd by the same thread into
-//          a packed destination (the extents of Maya-S's `_exps` tensors start 32 B past 4 KiB, G-B §1)
+//   uringb uring, plus the bounce copy as the engine would do it: as each extent's last chunk completes, the same
+//          thread copies the extent (from 32 B in: Maya-S's `_exps` extents start 32 B past 4 KiB, G-B §1) into the next
+//          destination of a rotating, page-locked (mlock) region of a RAM tier's size (2 GiB), so the copy meets cold
+//          pages and TLB entries as the engine's RAM-tier units do
 //   aio    one thread, Linux native AIO (io_setup / io_submit / io_getevents on the O_DIRECT fds): the fallback where
 //          io_uring is blocked
 //   pread  one thread, the chunks read one after another (today's per-thread path, depth 1)
@@ -46,19 +48,35 @@ static double now(void) {
     return t.tv_sec + t.tv_nsec * 1e-9;
 }
 
-typedef struct { int fd; off_t off; size_t len; char* buf; } Req;
+typedef struct { int fd; off_t off; size_t len; char* buf; int ext; } Req;
+
+// the extents of the call being read (for the bounce): source, length, chunks still in flight
+static char* ext_src[64];
+static size_t ext_len[64];
+static int ext_left[64];
+static int next_ext;
+static char* rot;                      // the rotating destination region
+static size_t rot_size, rot_at;
+static int bounce;
+
 
 // k experts' chunk list, into `buf` (k * EXPERT_BYTES, 4 KiB aligned)
 static int plan(Req* r, int k, size_t chunk, char* buf, unsigned* seed) {
     int n = 0;
+    next_ext = 0;
     for (int e = 0; e < k; ++e)
         for (int x = 0; x < 3; ++x) {
+            int id = next_ext++;
+            ext_src[id] = buf;
+            ext_len[id] = EXTENT[x];
+            ext_left[id] = 0;
             int f = rand_r(seed) % nfiles;
             off_t span = (sizes[f] - (off_t) EXTENT[x]) / 4096;
             off_t base = ((off_t) (((uint64_t) rand_r(seed) << 31 | rand_r(seed)) % span)) * 4096;
             for (size_t o = 0; o < EXTENT[x]; o += chunk) {
                 size_t len = EXTENT[x] - o < chunk ? EXTENT[x] - o : chunk;
-                r[n++] = (Req){fds[f], base + (off_t) o, len, buf};
+                r[n++] = (Req){fds[f], base + (off_t) o, len, buf, id};
+                ++ext_left[id];
                 buf += len;
             }
         }
@@ -121,6 +139,13 @@ static double run_uring(Ring* R, Req* r, int n, int depth) {
         while (head != __atomic_load_n(R->cq_tail, __ATOMIC_ACQUIRE)) {
             struct io_uring_cqe* c = &R->cqes[head & *R->cq_mask];
             if (c->res != (int) r[c->user_data].len) { fprintf(stderr, "short read %d\n", c->res); exit(1); }
+            int x = r[c->user_data].ext;
+            if (bounce && --ext_left[x] == 0) {          // the extent is complete: copy it while the rest read
+                size_t len = ext_len[x] - 32;
+                if (rot_at + len > rot_size) rot_at = 0;
+                memcpy(rot + rot_at, ext_src[x] + 32, len);
+                rot_at = (rot_at + len + 4095) & ~(size_t) 4095;
+            }
             ++head; ++done; --inflight;
         }
         __atomic_store_n(R->cq_head, head, __ATOMIC_RELEASE);
@@ -205,7 +230,10 @@ int main(int argc, char** argv) {
     printf("io_uring: %s\n", ur == 0 ? "available" : strerror(-ur));
     int ua = aio_init(256);
     printf("native aio: %s\n", ua == 0 ? "available" : strerror(-ua));
-    char* packed = malloc((size_t) 8 * EXPERT_BYTES);
+    rot_size = (size_t) 2 << 30;
+    rot = mmap(NULL, rot_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE, -1, 0);
+    if (rot == MAP_FAILED) { perror("mmap"); return 1; }
+    printf("bounce destination: 2 GiB %s\n", mlock(rot, rot_size) == 0 ? "page-locked" : "not page-locked (mlock failed)");
     const int KMAX = 8;
     char* buf;
     if (posix_memalign((void**) &buf, 4096, (size_t) KMAX * EXPERT_BYTES)) return 1;
@@ -232,14 +260,8 @@ int main(int argc, char** argv) {
                         int n = plan(r, k, chunks[c], buf, &seed);
                         double dt;
                         if (m <= 1) {
+                            bounce = m == 1;
                             dt = run_uring(&R, r, n, depths[d]);
-                            if (m == 1) {                    // the bounce: superset -> packed, 32 B past each 4 KiB
-                                double tb = now();
-                                for (int e = 0; e < k; ++e)
-                                    memcpy(packed + (size_t) e * EXPERT_BYTES, buf + (size_t) e * EXPERT_BYTES + 32,
-                                           EXPERT_BYTES - 4096);
-                                dt += now() - tb;
-                            }
                         } else if (m == 2) dt = run_aio(r, n, depths[d]);
                         else if (m == 3) dt = run_pread(r, n);
                         else dt = run_pool(r, n, depths[d]);
