@@ -770,7 +770,7 @@ tokens (sparse DSA from t + 1 > 11), chunked at 100 / 250, then 32 decode steps;
 | logits (the GGUF's head), one-shot and chunked, vs HF | CPU | max \|Δ\| ≤ 1e-4, top-1 identical | pass |
 | DSA token sets per (layer, position) | CPU | identical under the lower-pool rule; ties asserted | pass |
 | prefix hit vs recompute | CPU | bitwise | pass |
-| one row alone vs beside a long row (the dense path is the sparse kernel) | CPU, GPU | bitwise | pass |
+| one row alone vs beside a long row (the dense path is the sparse kernel) | CPU (its selection: every block), GPU (bitwise) | bitwise | pass |
 | clamp bind rate per path | CPU, GPU | ≥ 5% | pass |
 | tokenizer vs `llama-tokenize` (LC `27c7a76`) on a multilingual round-trip corpus | CPU | identical ids | pass |
 | the quantized loads `llama-quantize` leaves f32 in the fixtures (A-m1): a synthetic GGUF with Q6_K `attn_k_b` / `attn_v_b` (3-D, widths 256 / 512) and Q8_0 indexer and KDA-gate tensors, loaded through the recipe, against gguf-py's dequantization (rounded to BF16 where D5 rounds), per head | CPU (step 2) | bitwise | pass |
@@ -1235,6 +1235,18 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | the router's `torch.topk` breaks ties as HF leaves them | wrapped per router call with the stable descending sort, beside the indexer's `Tensor.topk` (D2) |
 | §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
 | the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
+
+### Step 3 (units, contracts, the model plugin)
+
+| Note | Disposition |
+|---|---|
+| A CPU matmul's bits follow its call's rows (the reference experts' product per expert over its routed rows; found at 1, 4 and 32 threads, not 8) | §6.1's prefix hit is bitwise its recompute with both sides in 64-row prompt steps (the same rows per call); a row beside a long one is checked on the CPU by its selection (every block, `all_blocks`) and bitwise on the GPU (step 4); the sub-batched CPU run is within 1e-5 of the unsplit one, the recurrence's bitwise test is D4's (step 4) |
+| `gdn_rewind@1`'s masked value −inf | GDN's existing replay with −inf is bitwise its replay with −1e4 (`test_gdn_kernels.py`, sm_86 and sm_120); the GPU providers refuse the new facts (`gate_width`, `head_weights`, `scoring`, `bias`, `scale`, `glu_limit`, norm `round`) until step 4, and the facts are passed only when not their defaults |
+| The FN locks the step reaches (`std.hyper`, `std.mixers.qsa` / `gdn`, `kernels.qsa_triton`) | their placement profiles are not in this checkout: their verdicts come with the close's propagation round (step 10); the other reached 5080 lineages' verdicts are in `evidence/glm_step3_close_2026-10-25.json` |
+| KDA under MTP | `std.mixers.kda@1` refuses `max_draft_tokens` (MTP deferred, D7): no KDA rewind or verify is served |
+| `glm_xml@1`'s forced-call grammar | the parser is exact (`<arg_key>` / `<arg_value>`); the grammar for a forced call accepts any text up to `</tool_call>` (a typed per-argument grammar if a step needs it) |
+| Q6_K `attn_k_b` / `attn_v_b` | `std.mixers.dsa_mla@1` dequantizes them at load (gguf-py), held in the model dtype; the test's Q6_K encoder is the testing package's (gguf-py has none) |
+| `test_reserve.py`'s GLM case and the KDA slot-0 test | with the first GPU kernel (step 4) |
 
 ### During step 1 (the lead's calls, §11)
 

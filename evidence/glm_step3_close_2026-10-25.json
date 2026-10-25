@@ -1,0 +1,49 @@
+{
+ "date": "2026-10-25",
+ "doc": "docs/v1-glm.md §9 step 3, §6.1, §13 (step 3)",
+ "commits": ["1bb7fb15 std units, contracts, references", "8cd4eaf3 models.glm5_next, bundle, CPU proof"],
+ "core_diff_lines_vs_merge_base": 0,
+ "fixtures_after_step2_folds": {
+  "note": "step 2's review folds (b6a43fd2) rebuilt both fixtures (F32 tensors kept f32, references from the GGUF's own state); these pins replace the step-2 evidence's",
+  "cpu_sha256": "7114e563b206c3aaccfae604f73158eb3514147b11f72be0b087a7c90ec64e79",
+  "gpu_sha256": "8f439ffad222f0fb7284510dc5219f5fde1eb032fc6e446bfe001bba8b1f7d86"
+ },
+ "cpu_proof": {
+  "test": "plugins/tests/test_glm5_next_cpu.py",
+  "result": "13 passed",
+  "rows": {
+   "logits vs HF, chunks 128 / 7 / 13": "max |Δ logprob| ≤ 1e-4, top-1 and greedy tokens identical",
+   "DSA token sets per (layer, position)": "identical under the lower-pool rule",
+   "prefix hit vs recompute": "bitwise (both sides in 64-row prompt steps)",
+   "one row beside a long row": "its selection is every block (all_blocks); bits: GPU, step 4",
+   "sub-batched steps (rows patched to 64)": "same tokens, logprobs within 1e-5; prefix hit off a sub-batched prompt at its checkpoint",
+   "release f32 tensors": "loaded with their file bits (not bf16-representable)",
+   "quantized loads (A-m1)": "Q6_K attn_k_b / attn_v_b, Q8_0 indexer and KDA gates through the recipe equal gguf-py's dequantization",
+   "plants": "mhc_comb_transposed, mhc_sinkhorn_short, dsa_pool_ape_off, router_bias_in_weights, kda_state_not_carried each fail"
+  },
+  "cpu_row_bits_finding": "the prefix test at 128-row steps on one side and 46 rows on the other differed by ≈1e-6 in a logprob at 1, 4 and 32 threads (not 8): the reference experts' product per expert follows its call's rows (first difference at layer 1's routed gate/up)"
+ },
+ "suites": {
+  "sharded full suite (plugins std core testing tools, A5000 sm_86, -n 4)": "1765 passed, 70 skipped, 1 failed (the prefix test above; fixed, file re-run 13 passed)",
+  "FN CPU tests (FN tiny GGUF, pins ok)": "20 passed, 4 skipped",
+  "FN golden tests (golden venv)": "9 passed, 1 skipped",
+  "judge tests": "71 passed",
+  "frontend http (glm_xml@1 cases)": "92 passed"
+ },
+ "gdn_rewind_masked_value": {
+  "check": "test_gdn_kernels.py -k 'verify or rewind': the replay with -inf bitwise the replay with -1e4",
+  "sm_86 (RTX A5000)": "9 passed",
+  "sm_120 (RTX 5080)": "9 passed"
+ },
+ "existing_locks_rtx_5080": {
+  "method": "holon_tools propagate without --approve on a copy of plans/ (nothing in the repository written), at 8cd4eaf3",
+  "Qwen3-30B-A3B-Q4_K_M (offload, profile_x4_gate)": "advance; snapshot trace byte-identical (units expert_io, flashinfer, ggml_cuda, std.moe, std.tiered, std.weights.gguf changed)",
+  "Qwen3-8B-Q4_K_M": "advance; snapshot trace byte-identical (units flashinfer, ggml_cuda, std.ffn, std.weights.gguf changed)",
+  "Qwen3.8-27B-UD-IQ3_S (its prompt set judge/prompts/v1-qwen3_5.jsonl)": "advance; snapshot trace byte-identical (units fla, flashinfer, gdn_triton, ggml_cuda, std.ffn, std.mixers.gdn, std.weights.gguf changed)"
+ },
+ "not_checked_here": "the FN locks (std.hyper, std.mixers.qsa / gdn, kernels.qsa_triton): their placement profiles are not in this checkout; verdicts at the close's propagation round",
+ "static": {
+  "run_all.sh": "the static checks pass (contract listings regenerated); lint-imports 8 kept, 0 broken",
+  "check_lock_impact": "warns: the branch outdates committed locks (merge with the propagation round)"
+ }
+}
