@@ -1270,6 +1270,29 @@ def test_a_keep_never_takes_a_unit_whose_demotion_is_pending(gpu_moe):
         assert (wrong == 0) == stamped and (got == want or not stamped), wrong
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_stores_fence_orders_a_delayed_producer():
+    """The fence std's stores use (`torch.Event` on `torch.accelerator`'s streams; scripts/ci/check_events.py): a
+    consumer stream waiting on the event of a producer stream that writes late reads the producer's bytes — the
+    pattern item 2's moves and the parking use (a generic stream ignores a CUDA-typed event's wait)."""
+    device = torch.device("cuda")
+    main = torch.accelerator.current_stream(device)
+    producer, consumer = torch.Stream(device=device), torch.Stream(device=device)
+    x = torch.zeros(1 << 20, dtype=torch.int32, device=device)
+    y = torch.empty_like(x)
+    producer.wait_stream(main)
+    with producer:
+        torch.cuda._sleep(50_000_000)
+        x.fill_(7)
+        done = torch.Event(device=device)
+        done.record()
+    consumer.wait_event(done)
+    with consumer:
+        y.copy_(x)
+    main.wait_stream(consumer)
+    assert bool((y == 7).all())
+
+
 def _bytes_exact(store) -> int:
     """Exclusive tiers: the pieces whose RAM unit or VRAM slot does not hold the checkpoint's bytes of the piece the
     map names there (an idle engine)."""

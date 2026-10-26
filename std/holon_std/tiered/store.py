@@ -373,7 +373,8 @@ class TieredStore:
         self.moves = [static(f"{self.name}.moves.{i}", (self.roles, 4, self.prefill)) for i in range(2)]
         self.n_moves = [static(f"{self.name}.n_moves.{i}", (self.roles, 2)) for i in range(2)]
         self.moves_async = getattr(self.policy, "exclusive_flag", None) is not None
-        # (device-generic events: the waits are on `torch.accelerator`'s streams, which ignore a `torch.cuda.Event`)
+        # (device-generic events: the waits are on `torch.accelerator`'s streams, whose `wait_event` ignores a
+        # CUDA-typed event: scripts/ci/check_events.py)
         self.admitted, self.moved = (torch.Event(device=self.ctx.device),
                                      [torch.Event(device=self.ctx.device), torch.Event(device=self.ctx.device)])
         self.recorded: set = set()              # the fences recorded in this step (the last step's moves joined it:
