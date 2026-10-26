@@ -98,8 +98,12 @@ class Sum(nn.Module):
         self._side.wait_stream(main)                         # x is ready
         with self._side:
             acc = self._rest(x)
-        # `acc` goes back to the side stream's blocks when it is dropped, with no event: the side stream is shared by
-        # the engine's sum units and waits for the main stream's work at every fork, so no later write of the side
-        # stream can pass the main stream's read of it (an event would keep one per layer alive while the host runs
-        # ahead: a prompt step's 11 shared-expert outputs, 20 MiB each at 4K tokens, at its activation peak)
-        return add(x, acc, join=lambda: main.wait_stream(self._side))
+        out = add(x, acc, join=lambda: main.wait_stream(self._side))
+        # `acc` goes back to the side stream's blocks when it is dropped, with no event (an event would keep one per
+        # layer alive while the host runs ahead: a prompt step's 11 shared-expert outputs, 20 MiB each at 4K tokens, at
+        # its activation peak), so the side stream first waits for the main stream's read of it: a later write of the
+        # side stream cannot pass that read, nor can the allocator's release of a free block (expandable segments: an
+        # out-of-memory retry or `empty_cache` unmaps it after waiting for its own stream only; GLM step 6's illegal
+        # address)
+        self._side.wait_stream(main)
+        return out

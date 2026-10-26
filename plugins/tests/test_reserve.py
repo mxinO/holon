@@ -20,9 +20,12 @@ first 4 blocks (`GLM_SLICE_GGUF`: KDA ×3 with the dense FFN, DSA with the route
 when its file is not given."""
 import os
 import warnings
+from unittest import mock
 
 import pytest
 import torch
+import triton
+import triton.language as tl
 from holon.api import SamplingParams
 from holon.core import platform
 from holon.core.engine import Engine, EngineConfig
@@ -265,21 +268,33 @@ def test_glm_a_loan_over_the_minimum_layout_is_refused():
     assert got == want
 
 
-@pytest.mark.parametrize("fraction", [0.99, 0.985])
-def test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction(fraction):
+@triton.jit
+def _bump(x):                                      # a kernel no engine launches: its module loads at its first launch
+    tl.store(x, tl.load(x) + 1)
+
+
+@pytest.mark.parametrize("fraction, lend", [(0.99, "require"), (0.985, "require"), (0.99, "off")],
+                         ids=["0.99", "0.985", "0.99-unlent"])
+def test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction(fraction, lend):
     """The lead's step-5 call on `--memory-fraction`: at the lock's fraction, with the deployment's lending
     (`moe.lend_peak`, `moe.loan_fixed_mib`), a sequence of steps that fragments the caching allocator — a long prompt,
     short prompts, mid-size prompts with prompt logprobs (the head's full-vocabulary chunks), 4 sequences decoding
     beside a prompt — runs without running out of memory, and the device keeps some memory free after every step.
-    The first 12 blocks of the real file (a store whose tail can lend a 32K step's loan), at 32K steps."""
+    The first 12 blocks of the real file (a store whose tail can lend a 32K step's loan), at 32K steps. Unlent (GLM
+    step 6: an RTX 5090 at 0.99 kept 3 MiB free after 32K steps, the caching allocator's segments past the allocated
+    peak the profile measured), the rest of the fraction's free memory is left after every step — the profile counts
+    the allocator's reserved growth — and a kernel whose module first loads then launches."""
     if GLM_SLICE12 is None:
         pytest.skip("GLM_SLICE12_GGUF not set")
-    opts = {"moe.store": "std.moe.offload@1", "moe.ring_lend": "tail", "moe.lend_peak": "require",
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_lend": "tail", "moe.lend_peak": lend,
             "moe.loan_fixed_mib": 1536}
-    e = Engine(EngineConfig(model=GLM_SLICE12, device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
-                            max_step_tokens=32768, max_model_len=33792, memory_fraction=fraction,
-                            host_memory=48 << 30, plugin_options=opts))
-    gen, least = torch.Generator().manual_seed(9), []
+    seen, free_memory = [], platform.free_memory
+    with mock.patch.object(platform, "free_memory", lambda device: seen.append(free_memory(device)) or seen[-1]):
+        e = Engine(EngineConfig(model=GLM_SLICE12, device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                                max_step_tokens=32768, max_model_len=33792, memory_fraction=fraction,
+                                host_memory=48 << 30, plugin_options=opts))
+    gen, least, headroom = torch.Generator().manual_seed(9), [], seen[-1] - int(seen[-1] * fraction)
+    store = e.ctx.shared_objects["std.moe.offload"]                  # (the engine lets go of it at close)
     ids = lambda n: torch.randint(0, 150000, (n,), generator=gen).tolist()        # noqa: E731
     step = e.step
 
@@ -302,8 +317,12 @@ def test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction(fraction):
         e.add(ids(6000), plp)
         while e.has_work():
             e.step()
+        if lend == "off":
+            _bump[(1,)](x := torch.zeros(1, dtype=torch.int32, device="cuda"))
+            assert int(x) == 1
     finally:
         e.close()
-    store = e.ctx.shared_objects["std.moe.offload"]
-    print(f"fraction {fraction}: least free {min(least) / 2**20:.0f} MiB over {len(least)} steps")
+    print(f"fraction {fraction}, lend {lend}: least free {min(least) / 2**20:.0f} MiB over {len(least)} steps")
     assert store.loan_overflows == 0 and min(least) >= 128 << 20    # no step overflowed its loan; a margin left
+    if lend == "off":
+        assert min(least) >= headroom - (64 << 20)       # (what modules loaded since took)

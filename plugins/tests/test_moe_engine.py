@@ -3,6 +3,7 @@
 same (dequantized) weights (docs/m02-moe.md, step 1)."""
 import contextlib
 import json
+import os
 import pathlib
 import types
 import warnings
@@ -1330,3 +1331,52 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
             engine.step()
     assert worker.flag() & 2
     engine.close()
+
+
+_SIDE_STREAM = """
+import sys, types, torch
+from holon_std.ffn.units import Sum
+
+class Double(torch.nn.Module):
+    def forward(self, x):
+        return x * 2
+
+class Late(torch.nn.Module):                       # a first part that reads `acc` late, on the main stream
+    joins = True
+
+    def add_residual(self, x, acc, join):
+        join()
+        torch.cuda._sleep(50_000_000)
+        return x + acc
+
+units = {"first": Late(), "rest": Double()}
+ctx = types.SimpleNamespace(device="cuda", options={}, unit=lambda p, **kw: units[p],
+                            shared=lambda key, make: make(types.SimpleNamespace(device="cuda")))
+s = Sum(ctx, hidden=1 << 22, parts=("first", "rest"))
+xs = [torch.full((1 << 22,), float(i + 1), device="cuda") for i in range(4)]
+torch.cuda.synchronize()
+ys = []
+for x in xs:
+    ys.append(s(x))
+    if sys.argv[1] == "release":
+        torch.cuda.empty_cache()                   # what an out-of-memory retry does
+torch.cuda.synchronize()
+print([float(y.min()) for y in ys] == [float(y.max()) for y in ys] == [3.0 * (i + 1) for i in range(4)])
+"""
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("release", ["reuse", "release"])
+def test_a_sums_side_stream_output_outlives_the_main_streams_read(release):
+    """GLM step 6's illegal address (A's M2, the side-stream audit): `std.ffn.sum`'s later parts run on a side stream
+    and their sum goes back to that stream's blocks with no event (`units.Sum.forward`) while the main stream's combine
+    may not have read it yet. Neither the next sum's side-stream output, which takes that block at once (`reuse`), nor
+    the allocator releasing free blocks (`release`: with expandable segments it unmaps one after waiting for its own
+    stream only, as an out-of-memory retry does) may pass that read. A main stream that reads late (a sleep before the
+    read) while the host runs ahead: each sum is still x + 2x. In a process of its own: an illegal address ends it."""
+    import subprocess
+    import sys
+    env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}
+    out = subprocess.run([sys.executable, "-c", _SIDE_STREAM, release], env=env, capture_output=True, text=True,
+                         timeout=300)
+    assert out.stdout.strip() == "True", out.stderr[-2000:]
