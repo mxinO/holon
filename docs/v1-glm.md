@@ -528,6 +528,92 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   k ≥ 4 experts a call (step 6).
 - **Core:** none.
 
+**D8p — Step 7: the staging ring of parts under exclusive tiers (design for review; the deferred (b)+(e) half).**
+
+*Why, measured* (`spikes/glm7/after_record.py`, then `after_replay.py`: the bench's own 24 requests through the mode (ii) lock on the RTX 5090,
+the tier of every expert before and after each prompt, every decode step's routes and SSD bytes; §13 step 7). A prompt
+step under exclusive tiers stages **every** miss in its own slot, borrowed from the cache (`Lent` wants twice a layer's
+most missing pieces with no parts: ≈ 213 a class at GLM's fit), on top of the 32K tail. The borrowed experts park over
+RAM's coldest or drop, and both they and the RAM experts parking displaced are read back:
+
+| Prompt | VRAM experts after it (of 3,135) | Displaced to the SSD | Prompt SSD bytes | Of them: the routed SSD-only set before it | Decode MB a token, tokens 1-32 / 33-256 |
+|---|---|---|---|---|---|
+| 1K | 2,470 | ≈ 880 | 11.7 GiB | ≈ 7.4 GiB (1,100 experts) | 90 / 34 |
+| 4K | 2,220 | ≈ 1,110 | 15.7 GiB | ≈ 9.1 GiB (1,360) | 111 / 40 |
+| 32K | **308** | ≈ 2,950 | 29.0 GiB | ≈ 10.0 GiB (1,505) | 259 / 51 |
+
+So a 1K prompt reads ≈ 4.3 GiB (37%) more than its routed SSD-only set, and its drive is 84% busy: the bytes are its
+time. With the ring of parts a pass stages two parts of a layer's RAM misses plus its SSD rows, so a prompt step
+borrows ≈ 2 × ⌈213 / 8⌉ + A_od = 86 slots a class at 1K (from ≈ 213: −60%), and the gather overlaps the parts'
+compute (C's step-1 estimate: a serialized (ii) 1K falls ≈ 1.2 → 0.9; that is today's shape). The 32K tail is not
+this design's (the 16K / 8K step sweep decides it).
+
+*Where the slots come from: `moe_tiers@3`, not the resolve providers.* The kept step-1 design gave every resolve
+provider (@1, `lfu`, `lru`, promote's; CPU oracles and CUDA) `outside` and `ahead` inputs. `moe_tiers` already knows a
+call's split — it reorders `fetch[r]` with the RAM entries first and the SSD entries after (`n_ram`) — so it assigns
+the staging slots instead, one provider and its oracle: `moe_tiers@3` = @2 plus `slots [R, T, k]` (the resolve's,
+rewritten in place), `ring [R, W]` (the step's ring slots, W = 2q a class) and `outside [R, A_od + A_ra]`:
+- RAM entry k (its rank in `fetch[r, :, :n_ram]`) → `ring[r, k mod W]` (part ⌊k / q⌋, q = ⌈n_ram / parts⌉);
+- SSD entry j (by id, not read ahead) → `outside[r, j mod A_od]` (round ⌊j / A_od⌋, as today's landing row);
+- read-ahead hit h → `outside[r, A_od + h]`;
+- an admitted miss (an F11 prompt-row admission; F10 admits decode misses only) → an outside slot past them, so no
+  later part overwrites it before the moves copy it;
+- every entry of `slots` that named the resolve's `stage[r, i]` now names its piece's new slot (an inverse table of the
+  staging list, on the device). Graphed (decode) steps keep @2's behaviour: W = F, no parts, no outside (their misses
+  ≤ the decode bound ≤ A_od).
+The resolve contracts do not change; @2 stays for providers that keep it; the store binds @3 under exclusive tiers.
+
+*A layer call's order* (eager prompt steps; the kept design's, now with the moves stream):
+1. resolve, then `moe_tiers@3`; round 0 signalled (main), as today;
+2. the read-ahead hits gathered on main into their outside slots; the hits' pass (part −1: resident + read-ahead hits);
+3. the RAM parts through the ring on the fetch stream (`_pipelined`: parts 0 and 1 at once, part i + 2 after part i's
+   compute, `landed(i)` the main stream's wait) — RAM units only, as the ring of parts on the RAM-holds-all layout;
+4. then per round r: main waits round r, gathers it into its outside slots, computes it as its own part, signals
+   round r + 1 (main-stream order: **no part waits on a round**, no round on a part);
+5. the moves (item 2: admissions then demotions on the moves stream) read outside slots and victims' cache slots.
+
+*Fences* (each a plant, below):
+- ring reuse: part i + 2's gather after part i's compute (`side.wait_stream(main)` at its start; today's code);
+- outside reuse within a call: round r + 1's gather after round r's compute (main order); across calls: the next call's
+  outside gathers after `admitted` (item 2's event already orders the next call's tier op and gathers after this
+  call's admissions — it now covers outside slots too, because admissions read only outside slots);
+- the ring vs the moves: admissions never read a ring slot (asserted in the oracle), demotions read cache slots;
+- a lending step's tail (activations) vs the moves: unchanged (moves write cache slots only; the tail is unmapped);
+- the landing rows: as D8f (a round's rows reused after its gather, main order).
+
+*Slots, loan and reserve.* `Lent` wants, per class, `W + A_od` (+ A_ra in read-ahead steps) instead of twice a layer's
+missing pieces: 2 × 27 + 32 = 86 at 1K, + 135 = 221 at ≥ 2,048 tokens (A_ra = 135 is mode (ii)'s `moe.read_ahead`;
+the read-ahead set's real size is ≈ 34 a layer, so the lock's A_ra drops to ≈ 64 with this change: 150 a class, a
+separate one-line lock change measured on its own). The outside region is part of the step's borrowed staging, so the
+loan's need and `test_reserve.py`'s tiny-GLM cases count it (§7.1); a layout that cannot lend W + A_od stages as
+today (no parts: the store's choice, logged).
+
+*Plants* (`holon_judge.planted`, each failing the GPU tiny model's exclusive-tier bitwise test against the resident
+store, and the slice's):
+- `ring_part_unfenced`: part i + 2 gathered without waiting part i's compute;
+- `ssd_slots_in_ring`: SSD entries staged in ring slots (step 1's planned plant: now buildable);
+- `outside_round_reused`: round r + 1 gathered before round r's compute;
+- `admitted_in_ring`: an admitted miss staged in a ring slot (F11 prompt admissions);
+- item 2's `moves_unfenced` re-run with parts on.
+
+*Locks.* Only `store.exclusive` layouts change (mode (ii)'s override set). FN's locks, the vehicle's and every
+RAM-holds-all lock run no exclusive tier: they must advance byte-identical (propagate without --approve, as each step).
+GLM has no lock yet. F10 (mode (ii)'s default) and F11 under exclusive tiers both get the bitwise test with parts on
+(`test_moe_engine.py`'s `ssd` cases at `moe.pipeline` 8) and the two-round test; `exact.py` capped vs uncapped on the
+vehicle with RAM capped.
+
+*Predicted, per mode (ii) cell* (inferred from the probe's bytes; the drive's 2.6 GB/s while busy; to be measured):
+- **1K prefill:** ≈ 11.7 → 8–8.5 GiB read (the displacement re-reads mostly gone; the routed set's 7.4 stays) and the
+  gather overlapped: 5.35 → ≈ 3.6–4.0 s, ≈ 0.70 → **0.92–1.03** of Maya (3.7 s).
+- **4K prefill:** 15.7 → ≈ 12.5–13.5 GiB (A_ra's borrow stays unless it is lowered): ≈ 0.83 → **0.95–1.0**.
+- **32K prefill:** the tail dominates its displacement (2,665 slots); parts save ≈ 1–2 GiB of 29: ≈ 0.72 → 0.75–0.8 —
+  the step sweep's lever, not this one.
+- **Decode after 1K / 4K:** fewer experts displaced (≈ 880 → ≈ 300), tokens 1-32 reads ≈ −15%: the 256-token average
+  ≈ +3–5%. After 32K: unchanged by this design.
+
+*Not in this design:* the background refill (parked: the drive is busy, §13), the 32K tail (the step sweep), the
+CPU lane (Q7).
+
 **D9 — Prefill: one 32K step per prompt in both modes (passes of 16,384), with opt-in sub-batched activations.**
 - **Why:** N0 measured Maya's 32K prompt at 3,195 tok/s, read as 2 × 16K chunks that are compute-bound (≈ 0.29 ms a
   token; its copy lane busy 4.3 s of a 4.7 s chunk). A 4K-step Holon pays the ≈ 68 GB stream eight times; from 8K
