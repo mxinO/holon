@@ -799,13 +799,7 @@ def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
         assert store.exclusive and {c.held for c in store.classes.values()} == {4} and trace.mirrored
         if not policy:
             assert parity(trace)["first_differing_step"] is None and trace.admissions > 0
-        res, host = store.residency.device.numpy(), store.host_units.numpy()
-        assert ((res == -1) == (host >= 0)).all() and ((res >= 0).all(-1) == (res >= 0).any(-1)).all()
-        for k, c in enumerate(store.classes.values()):        # each RAM unit holds one piece, the one the map says
-            owner = store.owner[k].numpy()
-            g, e = np.divmod(owner[owner >= 0], store.items)
-            role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
-            assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
+        _held_once(store)
         engine.close()
     for refused in ({"moe.tiers": "std.tiered.pinned@1"}, {"moe.placement": "placement.lru@1"},
                     {"moe.placement": "placement.profile_decay@1"}):
@@ -1163,6 +1157,7 @@ def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, polic
     held = _slots_held(store)                        # again, F10's spares (refilled by the decodes) in the lent tail:
     assert _served(engine, prompts) == want          # released, their slots return (step 1's review S1-M1)
     assert torch.equal(_slots_held(store), held)
+    _held_once(store)                                # (lending, parking and promotions: still one copy each)
     engine.close()
     with pytest.raises(RuntimeError, match="require.*moe.ring_lend is not tail"):
         _gpu_engine(file, host_memory=1 << 27, plugin_options=opts | {"moe.ring_lend": "coldest"})
@@ -1194,6 +1189,19 @@ def test_rams_long_heat_is_its_oracles(gpu_moe):
         _gpu_engine(file, host_memory=1 << 27,
                     plugin_options=opts | {"moe.tiers": "std.tiered.pinned@1", "moe.ram": ""})
 
+
+
+def _held_once(store) -> None:
+    """Exclusive tiers: every expert in one tier — a RAM unit's piece exactly where the map says (tier code −1), never
+    beside a VRAM copy; each RAM unit owned once, by the piece whose host unit it is (no copy a promotion that raced a
+    demotion could leave twice: Maya's duplicate-copy GC, step 7)."""
+    res, host = store.residency.device.cpu().numpy(), store.host_units.cpu().numpy()
+    assert ((res == -1) == (host >= 0)).all() and ((res >= 0).all(-1) == (res >= 0).any(-1)).all()
+    for k, c in enumerate(store.classes.values()):        # each RAM unit holds one piece, the one the map says
+        owner = store.owner[k].cpu().numpy()
+        g, e = np.divmod(owner[owner >= 0], store.items)
+        role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
+        assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
 
 def _slots_held(store) -> torch.Tensor:
     """Each layer's cache slots per role between steps: mapped, empty, a policy's spares' — conserved (none leaks)."""
