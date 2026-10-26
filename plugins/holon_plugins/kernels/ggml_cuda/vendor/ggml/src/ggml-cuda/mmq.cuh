@@ -570,7 +570,7 @@ static __device__ __forceinline__ void ggml_cuda_mmq_write_back_mma(
 // through shared memory (the tiles' space, free after the last k step), which stores y = up * silu(gate) at row i, each
 // first scaled by the expert's scale2 where there is one: swiglu_f32's expression (csrc/api.cu), so the result is
 // bitwise that of the unfused store and our SwiGLU. dst holds out/2 rows per (token, slot); MMA layouts only.
-template<ggml_type type, int J, bool fallback, ggml_prec prec_src1>
+template<ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool clamp> // Holon: clamp (glu_limit, D6)
 static __device__ __forceinline__ void ggml_cuda_mmq_write_back_glu(
             const float * __restrict__ sum, const int * __restrict__ ids_dst, float * __restrict__ dst,
             const float * __restrict__ y_scale, const int stride, const int j_max,
@@ -614,8 +614,12 @@ static __device__ __forceinline__ void ggml_cuda_mmq_write_back_glu(
                                 u *= up_scale[expert];
                                 gate *= gate_scale[expert];
                             }
-                            dst[ids_dst[j]*stride + i] = glu_limit > 0.0f ? // Holon: GLM's clamp (swiglu_f32's)
-                                ggml_cuda_op_swiglu_clamp_single(gate, u, glu_limit) : u * ggml_cuda_op_silu_single(gate);
+                            if constexpr (clamp) { // Holon: GLM's clamp (swiglu_f32's); a template, as a runtime
+                                // branch here cost ≈ 5% of the unclamped kernels (GLM step 6)
+                                dst[ids_dst[j]*stride + i] = ggml_cuda_op_swiglu_clamp_single(gate, u, glu_limit);
+                            } else {
+                                dst[ids_dst[j]*stride + i] = u * ggml_cuda_op_silu_single(gate);
+                            }
                         }
                     }
                 }
@@ -1009,7 +1013,7 @@ static constexpr __device__ ggml_cuda_mmq_write_back_t ggml_cuda_mmq_get_write_b
 
 // ---------------------------------------------------------------------------------------------
 
-template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, bool glu = false, bool tail = false>
+template <ggml_type type, int J, bool fallback, bool fixup, ggml_prec prec_src1, int glu = 0, bool tail = false> // Holon: glu 2 clamps
 static __device__ __forceinline__ void mul_mat_q_process_tile(
         const char * __restrict__ x, const int offset_x, const int * __restrict__ y,
         const int * __restrict__ ids_dst, float * __restrict__ dst, float * __restrict__ tmp_fixup,
@@ -1091,7 +1095,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     if (fixup || stage_end) {
         write_back(sum, ids_dst, tmp_fixup + ((fixup ? 0 : gridDim.x) + blockIdx.x)*(J*I), y_scale, I, I, J, nullptr, false);
     } else if constexpr (glu) {
-        ggml_cuda_mmq_write_back_glu<type, J, fallback, prec_src1>(sum, ids_dst, dst, y_scale, stride_col_dst, tile_y_max_j,
+        ggml_cuda_mmq_write_back_glu<type, J, fallback, prec_src1, glu == 2>(sum, ids_dst, dst, y_scale, stride_col_dst, tile_y_max_j,
                                                                    gate_scale, up_scale, expert, glu_limit);
     } else {
         write_back(sum, ids_dst, dst, y_scale, stride_col_dst, tile_x_max_i, tile_y_max_j, x_scale, dst_bf16);
@@ -1142,7 +1146,7 @@ static __device__ __forceinline__ void mmq_tile(
 // Holon: `glu` (with flat_ids), the fused gate/up store (ggml_cuda_mmq_write_back_glu): a tile covers I/2 gate rows and
 // their up rows, nrows_x/2 apart, and stores I/2 rows of y
 // Holon: `tail`, rows that end inside a K step (T6, mmq-load-tiles.cuh): an instance of its own, launched for those only
-template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, bool glu = false, bool tail = false>
+template <ggml_type type, int J, bool fallback, ggml_prec prec_src1, bool flat_ids = false, int glu = 0, bool tail = false> // Holon: glu 2 clamps
 __launch_bounds__(ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1), ggml_cuda_mmq_get_occupancy(type, J, fallback, prec_src1))
 static __global__ void mul_mat_q(
         const char * __restrict__ x, const int * __restrict__ y, const int32_t * __restrict__ ids_dst,
@@ -1617,6 +1621,8 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, false, tail>), nbytes_shared);
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, true, tail>), nbytes_shared); // Holon: glu
     CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, true, tail>), nbytes_shared);
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J, false, prec_src1, true, 2, tail>), nbytes_shared); // Holon: clamp
+    CUDA_SET_SHARED_MEMORY_LIMIT((mul_mat_q<type, J,  true, prec_src1, true, 2, tail>), nbytes_shared);
 
     const int nty  = (args.nrows_x   + config.I - 1) / config.I;
     // Holon: with ids, where a call's tokens span several column tiles, the column tiles of all nchannels_y compact
@@ -1627,7 +1633,8 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
     const int ntzw = flat ? 1 : args.nchannels_y * args.nsamples_y;
     const dim3 block_nums_xy_tiling(nty, ntx, ntzw);
-    const auto kernel = args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true, tail>  : // Holon: tail
+    const auto kernel = args.glu && args.glu_limit > 0.0f ? mul_mat_q<type, J, fallback, prec_src1, true, 2, tail> : // Holon: clamp
+                        args.glu ? mul_mat_q<type, J, fallback, prec_src1, true, true, tail>  : // Holon: tail
                         flat     ? mul_mat_q<type, J, fallback, prec_src1, true, false, tail> :
                                    mul_mat_q<type, J, fallback, prec_src1, false, false, tail>;
     GGML_ASSERT(!args.glu || (args.ids_dst && !fallback && config.use_mma_data_layout(cc) && args.nrows_x % config.I == 0 &&
