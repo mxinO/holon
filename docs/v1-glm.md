@@ -905,7 +905,10 @@ arena ≈ 5.6 GiB → **≈ 840 experts, 6.9%**. Its IQ3_XXS down class (8 layer
 reported row and the development lock (Q4). **As built (step 5):** the 5080 runs **8K steps with no loan** (`moe.lend_peak = off`): at 16K
 the startup profile does not fit, and at 8K its minimum layout (staging only, the gate/up cache at its 296-slot floor)
 cannot hold the classes' staging below the loan's own tail — the store refuses that layout at build (it once ran the
-loan over expert slots: every greedy token 0, fixed in step 5).
+loan over expert slots: every greedy token 0, fixed in step 5). **Step 6:** the startup profile counts what the caching
+allocator maps (§13, step 6), so the arena is 0.120 GiB smaller (≈ 17 slots) and keeps the 0.97 fraction's 239 MiB
+headroom free (279 MiB least, 147 before); a cache capped at `*=0.02` no longer fits above the paged floor (4.377 of
+4.421 GiB) and the store refuses it at build.
 
 ### 7.3 The RTX PRO 6000 (96 GB), step 5
 
