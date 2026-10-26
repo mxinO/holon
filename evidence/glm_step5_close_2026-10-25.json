@@ -376,7 +376,8 @@
      "gate_elements": 0.0,
      "up_elements": 0.0,
      "rows": 0.0,
-     "rows_seen": 128
+     "rows_seen": 128,
+     "note": "corrected at step 6: 128 rows of one MoE layer (layer 5) was too thin a sample; over gate (c)'s 48,421 decode positions every routed layer's calls the clamp binds in 17 of 42 routed layers (worst gate 24.2, |up| 29.1; spikes/glm5/clamp.py on the RTX PRO 6000), and decode without it is not bitwise the clamped run"
     }
    },
    "comb_logit_spread": {
@@ -410,7 +411,8 @@
      "gate_elements": 0.0,
      "up_elements": 0.0,
      "rows": 0.0,
-     "rows_seen": 128
+     "rows_seen": 128,
+     "note": "corrected at step 6: 128 rows of one MoE layer (layer 5) was too thin a sample; over gate (c)'s 48,421 decode positions every routed layer's calls the clamp binds in 17 of 42 routed layers (worst gate 24.2, |up| 29.1; spikes/glm5/clamp.py on the RTX PRO 6000), and decode without it is not bitwise the clamped run"
     }
    },
    "comb_logit_spread": {
