@@ -70,7 +70,7 @@ STRATA_NO_EOS = 999999                                  # an id outside the voca
 MAYA_NO_EOS = 2147483647                                # Maya accepts any id in [0, 2^31 - 1] (generate.cpp:524-543)
 # log lines kept in the record: what each engine resolved (placement, cache size, strategy, hit rates)
 KEEP = re.compile(r"(?i)moe.cache|moe strateg|auto-selected|offloaded \d+/\d+ layers|fit|n_cpu_moe|model buffer size|"
-                  r"kv.?cache size|slots|hit rate|load_mode|expert|glm stat|glm fast|cpu lane|ram tier")
+                  r"kv.?cache size|slots|hit rate|load_mode|expert|glm stat|glm fast|cpu lane|ram tier|^layout")
 
 
 def prompt(corpus: list[int], context: int) -> list[int]:
@@ -395,6 +395,9 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
     engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=a.ctx, prefix_cache=False))
     store, seen = engine.ctx.shared_objects.get("std.moe.offload"), {"hits": 0, "routed": 0}
+    if store is not None:                    # the layout, for the record: VRAM cache slots and RAM units a class
+        print("layout", json.dumps({n: {"cache": c.size - c.null - c.staging, "ram": c.held}
+                                    for n, c in store.classes.items()}), flush=True)
     if store is not None:                   # an offload deployment: the decode rows' routed experts found resident
         prev = {"map": store.residency.host.copy()}
 
