@@ -6,10 +6,14 @@ mid-size prompts with prompt logprobs (2K-12K, the gates' kind), one request at 
 the step's peak allocated and peak reserved bytes, the device's free memory after it, its prompt tokens and its
 activation loan (the store's `_step_loan`) and the loan's overflow (bytes its segments took outside the range: the
 device's own memory); the report gives, per phase, the worst bloat (peak reserved − peak allocated), the least free
-memory against the slack (the device's memory past the fraction), and the steps whose loan overflowed. An
-out-of-memory error ends the run and is recorded with its step.
+memory against the slack (the device's memory past the fraction), the steps whose loan overflowed and the caching
+allocator's retries (each a release of its cache and a host stall: ≈ 0 at a deployment's fraction). An out-of-memory
+error ends the run and is recorded with its step. Step 6 (B6i-M1, re-deriving the loan's margin against the profile's
+new peak): `--loan-margin` sets `holon_std.tiered.store.LOAN_MARGIN` for the run, and each lent step's need is its
+loan plus its overflow (`lent_steps`: prompt tokens, loan, overflow, in GiB). Any model: the prompts are the set its
+tokenizer's ids were written for.
 
-    python spikes/glm5/frag.py <maya-s -00001 shard> '<engine flags>' --prompts <glm v1-long set> --out <json>
+    python spikes/glm5/frag.py <model> '<engine flags>' --prompts <set.jsonl> --out <json> [--loan-margin M]
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ def main() -> None:
     ap.add_argument("--prompts", required=True)
     ap.add_argument("--long-len", type=int, default=24000)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--loan-margin", type=float)
     a = ap.parse_args()
     sys.path.insert(0, str(ROOT / "spikes/fn7/tasks"))
     import run as tasks
@@ -38,6 +43,9 @@ def main() -> None:
     from holon_judge import snapshot
     from holon_judge.recording import PromptSet
 
+    if a.loan_margin is not None:
+        from holon_std.tiered import store as tiered
+        tiered.LOAN_MARGIN = a.loan_margin
     cfg = {"max_model_len": 33792} | tasks.flags(a.flags)
     e = Engine(EngineConfig(a.model, **cfg))
     store = e.ctx.shared_objects.get("std.moe.offload")
@@ -55,7 +63,7 @@ def main() -> None:
             alloc, res = torch.cuda.max_memory_allocated(), torch.cuda.max_memory_reserved()
             over = loan.lib.loan_overflow() if loan is not None else 0
             rows[phase].append((alloc, res, torch.cuda.mem_get_info()[0], store.step_tokens if store else 0,
-                                getattr(store, "_step_loan", 0), over))
+                                getattr(store, "_step_loan", 0), over, torch.cuda.memory_stats()["num_alloc_retries"]))
             return out
         return run
     prompts = PromptSet.load(a.prompts)
@@ -81,7 +89,7 @@ def main() -> None:
         oom = {"phase": [k for k, v in rows.items() if v][-1], "error": str(err)[:300]}
     e.close()
     out = {"fraction": cfg.get("memory_fraction"), "slack_gib": round(slack / 2**30, 3), "total_gib": total / 2**30,
-           "oom": oom}
+           "oom": oom, "loan_margin": a.loan_margin, "alloc_retries": torch.cuda.memory_stats()["num_alloc_retries"]}
     gib = lambda b: round(b / 2**30, 3)                                     # noqa: E731
     for phase, r in rows.items():
         if not r:
@@ -90,8 +98,9 @@ def main() -> None:
                       "peak_reserved_gib": gib(max(res for _, res, *_ in r)),
                       "peak_allocated_gib": gib(max(al for al, *_ in r)),
                       "least_free_gib": gib(min(f for _, _, f, *_ in r)),
-                      "loan_overflow_gib": gib(max(o for *_, o in r)),
-                      "lent_steps (tokens, loan GiB)": sorted({(t, gib(ln)) for _, _, _, t, ln, _ in r if ln})}
+                      "loan_overflow_gib": gib(max(o for *_, o, _ in r)),
+                      "alloc_retries": r[-1][6] - (r[0][6] if len(r) > 1 else 0),
+                      "lent_steps": sorted({(t, gib(ln), gib(o)) for _, _, _, t, ln, o, _ in r if ln})}
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps(out, indent=1))
 

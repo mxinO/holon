@@ -1356,7 +1356,16 @@ s = Sum(ctx, hidden=1 << 22, parts=("first", "rest"))
 xs = [torch.full((1 << 22,), float(i + 1), device="cuda") for i in range(4)]
 torch.cuda.synchronize()
 ys = []
-for x in xs:
+if sys.argv[1] == "graph":                         # captured, the side stream's trailing wait inside the capture
+    x = xs[0].clone()
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        y = s(x)
+    for xi in xs:
+        x.copy_(xi)
+        graph.replay()
+        ys.append(y.clone())
+for x in xs if sys.argv[1] != "graph" else ():
     ys.append(s(x))
     if sys.argv[1] == "release":
         torch.cuda.empty_cache()                   # what an out-of-memory retry does
@@ -1366,14 +1375,16 @@ print([float(y.min()) for y in ys] == [float(y.max()) for y in ys] == [3.0 * (i 
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("release", ["reuse", "release"])
+@pytest.mark.parametrize("release", ["reuse", "release", "graph"])
 def test_a_sums_side_stream_output_outlives_the_main_streams_read(release):
     """GLM step 6's illegal address (A's M2, the side-stream audit): `std.ffn.sum`'s later parts run on a side stream
     and their sum goes back to that stream's blocks with no event (`units.Sum.forward`) while the main stream's combine
     may not have read it yet. Neither the next sum's side-stream output, which takes that block at once (`reuse`), nor
     the allocator releasing free blocks (`release`: with expandable segments it unmaps one after waiting for its own
     stream only, as an out-of-memory retry does) may pass that read. A main stream that reads late (a sleep before the
-    read) while the host runs ahead: each sum is still x + 2x. In a process of its own: an illegal address ends it."""
+    read) while the host runs ahead: each sum is still x + 2x. Captured in a CUDA graph (`graph`), the side stream's
+    trailing wait inside the capture leaves no unjoined work and every replay is still x + 2x. In a process of its
+    own: an illegal address ends it (`release` does without the wait: GLM step 6's repro)."""
     import subprocess
     import sys
     env = {**os.environ, "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"}

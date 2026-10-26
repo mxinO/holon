@@ -91,8 +91,8 @@ def free_memory(device: torch.device) -> int:
 def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
     """Peak bytes `fn()` takes on `device` beyond what it held before: its allocations' peak, or what the caching
     allocator maps for them where that is more — its segments' rounding and the holes its blocks leave (allocations
-    alone left an RTX 5090 at --memory-fraction 0.99 with 3 MiB free after 32K steps; GLM step 6). (Less where the
-    allocations reuse free blocks of segments mapped before.)"""
+    alone left an RTX 5090 at --memory-fraction 0.99 with 3 MiB free after 32K steps; GLM step 6). It returns cached,
+    unused blocks to the driver first, as `reserved_growth` does, so the growth is measured from a clean cache."""
     _cuda(device, "peak memory")
     synchronize(device)
     torch.cuda.empty_cache()
