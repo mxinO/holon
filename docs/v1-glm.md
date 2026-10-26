@@ -996,8 +996,11 @@ bench; its source, `glm_fast_path.cu`). The frozen text stands; these correct th
 - **A CPU lane:** Maya computes 12–44 RAM-resident experts a token on the CPU instead of fetching them over PCIe
   (≈ 4–15 ms a token of CPU work beside the GPU's), which §7.4's Maya token (dense + misses × PCIe) did not count.
   Holon stays GPU-only by default (Q7); a CPU lane is the owner's option if the mode (ii) cells stay below their bars.
-- **A decode look-ahead:** the next layers' routers run on each layer's FFN input and their predicted disk-only experts
-  are read into RAM ahead (`fast_ahead_route`, two reader threads); the design dropped a decode read-ahead (D8f).
+- **A decode look-ahead, off by default:** with `MAYA_GLM_AHEAD=<n>` the next n (≤ 4) layers' routers run on each
+  layer's FFN input and their top-8 disk-only experts are read into free RAM slots ahead (`fast_ahead_route`, two
+  reader threads); unset (as in every arm of this bench) n is 0. Maya's own bench notes measured it not faster (≈ 40%
+  of disk misses predictable within 4 layers; the wasted reads share the one NVMe). The design dropped a decode
+  read-ahead (D8f); step 7's replay against Holon's map is §13's.
 - **RAM's victim:** the least-used by aged counts among the held experts no route used in the last ≈ 64 tokens, else
   the least recent (`ram_victim`); Holon's exclusive RAM tier ranked by the policy's heat (F10: the least recent), with
   `moe.ram_heat` (step 6) a long decayed count without the protect window.
@@ -1310,6 +1313,19 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 | the router's `torch.topk` breaks ties as HF leaves them | wrapped per router call with the stable descending sort, beside the indexer's `Tensor.topk` (D2) |
 | §6.1's quantized-load test loads "through the recipe", which step 3 builds | the synthetic GGUF and its check land with the recipe at step 3 |
 | the GGUF tokenizer's `glm4` pre-tokenizer | std's table gains it with BPE `ignore_merges` (GLM's `tokenizer.json`, llama.cpp's `CHATGLM4`); the corpus holds words that tell it apart |
+
+### Step 7 (mode (ii)'s performance, then mode (i)'s; the lead's order)
+
+RTX 5090, mode (ii)'s lock flags (§7.4), one run an arm: decode ms a token over tokens 33-256 after a 1K / 32K prompt,
+the I/O worker's counters (`io_stats`), nsys over 16 decode tokens after a 1K prompt.
+
+| Item | Result |
+|---|---|
+| 1. The empty-call I/O skip | **Reverted** (b44e59ac): decode 60.2 ms a token before and after; an empty round trip was already nearly free |
+| 2. Demotions and admissions beside the critical path (dbbedd2e) | **Kept.** Decode at rest 60.2 → 51.8 ms a token after 1K, 60.2 → 53.1 after 32K; tokens 1-32 after 1K 68.3 → 63.5, after 32K 133.6 → 132.6 (the drive's 97 ms a token); prompts unchanged. nsys: the span 54.0 → 45.7 ms a token; the copies (`k_fetch`, 168 calls a token on the moves stream) 61-67 → 99 µs a call beside the rest. They are SM copies, not copy-engine DMA: the move lists live on the device inside graphs. Their SM contention: `k_fetch_roles` 170 → 203 µs a call (main), 162 → 180 (split side); compute kernels 17.6 → 18.7 ms a token at equal calls (alone vs beside a copy in one trace: mmvq IQ2_XXS 17.4 / 18.6 µs, `k_tiers` 50.8 / 62.0, `_dots` 15.4 / 16.4) — ≈ 3-4 ms of the ≈ 12 moved. `expert_io.fetch_ctas` 8 / 16 / 24: 51.8 / 52.2 / 51.9 ms (8 kept) |
+| The RAM gather's rate (THP, piece sizes) | ≈ 611 MiB of host bytes a decode token (84.4 RAM experts and 5.1 SSD rows, item 4's replay) over `k_fetch_roles`' 13.9 ms before item 2: ≈ 46 GB/s, FN's 45-48; ≈ 40 GB/s beside item 2's copies. The RAM tier THP-backed (the hygiene log), units of 4.125 / 3.06 / 2.56 MiB at 64 KiB alignment (FN's IQ2_XS 1.5 MB): no gap to close there |
+| 3. Maya's RAM victim rule (`moe.ram_protect`, 0ef371c6) | SSD MB a token at rest after 1K / 32K, after-1K tokens 1-32, the 1K prompt's GiB: `ram_heat` 0.999 42.3 / 47.6, 76.3, 10.85; 0.993 (Maya's aging, ≈ halving every 32,768 routes) 42.3 / 46.8, 76.3, 10.84; 0.993 + a 64-token window 42.1 / 46.9, 75.1, 10.73; 0.999 + 64 42.1 / 47.2, 75.1, 10.73; no `ram_heat` (the policy's heat) 44.5 / 46.3, 99.0, 11.36. Decode ms within 51.3-52.7 for all. `ram_heat` itself is what helps (99 → 76 MB a token after a 1K prompt); the decay and the window move reads by ≤ 1.6%, within a run's noise: the misses at rest are capacity, not the victim rule (Maya's own notes say as much) |
+| 4. The decode look-ahead (`spikes/glm7/lookahead.py --map`: Maya's top-8 predictions replayed against Holon's tier map, 765 eager decode tokens) | 5.1 SSD reads a token; predicted d ≤ 1 layer early: 2.55 covered (50%) for 7.3 reads issued (4.8 wasted); d ≤ 4: 3.07 (60%) for 23.6 issued (20.6 wasted, 1.9 of them routed by that layer within 32 tokens). Maya runs it off by default (§7.4) after measuring it not faster. **Closed unbuilt**: the waste is 2-7× the covered reads on the one drive |
 
 ### Step 6 (the illegal address first; the bench and the deployment follow)
 
