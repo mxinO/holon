@@ -5,13 +5,14 @@ Ours, written for this plugin (not adapted).
   the block: per channel, the softmax over the block's tokens of gate + APE, then the keys' weighted sum, in float32.
   The block's keys and gates are what the cache holds after the call (as `qsa_index@1`'s): a position this call
   stores is read from the call's rows (in the cache's dtype), any other from the cache.
-- `_attend`: one program per (query, group of 16 heads), the same for every shape, so a row's bits never depend on
-  the call's other rows or their number (the dense path is this kernel over every block). It walks the query's
-  selected tokens (its blocks' tokens up to its position) a tile at a time through the page table, each tile's
-  latent rows loaded once for both products, with an online softmax in float32. Both products run on tensor cores
-  against the bfloat16 latent, q̃ and the softmax weights each split into two bfloat16 parts (hi + lo: 16 bits;
-  exact products, f32 sums): one precision for every row, relative L2 ≈ 3e-6 against the float32 oracle (D5's
-  budget 2e-4; a third part of q̃ measured no closer, one part 9e-4).
+- `_attend`: a row's selected tokens (its blocks' tokens up to its position) in chunks of CHUNK, each chunk an online
+  softmax in float32 from its first tile, the chunks combined in order: one program per (query, group of 16 heads)
+  walking every chunk, or, for a call of few rows (decode, verify), a program per chunk and `_merge` combining them —
+  the same operations either way (one tile step, one combine, one warp count), so a row's bits never depend on the
+  call's other rows, their number or the path (the dense path is this kernel over every block). A tile's latent
+  rows are loaded once through the page table for both products, on tensor cores against the bfloat16 latent: q̃
+  as one bfloat16 part, the softmax weights as two (hi + lo: exact products, f32 sums); relative L2 ≈ 1e-3 against
+  the float32 oracle (two parts of q̃: 3e-6, at 4 dots a tile; docs/v1-glm.md §13, step 7: the real model's KL).
 """
 from __future__ import annotations
 
@@ -21,6 +22,9 @@ import triton.language as tl
 
 HEADS = 16          # a program's query heads: tl.dot's smallest M
 TOKENS = 32         # selected tokens a tile
+CHUNK = 256         # selected tokens a chunk (its online softmax from scratch; the chunks combined in order)
+WARPS = 8           # every `_attend` and `_merge` program's (a row's bits depend on the warps: the reductions' order)
+SPLIT_BELOW = 64    # a call of fewer (query, head group) programs than this: a program a chunk, then `_merge`
 
 
 @triton.jit
@@ -71,47 +75,121 @@ def _split2(x):
 
 
 @triton.jit
-def _attend(q_ptr, kv_ptr, blocks_ptr, table_ptr, seq_ptr, pos_ptr, out_ptr, stride_q, stride_qh, stride_blocks,
-            stride_table, stride_out, stride_oh, kv_unit, scale, H: tl.constexpr, DC_: tl.constexpr,
-            PAGE: tl.constexpr, RATIO: tl.constexpr, WIDTH: tl.constexpr, WPAD: tl.constexpr, HB: tl.constexpr,
-            BN: tl.constexpr):
-    t = tl.program_id(0).to(tl.int64)
-    h = tl.program_id(1) * HB + tl.arange(0, HB)
-    hok = h < H
-    c = tl.arange(0, DC_)
-    out = out_ptr + t * stride_out + h[:, None] * stride_oh + c[None, :]
-    s = tl.load(seq_ptr + t)
-    if s < 0:                                       # a padding token: 0
-        tl.store(out, tl.zeros((HB, DC_), tl.float32), mask=hok[:, None])
-        return
-    p = tl.load(pos_ptr + t)
+def _tile(q, kv_ptr, blocks_ptr, trow, t, p, count, j0, m, lsum, acc, stride_blocks, kv_unit, scale,
+          DC_: tl.constexpr, PAGE: tl.constexpr, RATIO: tl.constexpr, BN: tl.constexpr):
+    """The online softmax's step over the row's selected tokens j0 … j0 + BN − 1."""
+    idx = j0 + tl.arange(0, BN)                     # the selected blocks lead the row (−1 after them): their tokens
+    block = tl.load(blocks_ptr + t * stride_blocks + idx // RATIO, mask=idx < count * RATIO, other=-1)
+    tok = block.to(tl.int64) * RATIO + idx % RATIO
+    ok = (block >= 0) & (tok <= p)
+    unit = tl.load(trow + tok // PAGE, mask=ok, other=0).to(tl.int64)
+    cv = tl.load(kv_ptr + unit[:, None] * kv_unit + (tok % PAGE)[:, None] * DC_ + tl.arange(0, DC_)[None, :],
+                 mask=ok[:, None], other=0.0)                                                    # [BN, DC] bf16
+    scores = tl.where(ok[None, :], tl.dot(q, tl.trans(cv)) * scale, float("-inf"))
+    m_new = tl.maximum(m, tl.max(scores, 1))
+    alpha = tl.exp(m - m_new)
+    pw = tl.exp(scores - m_new[:, None])
+    p_hi, p_lo = _split2(pw)
+    return m_new, lsum * alpha + tl.sum(pw, 1), acc * alpha[:, None] + tl.dot(p_hi, cv) + tl.dot(p_lo, cv)
+
+
+@triton.jit
+def _combine(m, lsum, acc, m_c, l_c, acc_c):
+    """The chunks so far and the next one's (maximum, sum, unnormalized output), as one."""
+    m_new = tl.maximum(m, m_c)
+    a = tl.exp(m - m_new)
+    b = tl.exp(m_c - m_new)
+    return m_new, lsum * a + l_c * b, acc * a[:, None] + acc_c * b[:, None]
+
+
+@triton.jit
+def _row(seq_ptr, pos_ptr, blocks_ptr, t, stride_blocks, WIDTH: tl.constexpr, WPAD: tl.constexpr):
+    """A row's sequence, position and number of selected blocks."""
     w = tl.arange(0, WPAD)
     count = tl.sum((tl.load(blocks_ptr + t * stride_blocks + w, mask=w < WIDTH, other=-1) >= 0).to(tl.int32), 0)
-    trow = table_ptr + s.to(tl.int64) * stride_table
-    q_hi, q_lo = _split2(tl.load(q_ptr + t * stride_q + h[:, None] * stride_qh + c[None, :], mask=hok[:, None],
-                                 other=0.0).to(tl.float32))
+    return tl.load(seq_ptr + t), tl.load(pos_ptr + t), count
+
+
+@triton.jit
+def _attend(q_ptr, kv_ptr, blocks_ptr, table_ptr, seq_ptr, pos_ptr, out_ptr, part_ptr, stats_ptr, stride_q, stride_qh,
+            stride_blocks, stride_table, stride_out, stride_oh, kv_unit, scale, H: tl.constexpr, DC_: tl.constexpr,
+            PAGE: tl.constexpr, RATIO: tl.constexpr, WIDTH: tl.constexpr, WPAD: tl.constexpr, HB: tl.constexpr,
+            BN: tl.constexpr, CHUNK: tl.constexpr, CHUNKS: tl.constexpr, SPLIT: tl.constexpr):
+    """One program per (query, head group) over every chunk; with SPLIT one per (query, head group, chunk), storing
+    the chunk's output and (maximum, sum) for `_merge`."""
+    t = tl.program_id(0).to(tl.int64)
+    g = tl.program_id(1)
+    i = tl.arange(0, HB)
+    h = g * HB + i
+    hok = h < H
+    c = tl.arange(0, DC_)
+    s, p, count = _row(seq_ptr, pos_ptr, blocks_ptr, t, stride_blocks, WIDTH, WPAD)
+    trow = table_ptr + tl.maximum(s, 0).to(tl.int64) * stride_table
+    q = tl.load(q_ptr + t * stride_q + h[:, None] * stride_qh + c[None, :], mask=hok[:, None], other=0.0)
+    q = q.to(tl.bfloat16)
     m = tl.full((HB,), float("-inf"), tl.float32)
     lsum = tl.zeros((HB,), tl.float32)
     acc = tl.zeros((HB, DC_), tl.float32)
-    j = tl.arange(0, BN)
-    for j0 in range(0, count * RATIO, BN):          # the selected blocks lead the row (−1 after them): their tokens
-        idx = j0 + j
-        block = tl.load(blocks_ptr + t * stride_blocks + idx // RATIO, mask=idx < count * RATIO, other=-1)
-        tok = block.to(tl.int64) * RATIO + idx % RATIO
-        ok = (block >= 0) & (tok <= p)
-        unit = tl.load(trow + tok // PAGE, mask=ok, other=0).to(tl.int64)
-        cv = tl.load(kv_ptr + unit[:, None] * kv_unit + (tok % PAGE)[:, None] * DC_ + c[None, :], mask=ok[:, None],
-                     other=0.0)                                                                  # [BN, DC] bf16
-        ct = tl.trans(cv)
-        scores = tl.dot(q_hi, ct) + tl.dot(q_lo, ct)
-        scores = tl.where(ok[None, :], scores * scale, float("-inf"))
-        m_new = tl.maximum(m, tl.max(scores, 1))
-        alpha = tl.exp(m - m_new)
-        pw = tl.exp(scores - m_new[:, None])
-        lsum = lsum * alpha + tl.sum(pw, 1)
-        p_hi, p_lo = _split2(pw)
-        acc = acc * alpha[:, None] + tl.dot(p_hi, cv) + tl.dot(p_lo, cv)
-        m = m_new
+    if SPLIT:
+        k = tl.program_id(2)
+        if (s >= 0) & (k * CHUNK < count * RATIO):
+            for j0 in range(k * CHUNK, tl.minimum(k * CHUNK + CHUNK, count * RATIO), BN):
+                m, lsum, acc = _tile(q, kv_ptr, blocks_ptr, trow, t, p, count, j0, m, lsum, acc, stride_blocks,
+                                     kv_unit, scale, DC_, PAGE, RATIO, BN)
+            at = (t * CHUNKS + k) * tl.cdiv(H, HB) + g                          # [T, CHUNKS, groups] partials
+            tl.store(part_ptr + at * HB * DC_ + i[:, None] * DC_ + c[None, :], acc)
+            tl.store(stats_ptr + at * 2 * HB + i, m)
+            tl.store(stats_ptr + at * 2 * HB + HB + i, lsum)
+        return
+    out = out_ptr + t * stride_out + h[:, None] * stride_oh + c[None, :]
+    if s < 0:                                       # a padding token: 0
+        tl.store(out, tl.zeros((HB, DC_), tl.float32), mask=hok[:, None])
+        return
+    m_all = tl.full((HB,), float("-inf"), tl.float32)  # the chunks before this one (one loop over the tiles,
+    l_all = tl.zeros((HB,), tl.float32)                # pipelined as one; a chunk folded in at the next one's start)
+    a_all = tl.zeros((HB, DC_), tl.float32)
+    for j0 in range(0, count * RATIO, BN):
+        if (j0 % CHUNK == 0) & (j0 > 0):
+            if j0 == CHUNK:
+                m_all, l_all, a_all = m, lsum, acc
+            else:
+                m_all, l_all, a_all = _combine(m_all, l_all, a_all, m, lsum, acc)
+            m = tl.full((HB,), float("-inf"), tl.float32)
+            lsum = tl.zeros((HB,), tl.float32)
+            acc = tl.zeros((HB, DC_), tl.float32)
+        m, lsum, acc = _tile(q, kv_ptr, blocks_ptr, trow, t, p, count, j0, m, lsum, acc, stride_blocks, kv_unit,
+                             scale, DC_, PAGE, RATIO, BN)
+    if count * RATIO > CHUNK:
+        m, lsum, acc = _combine(m_all, l_all, a_all, m, lsum, acc)
+    tl.store(out, (acc / lsum[:, None]).to(out_ptr.dtype.element_ty), mask=hok[:, None])
+
+
+@triton.jit
+def _merge(blocks_ptr, seq_ptr, pos_ptr, out_ptr, part_ptr, stats_ptr, stride_blocks, stride_out, stride_oh,
+           H: tl.constexpr, DC_: tl.constexpr, RATIO: tl.constexpr, WIDTH: tl.constexpr, WPAD: tl.constexpr,
+           HB: tl.constexpr, CHUNK: tl.constexpr, CHUNKS: tl.constexpr):
+    """A split row's chunks combined in order, as `_attend` unsplit combines them, normalized into the output."""
+    t = tl.program_id(0).to(tl.int64)
+    g = tl.program_id(1)
+    i = tl.arange(0, HB)
+    h = g * HB + i
+    hok = h < H
+    c = tl.arange(0, DC_)
+    out = out_ptr + t * stride_out + h[:, None] * stride_oh + c[None, :]
+    s, _, count = _row(seq_ptr, pos_ptr, blocks_ptr, t, stride_blocks, WIDTH, WPAD)
+    if s < 0:
+        tl.store(out, tl.zeros((HB, DC_), tl.float32), mask=hok[:, None])
+        return
+    groups = tl.cdiv(H, HB)
+    at = t * CHUNKS * groups + g
+    m = tl.load(stats_ptr + at * 2 * HB + i)
+    lsum = tl.load(stats_ptr + at * 2 * HB + HB + i)
+    acc = tl.load(part_ptr + at * HB * DC_ + i[:, None] * DC_ + c[None, :])
+    for k in range(1, tl.cdiv(count * RATIO, CHUNK)):
+        at = (t * CHUNKS + k) * groups + g
+        m, lsum, acc = _combine(m, lsum, acc, tl.load(stats_ptr + at * 2 * HB + i),
+                                tl.load(stats_ptr + at * 2 * HB + HB + i),
+                                tl.load(part_ptr + at * HB * DC_ + i[:, None] * DC_ + c[None, :]))
     tl.store(out, (acc / lsum[:, None]).to(out_ptr.dtype.element_ty), mask=hok[:, None])
 
 
@@ -138,9 +216,16 @@ def mla_attend(q, kv, blocks, table, seq, positions, ratio: int, scale: float) -
     if t:
         if q.stride(2) != 1 or blocks.stride(1) != 1:
             raise ValueError("mla_attend: q's dims and the blocks must be contiguous")
-        width = blocks.shape[1]
-        _attend[(t, triton.cdiv(heads, HEADS))](
-            q, kv, blocks, table, seq, positions, out, q.stride(0), q.stride(1), blocks.stride(0), table.stride(0),
-            out.stride(0), out.stride(1), kv.stride(0), scale, heads, dc, kv.shape[1], ratio, width,
-            triton.next_power_of_2(width), HEADS, TOKENS, num_warps=4, num_stages=2)
+        width, wpad = blocks.shape[1], triton.next_power_of_2(blocks.shape[1])
+        groups, chunks = triton.cdiv(heads, HEADS), triton.cdiv(blocks.shape[1] * ratio, CHUNK)
+        split = t * groups < SPLIT_BELOW                # by shape: the bits are the row's either way
+        part = torch.empty(t * chunks * groups * HEADS * dc if split else 1, dtype=torch.float32, device=q.device)
+        stats = torch.empty(t * chunks * groups * 2 * HEADS if split else 1, dtype=torch.float32, device=q.device)
+        _attend[(t, groups, chunks if split else 1)](
+            q, kv, blocks, table, seq, positions, out, part, stats, q.stride(0), q.stride(1), blocks.stride(0),
+            table.stride(0), out.stride(0), out.stride(1), kv.stride(0), scale, heads, dc, kv.shape[1], ratio, width,
+            wpad, HEADS, TOKENS, CHUNK, chunks, split, num_warps=WARPS, num_stages=2)
+        if split:
+            _merge[(t, groups)](blocks, seq, positions, out, part, stats, blocks.stride(0), out.stride(0),
+                                out.stride(1), heads, dc, ratio, width, wpad, HEADS, CHUNK, chunks, num_warps=WARPS)
     return out

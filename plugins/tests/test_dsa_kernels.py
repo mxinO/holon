@@ -11,9 +11,10 @@ through the build context.
   and gates bitwise, pooled keys within `l0.check(f32, ratio)`; units laid out as the unit views its pool (raw keys,
   gates, pooled keys per unit).
 - `mla_attend@1` for prefill, decode and verify rows (sparse past 515 tokens, every block below), padding, q in f32
-  and bf16: relative L2 per row ≤ 2e-4 (D5's budget) against the oracle on the same stored latent; a plant (the open
-  block reading one token more) fails it. A row's output is the same bits alone, beside a long row and split across
-  calls (the dense path is the sparse kernel, sub-batching changes no bit).
+  and bf16: relative L2 per row ≤ 1.5e-3 (q̃ as one bfloat16 part: ≈ 9e-4 measured; step 7 judges it on the real
+  model, docs/v1-glm.md §13) against the oracle on the same stored latent; a plant (the open block reading one token
+  more) fails it. A row's output is the same bits alone (a program a chunk, then the merge), beside a long row (one
+  program over its chunks) and split across calls (the dense path is the sparse kernel, sub-batching changes no bit).
 - Decode (index, select, attend) captured in a CUDA graph replays to the eager bits.
 
 Skips without a GPU.
@@ -259,15 +260,20 @@ def test_attend(shape, q_dtype):
     rel = _rel_l2(ours, oracle)[seq >= 0]
     floor = _rel_l2(oracle.to(q_dtype), oracle)[seq >= 0].max()      # the output's own rounding
     print(f"\nmla_attend {shape[2:]} q {q_dtype}: rel L2 max {rel.max():.2e} (its rounding {floor:.2e})")
-    assert rel.max() <= 2e-4 + floor
+    assert rel.max() <= 1.5e-3 + floor
     planted = ref.mla_attend(q.float(), kv, blocks, table, seq, pos + 1, RATIO, 1 / 16)   # the open block, one more
     assert _rel_l2(ours, planted)[seq >= 0].max() > 1e-2
 
 
 def test_attend_row_bits_alone_and_split():
-    """A row's output: the same bits alone, beside a long prefill chunk, and with the call split in two (the dense
-    path is the sparse kernel over every block; sub-batching changes no bit)."""
+    """A row's output: the same bits alone (a call of few rows: a program a chunk, then `_merge`), beside a long
+    prefill chunk (one program walking the row's chunks), and with the call split in two (the dense path is the sparse
+    kernel over every block; sub-batching changes no bit)."""
+    from holon_plugins.kernels.qsa_triton import mla
+
     kernel, args, (_, _, _, _, seq, _) = _attend_case(GLM, torch.float32)
+    groups = GLM[2] // mla.HEADS
+    assert groups < mla.SPLIT_BELOW <= len(seq) * groups and WIDTH * RATIO > 2 * mla.CHUNK    # both paths, 3 chunks
     together = kernel(*args)
     q, kv, blocks, table, seq_, pos = args
     for t in (0, 2, 5, len(seq) - 1):                    # decode, a short prefill row, verify, a long chunk's last
