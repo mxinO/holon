@@ -20,7 +20,8 @@ Maya's engine (`--maya`, GLM-5.3-Flash) in its `--serve` mode, the same raw-id p
 2147483647`, an id no request produces; `DONE`'s `reused` must be 0); `holon` = Holon's `Engine` in process
 (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
-`holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
+`holon serve`'s), an arm's `env` its environment, and its `python` the interpreter its worker runs in (e.g. a Holon
+arm on another checkout's venv, for an A/B against `main`). Arms are interleaved: every round runs each arm once, in
 reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
@@ -480,7 +481,7 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         time.sleep(10)
     else:
         raise SystemExit(f"GPU {a.gpu} stayed busy: {busy}")
-    py = {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
+    py = arm.get("python") or {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
     cmd = [py, str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"], "--model", a.model, "--ctx",
            str(a.ctx), f"--flags={arm['flags']}", "--requests", str(log.parent / "requests.json")]   # one '-'-led value
     if arm["engine"] in ("llama", "strata", "maya"):
