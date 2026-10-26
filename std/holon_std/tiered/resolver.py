@@ -170,12 +170,13 @@ class DeviceResolver:
             moving = list(moving)                # on the moves stream: admitted first (spares: never a demoted slot)
             stream = store.moves_stream()
             stream.wait_stream(torch.accelerator.current_stream(ids.device))
-            with stream:
+            beside = [{"beside": True} if getattr(gather, "beside", False) else {} for _, gather in moving]
+            with stream:                         # (on few SMs where the copy can: beside the next calls' compute)
                 for r, (c, gather) in enumerate(moving):
-                    gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots())
+                    gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots(), **beside[r])
                 store.admitted.record()                  # (the current stream: this one)
                 for r, (c, gather) in enumerate(moving):
-                    gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units())
+                    gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units(), **beside[r])
                 store.moved[g % 2].record()
         return finish
 

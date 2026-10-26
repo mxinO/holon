@@ -145,7 +145,8 @@ then `staging` slots, then cache slots.
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. An optional `runs [U, X, 2]
   int64` reads landing rows (docs/v1-glm.md D8f; `src [U, row]` of its own width): the slot gets row `fetch[0, i]`'s
-  extents `runs[row, x] = (offset in the row, nbytes)` back to back. Optional member `gather_roles(fetch [R, 2, F], n
+  extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with `beside = True` also takes
+  `beside=True`: the same copy on few SMs, for one off the critical path beside other work. Optional member `gather_roles(fetch [R, 2, F], n
   [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the instance's copy, role r's list), so
   a store issues one call for a group's roles; an instance with `parts = True` also takes `part` and exactly one of
   `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a pipelined

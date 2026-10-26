@@ -19,9 +19,9 @@ constexpr int RANGE = 1, OVERFLOW = 2, JOBS = 8;       // error bits: a corrupt 
                                                        // the CPU's share past its job table
 constexpr int RESOLVE_THREADS = 512;                   // 16 warps: the block scans the fetch lists
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
-// The ring's copies run beside a prefill pass's compute, so they hold as few SMs as still keep PCIe near full (one
-// small CTA per class, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
-constexpr int BESIDE_CTAS = 1, BESIDE_UNROLL = 16;
+// Copies beside other work (the ring's beside a prefill pass's compute, a store's moves) hold as few SMs as still keep
+// the link near full (few CTAs, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
+constexpr int BESIDE_UNROLL = 16;
 
 // The resolve's policies: `moe_resolve@1`, and the variants of the placement plugins kernels.expert_io serves
 // (`moe_resolve.lfu@1`: F11, `moe_resolve.lru@1`: F4; their contracts and oracles are the plugins').
@@ -1108,7 +1108,7 @@ void patch(at::Tensor & y, const at::Tensor & rows, const at::Tensor & cpu) {
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, bool beside) {
+void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, int64_t beside) {
     const c10::cuda::CUDAGuard guard(dst.device());
     TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && dst.size(1) % 16 == 0,
                 "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
@@ -1122,8 +1122,9 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     const auto * f = fetch.data_ptr<int32_t>();
     const auto * from = reinterpret_cast<const uint4 *>(src.data_ptr());
     auto * to = reinterpret_cast<uint4 *>(dst.data_ptr());
-    if (beside) {
-        k_fetch<BESIDE_UNROLL><<<BESIDE_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
+    TORCH_CHECK(beside >= 0, "beside: a CTA count, or 0");
+    if (beside) {                                      // beside other work: on `beside` CTAs, many reads in flight
+        k_fetch<BESIDE_UNROLL><<<int(beside), FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
                                                                           int(fetch.size(1)));
     } else {
         k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
@@ -1336,6 +1337,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                            const at::Tensor & runs) {
               gather_roles(fetch.unsqueeze(0), n, {src}, {dst}, FETCH_CTAS, 0, 1, 0, {runs});
           }, "expert_fetch@1 from landing rows: dst[fetch[1, i]] = the extents runs[fetch[0, i]] name in src[fetch[0, i]]");
-    m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
-          "for i < min(n, staging)");
+    m.def("fetch", &gather, "expert_fetch@1 (beside > 0: on that many CTAs, beside other work — expert_prefetch@1's "
+          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging)");
 }

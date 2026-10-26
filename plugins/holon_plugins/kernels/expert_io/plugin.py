@@ -23,6 +23,7 @@ from . import extension
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
+BESIDE_CTAS = 2                            # a store's moves beside the compute (docs/v1-glm.md §13, step 7)
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
@@ -98,12 +99,15 @@ class ExpertFetch:
         self.lib = modules(ctx.fingerprint.sm)
         opts = ctx.options.get("plugins", {})
         self.ctas = int(opts.get("expert_io.fetch_ctas", 8))
+        self.beside_ctas = int(opts.get("expert_io.beside_ctas", BESIDE_CTAS))
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    def __call__(self, fetch, n, src, dst, runs=None) -> None:
+    beside = True                          # `(..., beside=True)`: on `expert_io.beside_ctas` CTAs (a store's moves)
+
+    def __call__(self, fetch, n, src, dst, runs=None, beside: bool = False) -> None:
         if runs is None:
-            self.lib.fetch(fetch, n, src, dst, False)
+            self.lib.fetch(fetch, n, src, dst, self.beside_ctas if beside else 0)
         else:                                  # landing rows (docs/v1-glm.md D8f): each piece's extents by its runs
             self.lib.fetch_runs(fetch, n, src, dst, runs)
 
@@ -133,7 +137,7 @@ class ExpertPrefetch:
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
         if self.copy == "sm":                                              # the device's list: SM copies
             with torch.cuda.stream(self.stream):
-                self.lib.fetch(fetch, n, src, dst, True)
+                self.lib.fetch(fetch, n, src, dst, 1)          # one CTA: beside a prefill pass's mmq
         else:                                                              # the host's: copy engines
             self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream)
         self.landed[key] = torch.cuda.Event()
