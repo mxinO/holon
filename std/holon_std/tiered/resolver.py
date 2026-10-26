@@ -133,8 +133,7 @@ class DeviceResolver:
         # rounds of A landing rows for the most SSD misses a call can have: its distinct routed experts
         rounds = -(-min(store.items, store.top_k * len(ids)) // store.landing_rows)
         store.round_rows(0)                      # round 0's reads first: the RAM gather runs while they do (C S1-M1)
-        when = store.io_device()[:, 0, 0]        # a round that reads nothing signals and waits for nothing
-        store.io.signal(self.io_slot, when=when)
+        store.io.signal(self.io_slot)
         main = torch.accelerator.current_stream(ids.device) if split else None
         side = store.fetch_stream(split=True) if split else None
         if side is not None:
@@ -152,8 +151,8 @@ class DeviceResolver:
             for r in range(rounds):
                 if r:
                     store.round_rows(r)
-                    store.io.signal(self.io_slot, when=when)
-                store.io.wait(self.io_slot, when=when)
+                    store.io.signal(self.io_slot)
+                store.io.wait(self.io_slot)
                 self._gather(store.ssd, store.n_ssd, landed=True, part=r)
             if side is not None:
                 main.wait_stream(side)

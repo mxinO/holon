@@ -299,11 +299,10 @@ class CpuTask:
         self.tasks.append(task)
         return len(self.tasks) - 1
 
-    def signal(self, slot: int, when=None) -> None:
-        if when is None or bool((when > 0).any()):              # (`when`: only if one of its words is positive)
-            moe.cpu_task(self.tasks[slot])
+    def signal(self, slot: int) -> None:
+        moe.cpu_task(self.tasks[slot])
 
-    def wait(self, slot: int, when=None) -> None:
+    def wait(self, slot: int) -> None:
         pass
 
     def copy(self, roles):

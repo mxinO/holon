@@ -58,35 +58,6 @@ def test_a_graph_runs_each_slots_task_once_per_signal_on_every_thread(lib, memop
 
 
 @pytest.mark.parametrize("memop", [False, True])
-def test_a_signal_when_no_word_is_positive_requests_nothing(lib, memop):
-    """`signal(slot, when)` / `wait(slot, when)` (GLM step 7: a layer call that reads nothing from the SSD skips its
-    round trip): in a graph, a replay whose `when` words (read on the device, strided) are all ≤ 0 neither runs the
-    slot's task nor waits; one with a positive word does both, every time."""
-    out = torch.zeros(2, dtype=torch.int64)
-    probes = [lib.Probe(20_000, 0, out)]
-    worker, keep = _worker(lib, probes, memop)
-    errors = torch.zeros(1, dtype=torch.int32, device="cuda")
-    table = torch.zeros(2, 3, dtype=torch.int32, device="cuda")
-    when = table[:, 0]                               # (a strided view, as a round's per-role counts)
-    stream = torch.cuda.Stream()
-    with torch.cuda.stream(stream):
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph, stream=stream):
-            worker.signal(0, errors, when)
-            worker.wait(0, errors, when)
-    for counts, runs in (((0, 0), 0), ((0, 1), 1), ((-1, 0), 1), ((2, 0), 2)):
-        table[:, 0] = torch.tensor(counts, dtype=torch.int32)
-        torch.cuda.synchronize()
-        for _ in range(5):
-            graph.replay()
-        torch.cuda.synchronize()
-        assert int(out[0]) == 5 * runs, counts
-        out.zero_() if runs == 2 else None
-    assert worker.flag() == 0 and int(errors[0]) == 0
-    worker.stop()
-
-
-@pytest.mark.parametrize("memop", [False, True])
 def test_the_protocol_fails_open(lib, memop):
     """A failing task raises bit 1 and the flag; then a slow task's wait returns at once and the worker answers it
     without running it. A task outliving the time bound raises bit 2 (spin: the wait gives up; memop: the watchdog

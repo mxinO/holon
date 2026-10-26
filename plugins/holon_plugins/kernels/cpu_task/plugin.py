@@ -103,13 +103,11 @@ class CpuTask:
         """Its slot; `urgent`: a hint — the worker serves its requests before requests it has not yet started."""
         return self.service.bind(task, urgent)
 
-    def signal(self, slot: int, when=None) -> None:
-        """`when` (int32 [n] on the device, strided): signal only if one of its words is positive."""
-        self.service.native.signal(slot, self.errors, when)
+    def signal(self, slot: int) -> None:
+        self.service.native.signal(slot, self.errors)
 
-    def wait(self, slot: int, when=None) -> None:
-        """`when`: the signal's — a slot it did not signal is not waited for."""
-        self.service.native.wait(slot, self.errors, when)
+    def wait(self, slot: int) -> None:
+        self.service.native.wait(slot, self.errors)
 
     def copy(self, roles) -> CopyTask:
         """The generic copy task (F9) over `roles`: per role (descriptors, units, requests[, runs, keep]), host

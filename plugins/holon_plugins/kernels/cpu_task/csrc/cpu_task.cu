@@ -72,30 +72,9 @@ __device__ __forceinline__ uint64_t globaltimer() {
 
 __global__ void k_signal(uint32_t * word) { SysRef(*word).store(REQ, cuda::memory_order_release); }
 
-// `when` (docs/v1-glm.md step 7): a request only if one of `count` words (at `stride`) is positive — a layer call whose
-// tables name no SSD read signals nothing and waits for nothing (no round trip on the critical path), graph-safe.
-__device__ __forceinline__ bool any_positive(const int32_t * when, int count, int64_t stride) {
-    bool any = false;
-    for (int i = 0; i < count; ++i) {
-        any |= cuda::atomic_ref<const int32_t, cuda::thread_scope_system>(when[i * stride]).load(
-                   cuda::memory_order_acquire) > 0;
-    }
-    return any;
-}
-
-__global__ void k_signal_when(uint32_t * word, const int32_t * when, int count, int64_t stride) {
-    if (any_positive(when, count, stride)) {
-        SysRef(*word).store(REQ, cuda::memory_order_release);
-    }
-}
-
 // `spin`: wait for the answer (or a flag, or the time bound); else (after a memop wait) only report. `flags` is the
 // flags' line: the CPU's word (TASK, the watchdog's TIMEOUT), then the GPU's (a spin wait's TIMEOUT): one writer each.
-__global__ void k_wait(uint32_t * word, uint32_t * flags, int32_t * errors, uint64_t timeout_ns, int spin,
-                       const int32_t * when = nullptr, int count = 0, int64_t stride = 0) {
-    if (when != nullptr && !any_positive(when, count, stride)) {
-        return;                                        // nothing was requested (`k_signal_when`)
-    }
+__global__ void k_wait(uint32_t * word, uint32_t * flags, int32_t * errors, uint64_t timeout_ns, int spin) {
     SysRef w(*word), f(flags[0]), g(flags[1]);
     uint32_t bits = f.load(cuda::memory_order_acquire) | g.load(cuda::memory_order_acquire);
     if (spin && !bits) {
@@ -1148,16 +1127,11 @@ class Worker {
         return d;
     }
 
-    void signal(int64_t slot, const at::Tensor & like, const c10::optional<at::Tensor> & when) {
+    void signal(int64_t slot, const at::Tensor & like) {
         check(slot);
         const c10::cuda::CUDAGuard guard(like.device());
         const cudaStream_t s = at::cuda::getCurrentCUDAStream().stream();
-        if (when.has_value()) {                        // only if a `when` word is positive: a kernel, not a memop
-            check_when(*when);
-            k_signal_when<<<1, 1, 0, s>>>(dev_ + slot * STRIDE, when->data_ptr<int32_t>(), int(when->numel()),
-                                          when->stride(0));
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-        } else if (memop_) {
+        if (memop_) {
             cu_check(driver().write32(s, reinterpret_cast<CUdeviceptr>(dev_ + slot * STRIDE), REQ,
                                       CU_STREAM_WRITE_VALUE_DEFAULT), "cuStreamWriteValue32");
         } else {
@@ -1166,20 +1140,12 @@ class Worker {
         }
     }
 
-    void wait(int64_t slot, at::Tensor & errors, const c10::optional<at::Tensor> & when) {
+    void wait(int64_t slot, at::Tensor & errors) {
         check(slot);
         TORCH_CHECK(errors.is_cuda() && errors.scalar_type() == at::kInt && errors.numel() == 1, "errors: int32 [1]");
         const c10::cuda::CUDAGuard guard(errors.device());
         const cudaStream_t s = at::cuda::getCurrentCUDAStream().stream();
         uint32_t * w = dev_ + slot * STRIDE;
-        if (when.has_value()) {                        // the signal's `when`: a spin wait that skips an empty call
-            check_when(*when);
-            k_wait<<<1, 1, 0, s>>>(w, dev_ + st_->tasks.size() * STRIDE, errors.data_ptr<int32_t>(),
-                                   uint64_t(st_->timeout_ns), 1, when->data_ptr<int32_t>(), int(when->numel()),
-                                   when->stride(0));
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-            return;
-        }
         if (memop_) {
             cu_check(driver().wait32(s, reinterpret_cast<CUdeviceptr>(w), DONE, CU_STREAM_WAIT_VALUE_GEQ),
                      "cuStreamWaitValue32");
@@ -1190,10 +1156,6 @@ class Worker {
     }
 
   private:
-    static void check_when(const at::Tensor & when) {
-        TORCH_CHECK(when.is_cuda() && when.scalar_type() == at::kInt && when.dim() == 1 && when.numel() >= 1,
-                    "when: int32 [n] the device reads (strided)");
-    }
     void check(int64_t slot) const {
         TORCH_CHECK(slot >= 0 && slot < int64_t(st_->tasks.size()), "cpu_task: slot ", slot, " of ",
                     st_->tasks.size());
@@ -1299,11 +1261,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
              "depth > 0: an io pool of copy tasks, read asynchronously (backend auto / uring / aio; urgent per slot)")
         .def("backend", &Worker::backend, "the io pool's read interface (io_uring or aio), else empty")
         .def("signal", &Worker::signal, "on the current stream (of `like`'s device): the slot's task runs once the "
-             "stream reaches here (`when`: only if one of its int32 words, read on the device, is positive)",
-             pybind11::arg("slot"), pybind11::arg("like"), pybind11::arg("when") = pybind11::none())
-        .def("wait", &Worker::wait, "on the current stream: later work waits for the slot's answer (fail-open; `when`: "
-             "the signal's, nothing to wait for where it signalled nothing)", pybind11::arg("slot"),
-             pybind11::arg("errors"), pybind11::arg("when") = pybind11::none())
+             "stream reaches here")
+        .def("wait", &Worker::wait, "on the current stream: later work waits for the slot's answer (fail-open)")
         .def("flag", &Worker::flag, "the sticky error bits: 1 a task failed, 2 a wait timed out")
         .def("served", &Worker::served, "requests answered so far")
         .def("io_stats", &Worker::io_stats, "the io pool's counters: backend, bytes read, busy_ns (time with reads in "
