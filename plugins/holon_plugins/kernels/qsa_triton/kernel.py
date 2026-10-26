@@ -148,13 +148,16 @@ def _score_weighted(q_ptr, w_ptr, pooled_ptr, table_ptr, seq_ptr, pos_ptr, ws_pt
 
 
 @triton.jit
-def _keys(base, i, n):
-    """Scores as int32 keys in their float order: a non-negative float's bits, a negative one's with the magnitude bits
-    flipped (signed scores: head weights), −0.0 as +0.0 (a tie, as the floats compare); past n, the int32 minimum
-    (below every score's key)."""
-    bits = tl.load(base + i, mask=i < n, other=0.0).to(tl.int32, bitcast=True)
-    key = tl.where(bits == -2147483648, 0, tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits))
-    return tl.where(i < n, key, -2147483648)
+def _keys(base, i, n, SIGNED: tl.constexpr):
+    """Scores as int32 keys in their float order: non-negative floats order as their bits; past n, −1 (below every
+    key). SIGNED (head weights): a negative float's bits with the magnitude bits flipped, −0.0 as +0.0 (a tie, as the
+    floats compare), past n the int32 minimum. (Unsigned scores keep the plain keys: the signed form's selects were
+    ≈ 2.3× slower in FN's decode at 32K, GLM step 6.)"""
+    if SIGNED:
+        bits = tl.load(base + i, mask=i < n, other=0.0).to(tl.int32, bitcast=True)
+        key = tl.where(bits == -2147483648, 0, tl.where(bits < 0, bits ^ 0x7FFFFFFF, bits))
+        return tl.where(i < n, key, -2147483648)
+    return tl.load(base + i, mask=i < n, other=-1.0).to(tl.int32, bitcast=True)
 
 
 @triton.jit
@@ -175,7 +178,7 @@ def _emit(out, key, i, kth, need, above, equal):
 
 @triton.jit
 def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.constexpr, TOP: tl.constexpr,
-          CHUNK: tl.constexpr, PAD: tl.constexpr):
+          CHUNK: tl.constexpr, PAD: tl.constexpr, SIGNED: tl.constexpr):
     """A query's top min(TOP, n) blocks, ties to the lower block, ascending, then its open block. The k-th largest
     key is found exactly, a bit a round from the top (the largest v with count(key ≥ v) ≥ k; its sign first: from 0
     when k keys are non-negative, else from the int32 minimum), over keys held in registers when the row fits CHUNK
@@ -196,8 +199,10 @@ def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.co
         for c0 in range(0, n, CHUNK):
             tl.store(out + c0 + i, c0 + i, mask=c0 + i < n)
     elif n <= CHUNK:
-        key = _keys(base, i, n)
-        kth = tl.where(tl.sum((key >= 0).to(tl.int32), 0) >= k, 0, -2147483648)
+        key = _keys(base, i, n, SIGNED)
+        kth = n * 0
+        if SIGNED:
+            kth = tl.where(tl.sum((key >= 0).to(tl.int32), 0) >= k, 0, -2147483648)
         settled = n * 0
         for b in tl.static_range(31):
             if settled == 0:                        # until exactly k keys are at or above kth
@@ -210,22 +215,24 @@ def _topk(ws_ptr, seq_ptr, pos_ptr, out_ptr, stride_ws, stride_out, RATIO: tl.co
             need = k - tl.sum((key > kth).to(tl.int32), 0)
         _emit(out, key, i, kth, need, 0, 0)
     else:
-        count = n * 0
-        for c0 in range(0, n, CHUNK):
-            count += tl.sum((_keys(base, c0 + i, n) >= 0).to(tl.int32), 0)
-        kth = tl.where(count >= k, 0, -2147483648)
+        kth = n * 0
+        if SIGNED:
+            count = n * 0
+            for c0 in range(0, n, CHUNK):
+                count += tl.sum((_keys(base, c0 + i, n, SIGNED) >= 0).to(tl.int32), 0)
+            kth = tl.where(count >= k, 0, -2147483648)
         for b in tl.static_range(31):
             count = n * 0
             for c0 in range(0, n, CHUNK):
-                count += tl.sum((_keys(base, c0 + i, n) >= kth + (1 << (30 - b))).to(tl.int32), 0)
+                count += tl.sum((_keys(base, c0 + i, n, SIGNED) >= kth + (1 << (30 - b))).to(tl.int32), 0)
             kth += (count >= k).to(tl.int32) << (30 - b)
         greater = n * 0
         for c0 in range(0, n, CHUNK):
-            greater += tl.sum((_keys(base, c0 + i, n) > kth).to(tl.int32), 0)
+            greater += tl.sum((_keys(base, c0 + i, n, SIGNED) > kth).to(tl.int32), 0)
         above = n * 0
         equal = n * 0
         for c0 in range(0, n, CHUNK):
-            above, equal = _emit(out, _keys(base, c0 + i, n), c0 + i, kth, k - greater, above, equal)
+            above, equal = _emit(out, _keys(base, c0 + i, n, SIGNED), c0 + i, kth, k - greater, above, equal)
     if (p + 1) % RATIO:
         tl.store(out + k, n)
 
@@ -373,7 +380,7 @@ def qsa_select(q, pooled, table, seq, positions, ratio: int, budget: int, sub_ba
         ws = torch.empty(rows, blocks, dtype=torch.float32, device=q.device)
         scores(q[a:a + rows], pooled, table, seq[a:], positions[a:], ratio, ws, None if w is None else w[a:a + rows])
         _topk[(rows,)](ws, seq[a:], positions[a:], out[a:], ws.stride(0), out.stride(0), ratio, top, TOPK_CHUNK,
-                       triton.next_power_of_2(top + 1), num_warps=8)
+                       triton.next_power_of_2(top + 1), w is not None, num_warps=8)
     return out
 
 
