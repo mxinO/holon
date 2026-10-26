@@ -373,7 +373,15 @@ class TieredStore:
         self.moves = [static(f"{self.name}.moves.{i}", (self.roles, 4, self.prefill)) for i in range(2)]
         self.n_moves = [static(f"{self.name}.n_moves.{i}", (self.roles, 2)) for i in range(2)]
         self.moves_async = getattr(self.policy, "exclusive_flag", None) is not None
-        self.admitted, self.moved = torch.cuda.Event(), [torch.cuda.Event(), torch.cuda.Event()]
+        # (device-generic events: the waits are on `torch.accelerator`'s streams, which ignore a `torch.cuda.Event`)
+        self.admitted, self.moved = (torch.Event(device=self.ctx.device),
+                                     [torch.Event(device=self.ctx.device), torch.Event(device=self.ctx.device)])
+        self.recorded: set = set()              # the fences recorded in this step (the last step's moves joined it:
+        #                                         a wait on an earlier one is moot, and a graph cannot capture it)
+        # The demotions run beside the next call too: it never gives a unit the previous call demoted into to a
+        # displacement (a keep the I/O worker writes from the host would race that copy): `moe_tiers@2`'s stamps
+        self.tier_stamps = {"stamp": static(f"{self.name}.stamp", tuple(self.owner.shape)),
+                            "clock": static(f"{self.name}.clock", (1,))} if self.moves_async else {}
         facts = {"experts": self.items, "top_k": self.top_k, "roles": self.roles}
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
@@ -703,6 +711,9 @@ class TieredStore:
         self._host = host
         self.host_units.copy_(torch.from_numpy(host))
         self.owner.copy_(torch.from_numpy(owner))
+        if self.tier_stamps:                    # no unit pending: stamps two calls back
+            self.tier_stamps["clock"].zero_()
+            self.tier_stamps["stamp"].fill_(-1)
         for reads in self.reads:
             reads.bind()
 
@@ -1137,6 +1148,8 @@ class TieredStore:
             self._started = False
             return
         self._started = early
+        if self.exclusive:
+            self.recorded.clear()
         if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go
             tokens = self.counts[0].sum() / self.top_k
             self.ram_heat.mul_(torch.pow(self._ram_decay_t, tokens)).add_(self.counts)

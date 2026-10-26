@@ -141,16 +141,31 @@ SPARE, OWN = -4, -5        # `moe_tiers@2`'s records from a policy with spares (
 def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.Tensor, n_fetch: torch.Tensor,
               stage: torch.Tensor, records: list[tuple[int, int, int]], residency: torch.Tensor, host: torch.Tensor,
               piece: torch.Tensor, classes: torch.Tensor, owner: torch.Tensor, capacity: torch.Tensor,
-              heat: torch.Tensor | None, rows: int | None = None, ahead: torch.Tensor | None = None) -> dict:
+              heat: torch.Tensor | None, rows: int | None = None, ahead: torch.Tensor | None = None,
+              stamp: torch.Tensor | None = None, clock: torch.Tensor | None = None) -> dict:
     """The `moe_tiers@2` oracle, one layer call after its resolve (`records`: the call's delta records): `fetch`
     (its RAM entries, in order: `n_ram` [R]), `residency`, `host`, `owner` after it, `io` per role (its rows (piece,
     landing row, keep unit or −1)), `ssd` [R, 2, F] (the j-th SSD miss by id: (landing row j % `rows`, its slot)) and
     `n_ssd` [R], `moves` [R, 4, F] (demotions: slot, unit; moves: slot, slot) and `n_moves` [R, 2]; an SSD miss the
-    layer read ahead (`ahead[e]` ≥ 0, its row) is neither read nor kept: `hit` [R, 2, F] (row, slot), `n_hit` [R]."""
+    layer read ahead (`ahead[e]` ≥ 0, its row) is neither read nor kept: `hit` [R, 2, F] (row, slot), `n_hit` [R].
+    With `stamp` [C, U] and `clock` [1] (moves beside the next calls): RAM's coldest is never an expert with a unit
+    the previous call demoted into (`stamp` = its clock + 1, uint32 arithmetic), each demotion stamps its units, the
+    call advances `clock`; both returned."""
     from .kernels import DECODE, PADDING
 
     g, (_, experts, roles) = group, residency.shape
     fetch, residency, host, owner = fetch.clone(), residency.clone(), host.clone(), owner.clone()
+    now = (int(clock[0]) + 1) & 0xFFFFFFFF if clock is not None else None
+    stamp = stamp.clone() if stamp is not None else None
+
+    def pending(c: int, u: int) -> bool:
+        """Unit u of class c demoted into by the previous call (or this one): its copy may still run."""
+        return stamp is not None and (now - (int(stamp[c, u]) & 0xFFFFFFFF)) & 0xFFFFFFFF <= 1
+
+    def demoted(units: list[int]) -> None:
+        if stamp is not None:
+            for c, u in zip(cls, units, strict=True):
+                stamp[c, u] = now if now < 1 << 31 else now - (1 << 32)
     width = stage.shape[1]
     live = (kinds.long()[:, None] != PADDING) & (ids >= 0)
     routed = {int(e) for e in ids[live].tolist()}
@@ -174,7 +189,9 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
                 continue
             for e in range(experts):
                 if (residency[gg, e] == -1).all() and (host[gg, e] >= 0).all() and (gg, e) not in placed and \
-                        not (gg == g and e in routed):
+                        not (gg == g and e in routed) and \
+                        not any(pending(c, int(u))
+                                for c, u in zip(classes[gg].tolist(), host[gg, e].tolist(), strict=True)):
                     key = (heat[gg, e].item(), gg, e)                # (an int32 heat compares exactly)
                     best = key if best is None or key < best else best
         return None if best is None or not best[0] < than else best[1:]
@@ -208,6 +225,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
                 for r in range(roles):
                     moves[r, 0:2, n_moves[r, 0]] = torch.tensor([slots[r], units[r]])
                     n_moves[r, 0] += 1
+                demoted(units)
             continue
         if a == OWN:                                                     # b took its spare back: its RAM units free
             for r, c in enumerate(cls):
@@ -234,6 +252,7 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
                 for r in range(roles):
                     moves[r, 0:2, n_moves[r, 0]] = torch.tensor([slots[r], units[r]])
                     n_moves[r, 0] += 1
+                demoted(units)
             j += 1
         host[g, a] = -1
     io = [[] for _ in range(roles)]
@@ -269,7 +288,9 @@ def moe_tiers(ids: torch.Tensor, kinds: torch.Tensor, group: int, fetch: torch.T
         n_ram[r] = len(keep)
     return {"fetch": ram, "n_ram": n_ram, "residency": residency, "host": host, "owner": owner, "io": io,
             "ssd": lists, "n_ssd": torch.full((roles,), len(ssd), dtype=torch.int32), "hit": hits,
-            "n_hit": torch.full((roles,), h, dtype=torch.int32), "moves": moves, "n_moves": n_moves}
+            "n_hit": torch.full((roles,), h, dtype=torch.int32), "moves": moves, "n_moves": n_moves} | (
+        {"stamp": stamp, "clock": torch.tensor([now if now < 1 << 31 else now - (1 << 32)], dtype=torch.int32)}
+        if stamp is not None else {})
 
 
 def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, ring: torch.Tensor,

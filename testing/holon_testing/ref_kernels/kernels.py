@@ -331,13 +331,15 @@ class MoeTiers:
         pass
 
     def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit) -> None:
+                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp=None,
+                 clock=None) -> None:
         records = [tuple(r) for r in delta[int(start[0]):int(n_delta[0])].tolist()]
         out = moe.moe_tiers(ids, kinds, group, fetch, n_fetch, stage, records, residency, host, piece, classes, owner,
-                            capacity, heat, rows, ahead)
+                            capacity, heat, rows, ahead, stamp, clock)
         for name, t in (("fetch", fetch), ("residency", residency), ("host", host), ("owner", owner),
                         ("moves", moves), ("n_moves", n_moves), ("ssd", ssd), ("n_ssd", n_ssd), ("n_ram", n_ram),
-                        ("hit", hit), ("n_hit", n_hit)):
+                        ("hit", hit), ("n_hit", n_hit)) + ((("stamp", stamp), ("clock", clock)) if stamp is not None
+                                                           else ()):
             t.copy_(out[name])
         for r, lines in enumerate(out["io"]):
             io[r, 0, 0] = len(lines)

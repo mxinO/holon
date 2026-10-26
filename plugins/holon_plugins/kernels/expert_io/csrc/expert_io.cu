@@ -643,7 +643,13 @@ struct Tiers {
     const int32_t * ahead;                             // [E] or null: the layer's read-ahead row of each expert, or −1
     int32_t * hit, * n_hit;                            // [R, 2, F], [R]: the misses read ahead (row, slot)
     int groups, units, rows;                           // rows: the on-demand landing rows (a round's)
-};
+    int32_t * stamp, * clock;                          // [C, U], [1] or null: the call each unit was last demoted into
+};                                                     // by, and the calls so far (moves beside the next calls)
+
+// A unit the previous call demoted into (or this one): its copy may still be running beside this call (`stamp`).
+__device__ __forceinline__ bool pending(const Tiers & T, int c, int u) {
+    return T.stamp != nullptr && uint32_t(T.clock[0]) + 1u - uint32_t(T.stamp[c * T.units + u]) <= 1u;
+}
 
 constexpr int TIER_THREADS = 256;
 constexpr int SPARE = -4, OWN = -5;                    // records of a policy with spares (F10): b's slots a spare; b
@@ -687,7 +693,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, double th
         bool ok = !(gg == g && flags[e] & (1 | 4));    // routed by the call (1), placed by it (4)
         for (int r = 0; r < roles && ok; ++r) {
             ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1 &&
-                 T.host[x * roles + r] >= 0;
+                 T.host[x * roles + r] >= 0 && !pending(T, T.classes[gg * roles + r], T.host[x * roles + r]);
         }
         if (ok) {
             const double h = heat_at(T, x);
@@ -831,6 +837,9 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                     const int m = T.n_moves[r * 2]++;
                     T.moves[(r * 4) * F + m] = victim[r];
                     T.moves[(r * 4 + 1) * F + m] = units[r];
+                    if (T.stamp != nullptr) {
+                        T.stamp[T.classes[g * roles + r] * T.units + units[r]] = T.clock[0] + 1;
+                    }
                 }
             }
             __syncthreads();
@@ -906,6 +915,9 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                     const int m = T.n_moves[r * 2]++;
                     T.moves[(r * 4) * F + m] = victim[r];
                     T.moves[(r * 4 + 1) * F + m] = units[r];
+                    if (T.stamp != nullptr) {
+                        T.stamp[T.classes[g * roles + r] * T.units + units[r]] = T.clock[0] + 1;
+                    }
                 }
             }
             ++j;
@@ -989,6 +1001,10 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
             }
         }
     }
+    __syncthreads();
+    if (tid == 0 && T.clock != nullptr) {
+        T.clock[0] += 1;
+    }
 }
 
 void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::Tensor & fetch, const at::Tensor & n_fetch,
@@ -996,7 +1012,8 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
            at::Tensor & residency, at::Tensor & host, const at::Tensor & piece, const at::Tensor & classes,
            at::Tensor & owner, const at::Tensor & capacity, const c10::optional<at::Tensor> & heat, at::Tensor & io,
            at::Tensor & moves, at::Tensor & n_moves, at::Tensor & ssd, at::Tensor & n_ssd, at::Tensor & n_ram,
-           int64_t rows, const c10::optional<at::Tensor> & ahead, at::Tensor & hit, at::Tensor & n_hit) {
+           int64_t rows, const c10::optional<at::Tensor> & ahead, at::Tensor & hit, at::Tensor & n_hit,
+           const c10::optional<at::Tensor> & stamp, const c10::optional<at::Tensor> & clock) {
     const c10::cuda::CUDAGuard guard(ids.device());
     const int64_t tokens = ids.size(0), k = ids.size(1), groups = residency.size(0), experts = residency.size(1),
                   roles = residency.size(2), F = stage.size(1);
@@ -1043,7 +1060,14 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
             classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h, hi,
             io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), ssd.data_ptr<int32_t>(),
             n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), ah, hit.data_ptr<int32_t>(),
-            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows)};
+            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows), nullptr, nullptr};
+    TORCH_CHECK(stamp.has_value() == clock.has_value(), "stamp and clock: both or neither");
+    if (stamp.has_value()) {
+        check(*stamp, ids, at::kInt, {owner.size(0), owner.size(1)}, "stamp");
+        check(*clock, ids, at::kInt, {1}, "clock");
+        T.stamp = stamp->data_ptr<int32_t>();
+        T.clock = clock->data_ptr<int32_t>();
+    }
     k_tiers<<<1, TIER_THREADS, experts * sizeof(int32_t), stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), int(group), fetch.data_ptr<int32_t>(),
         n_fetch.data_ptr<int32_t>(), stage.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), start.data_ptr<int32_t>(),
@@ -1323,7 +1347,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           "since the last loan_set");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
-    m.def("tiers", &tiers, "moe_tiers@2: the call's admissions and SSD misses through the exclusive RAM tier");
+    m.def("tiers", &tiers, "moe_tiers@2: the call's admissions and SSD misses through the exclusive RAM tier",
+          pybind11::arg("ids"), pybind11::arg("kinds"), pybind11::arg("group"), pybind11::arg("fetch"),
+          pybind11::arg("n_fetch"), pybind11::arg("stage"), pybind11::arg("delta"), pybind11::arg("start"),
+          pybind11::arg("n_delta"), pybind11::arg("residency"), pybind11::arg("host"), pybind11::arg("piece"),
+          pybind11::arg("classes"), pybind11::arg("owner"), pybind11::arg("capacity"), pybind11::arg("heat"),
+          pybind11::arg("io"), pybind11::arg("moves"), pybind11::arg("n_moves"), pybind11::arg("ssd"),
+          pybind11::arg("n_ssd"), pybind11::arg("n_ram"), pybind11::arg("rows"), pybind11::arg("ahead"),
+          pybind11::arg("hit"), pybind11::arg("n_hit"), pybind11::arg("stamp") = pybind11::none(),
+          pybind11::arg("clock") = pybind11::none());
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");

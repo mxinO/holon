@@ -575,7 +575,9 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     displaced. SSD reads land in landing rows (docs/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
     its io row (piece, row, keep unit), its own fetch list; the RAM entries stay in the fetch list, in order. A miss
     the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, never kept — with
-    decode rows and free RAM units beside it (docs/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3)."""
+    decode rows and free RAM units beside it (docs/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3). With heat, units
+    stamped by the previous call (a third of them) are never displaced, the call's demotions stamp theirs and the
+    clock advances (docs/v1-glm.md §13 step 7: moves beside the next calls)."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -601,9 +603,13 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     if ahead:                                           # every other SSD-only expert of the layer, rows 3 on
         only = (t["residency"][layer] == -2).all(-1).nonzero().flatten()[::2]
         sets[only] = rows + torch.arange(len(only), dtype=torch.int32)
+    stamps = None
+    if policy:                                          # a third of the units demoted into by the previous call
+        stamp = torch.where(torch.rand(t["owner"].shape, generator=g) < 1 / 3, 5, -1).int()
+        stamps = (stamp, torch.tensor([5], dtype=torch.int32))
     want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
                                t["piece"], t["classes"], t["owner"], t["capacity"], heat, rows,
-                               sets if ahead else None)
+                               sets if ahead else None, *(stamps or ()))
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
     delta = torch.tensor([(layer, a, b) for _, a, b in records] or [[0, 0, 0]], dtype=torch.int32).view(-1, 3)
@@ -615,12 +621,15 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     ssd = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
     n_ssd, n_ram, n_hit = (torch.zeros(ROLES, dtype=torch.int32, device=device) for _ in range(3))
     hit = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
+    dev_stamps = [x.clone().to(device) for x in stamps or ()]
     tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
           torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
                                                                          device=device),
           dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"],
           dev["heat"] if policy else None, io, moves, n_moves, ssd, n_ssd, n_ram, rows,
-          sets.to(device) if ahead else None, hit, n_hit)
+          sets.to(device) if ahead else None, hit, n_hit, *dev_stamps)
+    if stamps:
+        assert torch.equal(dev_stamps[0].cpu(), want["stamp"]) and int(dev_stamps[1]) == int(want["clock"][0]) == 6
     for name in ("residency", "host", "owner"):
         assert torch.equal(dev[name].cpu(), want[name]), name
     assert torch.equal(n_moves.cpu(), want["n_moves"]) and torch.equal(n_ram.cpu(), want["n_ram"])

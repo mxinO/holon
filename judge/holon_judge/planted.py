@@ -1725,43 +1725,94 @@ def ondemand_round_unjoined() -> Iterator[None]:
 
 
 @contextlib.contextmanager
-def moves_unfenced() -> Iterator[None]:
-    """GLM step 7: under a policy with spares, a call's moves run on the store's moves stream; here nothing waits for
-    them within a step — the next calls' fences (`admitted`, `moved`) are events never recorded — and they start late
-    (a sleep on that stream), so a demotion reads its victim's slot after a later call of the step promoted into it
-    (a prompt step's passes: the slot a spare again). Reports how often it fired."""
+def _late_demotions(ns: int) -> Iterator[None]:
+    """A store's demotions (its moves stream's copies into RAM units) each after a sleep on that stream: they finish
+    calls later than they would."""
+    from holon_plugins.kernels.expert_io import plugin
+
+    call = plugin.ExpertFetch.__call__
+
+    def late(self, fetch, n, src, dst, runs=None, beside=False):
+        if beside and dst.data_ptr() != src.data_ptr():        # (a demotion: slots into units; a move: slots)
+            torch.cuda._sleep(ns)
+        return call(self, fetch, n, src, dst, runs, beside)
+    with mock.patch.object(plugin.ExpertFetch, "__call__", late):
+        yield
+
+
+class _Never(set):
+    """A store's `recorded` fences that never hold one: no call waits for an earlier call's moves."""
+
+    def add(self, key) -> None:
+        pass
+
+
+@contextlib.contextmanager
+def moves_unfenced() -> Iterator[collections.Counter]:
+    """GLM step 7: under a policy with spares a call's moves run on the store's moves stream; here no later call of the
+    step waits for them (the fences `admitted`, `moved` never count as recorded) and the demotions run late (a sleep
+    before each), so a later call rewrites a move table, or reuses a slot or unit, before the demotions read them —
+    RAM units end up holding other experts' bytes. Yields its counts (`calls` it unfenced)."""
     from holon_std.tiered import store as tiered
 
-    moves_stream, fired = tiered.TieredStore.moves_stream, collections.Counter()
+    start, fired = tiered.TieredStore.start_step, collections.Counter()
 
-    class Late:                                  # the moves stream, its work after a sleep
-        def __init__(self, stream):
-            self.stream = stream
-
-        def wait_stream(self, other):
-            self.stream.wait_stream(other)
-            with self.stream:
-                torch.cuda._sleep(2_000_000)
-
-        def __enter__(self):
-            return self.stream.__enter__()
-
-        def __exit__(self, *exc):
-            return self.stream.__exit__(*exc)
-
-    def planted(self):
-        self.admitted, self.moved = torch.cuda.Event(), [torch.cuda.Event(), torch.cuda.Event()]   # (unrecorded)
-        fired[_when()] += 1
-        return Late(moves_stream(self))
-    layer_done = tiered.TieredStore.layer_done
-
-    def joined(self, g):                         # (a graph's capture needs its fork joined: the step's join stays)
-        with mock.patch.object(tiered.TieredStore, "moves_stream", moves_stream):
-            layer_done(self, g)
-    with mock.patch.object(tiered.TieredStore, "moves_stream", planted), \
-            mock.patch.object(tiered.TieredStore, "layer_done", joined):
-        yield
+    def planted(self, early=False):
+        start(self, early)
+        if self.exclusive and self.moves_async:
+            self.recorded = _Never()
+            fired["calls"] += 1
+    with mock.patch.object(tiered.TieredStore, "start_step", planted), _late_demotions(20_000_000):
+        yield fired
     print(f"plant moves-unfenced fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def pending_victims(stamped: bool = True, ns: int = 20_000_000) -> Iterator[collections.Counter]:
+    """GLM step 7 (A's D8p-M3): every layer call's RAM-coldest forced to the experts the previous call demoted into
+    RAM (their heat dropped below every other for the call), the demotions late (a sleep before each), eager steps
+    (each call's tables read back). With `stamped` the store's stamps stand (the fix: those experts are not
+    displaceable); without, they are dropped (`keep_into_pending_demotion`). Yields its counts: `forced` calls,
+    `keeps_on_pending` keeps given a unit whose demotion was still pending."""
+    from holon_plugins.kernels.expert_io import plugin
+
+    call, fired = plugin.MoeTiers.__call__, collections.Counter()
+    last: list[tuple[int, int]] = []                     # the previous call's demotion targets (class, unit)
+
+    def planted(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece,
+                classes, owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit,
+                stamp=None, clock=None):
+        nonlocal last
+        saved = None
+        if last and heat is not None:                    # those experts RAM's coldest, by far
+            owners = sorted({int(owner[c, u]) for c, u in last if int(owner[c, u]) >= 0})
+            if owners:
+                experts = heat.shape[1]
+                at = (torch.tensor([x // experts for x in owners]), torch.tensor([x % experts for x in owners]))
+                saved = (at, heat[at].clone())
+                heat[at] = heat.min() - 1000
+                fired["forced"] += 1
+        call(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
+             owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit,
+             *((stamp, clock) if stamped else (None, None)))
+        if saved is not None:
+            heat[saved[0]] = saved[1]
+        cls = classes[group].tolist()
+        keeps = {(cls[r], int(io[r, 1 + i, 2])) for r in range(io.shape[0]) for i in range(int(io[r, 0, 0]))
+                 if int(io[r, 1 + i, 2]) >= 0}
+        fired["keeps_on_pending"] += len(keeps & set(last))
+        last = [(cls[r], int(moves[r, 1, m])) for r in range(moves.shape[0]) for m in range(int(n_moves[r, 0]))]
+    with mock.patch.object(plugin.MoeTiers, "__call__", planted), _late_demotions(ns):
+        yield fired
+    print(f"plant pending-victims (stamped {stamped}) fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def keep_into_pending_demotion() -> Iterator[collections.Counter]:
+    """GLM step 7 (A's D8p-M3): a keep given a unit the previous call's late demotion is still writing — the store's
+    stamps dropped, RAM's coldest forced onto those experts (`pending_victims`)."""
+    with pending_victims(stamped=False) as fired:
+        yield fired
 
 
 @contextlib.contextmanager

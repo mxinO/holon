@@ -128,13 +128,14 @@ class DeviceResolver:
         moves, n_moves = store.moves[g % 2], store.n_moves[g % 2]
         if store.moves_async:                    # the last call's admissions read the staging slots this one fills;
             main = torch.accelerator.current_stream(ids.device)          # the call before it, this table (`moves`)
-            main.wait_event(store.admitted)
-            main.wait_event(store.moved[g % 2])
+            for key, event in (("admitted", store.admitted), (g % 2, store.moved[g % 2])):
+                if key in store.recorded:        # (recorded in this step: the last step's moves joined before it)
+                    main.wait_event(event)
         store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
                       store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
                       store.classes32, store.owner, store.capacity, store.heat, store.io_rows, moves,
                       n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
-                      store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
+                      store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit, **store.tier_stamps)
         # rounds of A landing rows for the most SSD misses a call can have: its distinct routed experts
         rounds = -(-min(store.items, store.top_k * len(ids)) // store.landing_rows)
         store.round_rows(0)                      # round 0's reads first: the RAM gather runs while they do (C S1-M1)
@@ -175,9 +176,11 @@ class DeviceResolver:
                 for r, (c, gather) in enumerate(moving):
                     gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots(), **beside[r])
                 store.admitted.record()                  # (the current stream: this one)
+                store.recorded.add("admitted")
                 for r, (c, gather) in enumerate(moving):
                     gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units(), **beside[r])
                 store.moved[g % 2].record()
+                store.recorded.add(g % 2)
         return finish
 
     def _pipelined(self, ids: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):

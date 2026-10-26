@@ -1209,15 +1209,16 @@ def test_a_spare_policys_moves_run_beside_and_fence_the_staging_slots(gpu_moe):
     opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ring_tokens": 512,
             "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     for plant in (False, True):
-        with moves_unfenced() if plant else contextlib.nullcontext():
+        with moves_unfenced() if plant else contextlib.nullcontext() as fired:
             engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
             store = engine.ctx.shared_objects[KEY]
             assert store.moves_async
             got = engine.generate(prompts, params)
+            wrong = _bytes_exact(store)
             if not plant:
                 _held_once(store)
             engine.close()
-        assert (got == want) != plant
+        assert (got == want and not wrong) != plant and (not plant or fired["calls"]), wrong
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
@@ -1241,6 +1242,54 @@ def test_a_layout_lends_only_past_the_policys_reserved_slots(gpu_moe, cache):
     lendable = min(c.size - c.null - c.staging - held[n] for n, c in store.classes.items())
     assert store.lending == (lendable >= store.prefill) == (cache == "*=0.75")
     engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_keep_never_takes_a_unit_whose_demotion_is_pending(gpu_moe):
+    """GLM step 7 (A's D8p-M3): a call's demotions run beside the next call, whose keeps the I/O worker writes from the
+    host, so `moe_tiers@2`'s stamps keep the units the previous call demoted into out of its displacements. With
+    RAM's coldest forced onto those experts at every call and the demotions late, the store serves the resident
+    store's bits; with the stamps dropped (`keep_into_pending_demotion`) keeps land on such units and it does not."""
+    from holon_judge.planted import keep_into_pending_demotion, pending_victims
+
+    file, prompts, _ = gpu_moe
+    params = SamplingParams(temperature=0.0, max_tokens=48, ignore_eos=True)
+    resident = _gpu_engine(file, cuda_graphs=False)
+    want = resident.generate(prompts, params)
+    resident.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ring_tokens": 512,
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    for plant in (pending_victims, keep_into_pending_demotion):
+        with plant() as fired:
+            engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts, cuda_graphs=False)
+            got = engine.generate(prompts, params)
+            wrong = _bytes_exact(engine.ctx.shared_objects[KEY])
+            engine.close()
+        stamped = plant is pending_victims
+        assert fired["forced"] and (fired["keeps_on_pending"] == 0) == stamped, dict(fired)
+        assert (wrong == 0) == stamped and (got == want or not stamped), wrong
+
+
+def _bytes_exact(store) -> int:
+    """Exclusive tiers: the pieces whose RAM unit or VRAM slot does not hold the checkpoint's bytes of the piece the
+    map names there (an idle engine)."""
+    torch.cuda.synchronize()
+    tier, res, host, wrong = store.tiers[-1], store.residency.device.cpu(), store.host_units.cpu(), 0
+    fds: dict[int, int] = {}
+    for g, gid in enumerate(store.layers):
+        for e in range(store.items):
+            for r, c in store.groups[gid].items():
+                at = int(res[g, e, r])
+                if at < -1:
+                    continue
+                _, extents = tier.read(c.name, store._piece_index(c, g, e, r))
+                want = b"".join(os.pread(fds.setdefault(fd, os.open(os.readlink(f"/proc/self/fd/{fd}"), os.O_RDONLY)),
+                                         n, off) for fd, _, off, n in extents)
+                view = c.units()[int(host[g, e, r])] if at == -1 else c.slots()[at]
+                wrong += view[:len(want)].cpu().numpy().tobytes() != want
+    for fd in fds.values():
+        os.close(fd)
+    return wrong
 
 
 def _held_once(store) -> None:

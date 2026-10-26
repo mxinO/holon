@@ -146,13 +146,13 @@ then `staging` slots, then cache slots.
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. An optional `runs [U, X, 2]
   int64` reads landing rows (docs/v1-glm.md D8f; `src [U, row]` of its own width): the slot gets row `fetch[0, i]`'s
   extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with `beside = True` also takes
-  `beside=True`: the same copy on few SMs, for one off the critical path beside other work. Optional member `gather_roles(fetch [R, 2, F], n
-  [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the instance's copy, role r's list), so
-  a store issues one call for a group's roles; an instance with `parts = True` also takes `part` and exactly one of
-  `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a pipelined
-  pass's fetch, part by part) or q = `size` (an SSD round); and `runs`, one per role (landing rows). A
-  `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as they are in `out` (a pipelined pass
-  computes each part's entries into one `out`).
+  `beside=True`: the same copy on few SMs, for one off the critical path beside other work. Optional member
+  `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
+  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True` also
+  takes `part` and exactly one of `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q =
+  ⌈min(n[r], F) / parts⌉ (a pipelined pass's fetch, part by part) or q = `size` (an SSD round); and `runs`, one per role
+  (landing rows). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as they are in `out` (a
+  pipelined pass computes each part's entries into one `out`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
   src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits
@@ -202,7 +202,11 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
      SSD miss the layer read ahead (`ahead[e]` ≥ 0, its landing row) is neither read nor kept nor counted in j:
      `hit[r, :, h]` = (that row, its slot), `n_hit[r]` of them.
   The map, `host` and `owner` take the call's result (a resident, b and kept pieces in RAM or on the SSD, displaced
-  experts on the SSD). `n_moves[r]` = (demotions, moves). Deterministic. Facts: experts, top_k, roles.
+  experts on the SSD). `n_moves[r]` = (demotions, moves). Optional trailing `stamp [C, U] int32, clock [1] int32`
+  (a caller whose moves run beside its next calls, docs/v1-glm.md §13 step 7): with them RAM's coldest is never an
+  expert holding a unit the previous call demoted into — `stamp[c, u]` is the clock + 1 of the call that last demoted
+  into it, a unit pending while clock + 1 − stamp ≤ 1 (uint32) — since that copy may still run; each demotion stamps
+  its units clock + 1, and the call ends with clock += 1. Deterministic. Facts: experts, top_k, roles.
 
 The CPU's share of the misses (F5b, docs/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
 CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
