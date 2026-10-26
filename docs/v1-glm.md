@@ -991,6 +991,21 @@ figures:
   arms. **Holon's mode (ii) runs take the same 64 GiB job step and hygiene, and every cell's evidence records the
   step's `memory.peak` for both engines** (reset per engine), so the cap's fairness shows.
 
+**Measured at step 6: what the model above leaves out of Maya's mode (ii) token** (its `glm stat` lines in step 6's
+bench; its source, `glm_fast_path.cu`). The frozen text stands; these correct the modelled cells:
+- **A CPU lane:** Maya computes 12–44 RAM-resident experts a token on the CPU instead of fetching them over PCIe
+  (≈ 4–15 ms a token of CPU work beside the GPU's), which §7.4's Maya token (dense + misses × PCIe) did not count.
+  Holon stays GPU-only by default (Q7); a CPU lane is the owner's option if the mode (ii) cells stay below their bars.
+- **A decode look-ahead:** the next layers' routers run on each layer's FFN input and their predicted disk-only experts
+  are read into RAM ahead (`fast_ahead_route`, two reader threads); the design dropped a decode read-ahead (D8f).
+- **RAM's victim:** the least-used by aged counts among the held experts no route used in the last ≈ 64 tokens, else
+  the least recent (`ram_victim`); Holon's exclusive RAM tier ranked by the policy's heat (F10: the least recent), with
+  `moe.ram_heat` (step 6) a long decayed count without the protect window.
+- **Holon's own token, measured** (5090, a 1K context, at rest): ≈ 5.9 SSD reads a token at the drive's 2.9 ms an
+  expert (≈ 17 ms; the I/O worker's counters), 42 I/O round trips a token of which 37 read nothing (fixed in step 7:
+  a call with no SSD read skips its round trip), RAM gathers ≈ 7.4 ms, demotion and admission copies ≈ 6.3 ms on the
+  critical path, compute ≈ 15 ms; Maya ≈ 4.0–4.5 reads a token at ≈ 3.1 ms.
+
 **Measured replay after step 1: mode (ii) lending's decode cost per context** (C's `lend_decode.py` over Maya's bench
 decode trace, at GLM's fit: VRAM 3,185, RAM 7,550; SSD reads a token over the 256 decode tokens after each prompt;
 step 1's fix review C). The
