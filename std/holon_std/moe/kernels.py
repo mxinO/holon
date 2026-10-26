@@ -208,9 +208,11 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
 
 - `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task, urgent=False) ->
   slot` (at build; `urgent` a hint: a worker serves an urgent slot's request before requests it has not yet started, and
-  may ignore it), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
-  reaches the signal, the device's writes before it visible to the task; work after the wait runs once the task has
-  answered, its writes visible), and `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
+  may ignore it), `signal(slot, when=None)` and `wait(slot, when=None)` (graph ops on the current stream: the slot's
+  task runs once the stream reaches the signal, the device's writes before it visible to the task; work after the wait
+  runs once the task has answered, its writes visible; with `when`, an int32 [n] the device reads, the signal requests
+  only if one of its words is positive and the wait with the same `when` waits only then: optional, additive), and
+  `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
   wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers at
   once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph never
   waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now), with

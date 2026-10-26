@@ -1681,6 +1681,28 @@ def ondemand_round_unjoined() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def ssd_round_trip_skipped() -> Iterator[None]:
+    """GLM step 7: a layer call's SSD round trip skipped though it reads — the `when` its signal and wait take
+    (`cpu_task@1`) read as all zeros, so a call with misses neither requests nor waits and gathers stale landing rows.
+    Reports how often it fired."""
+    from holon_plugins.kernels.cpu_task import plugin as cpu_task
+
+    signal, wait, fired = cpu_task.CpuTask.signal, cpu_task.CpuTask.wait, collections.Counter()
+
+    def zero(when):
+        return None if when is None else torch.zeros_like(when)
+
+    def planted_signal(self, slot, when=None):
+        fired[_when()] += when is not None
+        signal(self, slot, zero(when))
+
+    with (mock.patch.object(cpu_task.CpuTask, "signal", planted_signal),
+          mock.patch.object(cpu_task.CpuTask, "wait", lambda self, slot, when=None: wait(self, slot, zero(when)))):
+        yield
+    print(f"plant ssd-round-trip-skipped fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def keep_copy_skipped() -> Iterator[None]:
     """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
     cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
@@ -2334,6 +2356,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "exclusive_lent_not_demoted": exclusive_lent_not_demoted, "promote_spare_unlogged": promote_spare_unlogged,
     "promote_victim_code": promote_victim_code, "landing_reuse_unfenced": landing_reuse_unfenced,
     "ondemand_round_unjoined": ondemand_round_unjoined, "keep_copy_skipped": keep_copy_skipped,
+    "ssd_round_trip_skipped": ssd_round_trip_skipped,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate

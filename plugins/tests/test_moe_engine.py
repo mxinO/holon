@@ -1195,6 +1195,26 @@ def test_rams_long_heat_is_its_oracles(gpu_moe):
                     plugin_options=opts | {"moe.tiers": "std.tiered.pinned@1", "moe.ram": ""})
 
 
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_call_with_ssd_reads_never_skips_its_round_trip(gpu_moe):
+    """GLM step 7: a layer call whose tables name no SSD read signals and waits for nothing (`cpu_task@1`'s `when`), so
+    a decode token's empty calls cost no round trip — and one that reads never skips: under exclusive tiers with RAM
+    holding a quarter of the experts the store serves the resident store's bits, and under `ssd_round_trip_skipped`
+    (every call's `when` read as zeros) it does not."""
+    from holon_judge.planted import ssd_round_trip_skipped
+
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ring_tokens": 512,
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    for plant in (False, True):
+        with ssd_round_trip_skipped() if plant else contextlib.nullcontext():
+            engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+            got = _served(engine, prompts)
+            engine.close()
+        assert (got == want) != plant
+
+
 def _slots_held(store) -> torch.Tensor:
     """Each layer's cache slots per role between steps: mapped, empty, a policy's spares' — conserved (none leaks)."""
     spare = store.state.get("spare")
