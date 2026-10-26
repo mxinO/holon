@@ -60,10 +60,14 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
-LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
+LOAN_MARGIN, LOAN_SLACK = 1.6, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
 # a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
-# step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12); lent in proportion
-# to the step's prompt tokens. A step past its loan takes the rest from the device (the loan's overflow)
+# step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12). Against the profile's
+# peak (since GLM step 6 what the allocator maps where that is more, ≈ 8-10% above the allocated peak at a full step)
+# a lent step needed at most 1.50x its share (FN's 5080 lock, 2K-4K steps; GLM's 5090 deployment 1.07-1.12x at 24K-32K,
+# `spikes/glm5/frag.py --loan-margin 1.0`); lent in proportion to the step's prompt tokens, its fixed costs (a prompt
+# logprob step's head chunk, the mixers' sub-batch temporaries) in `moe.loan_fixed_mib`. A step past its loan takes
+# the rest from the device (the loan's overflow)
 
 
 @dataclasses.dataclass(eq=False)
@@ -808,9 +812,11 @@ class TieredStore:
 
     def lend_activations(self, peak: int) -> int:
         """The core's ActivationLender, at the startup profile: a tail store (`lend_peak`) lends its tail steps — from
-        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`,
-        `LOAN_SLACK`) past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak`
-        is the worst step's, of `max_step_tokens`), where its device has `activation_loan@1`; 0 where it lends none."""
+        `ring_tokens` prompt tokens — their activations, `peak` bytes and the allocator's segments (`LOAN_MARGIN`)
+        past their passes' buffers at the tail's end, in proportion to the step's prompt tokens (`peak` is the worst
+        step's, of `max_step_tokens`), plus the fixed bytes (`moe.loan_fixed_mib`, at least `LOAN_SLACK`), the worst
+        step's included (FN's 5080 lock: its 4K-token steps with prompt logprobs need ≈ 1.85x their share, the head's
+        chunk past it), where its device has `activation_loan@1`; 0 where it lends none."""
         self._asked = True
         missing = [why for why, ok in (("moe.lend_peak is off", self.lend_peak),
                                        ("moe.ring_lend is not tail", self.ring_lend == "tail"),
@@ -820,7 +826,7 @@ class TieredStore:
                                         self.ctx.candidates(ACTIVATION_LOAN, {}))) if not ok]
         if missing:
             return self._no_loan(", ".join(missing))
-        loan = -(-(int(peak * LOAN_MARGIN) + LOAN_SLACK) // self._align) * self._align
+        loan = -(-(int(peak * LOAN_MARGIN) + self._loan_fixed) // self._align) * self._align
         self._loan_bytes = loan
         try:
             tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
@@ -1128,7 +1134,8 @@ class TieredStore:
         if not self.tail:
             return 0
         cls, n = self.tail
-        nbytes = n * list(self.classes.values())[cls].unit_bytes - (0 if loan else self._loan_bytes)
+        nbytes = n * list(self.classes.values())[cls].unit_bytes if loan else \
+            max((f() for f in self.tail_bytes), default=0)      # (not the tail's slots less the loan: their rounding)
         return -(-nbytes // self._align) * self._align
 
     def _step_loan_bytes(self, at: int) -> int:

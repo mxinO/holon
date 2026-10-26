@@ -1066,16 +1066,18 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
 def test_a_lent_steps_loan_holds_its_fixed_bytes(gpu_moe):
     """`moe.loan_fixed_mib` (GLM step 5): a lent step's loan is its share of the worst step's by its prompt tokens plus
     the fixed bytes (a step's fixed costs do not shrink with its tokens: mid-size steps once overflowed their loans
-    into the device's own memory and ran out of it), at most the worst step's loan. The resident store's bits."""
+    into the device's own memory and ran out of it), at most the worst step's loan — which holds them too (step 6: FN's
+    4K-token steps with prompt logprobs overflowed a worst-step loan without them). The resident store's bits."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on",
-            "moe.loan_fixed_mib": 64}
+            "moe.loan_fixed_mib": 32}
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
     store = engine.ctx.shared_objects[KEY]
     loans, use = [], store._loan.use
     store._loan.use = lambda r: (loans.append((store.step_tokens, r.numel())), use(r))[1]
     assert _served(engine, prompts) == want
-    assert loans and all(n >= min(store._loan_per_token * t + (64 << 20), store._loan_bytes) - 1024 for t, n in loans)
+    assert loans and all(n >= min(store._loan_per_token * t + (32 << 20), store._loan_bytes) - 1024 for t, n in loans)
+    assert store._loan_bytes >= store._loan_per_token * engine.cfg.max_step_tokens + (32 << 20)
     engine.close()
 
 
