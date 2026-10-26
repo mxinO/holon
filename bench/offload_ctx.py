@@ -425,10 +425,13 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
         seen.update(hits=0, routed=0)
         rows0, tokens0, by0 = passes()
         b0 = b1 = read()
+        least, retries = torch.cuda.mem_get_info()[0], torch.cuda.memory_stats()["num_alloc_retries"]
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
         while not done:
-            for d in engine.step():
+            steps = engine.step()
+            least = min(least, torch.cuda.mem_get_info()[0])    # the device's free memory after each step's launch
+            for d in steps:
                 if d.rid == rid:
                     if not stamps:
                         b1 = read()          # the prompt's reads (the decode's from here)
@@ -445,6 +448,8 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                 res[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
         if seen["routed"]:
             res["hit_rate_all"] = seen["hits"] / seen["routed"]
+        res |= {"least_free_mib": least >> 20,
+                "alloc_retries": torch.cuda.memory_stats()["num_alloc_retries"] - retries}
         if io is not None:                   # SSD bytes: the prompt's, and a decode token's after it
             b2 = read()
             res |= {"ssd_prompt_bytes": b1 - b0, "ssd_decode_bytes_per_token": (b2 - b1) / max(n - 1, 1)}
