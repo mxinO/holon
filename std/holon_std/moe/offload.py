@@ -60,7 +60,8 @@ def _store(ctx, experts: int, top_k: int):
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
                         ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0)),
-                        loan_fixed=int(opts.get("moe.loan_fixed_mib", 0)) << 20))
+                        loan_fixed=int(opts.get("moe.loan_fixed_mib", 0)) << 20,
+                        ram_heat=float(opts.get("moe.ram_heat", 0.0))))
 
 
 def _rows(ctx) -> int:

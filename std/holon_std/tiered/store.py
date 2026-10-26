@@ -128,7 +128,7 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0) -> None:
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -138,6 +138,13 @@ class TieredStore:
         self._loan_fixed = max(loan_fixed, LOAN_SLACK)
         self.loan_overflows, self.loan_overflow_most = 0, 0        # lent steps that overflowed; the most bytes
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
+        # `ram_heat` (`moe.ram_heat`, docs/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
+        # for parking, keeps and demotions — by a long-memory heat of its own, decaying by this factor a decode token
+        # (each routed expert of a token +1; seeded from the profile), not the policy's ≈ 12-token one: the decode after
+        # a lending prompt then reads fewer long-term-warm experts back from the SSD (0: the policy's heat)
+        if not 0.0 <= ram_heat < 1.0:
+            raise ValueError(f"{name}: ram_heat {ram_heat}: a decay factor a token in [0, 1)")
+        self._ram_decay, self.ram_heat = ram_heat, None
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
@@ -327,6 +334,8 @@ class TieredStore:
             self.layer_classes = [[self.groups[g][r] for r in range(self.roles)] for g in self.layers]
             if self.exclusive:
                 self._exclusive_tables(shape)
+            elif self._ram_decay:
+                raise ValueError(f"{self.name}: moe.ram_heat ranks an exclusive RAM tier: set moe.tiers to one")
             self.prefetch = {}
             for c in self.classes.values():
                 facts = {"unit_bytes": c.unit_bytes}
@@ -380,6 +389,10 @@ class TieredStore:
         self.n_hit = static(f"{self.name}.n_hit", (self.roles,))
         self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
+        if self._ram_decay:                      # RAM's own long-memory heat (`moe.ram_heat`), what RAM ranks by
+            self.ram_heat = self.ctx.static(f"{self.name}.ram_heat", shape[:2], torch.float32)
+            self._ram_decay_t = self.ctx.static(f"{self.name}.ram_decay", (1,), torch.float32)
+            self.heat = self.ram_heat
         self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
 
     @property
@@ -577,6 +590,10 @@ class TieredStore:
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
+        if self.ram_heat is not None:            # the profile's counts, scaled as tokens' (≈ half a token a piece)
+            prof = torch.as_tensor(self._profile_counts(), dtype=torch.float64)
+            self.ram_heat.copy_(prof / max(float(prof.sum()), 1.0) * prof.numel() * 0.5)
+            self._ram_decay_t.fill_(self._ram_decay)
         flag = getattr(self.policy, "exclusive_flag", None)  # a policy's own flag: its resolve logs what exclusive
         if self.exclusive and flag:                          # tiers must place (F10's refills: docs/v1-glm.md D8a)
             self.state[flag].fill_(1)
@@ -1100,6 +1117,9 @@ class TieredStore:
             self._started = False
             return
         self._started = early
+        if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go
+            tokens = self.counts[0].sum() / self.top_k
+            self.ram_heat.mul_(torch.pow(self._ram_decay_t, tokens)).add_(self.counts)
         for t in self.zeroed:
             t.zero_()
         self.residency.apply(self.edit_errors)
