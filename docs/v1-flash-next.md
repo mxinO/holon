@@ -220,7 +220,8 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
    - **As built (the close, panel B):** a fourth seam, `ActivationLender` (the step-peak loan, approved by the lead in
      §21.6), and **+49 code lines**, not +47: 19ac3213's two lines (freeing each prompt-logprob piece before the next)
      were never counted, so §22.2's "+46" was +48 and §23.6's "+47" +49. No FN core line serves a dropped feature.
-     The lead reports the overshoot to the owner for sign-off (§22.9).
+     The lead reports the overshoot to the owner for sign-off (§22.9). **Approved: +49 lines with `ActivationLender`
+     as a fourth seam, owner, 2026-10-26.**
 
 **Non-goals:**
 - the vision tower;
@@ -3740,7 +3741,8 @@ The pair runs at the reference's step: the deployment's, `--prefill-step`. It ha
 ### 22.10 The final tree (8818cdca): locks, propagation, gates, D11
 
 Evidence: `evidence/fn_close_final_2026-10-24.json`. The runtime is 8818cdca; gate (c)'s script is 00ebb81d (the same
-runtime: spikes and docs only).
+runtime: spikes and docs only). FN's core, +49 code lines with `ActivationLender` a fourth seam (§1 item 8): approved
+by the owner, 2026-10-26.
 
 **The second runtime round** (panels B and C, re-review):
 - `kernels.fla` packs consecutive short rows into calls of at most `SUB_TOKENS` tokens, and splits only longer rows
