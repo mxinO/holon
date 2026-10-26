@@ -1,51 +1,51 @@
-"""GLM step 7, mode (ii) (a): after_record.py's recording of the bench's workload, replayed for the after-prompt levers.
-Per prompt size: the experts the prompt displaced (VRAM or RAM before it, SSD after), the decode's SSD reads a token
-over tokens 1-32 and 33-256 and the share of them displaced ones
-a background refill of the K hottest displaced
-experts (RAM's heat at the prompt's end) before the decode: the reads it would save (an expert's first decode read
-only) against the reads it costs (K), and where the saved ones fall (tokens 1-32 or later).
-    python after_replay.py <after_bench.npz>"""
+"""GLM step 7, mode (ii) (a): `after_record.py`'s recording replayed piece by piece (a role's tier: VRAM, RAM, SSD
+only). Per prompt size (means over its requests):
+- the prompt: its routed pieces that were SSD-only before it (the least it must read) against the bytes it read, and
+  the excess; the pieces it displaced (VRAM or RAM before, SSD only after), from VRAM and from RAM;
+- the decode: the SSD bytes a token the map predicts (routed pieces SSD-only at the step's start) against the bytes
+  read (the check of the replay), over tokens 1-32 and 33-256, and the share of them re-reading pieces the prompt
+  displaced.
+    python spikes/glm7/after_replay.py <after.npz>"""
 import collections
 import sys
 
 import numpy as np
 
 z = np.load(sys.argv[1])
-keys = sorted({k.rsplit(".", 1)[0] for k in z.files}, key=lambda k: (int(k.split("_")[0]), int(k.split("_")[1])))
+mib = z["piece_mib"]                                                    # [G, R]
+keys = sorted({k.rsplit(".", 1)[0] for k in z.files if "." in k}, key=lambda k: tuple(map(int, k.split("_"))))
 agg = collections.defaultdict(lambda: collections.defaultdict(list))
 for k in keys:
-    size = int(k.split("_")[0])
-    before, maps, bts = z[f"{k}.before"], z[f"{k}.maps"], z[f"{k}.bytes"]
-    meta = z[f"{k}.meta"]
-    n_prompt, parked, n_steps, wall, E = int(meta[0]), int(meta[1]), int(meta[2]), float(meta[3]), int(meta[4])
-    routed = np.unpackbits(z[f"{k}.routed"], axis=-1)[..., :E].astype(bool)
+    before, maps, read = z[f"{k}.before"], z[f"{k}.maps"], z[f"{k}.bytes"] / 2**20
+    n_prompt, parked, n_steps, _, experts = z[f"{k}.meta"]
+    n_prompt, n_steps = int(n_prompt), int(n_steps)
+    routed = np.unpackbits(z[f"{k}.routed"], axis=-1)[..., :int(experts)].astype(bool)     # [S, G, E]
+    size = mib[:, None, :]                                              # [G, 1, R]
+    a = agg[int(k.split("_")[0])]
+    prompt = routed[:n_prompt].any(0)[..., None]
+    least = ((prompt & (before == 2)) * size).sum() / 1024
+    a["prompt GiB read"].append(read[n_prompt - 1] / 1024)
+    a["prompt GiB least (routed SSD-only before)"].append(least)
+    a["prompt GiB excess"].append(read[n_prompt - 1] / 1024 - least)
     after = maps[n_prompt - 1]
-    disp = (before < 2) & (after == 2)
-    reads = [(routed[t] & (maps[t - 1] == 2)) for t in range(n_prompt, n_steps)]      # decode step t's SSD reads
-    early, late = reads[:32], reads[32:]
-    a = agg[size]
-    a["displaced"].append(disp.sum())
-    a["displaced_vram"].append((disp & (before == 0)).sum())
-    a["parked"].append(parked)
-    a["prompt_routed_ssd_before"].append((routed[:n_prompt].any(0) & (before == 2)).sum())
-    a["prompt_gib"].append(bts[n_prompt - 1] / 2**30)
-    a["reads_1_32"].append(sum(r.sum() for r in early) / 32)
-    a["reads_33_256"].append(sum(r.sum() for r in late) / max(len(late), 1))
-    a["disp_share_1_32"].append(sum((r & disp).sum() for r in early) / max(sum(r.sum() for r in early), 1))
-    a["disp_share_33_256"].append(sum((r & disp).sum() for r in late) / max(sum(r.sum() for r in late), 1))
-    first = np.full(disp.shape, -1)                         # each displaced expert's first decode read (token)
-    for t, r in enumerate(reads):
-        m = r & disp & (first < 0)
-        first[m] = t
-    heat = z[f"{k}.heat_end"] if f"{k}.heat_end" in z.files else np.zeros(disp.shape)
-    order = np.argsort(-np.where(disp, heat, -np.inf), axis=None, kind="stable")
-    for K in (250, 500, 1000, 2000):
-        take = np.zeros(disp.size, bool)
-        take[order[:min(K, int(disp.sum()))]] = True
-        f = first.ravel()[take]
-        a[f"refill{K}_saved"].append((f >= 0).sum())
-        a[f"refill{K}_saved_1_32"].append(((f >= 0) & (f < 32)).sum())
+    displaced = (before < 2) & (after == 2)
+    a["displaced pieces"].append(displaced.sum())
+    a["  from VRAM"].append((displaced & (before == 0)).sum())
+    a["  from RAM"].append((displaced & (before == 1)).sum())
+    a["displaced GiB"].append((displaced * size).sum() / 1024)
+    a["parked experts"].append(int(parked))
+    pred, mine = [], []
+    for t in range(n_prompt, n_steps):                                  # decode step t reads its SSD-only routes
+        miss = routed[t][..., None] & (maps[t - 1] == 2)
+        pred.append((miss * size).sum())
+        mine.append(((miss & displaced) * size).sum())
+    pred, mine = np.array(pred), np.array(mine)
+    got = np.diff(read[n_prompt - 1:])
+    for name, sl in (("1-32", slice(0, 32)), ("33-256", slice(32, None))):
+        a[f"decode MB/token read, {name}"].append(got[sl].mean())
+        a[f"decode MB/token predicted, {name}"].append(pred[sl].mean())
+        a[f"decode share re-reading displaced, {name}"].append(mine[sl].sum() / max(pred[sl].sum(), 1e-9))
 for size, a in sorted(agg.items()):
-    print(f"== {size}-token prompts ({len(a['displaced'])})")
+    print(f"== {size}-token prompts ({len(a['prompt GiB read'])})")
     for m, v in a.items():
-        print(f"  {m:28s} {np.mean(v):9.2f}  (min {np.min(v):.2f}, max {np.max(v):.2f})")
+        print(f"  {m:46s} {np.mean(v):9.3f}  ({np.min(v):.3f} – {np.max(v):.3f})")
