@@ -30,6 +30,8 @@ class PlacementPolicy(Protocol):
     exclusive_flag: str | None    # (optional) a device state [1] int32 the store sets to 1 under exclusive tiers: its
     #                               resolve then logs what they must place (F10's refills: docs/v1-glm.md D8a)
     frozen: bool                  # (optional) a host policy that never swaps after the seed
+    reserved: int                 # (optional) cache slots a group holds in each of its roles' classes outside what a
+    #                               step can lend (F10's spares): the store's layout lends only the rest
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         """Device buffers its resolve contract keeps across steps, per group: name -> (shape, dtype). The store holds

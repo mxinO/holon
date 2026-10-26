@@ -1220,6 +1220,29 @@ def test_a_spare_policys_moves_run_beside_and_fence_the_staging_slots(gpu_moe):
         assert (got == want) != plant
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("cache", ["*=0.5", "*=0.75"])
+def test_a_layout_lends_only_past_the_policys_reserved_slots(gpu_moe, cache):
+    """F10 under exclusive tiers: its spares (`reserved` a layer in each role's class) are cache slots no step lends.
+    A cache whose seeded experts less the spares cannot lend a prefill pass's staging stages it in slots of its own
+    (it stopped at the first prompt step with the store's SHORT error when the layout counted the spares as lendable);
+    one that can still lends. Either way the resident store's bits."""
+    file, prompts, _ = gpu_moe
+    resident = _gpu_engine(file, max_seqs=1)               # (one sequence a step: a pass of 8 misses, staging of 2)
+    want = _served(resident, prompts)
+    resident.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.ram": "*=0.25",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts, max_seqs=1)
+    store = engine.ctx.shared_objects[KEY]
+    assert _served(engine, prompts) == want
+    held = store._held_out()
+    assert all(n == 3 * len(store.layers) for n in held.values())          # 3 spares a layer, one class a role
+    lendable = min(c.size - c.null - c.staging - held[n] for n, c in store.classes.items())
+    assert store.lending == (lendable >= store.prefill) == (cache == "*=0.75")
+    engine.close()
+
+
 def _held_once(store) -> None:
     """Exclusive tiers: every expert in one tier — a RAM unit's piece exactly where the map says (tier code −1), never
     beside a VRAM copy; each RAM unit owned once, by the piece whose host unit it is (no copy a promotion that raced a

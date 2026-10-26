@@ -527,6 +527,8 @@ class TieredStore:
         floors = dict(pinned)
         # the classes a borrowing step lends from: the target's (an auxiliary model's layers never borrow)
         lenders = {c.name for g in list(self._order)[:self.borrowing_groups] for c in self.groups[g].values()}
+        held = self._held_out()                 # the policy's reserved slots (F10's spares): a step below the ring's
+        #                                         tokens lends past them (a tail step releases its layers' spares)
         for staging in sorted({self.staging, self.prefill}):
             for c in classes:
                 c.staging = staging
@@ -535,16 +537,18 @@ class TieredStore:
                 budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes),
                                  floors)
                 seed = self.policy.seed(self._profile_counts(), budget)
-                short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
-                         and c.name not in floors and c.cap >= self.prefill and c.name in lenders}
+                short = {c.name: self.prefill + held[c.name] for c in classes if budget.taken[c.name] - held[c.name]
+                         < self.prefill and c.name not in floors and c.cap - held[c.name] >= self.prefill
+                         and c.name in lenders}
                 if not (can_lend and staging < self.prefill and short):
                     break
                 floors |= short
-            self.lending = can_lend and all(n >= self.prefill for c, n in budget.taken.items() if c in lenders)
+            self.lending = can_lend and all(n - held[c] >= self.prefill for c, n in budget.taken.items()
+                                            if c in lenders)
             if self.lending and self.tail:          # the tail's class must still stage a pass outside the tail: a
                 cls, n = self.tail                  # small pool (the startup profile's minimum) stages instead
                 c = classes[cls]
-                self.lending = budget.taken[c.name] - n >= self.prefill
+                self.lending = budget.taken[c.name] - n >= self.prefill      # (a tail step releases the spares)
             if self.lending or staging == self.prefill:
                 break
             floors = dict(pinned)
@@ -1196,6 +1200,16 @@ class TieredStore:
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
                              f"prefill pass's {self.prefill} misses")
         return cls, n
+
+    def _held_out(self) -> dict[str, int]:
+        """Per class, the cache slots the placement policy reserves outside what a step can lend (`reserved` a group in
+        each of its roles' classes: F10's spares)."""
+        reserved = int(getattr(self.policy, "reserved", 0))
+        held = dict.fromkeys(self.classes, 0)
+        for g in self._order:
+            for c in self.groups[g].values():
+                held[c.name] += reserved
+        return held
 
     def _check_pinned(self) -> None:
         """D4: placement never follows free memory. A pinned arena that did not get its pinned size (it grows above
