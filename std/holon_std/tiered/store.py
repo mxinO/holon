@@ -60,6 +60,7 @@ LAND = 2                                     # d: launches between a swap's unma
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
+PROTECTED = float(1 << 23)                   # `ram_protect`: a recently routed expert's rank, above any heat (exact)
 LOAN_MARGIN, LOAN_SLACK = 1.6, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
 # a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
 # step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12). Against the profile's
@@ -128,7 +129,8 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0) -> None:
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0,
+                 ram_protect: int = 0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -145,6 +147,11 @@ class TieredStore:
         if not 0.0 <= ram_heat < 1.0:
             raise ValueError(f"{name}: ram_heat {ram_heat}: a decay factor a token in [0, 1)")
         self._ram_decay, self.ram_heat = ram_heat, None
+        # `ram_protect` (`moe.ram_protect`, step 7: Maya's `ram_victim`): with `ram_heat`, RAM's victim is the least
+        # heat among the experts no token routed in the last this many tokens, else the least recently routed (0: none)
+        if ram_protect < 0 or (ram_protect and not ram_heat):
+            raise ValueError(f"{name}: ram_protect {ram_protect}: a token count, with ram_heat")
+        self._ram_protect = ram_protect
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
@@ -401,6 +408,10 @@ class TieredStore:
             self.ram_heat = self.ctx.static(f"{self.name}.ram_heat", shape[:2], torch.float32)
             self._ram_decay_t = self.ctx.static(f"{self.name}.ram_decay", (1,), torch.float32)
             self.heat = self.ram_heat
+            if self._ram_protect:                # the rank RAM orders by: the heat, or for the recently routed
+                self.ram_rank = self.ctx.static(f"{self.name}.ram_rank", shape[:2], torch.float32)  # above it
+                self.ram_age = self.ctx.static(f"{self.name}.ram_age", shape[:2], torch.float32)    # (≤ protect)
+                self.heat = self.ram_rank
         self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
 
     @property
@@ -602,6 +613,9 @@ class TieredStore:
             prof = torch.as_tensor(self._profile_counts(), dtype=torch.float64)
             self.ram_heat.copy_(prof / max(float(prof.sum()), 1.0) * prof.numel() * 0.5)
             self._ram_decay_t.fill_(self._ram_decay)
+            if self._ram_protect:
+                self.ram_rank.copy_(self.ram_heat)
+                self.ram_age.fill_(self._ram_protect)
         flag = getattr(self.policy, "exclusive_flag", None)  # a policy's own flag: its resolve logs what exclusive
         if self.exclusive and flag:                          # tiers must place (F10's refills: docs/v1-glm.md D8a)
             self.state[flag].fill_(1)
@@ -1136,6 +1150,11 @@ class TieredStore:
         if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go
             tokens = self.counts[0].sum() / self.top_k
             self.ram_heat.mul_(torch.pow(self._ram_decay_t, tokens)).add_(self.counts)
+            if self._ram_protect:                # tokens since each was routed (capped); the recent: above every
+                age = torch.where(self.counts > 0, 0.0, (self.ram_age + tokens).clamp_(max=self._ram_protect))
+                self.ram_age.copy_(age)          # other, the least recently routed lowest
+                torch.where(age < self._ram_protect, PROTECTED + self._ram_protect - age, self.ram_heat,
+                            out=self.ram_rank)
         for t in self.zeroed:
             t.zero_()
         self.residency.apply(self.edit_errors)
