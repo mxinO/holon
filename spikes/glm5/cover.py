@@ -48,7 +48,8 @@ BOUNDS = {"dsa.worst_gap": EPS, "dsa.pooled_err": 1.2e-6, "dsa.attend_prompt_rel
 DETECTORS = {"dsa_decode_select_shift": "dsa.worst_gap", "kda_state_not_carried": "kda.out_err_at_step_starts",
              "kda_gate_softplus": "kda.out_err_decode", "mhc_comb_transposed": "mhc.r_rel_err",
              "mhc_sinkhorn_short": "mhc.comb_abs_err", "dsa_pool_ape_off": "dsa.pooled_err",
-             "router_bias_in_weights": "router.weight_rel_err"}
+             "router_bias_in_weights": "router.weight_rel_err", "dsa_attend_chunk_unscaled": "dsa.attend_prompt_rel_l2",
+             "dsa_attend_chunk_dropped": "dsa.attend_prompt_rel_l2"}
 
 
 def _pick(n: int, k: int) -> torch.Tensor:

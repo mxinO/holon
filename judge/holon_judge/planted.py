@@ -422,9 +422,53 @@ def glu_clamp_off() -> Iterator[None]:
     print(f"plant glu-clamp-off fired: {dict(fired)}", file=sys.stderr)
 
 
+def _mla_variant(name: str, old: str, new: str) -> Iterator[None]:
+    """kernels.qsa_triton's `mla_attend` from its own source with `old` replaced by `new` (once), in a module of its
+    own (Triton reads a kernel's source from its file), the plugin's calls routed to it. Reports how often it fired."""
+    import importlib.util
+    import inspect
+    import tempfile
+
+    from holon_plugins.kernels.qsa_triton import mla
+
+    src = inspect.getsource(mla)
+    assert src.count(old) == 1, f"plant {name}: the kernel changed"
+    fired = collections.Counter()
+    with tempfile.TemporaryDirectory() as d:
+        path = f"{d}/holon_plant_{name.replace('-', '_')}.py"
+        with open(path, "w") as f:
+            f.write(src.replace(old, new))
+        spec = importlib.util.spec_from_file_location(f"holon_plant_{name.replace('-', '_')}", path)
+        variant = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(variant)
+
+        def planted(*a, **kw):
+            fired[_when()] += 1
+            return variant.mla_attend(*a, **kw)
+        with mock.patch.object(mla, "mla_attend", planted):
+            yield
+    print(f"plant {name} fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def dsa_attend_chunk_unscaled() -> Iterator[None]:
+    """GLM's DSA attend (step 7's chunks): a chunk combined without its own rescale (its weights taken at its own
+    maximum, not the joint one) — the merge's softmax wrong wherever a row's chunks peak apart."""
+    yield from _mla_variant("dsa-attend-chunk-unscaled", "    b = tl.exp(m_c - m_new)\n", "    b = tl.exp(m_c - m_c)\n")
+
+
+@contextlib.contextmanager
+def dsa_attend_chunk_dropped() -> Iterator[None]:
+    """GLM's DSA attend (step 7's chunks): every chunk after a row's first dropped at the combine (the state so far
+    kept as it is) — the tokens past the first CHUNK selected never read."""
+    yield from _mla_variant("dsa-attend-chunk-dropped", "    b = tl.exp(m_c - m_new)\n",
+                            "    b = tl.exp(m_c - m_new) * 0.0\n")
+
+
 GLM_PLANTS = {"mhc_comb_transposed": mhc_comb_transposed, "mhc_sinkhorn_short": mhc_sinkhorn_short,
               "dsa_pool_ape_off": dsa_pool_ape_off, "router_bias_in_weights": router_bias_in_weights,
-              "kda_state_not_carried": kda_state_not_carried}
+              "kda_state_not_carried": kda_state_not_carried, "dsa_attend_chunk_unscaled": dsa_attend_chunk_unscaled,
+              "dsa_attend_chunk_dropped": dsa_attend_chunk_dropped}
 # (a′)'s plants (the GPU tiny run, L0): kernel paths the CPU providers do not take
 GLM_GPU_PLANTS = {"dsa_decode_select_shift": dsa_decode_select_shift, "kda_gate_softplus": kda_gate_softplus,
                   "router_prompt_softmax": router_prompt_softmax, "glu_clamp_off": glu_clamp_off}
