@@ -1681,6 +1681,46 @@ def ondemand_round_unjoined() -> Iterator[None]:
 
 
 @contextlib.contextmanager
+def moves_unfenced() -> Iterator[None]:
+    """GLM step 7: under a policy with spares, a call's moves run on the store's moves stream; here nothing waits for
+    them within a step — the next calls' fences (`admitted`, `moved`) are events never recorded — and they start late
+    (a sleep on that stream), so a demotion reads its victim's slot after a later call of the step promoted into it
+    (a prompt step's passes: the slot a spare again). Reports how often it fired."""
+    from holon_std.tiered import store as tiered
+
+    moves_stream, fired = tiered.TieredStore.moves_stream, collections.Counter()
+
+    class Late:                                  # the moves stream, its work after a sleep
+        def __init__(self, stream):
+            self.stream = stream
+
+        def wait_stream(self, other):
+            self.stream.wait_stream(other)
+            with self.stream:
+                torch.cuda._sleep(2_000_000)
+
+        def __enter__(self):
+            return self.stream.__enter__()
+
+        def __exit__(self, *exc):
+            return self.stream.__exit__(*exc)
+
+    def planted(self):
+        self.admitted, self.moved = torch.cuda.Event(), [torch.cuda.Event(), torch.cuda.Event()]   # (unrecorded)
+        fired[_when()] += 1
+        return Late(moves_stream(self))
+    layer_done = tiered.TieredStore.layer_done
+
+    def joined(self, g):                         # (a graph's capture needs its fork joined: the step's join stays)
+        with mock.patch.object(tiered.TieredStore, "moves_stream", moves_stream):
+            layer_done(self, g)
+    with mock.patch.object(tiered.TieredStore, "moves_stream", planted), \
+            mock.patch.object(tiered.TieredStore, "layer_done", joined):
+        yield
+    print(f"plant moves-unfenced fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def keep_copy_skipped() -> Iterator[None]:
     """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
     cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
@@ -2334,6 +2374,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "exclusive_lent_not_demoted": exclusive_lent_not_demoted, "promote_spare_unlogged": promote_spare_unlogged,
     "promote_victim_code": promote_victim_code, "landing_reuse_unfenced": landing_reuse_unfenced,
     "ondemand_round_unjoined": ondemand_round_unjoined, "keep_copy_skipped": keep_copy_skipped,
+    "moves_unfenced": moves_unfenced,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate

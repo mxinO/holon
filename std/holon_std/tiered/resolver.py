@@ -125,10 +125,15 @@ class DeviceResolver:
         call could need — no host sync; a round past the misses is empty; a graphed step's fit one), then the demotions
         and the admitted moves (after the side stream's gather)."""
         store, g = self.store, self.group
+        moves, n_moves = store.moves[g % 2], store.n_moves[g % 2]
+        if store.moves_async:                    # the last call's admissions read the staging slots this one fills;
+            main = torch.accelerator.current_stream(ids.device)          # the call before it, this table (`moves`)
+            main.wait_event(store.admitted)
+            main.wait_event(store.moved[g % 2])
         store.tier_op(ids, kinds, g, fetch, n, self.stage, store.delta[g], store.call_start,
                       store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
-                      store.classes32, store.owner, store.capacity, store.heat, store.io_rows, store.moves,
-                      store.n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
+                      store.classes32, store.owner, store.capacity, store.heat, store.io_rows, moves,
+                      n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
                       store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit)
         # rounds of A landing rows for the most SSD misses a call can have: its distinct routed experts
         rounds = -(-min(store.items, store.top_k * len(ids)) // store.landing_rows)
@@ -156,9 +161,22 @@ class DeviceResolver:
                 self._gather(store.ssd, store.n_ssd, landed=True, part=r)
             if side is not None:
                 main.wait_stream(side)
-            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
-                gather(store.moves[r, 0:2], store.n_moves[r, 0:1], c.slots(), c.units())      # demotions
-                gather(store.moves[r, 2:4], store.n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
+            moving = zip(self.classes, self._fetch, strict=True)
+            if not store.moves_async:
+                for r, (c, gather) in enumerate(moving):
+                    gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units())      # demotions
+                    gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots())      # admitted, staged
+                return
+            moving = list(moving)                # on the moves stream: admitted first (spares: never a demoted slot)
+            stream = store.moves_stream()
+            stream.wait_stream(torch.accelerator.current_stream(ids.device))
+            with stream:
+                for r, (c, gather) in enumerate(moving):
+                    gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots())
+                store.admitted.record()                  # (the current stream: this one)
+                for r, (c, gather) in enumerate(moving):
+                    gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units())
+                store.moved[g % 2].record()
         return finish
 
     def _pipelined(self, ids: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, parts: int):

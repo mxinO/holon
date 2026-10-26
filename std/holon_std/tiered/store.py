@@ -364,8 +364,16 @@ class TieredStore:
         self.owner = static(f"{self.name}.owner", (len(classes), max(c.held for c in classes)))
         self.capacity = static(f"{self.name}.capacity", (len(classes),))
         self.call_start = static(f"{self.name}.call_start", (1,))
-        self.moves = static(f"{self.name}.moves", (self.roles, 4, self.prefill))
-        self.n_moves = static(f"{self.name}.n_moves", (self.roles, 2))
+        # A call's moves (its demotions, then its admitted staged pieces): two tables, a call's by its group's parity.
+        # Under a policy with spares (F10: `exclusive_flag`) an admitted piece never lands in a slot its call demotes,
+        # so its moves run on a stream of their own (step 7: ≈ 10.8 ms a decode token of the 5090's on the main
+        # stream): its admissions first — the next call writes the staging slots they read only after them
+        # (`admitted`) —, then its demotions (SM copies: the lists are the device's); the next call but one rewrites
+        # its table only after them (`moved`); the step's last call joins the stream back.
+        self.moves = [static(f"{self.name}.moves.{i}", (self.roles, 4, self.prefill)) for i in range(2)]
+        self.n_moves = [static(f"{self.name}.n_moves.{i}", (self.roles, 2)) for i in range(2)]
+        self.moves_async = getattr(self.policy, "exclusive_flag", None) is not None
+        self.admitted, self.moved = torch.cuda.Event(), [torch.cuda.Event(), torch.cuda.Event()]
         facts = {"experts": self.items, "top_k": self.top_k, "roles": self.roles}
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
@@ -925,6 +933,12 @@ class TieredStore:
             self._fetch_streams[split] = torch.Stream(device=self.ctx.device, priority=-1 if split else 0)
         return self._fetch_streams[split]
 
+    def moves_stream(self) -> torch.Stream:
+        """The stream a call's moves run on under a policy with spares (`moves_async`), one per store."""
+        if "moves" not in self._fetch_streams:
+            self._fetch_streams["moves"] = torch.Stream(device=self.ctx.device)
+        return self._fetch_streams["moves"]
+
     def tail_view(self) -> torch.Tensor | None:
         """The step's lent tail (D11) as bytes — its class's last n slots, contiguous —, from the step's first resolve
         to its end; a staging layout's own tail (the pool's last bytes) in any step; else None."""
@@ -943,6 +957,8 @@ class TieredStore:
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
     def layer_done(self, g: int) -> None:
+        if self.exclusive and self.moves_async and g == len(self._order) - 1:      # the step's moves joined back
+            torch.accelerator.current_stream(self.ctx.device).wait_stream(self.moves_stream())
         if self._ahead and g + DEPTH < self.borrowing_groups:     # the layer two on: its set, now its readers ran
             self.read_ahead(g + DEPTH)
         if self.lent is not None:
