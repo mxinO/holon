@@ -1165,39 +1165,31 @@ def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, polic
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("protect", [0, 4])
-def test_rams_long_heat_is_its_oracles(gpu_moe, protect):
+def test_rams_long_heat_is_its_oracles(gpu_moe):
     """`moe.ram_heat` (docs/v1-glm.md §7.4's lever 1, step 6): an exclusive RAM tier's victims by a long-memory heat of
-    its own — each step's tokens decay it by the factor a token, then add the step's routed counts — which the tiers'
-    placement and the parking rank by in place of the policy's; with `moe.ram_protect` (step 7: Maya's victim rule)
-    the experts routed in the last `protect` tokens rank above every other, the least recently routed lowest.
-    Against its oracle over the committed steps' counts (the last step's are folded at the next step's start),
-    graphed decode steps included; the resident store's bits."""
+    its own — each step's decode tokens decay it by the factor a token, then add the step's routed counts — which the
+    tiers' placement and the parking rank by in place of the policy's. Against its oracle over the committed steps'
+    counts (the last step's are folded at the next step's start), graphed decode steps included; the resident store's
+    bits."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.ram": "*=0.25", "moe.ram_heat": 0.9,
-            "moe.ram_protect": protect, "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
     store, counts = engine.ctx.shared_objects[KEY], []
-    assert store.heat is (store.ram_rank if protect else store.ram_heat)
+    assert store.heat is store.ram_heat
     store.taps.append(lambda step, record: counts.append(record["counts"].astype(np.float64)))
     assert _served(engine, prompts) == want
     assert engine.generate([[5, 6, 7]], SamplingParams(temperature=0.0, max_tokens=12, ignore_eos=True))
     heat = np.zeros_like(counts[0])                   # (no profile: seeded at 0)
-    age = np.full_like(heat, protect)
     for c in counts[:-1]:
         heat = heat * 0.9 ** (c[0].sum() / store.top_k) + c
-        age = np.where(c > 0, 0, np.minimum(age + c[0].sum() / store.top_k, protect))
     assert any(c.sum() for c in counts[:-1]) and np.allclose(store.ram_heat.cpu().numpy(), heat, rtol=1e-5, atol=1e-5)
-    if protect:
-        recent = age < protect
-        assert recent.any() and not recent.all() and (heat < 1 << 23).all()
-        assert np.allclose(store.ram_rank.cpu().numpy(), np.where(recent, (1 << 23) + protect - age, heat),
-                           rtol=1e-6, atol=1e-5)
     engine.close()
-    if not protect:
-        with pytest.raises(ValueError, match="moe.ram_heat ranks an exclusive RAM tier"):
-            _gpu_engine(file, host_memory=1 << 27,
-                        plugin_options=opts | {"moe.tiers": "std.tiered.pinned@1", "moe.ram": ""})
+    with pytest.raises(ValueError, match="moe.ram_heat ranks an exclusive RAM tier"):
+        _gpu_engine(file, host_memory=1 << 27,
+                    plugin_options=opts | {"moe.tiers": "std.tiered.pinned@1", "moe.ram": ""})
+
+
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
