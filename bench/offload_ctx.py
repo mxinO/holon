@@ -20,8 +20,9 @@ Maya's engine (`--maya`, GLM-5.3-Flash) in its `--serve` mode, the same raw-id p
 2147483647`, an id no request produces; `DONE`'s `reused` must be 0); `holon` = Holon's `Engine` in process
 (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
-`holon serve`'s), an arm's `env` its environment, and its `python` the interpreter its worker runs in (e.g. a Holon
-arm on another checkout's venv, for an A/B against `main`). Arms are interleaved: every round runs each arm once, in
+`holon serve`'s), an arm's `env` its environment, its `python` the interpreter its worker runs in (e.g. a Holon
+arm on another checkout's venv, for an A/B against `main`), and its `wrap` a command prefix for the server (Holon's:
+the worker). Arms are interleaved: every round runs each arm once, in
 reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
@@ -413,16 +414,24 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             by[acc] += n
         return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows), by
 
+    io = getattr(getattr(getattr(store, "io", None), "service", None), "native", None)    # exclusive tiers' I/O
+
+    def read() -> int:                       # the SSD bytes the store's I/O worker read so far (0: no SSD tier)
+        return io.io_stats()["bytes"] if io is not None else 0
+
     def request(ids: list[int], n: int) -> dict:
         stamps, done, out = [], False, []
         torch.cuda.synchronize()
         seen.update(hits=0, routed=0)
         rows0, tokens0, by0 = passes()
+        b0 = b1 = read()
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
         while not done:
             for d in engine.step():
                 if d.rid == rid:
+                    if not stamps:
+                        b1 = read()          # the prompt's reads (the decode's from here)
                     stamps += [time.perf_counter()] * len(d.token_ids)
                     out += list(d.token_ids)
                     done = d.finish_reason is not None
@@ -436,6 +445,9 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                 res[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
         if seen["routed"]:
             res["hit_rate_all"] = seen["hits"] / seen["routed"]
+        if io is not None:                   # SSD bytes: the prompt's, and a decode token's after it
+            b2 = read()
+            res |= {"ssd_prompt_bytes": b1 - b0, "ssd_decode_bytes_per_token": (b2 - b1) / max(n - 1, 1)}
         return res | {"ids": out}
 
     warm, reqs = requests(a, corpus)
@@ -487,6 +499,8 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
     if arm["engine"] in ("llama", "strata", "maya"):
         cmd += ["--server", {"llama": a.server, "strata": a.strata, "maya": a.maya}[arm["engine"]],
                 "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
+    elif arm.get("wrap"):                    # an in-process engine: the worker itself under the wrap (e.g. hygiene)
+        cmd = shlex.split(arm["wrap"]) + cmd
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(a.gpu), CUDA_DEVICE_ORDER="PCI_BUS_ID", **arm.get("env", {}))
     stop, peak = threading.Event(), [0]
     sampler = threading.Thread(target=peak_vram, args=(a.gpu, stop, peak), daemon=True)
