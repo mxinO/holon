@@ -6,7 +6,8 @@ import time
 import torch
 
 dev = torch.device("cuda")
-torch.cuda._sleep(1000); torch.cuda.synchronize()
+torch.cuda._sleep(1000)
+torch.cuda.synchronize()
 def ctx(s):
     return torch.cuda.stream(s) if isinstance(s, torch.cuda.Stream) else s
 def check(name, make_a, make_b, fence):
@@ -15,12 +16,17 @@ def check(name, make_a, make_b, fence):
         torch.cuda._sleep(300_000_000)
     fence(a, b)
     with ctx(b):
-        e = torch.Event(device=dev); e.record()
+        e = torch.Event(device=dev)
+        e.record()
     time.sleep(0.05)
     print(f"{name:55s} {'IGNORED' if e.query() else 'ok'}")
     torch.cuda.synchronize()
-gen = lambda: torch.Stream(device=dev)
-cud = lambda: torch.cuda.Stream(dev)
+def gen():
+    return torch.Stream(device=dev)
+
+
+def cud():
+    return torch.cuda.Stream(dev)
 def ev(kind):
     def f(a, b):
         e = torch.cuda.Event() if kind == "cuda" else torch.Event(device=dev)
