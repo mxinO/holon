@@ -1294,24 +1294,24 @@ def test_a_stores_fence_orders_a_delayed_producer():
 
 
 def _bytes_exact(store) -> int:
-    """Exclusive tiers: the pieces whose RAM unit or VRAM slot does not hold the checkpoint's bytes of the piece the
-    map names there (an idle engine)."""
+    """Exclusive tiers: how many pieces' RAM units or VRAM slots do not hold the bytes the file has for the piece the
+    map names there (an idle engine; `_ram_units_hold_their_pieces` asserts the RAM half)."""
+    from holon_std.tiered import files
+    from holon_std.tiered.store import _offsets
+
     torch.cuda.synchronize()
-    tier, res, host, wrong = store.tiers[-1], store.residency.device.cpu(), store.host_units.cpu(), 0
-    fds: dict[int, int] = {}
-    for g, gid in enumerate(store.layers):
-        for e in range(store.items):
-            for r, c in store.groups[gid].items():
-                at = int(res[g, e, r])
-                if at < -1:
+    res, host, wrong = store.residency.device.cpu().numpy(), store.host_units.cpu().numpy(), 0
+    for g, classes in enumerate(store.layer_classes):
+        for i in range(store.items):
+            for r, c in enumerate(classes):
+                if res[g, i, r] < -1:
                     continue
-                _, extents = tier.read(c.name, store._piece_index(c, g, e, r))
-                want = b"".join(os.pread(fds.setdefault(fd, os.open(os.readlink(f"/proc/self/fd/{fd}"), os.O_RDONLY)),
-                                         n, off) for fd, _, off, n in extents)
-                view = c.units()[int(host[g, e, r])] if at == -1 else c.slots()[at]
-                wrong += view[:len(want)].cpu().numpy().tobytes() != want
-    for fd in fds.values():
-        os.close(fd)
+                want = np.empty(c.unit_bytes, dtype=np.uint8)
+                piece = c.pieces[store._piece_index(c, g, i, r)][3]
+                files.read([(e, want[o:o + e.nbytes]) for e, o in _offsets(piece)])
+                got = c.host_view()[int(host[g, i, r])].numpy() if res[g, i, r] == -1 else \
+                    c.slots()[int(res[g, i, r])].cpu().numpy()
+                wrong += not np.array_equal(got[:c.unit_bytes], want)
     return wrong
 
 
@@ -1425,17 +1425,23 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
     loan (`require`): lent experts are parked from intact slots — the step's lending runs before the loan is handed to
     the forward, an expert holding a loan slot goes to the SSD, the copies are waited for before a lent slot is reused —
     so every RAM-resident expert's units hold its pieces as the file does, and the streams are the resident store's."""
+    from holon_judge.planted import parking_late, parking_unwaited
+
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
-    store = engine.ctx.shared_objects[KEY]
-    assert _served(engine, prompts) == want
-    assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
-    assert store._parked is None                     # each step's parking copies waited for (C S1-M2's fence)
-    assert _ram_units_hold_their_pieces(store) > 0
-    engine.close()
+    for plant in (contextlib.nullcontext, parking_late, parking_unwaited):     # the fence, then under a forced delay
+        with plant() as fired:
+            engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+            store = engine.ctx.shared_objects[KEY]
+            got = _served(engine, prompts)
+            assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
+            assert store._parked is None             # each step's parking copies waited for (C S1-M2's fence)
+            wrong = _bytes_exact(store)
+            engine.close()
+        assert plant is contextlib.nullcontext or fired["delayed"]
+        assert (got == want and not wrong) == (plant is not parking_unwaited), wrong
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
