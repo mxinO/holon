@@ -39,8 +39,10 @@ TIE = 1e-5            # the router's near-ties of score + bias (fast-math expf)
 SAMPLE = 64           # sampled rows a prompt call (DSA, router, mHC)
 # metric -> bound (§6.2, FN's way): ≈ 10× the clean runs' maximum (RTX PRO 6000 all-resident, RTX 5090 mode (i); step
 # 5's evidence), each ≥ 10× below its plant's effect; a clean 0 bounded at the check's own tolerance
-BOUNDS = {"dsa.worst_gap": EPS, "dsa.pooled_err": 1.2e-6, "dsa.attend_prompt_rel_l2": 4e-5,
-          "dsa.attend_decode_rel_l2": 5e-5, "router.picks_off": 0.0, "router.weight_rel_err": 1.4e-5,
+# The attend's two, step 7 (q̃ one bf16 part, chunks of 256): ≈ 10× the RTX 5090's clean 6.9e-4 / 5.7e-4; its plants
+# (a chunk combined unscaled, chunks dropped) 0.66 / 0.34 and 0.83 / 0.89, ≥ 57× (step 5's 4e-5 / 5e-5: the 4-dot form)
+BOUNDS = {"dsa.worst_gap": EPS, "dsa.pooled_err": 1.2e-6, "dsa.attend_prompt_rel_l2": 7e-3,
+          "dsa.attend_decode_rel_l2": 6e-3, "router.picks_off": 0.0, "router.weight_rel_err": 1.4e-5,
           "kda.out_err_at_step_starts": 0.14, "kda.out_err_elsewhere": 0.22, "kda.out_err_decode": 0.06,
           "kda.state_err_at_step_starts": 0.016, "mhc.comb_abs_err": 1e-5, "mhc.x_rel_err": 4e-3,
           "mhc.r_rel_err": 1e-7, "mhc.writeback_rel_err": 4e-7}
