@@ -528,7 +528,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   k ≥ 4 experts a call (step 6).
 - **Core:** none.
 
-**D8p — Step 7: the staging ring of parts under exclusive tiers (design for review; the deferred (b)+(e) half).**
+**D8p — Step 7: the staging ring of parts under exclusive tiers (the deferred (b)+(e) half). On hold** (the lead's call on the panel's review, 2026-10-26): built only if mode (ii) 1K stays below ≈ 0.95 after C's cheaper levers L1–L3 (§13 step 7); rev 2's fixes below are kept for that case. **The motivation table's displaced counts and "routed SSD-only" column are inflated** (C's M1: the first probe counted an expert split across VRAM and RAM as on the SSD); its prompt bytes stand; the per-piece probe re-derives the rest.
 
 *Why, measured* (`spikes/glm7/after_record.py`, then `after_replay.py`: the bench's own 24 requests through the mode (ii) lock on the RTX 5090,
 the tier of every expert before and after each prompt, every decode step's routes and SSD bytes; §13 step 7). A prompt
@@ -610,6 +610,29 @@ vehicle with RAM capped.
   the step sweep's lever, not this one.
 - **Decode after 1K / 4K:** fewer experts displaced (≈ 880 → ≈ 300), tokens 1-32 reads ≈ −15%: the 256-token average
   ≈ +3–5%. After 32K: unchanged by this design.
+
+*Rev 2 (the panel's review: A, B, C; for when it is built):*
+- **The part tensor** (A M1): `moe_tiers@3` writes `part [T, k]` itself — −1 for resident entries and read-ahead hits,
+  ⌊k / q⌋ for RAM entries, P + round for SSD entries, admitted entries by their source, each entry the max over its
+  roles — checked by its oracle (today's `_pipelined` derives it from `host` units, which the tier op rewrites). The
+  invariant it needs, asserted with an error bit: every role's RAM list holds the same experts in the same order
+  (RAM residency is whole). The fetch, SSD and hit lists' destination columns are rewritten with `slots`.
+- **Bounds** (A M2, C m1): W from a bound, min(top_k × pass tokens, E − the layer's VRAM floor) a class (≈ 72 at
+  E = 288, P = 8), not a measured count; the slot arithmetic restated from the probe's n_ram a class at 1K / 4K; F11's
+  prompt-row admissions added to the want or capped at the room left, the oracle checking it. Today a stage step
+  lends `prefill` (288) a class, A_ra's rows on top in read-ahead steps.
+- **Order** (A m1): RAM parts 0 and 1 start right after the tier op, before the hits' gather and pass.
+- **Plants** (A m2, m3; B; C m3): deterministic, each forcing its bad order and its test asserting the condition
+  occurs — parts ≥ 3 with a wrap (`ring_part_unfenced`), two rounds or more (`outside_round_reused`), F11 prompt-row
+  admissions (`admitted_in_ring`, aimed at them); plus `slots_not_rewritten`, `part_one_role` (a guard of wholeness)
+  and `outside_admitted_overwritten` (a round's gather into an outside slot the previous call's admission has not yet
+  copied: the cross-call fence). Every plant judged by bytes (`_bytes_exact`) as well as outputs.
+- **Contracts** (B): @3 replaces @2 (deleted, not kept); @3's text states its dependency on the resolve's
+  `stage[r, i]` convention, with an L0 against all four resolve providers. The moves stream is F10's only (under
+  F11 the moves stay on main).
+- **Predictions** (C m2, B): split into fewer re-reads against overlap, and against the simpler option of RAM misses
+  in rounds on main; 1K ≈ 0.88–0.94 (≈ 9.1 GiB at Maya's 3.80 s), 4K ≈ 0.98, decode after 1K / 4K +1.5–2.5% (the
+  whole after-prompt penalty is 3.3% at 1K); one drive-busy figure, its measurement named.
 
 *Not in this design:* the background refill (parked: the drive is busy, §13), the 32K tail (the step sweep), the
 CPU lane (Q7).
