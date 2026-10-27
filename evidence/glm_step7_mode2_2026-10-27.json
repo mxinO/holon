@@ -170,7 +170,38 @@
   },
   "cap_gib": 64,
   "hygiene": "Holon's GGUF fds O_DIRECT, its RAM tier THP-backed; Maya's fds as in step 6",
-  "enforced_cap_rerun": "pending (one round)"
+  "enforced_cap_rerun": {
+   "rounds": 1,
+   "note": "a warm-up and one round in a 64 GiB job step whose limit the node enforces (cgroup v2)",
+   "ratio_to_maya": {
+    "prefill": {
+     "1k": 0.737,
+     "4k": 0.874,
+     "32k": 0.723
+    },
+    "decode": {
+     "1k": 0.884,
+     "4k": 0.871,
+     "32k": 0.686
+    }
+   },
+   "nvme_gib_a_pass": {
+    "holon": [
+     966,
+     966
+    ],
+    "maya_default": [
+     654,
+     639
+    ],
+    "maya_ckpt0": [
+     574,
+     577
+    ]
+   },
+   "step_memory_peak_gib": 63.33,
+   "holon_loan_overflow_messages": 0
+  }
  },
  "verdict": "every cell below its bar, none within 3% (4K prefill nearest, 5.4% short); D8p and a CPU lane held for the owner"
 }
