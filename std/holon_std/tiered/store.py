@@ -185,6 +185,11 @@ class TieredStore:
         self._loan, self._loan_bytes, self._loaned = None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
+        # D8w (docs/v1-glm.md), exclusive tiers: the whole-expert tail's other classes, {class index: its last m
+        # slots}, beside the tail's class; a tail step's own share of them; its loan's bytes in the tail's class
+        self.tail_down: dict[int, int] = {}
+        self._step_down: dict[int, int] = {}
+        self._step_gu_loan = 0
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_streams: dict[bool, torch.Stream] = {}
         self._auxiliary: set[int] = set()                   # an auxiliary model's groups (`mark_auxiliary`)
@@ -308,6 +313,8 @@ class TieredStore:
             self.ring = self.ctx.static(f"{self.name}.ring", shape, torch.int32)      # this step's ring slots
             self.empty = self.ctx.static(f"{self.name}.empty", (shape[0], self.roles, self.items), torch.int32)
             self.n_empty = self.ctx.static(f"{self.name}.n_empty", shape[:1], torch.int32)
+            if self.exclusive:                   # the step's empty stacks too: a whole-expert tail's compaction
+                self.telemetry |= {"empty": self.empty, "n_empty": self.n_empty}     # swaps slots between layers
             # A borrowing step's tables (`Lent`, on the device): the empty slots it found, the lent experts' slots and
             # `lend` call, each call's need per class, each class's pool of lent slots, the ring's copies, the stage
             # lists, and whether the ring held (else the step staged) with the stage width its misses had.
@@ -455,6 +462,7 @@ class TieredStore:
         # A layout that stages also keeps the tail's bytes for the large passes' buffers (`own_tail`), so the startup
         # profile's worst step — on this minimum — takes them from the pool, not from the activations it measures.
         self.tail = self._tail(lambda c: c.cap)
+        self.tail_down = self._down(self.tail[1], lambda c: c.cap) if self.tail else {}
         least = sum((c.null + self.prefill) * c.unit_bytes for c in classes) + self._align * len(classes) + \
             self._own_bytes()
         most = sum(c.bytes(c.cap) for c in classes) + self._align * len(classes)
@@ -760,7 +768,7 @@ class TieredStore:
         # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
         self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
             self.large_passes(at) and not self.exclusive else 1
-        self._step_tail = None
+        self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned and (held := self._loan.held()):
             raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
                                "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
@@ -775,7 +783,11 @@ class TieredStore:
             if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
                 self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
             need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
-            self._step_tail = (cls, min(n, -(-need // list(self.classes.values())[cls].unit_bytes)))
+            n_step = min(n, self._split(need, cls, lambda c: c.cap))
+            self._step_tail = (cls, n_step)
+            self._step_down = {c: min(m, self.tail_down.get(c, 0)) for c, m in self._down(n_step).items()}
+            down = sum(m * list(self.classes.values())[c].unit_bytes for c, m in self._step_down.items())
+            self._step_gu_loan = max(self._step_loan - down, 0) if self._step_down else self._step_loan
         elif self._loan is not None and self._own_tail is not None and self.large_passes(at):   # a staging layout's
             self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))           # loan: its own tail's end
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
@@ -810,7 +822,9 @@ class TieredStore:
             self.borrowed["ring" if mode == "ring" and int(telemetry["ring_ok"][0]) else "stage"] += 1
             self.borrowed["partial"] = self.borrowed.get("partial", 0) + (int(telemetry["ring_ok"][0]) == 2)
         self.residency.commit(step.step, record["records"], returned=mode is not None,
-                              device=telemetry["map"].numpy() if self.exclusive else None)
+                              device=telemetry["map"].numpy() if self.exclusive else None,
+                              empty=(telemetry["empty"].numpy(), telemetry["n_empty"].numpy())
+                              if self.exclusive else None)
         if self.exclusive and mode:              # the step's lent experts that ended in RAM: parked
             lent = record["records"][record["records"][:, 1] == -1]
             self.parked += int((self.residency.host[lent[:, 0], lent[:, 2]] == -1).all(-1).sum())
@@ -882,6 +896,7 @@ class TieredStore:
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
         self._loan_per_token = peak * LOAN_MARGIN / _profiled_tokens(self.ctx.options)
         self.tail = tail
+        self.tail_down = self._down(tail[1], lambda c: c.cap)
         return self.ring_tokens
 
     def _loan_overflowed(self) -> None:
@@ -913,6 +928,15 @@ class TieredStore:
             return None
         if self.exclusive:                       # its lent experts parked before the forward writes the loan
             self.start_step(early=True)
+        if self._step_down:                     # D8w: one range a class with a tail, the smallest first
+            classes = list(self.classes.values())
+            ranges = [classes[c].slots()[classes[c].size - m:].view(-1) for c, m in self._step_down.items() if m]
+            if self._step_gu_loan:
+                cls, first = self._loan_slots()
+                ranges.append(classes[cls].slots()[first:].view(-1)[-self._step_gu_loan:])
+            ranges = sorted((r[-r.data_ptr() % 512:] for r in ranges), key=len)
+            self._loaned = True
+            return self._loan.use_ranges(ranges)
         if (tail := self._loan_slots()) is not None:
             cls, first = tail
             loan = list(self.classes.values())[cls].slots()[first:].view(-1)[-self._step_loan:]
@@ -967,7 +991,7 @@ class TieredStore:
         cls, n = self.lent.tail
         c = list(self.classes.values())[cls]
         view = c.slots()[c.size - n:].view(-1)
-        return view[:len(view) - self._step_loan]           # (the activation loan's bytes past the passes')
+        return view[:len(view) - self._step_gu_loan]        # (the activation loan's bytes past the passes')
 
     def sources(self, g: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Layer g's ring and stage tables for the step (at its first pass)."""
@@ -1008,7 +1032,86 @@ class TieredStore:
         logged as `lend`'s. Returns the picks [groups, items]."""
         picked = self.resolvers[0].resolve.lend_tail(cls, n, self.residency.device, self._class_index, self.limits,
                                                      **self.state)
-        return self._unmap(picked, 0)
+        if not self._step_down:
+            return self._unmap(picked, 0)
+        picked, moves = self._compaction(picked)
+        picked = self._unmap(picked, 0)
+        self._relocate(moves)
+        return picked
+
+    def _compaction(self, picked: torch.Tensor) -> tuple[torch.Tensor, list]:
+        """D8w (docs/v1-glm.md): a whole-expert tail's other classes freed for the loan. Per class with a tail of m
+        slots: its residents there (not lent) are paired, k-th to k-th, with the slots the tail's lent experts free
+        outside it; a resident left without one is lent too (whole). Returns the lent experts and, per class, the
+        relocations' table — on the device, no host sync."""
+        res, classes = self.residency.device, list(self.classes.values())
+        groups, items, roles = res.shape
+        cls = self._class_index.long()[:, None, :].expand(groups, items, roles).reshape(-1)
+        size = groups * items * roles
+        moves = []
+        for c, m in self._step_down.items():
+            if not m:
+                continue
+            first = classes[c].size - m
+            slots = res.reshape(-1)
+            mine = cls == c
+            tail = mine & (slots >= first) & ~picked[..., None].expand(groups, items, roles).reshape(-1)
+            freed = mine & (slots >= 0) & (slots < first) & picked[..., None].expand(groups, items, roles).reshape(-1)
+            rank_t, rank_f = tail.cumsum(0) - 1, freed.cumsum(0) - 1
+            free_slots = torch.full((size + 1,), -1, dtype=slots.dtype, device=slots.device)
+            free_slots.scatter_(0, torch.where(freed, rank_f, size), slots)
+            to = torch.where(tail, free_slots[rank_t.clamp(0, size)], -1)
+            stuck = tail & (to < 0)
+            picked = picked | stuck.view(groups, items, roles).any(-1)
+            moves.append((c, tail & (to >= 0), to, freed, rank_f))
+        return picked, moves
+
+    def _relocate(self, moves: list) -> None:
+        """The compaction's relocations after the lent experts left (`_unmap`: their pieces parked from their slots on
+        the copy stream): each paired resident's piece copied out of its tail slot into the freed slot after those
+        copies, its map entry moved; each freed slot's lent expert keeps the tail slot instead (its layer gets that one
+        back at the step's end); the main stream waits for the copies before the forward writes the loan."""
+        res, lent = self.residency.device, self.lent_slots
+        self._compaction_fence("moves")          # the last step's admissions and demotions land first
+        flat_res, flat_lent = res.view(-1), lent.view(-1)
+        size = flat_res.numel()
+        lists = []
+        for c, moving, to, freed, rank_f in moves:
+            src = flat_res.clone()
+            rank_m = moving.cumsum(0) - 1
+            n = moving.sum().int().view(1)
+            fetch = torch.zeros(2, size + 1, dtype=torch.int32, device=res.device)
+            at = torch.where(moving, rank_m, size)
+            fetch[0].scatter_(0, at, src.int())
+            fetch[1].scatter_(0, at, to.int())
+            # the k-th freed slot's lent expert keeps the k-th moved piece's tail slot (k below the moved count)
+            tail_by_rank = fetch[0]
+            swap = freed & (rank_f < n)
+            flat_lent.copy_(torch.where(swap, tail_by_rank[rank_f.clamp(0, size)], flat_lent))
+            flat_res.copy_(torch.where(moving, to, flat_res))
+            lists.append((c, fetch[:, :size].contiguous(), n))
+        side = self.fetch_stream() if res.is_cuda else None
+        if side is not None:
+            side.wait_stream(torch.accelerator.current_stream(res.device))
+        names = list(self.classes)
+        with side if side is not None else contextlib.nullcontext():
+            for c, fetch, n in lists:
+                sc = self.classes[names[c]]
+                self._class_fetch[names[c]](fetch, n, sc.slots(), sc.slots())
+        if side is not None:
+            for _, fetch, n in lists:
+                fetch.record_stream(side)
+                n.record_stream(side)
+            self._compaction_fence("copies", side)
+
+    def _compaction_fence(self, which: str, side=None) -> None:
+        """The compaction's two fences (D8w, C): the main stream waits for the last step's moves ("moves") before the
+        compaction reads its slots, and for its copies ("copies", on `side`) before the forward writes the loan."""
+        main = torch.accelerator.current_stream(self.residency.device.device)
+        if which == "moves" and self.moves_async:
+            main.wait_stream(self.moves_stream())
+        elif which == "copies" and side is not None:
+            main.wait_stream(side)
 
     def _unmap(self, picked: torch.Tensor, call: int) -> torch.Tensor:
         """`picked` [groups, items] unmapped in every role and logged `(group, −1, item)`, their slots kept with the
@@ -1100,14 +1203,18 @@ class TieredStore:
             return None
         cls, _ = self._step_tail
         c = list(self.classes.values())[cls]
-        return cls, (c.size * c.unit_bytes - self._step_loan) // c.unit_bytes
+        return cls, (c.size * c.unit_bytes - self._step_gu_loan) // c.unit_bytes
 
     def _in_loan(self, cls: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
         """[n] bool: the pieces' experts holding a slot of this step's activation loan (`_loan_slots`)."""
         if (tail := self._loan_slots()) is None:
             return torch.zeros(slots.shape[0], dtype=torch.bool, device=slots.device)
         c, first = tail
-        return ((cls == c) & (slots >= first)).any(1)
+        held = (cls == c) & (slots >= first) if self._step_gu_loan else torch.zeros_like(slots, dtype=torch.bool)
+        classes = list(self.classes.values())
+        for d, m in self._step_down.items():         # D8w: the other classes' tails, the loan's too
+            held |= (cls == d) & (slots >= classes[d].size - m) & (m > 0)
+        return held.any(1)
 
     def _copy_parked(self, cls: torch.Tensor, slots: torch.Tensor, to: torch.Tensor, placed: torch.Tensor) -> None:
         """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit), on the
@@ -1191,6 +1298,8 @@ class TieredStore:
         cls, n = self.tail
         nbytes = n * list(self.classes.values())[cls].unit_bytes if loan else \
             max((f() for f in self.tail_bytes), default=0)      # (not the tail's slots less the loan: their rounding)
+        if loan and self.tail_down:             # (a whole-expert tail's n holds part of it: the whole need here)
+            nbytes = max(nbytes, max((f() for f in self.tail_bytes), default=0) + self._loan_bytes)
         return -(-nbytes // self._align) * self._align
 
     def _step_loan_bytes(self, at: int) -> int:
@@ -1209,12 +1318,51 @@ class TieredStore:
         first = [classes.index(self.groups[g][0]) for g in self._order]
         cls = max(sorted(set(first)), key=first.count)
         c = classes[cls]
-        n = -(-(max((f() for f in self.tail_bytes), default=0) + self._loan_bytes) // c.unit_bytes)
+        n = self._split(max((f() for f in self.tail_bytes), default=0) + self._loan_bytes, cls, slots)
         if slots(c) - n < self.prefill:
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
                              f"prefill pass's {self.prefill} misses")
         return cls, n
+
+    @property
+    def whole_tail(self) -> bool:
+        """D8w (docs/v1-glm.md): under exclusive tiers a tail lends its experts whole — the tail's class's last n slots
+        and each other role's class's last m — so no lent expert's piece is displaced unused."""
+        return self.exclusive and self.roles > 1
+
+    def _shares(self) -> dict[int, float]:
+        """Per class of the tail's other roles: the share of the target's groups whose piece of that role it holds."""
+        classes, groups = list(self.classes.values()), list(self._order)[:self.borrowing_groups]
+        count: dict[int, int] = {}
+        for g in groups:
+            for r in range(1, self.roles):
+                c = classes.index(self.groups[g][r])
+                count[c] = count.get(c, 0) + 1
+        return {c: k / len(groups) for c, k in count.items()}
+
+    def _down(self, n: int, slots: Callable[[SlotClass], int] = lambda c: c.cap) -> dict[int, int]:
+        """A whole-expert tail of n experts in the tail's class: each other class's last m slots, m its share of n
+        (the experts' pieces of its roles), at most what leaves the class a prefill pass's staging outside it (as the
+        tail's class)."""
+        if not self.whole_tail:
+            return {}
+        classes = list(self.classes.values())
+        return {c: max(0, min(int(n * share), slots(classes[c]) - self.prefill)) for c, share in self._shares().items()}
+
+    def _split(self, need: int, cls: int, slots: Callable[[SlotClass], int]) -> int:
+        """The tail's n slots in class `cls` for `need` bytes: with a whole-expert tail, n with its other classes'
+        last m (`_down`) together holding them."""
+        classes = list(self.classes.values())
+        unit = classes[cls].unit_bytes
+        n = -(-need // unit)
+        if not self.whole_tail:
+            return n
+        per = unit + sum(share * classes[c].unit_bytes for c, share in self._shares().items())
+        n = -(-need // int(per))
+        while n * unit + sum(m * classes[c].unit_bytes for c, m in self._down(n, slots).items()) < need:
+            n += 1
+        return n
 
     def _held_out(self) -> dict[str, int]:
         """Per class, the cache slots the placement policy reserves outside what a step can lend (`reserved` a group in

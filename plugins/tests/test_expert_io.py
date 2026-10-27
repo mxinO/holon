@@ -663,3 +663,37 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
         assert not (want["residency"][layer, early] == -1).any()
         assert all(not {piece for piece, _, _ in want["io"][r]} & {int(t["piece"][layer, e, r]) for e in early}
                    for r in range(ROLES))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_loan_over_several_ranges_fills_them_in_order(plugins):
+    """`activation_loan@1`'s `use_ranges` (docs/v1-glm.md D8w): the caching allocator's segments cut from the ranges in
+    the given order (the smallest first: a segment the first range holds goes there; one only a later range holds goes
+    there), none outside them while they hold it, a returned segment coalesced within its range, a range set refused
+    while segments are out or where two ranges overlap; past every range, the device's own memory, counted."""
+    loan = kernel(plugins, "cuda", "activation_loan@1", "kernels.expert_io")
+    whole = torch.empty(64 << 20, dtype=torch.uint8, device="cuda")
+    # 8 MiB, then 48 MiB, a gap between; neither starting where `whole` does (torch's allocator keys its blocks by
+    # address: a segment there would alias `whole`'s block, freed with the pool)
+    small, large = whole[2 << 20:10 << 20], whole[16 << 20:]
+
+    def inside(t: torch.Tensor, r: torch.Tensor) -> bool:
+        return r.data_ptr() <= t.data_ptr() and t.data_ptr() + t.nbytes <= r.data_ptr() + r.numel()
+    with loan.use_ranges([small, large]):
+        a = torch.empty(512 << 10, dtype=torch.uint8, device="cuda")        # (a 2 MiB segment): the small range
+        b = torch.empty(30 << 20, dtype=torch.uint8, device="cuda")         # only the large range holds it
+    placed = inside(a, small), inside(b, large), loan.lib.loan_overflow()   # (no tensor in an assert: pytest keeps
+    with pytest.raises(RuntimeError, match="still out"):                    # its operands past the pool's release)
+        loan.lib.loan_set_ranges([small.data_ptr()], [small.numel()])
+    del a, b
+    loan.release()
+    assert placed == (True, True, 0)
+    with pytest.raises(RuntimeError, match="overlap"):
+        loan.lib.loan_set_ranges([whole.data_ptr(), small.data_ptr()], [whole.numel(), small.numel()])
+    with loan.use_ranges([small, large]):
+        c = torch.empty(40 << 20, dtype=torch.uint8, device="cuda")         # the large range, whole again
+        d = torch.empty(20 << 20, dtype=torch.uint8, device="cuda")         # no range holds it: the device's
+    placed = inside(c, large), inside(d, small) or inside(d, large), loan.lib.loan_overflow() >= 20 << 20
+    del c, d
+    loan.release()
+    assert placed == (True, False, True)

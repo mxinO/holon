@@ -195,6 +195,16 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     assert closed == [1]               # the first engine closed before the second was built (its host pools gone)
     propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
     assert built[-1] == 990
+    # a check engine whose steps overflowed an activation loan is refused (docs/v1-glm.md D8w)
+    class Overflowing(Measuring):
+        def __init__(self, config):
+            super().__init__(config)
+            self.ctx = type("Ctx", (), {"shared_objects": {"moe": type("S", (), {"loan_overflows": 2,
+                                                                                  "loan_overflow_most": 5 << 20})()}})()
+    monkeypatch.setattr(propagate, "Engine", Overflowing)
+    with pytest.raises(RuntimeError, match="2 check steps overflowed their activation loan, by up to 5 MiB"):
+        propagate.EngineChecks(EngineConfig(model="m"), [], None).snapshot()
+    monkeypatch.setattr(propagate, "Engine", Measuring)
     # a deployment that requires its step-peak loan measures every engine's pools (its loan comes from that profile)
     lent = EngineConfig(model="m", plugin_options={"moe.lend_peak": "require"})
     checks = propagate.EngineChecks(lent, [], None, pool_bytes=990)

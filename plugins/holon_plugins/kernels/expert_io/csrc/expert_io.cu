@@ -1257,30 +1257,47 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 #endif
 }
 
-// `activation_loan@1`: torch's pluggable-allocator entry points over the one device range `loan_set` names (a
-// MemPool of the caching allocator asks them for its segments): first fit over the range's free extents, 512-byte
-// aligned, coalesced when a segment comes back. A segment the range cannot hold (the caching allocator's segments
-// for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each stream its own) is the
-// device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that way. (Failing it
-// instead does not make torch 2.11 return a MemPool's cached segments and ask again: the step stops, out of memory.)
-struct Loan {
+// `activation_loan@1`: torch's pluggable-allocator entry points over the device ranges `loan_set_ranges` names, in
+// their order (`use_ranges`: the smallest first, so small segments fill the small ranges; `loan_set`: one range) — a
+// MemPool of the caching allocator asks them for its segments: first fit over a range's free extents, the ranges in
+// order, 512-byte aligned, coalesced within its range when a segment comes back. A segment no range can hold (the
+// caching allocator's segments for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each
+// stream its own) is the device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that
+// way. (Failing it instead does not make torch 2.11 return a MemPool's cached segments and ask again: the step stops,
+// out of memory.)
+struct LoanRange {
     char * base = nullptr;
     size_t cap = 0;
     std::map<size_t, size_t> free;                     // offset -> bytes
+};
+struct Loan {
+    std::vector<LoanRange> ranges;
     int64_t live = 0, outside = 0, most = 0;
 };
 Loan loan;
 
 size_t loan_round(ssize_t size) { return (size_t(size) + 511) & ~size_t(511); }
 
-void loan_set(int64_t ptr, int64_t nbytes) {
+void loan_set_ranges(const std::vector<int64_t> & ptrs, const std::vector<int64_t> & sizes) {
     TORCH_CHECK(loan.live == 0, "activation_loan@1: ", loan.live, " segments of the loan are still out");
-    loan.base = reinterpret_cast<char *>(ptr);
-    loan.cap = size_t(nbytes) & ~size_t(511);
-    loan.free.clear();
-    loan.free[0] = loan.cap;
+    TORCH_CHECK(ptrs.size() == sizes.size(), "activation_loan@1: ", ptrs.size(), " ranges, ", sizes.size(), " sizes");
+    loan.ranges.clear();
+    for (size_t i = 0; i < ptrs.size(); ++i) {
+        LoanRange r;
+        r.base = reinterpret_cast<char *>(ptrs[i]);
+        r.cap = size_t(sizes[i]) & ~size_t(511);
+        for (const auto & o : loan.ranges) {
+            TORCH_CHECK(r.base + r.cap <= o.base || o.base + o.cap <= r.base, "activation_loan@1: ranges overlap");
+        }
+        if (r.cap) {
+            r.free[0] = r.cap;
+        }
+        loan.ranges.push_back(std::move(r));
+    }
     loan.most = 0;                                                   // `loan_overflow`: per use
 }
+
+void loan_set(int64_t ptr, int64_t nbytes) { loan_set_ranges({ptr}, {nbytes}); }
 
 int64_t loan_live() { return loan.live; }
 
@@ -1291,15 +1308,17 @@ int64_t loan_overflow() { return loan.most; }
 extern "C" {
 void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
     const size_t n = loan_round(size);
-    for (auto it = loan.free.begin(); it != loan.free.end(); ++it) {
-        if (it->second >= n) {
-            const size_t at = it->first, left = it->second - n;
-            loan.free.erase(it);
-            if (left) {
-                loan.free[at + n] = left;
+    for (auto & r : loan.ranges) {
+        for (auto it = r.free.begin(); it != r.free.end(); ++it) {
+            if (it->second >= n) {
+                const size_t at = it->first, left = it->second - n;
+                r.free.erase(it);
+                if (left) {
+                    r.free[at + n] = left;
+                }
+                ++loan.live;
+                return r.base + at;
             }
-            ++loan.live;
-            return loan.base + at;
         }
     }
     void * out = nullptr;
@@ -1315,33 +1334,41 @@ void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
 
 void holon_loan_free(void * ptr, ssize_t size, int, cudaStream_t) {
     char * p = static_cast<char *>(ptr);
-    if (p < loan.base || p >= loan.base + loan.cap) {                // the device's
+    LoanRange * r = nullptr;
+    for (auto & o : loan.ranges) {
+        if (p >= o.base && p < o.base + o.cap) {
+            r = &o;
+        }
+    }
+    if (r == nullptr) {                                              // the device's
         cudaFree(ptr);
         loan.outside -= int64_t(loan_round(size));
         --loan.live;
         return;
     }
-    size_t at = size_t(p - loan.base), n = loan_round(size);
-    auto next = loan.free.lower_bound(at);
-    if (next != loan.free.end() && at + n == next->first) {          // the extent after it
+    size_t at = size_t(p - r->base), n = loan_round(size);
+    auto next = r->free.lower_bound(at);
+    if (next != r->free.end() && at + n == next->first) {            // the extent after it
         n += next->second;
-        next = loan.free.erase(next);
+        next = r->free.erase(next);
     }
-    if (next != loan.free.begin()) {                                 // the extent before it
+    if (next != r->free.begin()) {                                   // the extent before it
         auto prev = std::prev(next);
         if (prev->first + prev->second == at) {
             at = prev->first;
             n += prev->second;
-            loan.free.erase(prev);
+            r->free.erase(prev);
         }
     }
-    loan.free[at] = n;
+    r->free[at] = n;
     --loan.live;
 }
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_set", &loan_set, "activation_loan@1: the range the loan's segments are cut from (none out)");
+    m.def("loan_set_ranges", &loan_set_ranges, "activation_loan@1: the ranges the loan's segments are cut from, in "
+          "order (none out; none overlapping)");
     m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
     m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once, "
           "since the last loan_set");

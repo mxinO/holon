@@ -1172,10 +1172,11 @@ def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, polic
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.placement": policy}
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
     store = engine.ctx.shared_objects[KEY]
-    ranges, use = [], store._loan.use
-    store._loan.use = lambda r: (ranges.append(r.numel()), use(r))[1]
+    ranges, use = [], store._loan.use_ranges           # (a whole-expert tail: a range per class with a tail, D8w)
+    store._loan.use_ranges = lambda rs: (ranges.append([r.numel() for r in rs]), use(rs))[1]
     assert _served(engine, prompts) == want
     assert store.exclusive and ranges and store.borrowed["stage"] and not store.borrowed["ring"], store.borrowed
+    assert store.whole_tail and store.tail_down and max(map(len, ranges)) == 1 + len(store.tail_down), ranges
     held = _slots_held(store)                        # again, F10's spares (refilled by the decodes) in the lent tail:
     assert _served(engine, prompts) == want          # released, their slots return (step 1's review S1-M1)
     assert torch.equal(_slots_held(store), held)
@@ -1354,6 +1355,103 @@ def _slots_held(store) -> torch.Tensor:
     spare = store.state.get("spare")
     spares = (spare[..., 0] > 0).sum(1) if spare is not None else 0
     return ((store.residency.device >= 0).sum(1) + (store.n_empty + spares)[:, None]).cpu()
+
+
+def _loan_free(store) -> bool:
+    """D8w: no piece the map names sits in this step's activation loan — its other classes' tails and its tail's
+    class's last bytes (`_in_loan`'s ranges)."""
+    res, classes = store.residency.device, list(store.classes.values())
+    cls = store._class_index.long()[:, None, :].expand_as(res)
+    bad = torch.zeros_like(res, dtype=torch.bool)
+    for c, m in store._step_down.items():
+        bad |= (cls == c) & (res >= classes[c].size - m)
+    if (tail := store._loan_slots()) is not None and store._step_gu_loan:
+        bad |= (cls == tail[0]) & (res >= tail[1])
+    return not bool(bad.any())
+
+
+def _slots_once(store) -> bool:
+    """Each class's slot is mapped by one piece or on one layer's empty stack, never both nor twice."""
+    res, empty, n = (t.cpu().numpy() for t in (store.residency.device, store.empty, store.n_empty))
+    classes = store._class_index.cpu().numpy()
+    for c in range(len(store.classes)):
+        mine = [(g, r) for g in range(len(n)) for r in range(res.shape[2]) if classes[g, r] == c]
+        held = [res[g, :, r][res[g, :, r] >= 0] for g, r in mine] + [empty[g, r, :n[g]] for g, r in mine]
+        held = np.concatenate(held)
+        if len(set(held.tolist())) != len(held):
+            return False
+    return True
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("policy", ["", "placement.promote@1"])
+def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy):
+    """D8w (docs/v1-glm.md): under exclusive tiers the tail's experts are lent whole — the tail's class's last n slots
+    and the down class's last m, its residents relocated into the slots the lent experts free (copied after their
+    pieces are parked, before the forward writes the loan), so the loan's ranges hold no mapped piece; a layer whose
+    expert was lent gets the tail slot back at the step's end; each slot is held once; the host mirror (map and empty
+    stacks) is the device's; every piece's bytes are the file's and the streams the resident store's, with the
+    tail's class holding only part of the loan. Each of the compaction's plants is caught (D8w's list)."""
+    from holon_judge import planted
+
+    file, prompts, want = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25", "moe.placement": policy,
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    plants = [None, "tail_down_not_compacted", "compaction_map_stale", "compaction_return_wrong_layer",
+              "compaction_beside_moves", "loan_range_overlap"]
+    for plant in plants if policy else plants[:1]:
+        with planted.PLANTS[plant]() if plant else contextlib.nullcontext():
+            engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+            store = engine.ctx.shared_objects[KEY]
+            checks, lend_tail = [], store.lend_tail
+
+            def watched(cls, n, store=store, lend_tail=lend_tail, checks=checks):
+                before = store.residency.device.clone()
+                picked = lend_tail(cls, n)
+                kept = (before >= 0) & (store.residency.device >= 0)
+                checks.append((_loan_free(store), int((kept & (before != store.residency.device)).sum())))
+                return picked
+            store.lend_tail = watched
+            # whole-expert placement keeps an expert's pieces at aligned slots here (one down class, every layer's);
+            # GLM's down classes cover disjoint layers, so its slots do not stay aligned: the down slots shuffled
+            torch.cuda.synchronize()
+            res, down = store.residency.device, store._class_index[:, 1].long()
+            gen = torch.Generator().manual_seed(0)
+            for c in store.tail_down:
+                mine = (down == c)[:, None] & (res[..., 1] >= 0)
+                slots = res[..., 1][mine]
+                moved = slots[torch.randperm(len(slots), generator=gen).to(slots.device)]
+                arena = list(store.classes.values())[c].slots()
+                arena[moved.long()] = arena[slots.long()].clone()
+                res[..., 1][mine] = moved
+            store.residency.host[...] = res.cpu().numpy()
+            try:
+                got = _served(engine, prompts)
+                for shift in (7, 11):                            # more steps: a returned slot's next admissions
+                    engine.generate([[(t + shift) % 512 for t in p] for p in prompts], GREEDY)
+                torch.cuda.synchronize()
+                ok = (got == want, all(free for free, _ in checks), _slots_once(store), _bytes_exact(store) == 0)
+            except RuntimeError as e:                            # (a plant the store or the provider refuses)
+                assert plant is not None, e
+                ok = ("overlap" in str(e),) if plant == "loan_range_overlap" else (False,)
+            if plant is None:
+                assert store.whole_tail and store.tail_down and any(moved for _, moved in checks), checks
+                assert all(ok), ok
+                _held_once(store)
+                mirror = store.residency
+                assert (mirror.host == store.residency.device.cpu().numpy()).all()
+                n_empty, empty = store.n_empty.cpu().numpy(), store.empty.cpu().numpy()
+                assert all(len(mirror.empty[g]) == n_empty[g] and all((x == empty[g, :, j]).all() for j, x in
+                                                                       enumerate(mirror.empty[g]))
+                           for g in range(len(n_empty)))
+                unit = list(store.classes.values())[store.tail[0]].unit_bytes
+                assert store.tail[1] * unit < store._loan_bytes     # the tail's class holds only part of the loan
+            elif plant == "loan_range_overlap":
+                assert ok == (True,), ok
+            else:
+                assert not all(ok), (plant, ok)
+            engine.close()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

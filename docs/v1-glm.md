@@ -702,14 +702,20 @@ routed set, and the 32K decode's 79 MB a token.
   each tail expert's down class; the largest allocations (the 16,384-row pass buffers) must fit the gate/up range
   (asserted at the profile; the down ranges take the smaller ones).
 - **The review's fixes.** *Compaction is its own slot-movement path* (B-M1): one implementation in the store after
-  the providers' `lend_tail` pick, **gated on `store.exclusive`** (FN's RAM-holds-all lending untouched); its own
-  record kind, `(g, RELOCATE, item)` with the role and both slots, which `ResidencyMap.commit` replays; `Lent` records
-  the empty-slot swaps between layers, so the step's end returns the tail range's slots to the lent experts' layers;
-  plant `compaction_return_wrong_layer`. *An optional member, not @2* (B): `activation_loan@1` gains `use_ranges(
+  the providers' `lend_tail` pick, **gated on `store.exclusive`** (FN's RAM-holds-all lending untouched); `Lent`
+  records the empty-slot swaps between layers (the lent experts' `lent_slots` take the tail slots), so the step's
+  end returns the tail range's slots to the lent experts' layers; plant `compaction_return_wrong_layer`. *As built*:
+  no `RELOCATE` record — under exclusive tiers the host mirror already adopts the step's map, and now adopts its empty
+  stacks too (both device-owned, exact; `ResidencyMap.commit(empty=…)`), which covers the swaps with no new record
+  kind for a replay to get wrong. *An optional member, not @2* (B): `activation_loan@1` gains `use_ranges(
   ranges)` (as `overflow()` is optional), the store using it where the provider has it, so FN's 5080 locks keep
-  their site keys. *Fit* (C): allocations placed in the smallest range that holds them (the down ranges first); n
-  sized from a replay of the worst step's allocation trace through the ranges at the profile, zero overflow
-  asserted; the gate/up range must hold the 32K step's R (2 GiB) and the 16,384-row pass buffers (≈ 2 GiB); each
+  their site keys. *Fit* (C): allocations placed in the smallest range that holds them (the down ranges first); the
+  fit asserted by construction at layout, and zero overflow asserted on real steps — **not** by replaying the worst
+  step's allocation trace (a deviation from C's text, agreed 2026-10-27: the core hands the store only the profile's
+  peak, so a replay would need a model of torch's caching allocator in Python, fragile and unverifiable): the probe
+  asserts zero overflow on the bench's 1K / 4K / 32K requests, the 32K worst case and a 32K prompt-logprob step (the
+  largest fixed cost), and `tune` / `propagate` refuse a deployment whose check steps overflow (as `require` refuses
+  an unmeasured loan); the gate/up range must hold the 32K step's R (2 GiB) and the 16,384-row pass buffers (≈ 2 GiB); each
   down class's tail plus staging asserted to fit with a floor of cache left (the IQ3_XXS down class gives ≈ 45% of
   itself). *The moves fence* (C): compaction waits for the previous step's admissions (`admitted`) on the moves
   stream; plant `compaction_beside_moves`; the "no resident piece in a loan range" check stays in

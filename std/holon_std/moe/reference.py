@@ -452,6 +452,9 @@ class ActivationLoan:
     def use(self, range_: torch.Tensor) -> contextlib.AbstractContextManager:
         return contextlib.nullcontext()
 
+    def use_ranges(self, ranges: list[torch.Tensor]) -> contextlib.AbstractContextManager:
+        return contextlib.nullcontext()
+
     def held(self) -> int:
         return 0
 

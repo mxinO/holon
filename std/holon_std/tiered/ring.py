@@ -52,6 +52,8 @@ class Lent:
         if tail is not None:                # this step's tail (its own passes' size): the rest of the class lends
             self.end = self.end.clone()
             self.end[tail[0]] -= tail[1]
+            for c, m in store._step_down.items():       # a whole-expert tail's other classes (D8w): their tails
+                self.end[c] -= m
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:

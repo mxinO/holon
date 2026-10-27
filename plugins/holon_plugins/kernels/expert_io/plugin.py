@@ -184,8 +184,13 @@ class ActivationLoan:
         self.index = device.index if device.index is not None else torch.cuda.current_device()
 
     def use(self, range_: torch.Tensor):
+        return self.use_ranges([range_])
+
+    def use_ranges(self, ranges: list[torch.Tensor]):
+        """`use` over several device ranges (docs/v1-glm.md D8w: one per class with a tail), in the order given — the
+        caller's smallest first, so small segments fill the small ranges —, none overlapping."""
         self.release()
-        self.lib.loan_set(range_.data_ptr(), range_.numel())
+        self.lib.loan_set_ranges([r.data_ptr() for r in ranges], [r.numel() for r in ranges])
         self.pool = torch.cuda.MemPool(self.allocator.allocator())
         return torch.cuda.use_mem_pool(self.pool, self.index)
 

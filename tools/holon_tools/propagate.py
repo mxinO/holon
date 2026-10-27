@@ -190,8 +190,10 @@ class EngineChecks:
 
     def snapshot(self) -> Snapshot:
         engine, self._built = self._built, None       # the plan's engine runs the first trace: one build fewer
-        return snapshot.record(engine or self._pinned(), self.trace,
-                               {"trace": canonical_hash(self.trace), "pool_bytes": self.pool_bytes})
+        engine = engine or self._pinned()
+        snap = snapshot.record(engine, self.trace, {"trace": canonical_hash(self.trace), "pool_bytes": self.pool_bytes})
+        _no_overflow(engine)
+        return snap
 
     def _pinned(self) -> Engine:
         """An engine on the pinned pools — unless the deployment requires its step-peak loan (`moe.lend_peak =
@@ -218,6 +220,7 @@ class EngineChecks:
         meta = model_meta(pathlib.Path(self.config.model)) | {"dtype": str(self.config.dtype).removeprefix("torch.")}
         floors = [Recording.load(f) for f in self.inputs.floors]
         result = compare(golden, score(engine, prompts, golden.k, meta), floors)
+        _no_overflow(engine)
         return bool(result.passed), result.table()
 
     def _l2_reference(self) -> tuple[bool, str]:
@@ -235,6 +238,7 @@ class EngineChecks:
                 "dtype": str(self.config.dtype).removeprefix("torch."), "gpu_class": engine.ctx.fingerprint.gpu}
             budgets = reference.Budgets.load(reference.budgets_path(path))
             result = reference.judge(ref, score(engine, prompts, ref.k, meta), budgets, reference.sha256(path))
+            _no_overflow(engine)
             passed &= result.passed
             reports.append(result.table())
         return passed, "\n".join(reports)
@@ -251,6 +255,15 @@ class EngineChecks:
             torch.cuda.empty_cache()
         self._last = Engine(config)
         return self._last
+
+
+def _no_overflow(engine: Engine) -> None:
+    """A deployment whose check steps overflowed an activation loan into the device's own memory (a store's
+    `loan_overflows`, docs/v1-glm.md D8w) is refused: the reserve does not hold those bytes."""
+    for name, o in getattr(getattr(engine, "ctx", None), "shared_objects", {}).items():
+        if getattr(o, "loan_overflows", 0):
+            raise RuntimeError(f"{name}: {o.loan_overflows} check steps overflowed their activation loan, by up to "
+                               f"{o.loan_overflow_most / 2**20:.0f} MiB: raise moe.loan_fixed_mib; no lock is written")
 
 
 def snapshot_path(plans_dir: str | pathlib.Path, plan: Plan, digest: str) -> pathlib.Path:

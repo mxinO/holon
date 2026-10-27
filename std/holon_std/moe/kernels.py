@@ -165,7 +165,10 @@ then `staging` slots, then cache slots.
   `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
   — `held() -> int`, the bytes allocated in it still alive, and `release()`: the range free again (nothing held). An
   allocation the range cannot hold fails, or (a provider with `overflow() -> int`) takes the device's own memory,
-  `overflow()` then the most bytes out that way at once in the current use.
+  `overflow()` then the most bytes out that way at once in the current use. Optional: `use_ranges(ranges [list of
+  [N] uint8])`, `use` over several ranges, none overlapping, an allocation cut from the first in the given order that
+  holds it (docs/v1-glm.md D8w: a whole-expert tail, one range per class with a tail). No range may start where a
+  device allocation of torch's starts (its caching allocator keys blocks by address).
 
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's

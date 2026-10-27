@@ -1931,6 +1931,89 @@ def keep_into_pending_demotion() -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def _relocation(skip: str, ns: int = 0) -> Iterator[collections.Counter]:
+    """D8w's compaction (`TieredStore._relocate`, docs/v1-glm.md) with one of its parts dropped (`skip`): "copies" (no
+    piece leaves the loan's ranges: `tail_down_not_compacted`), "map" (the pieces copied, the map not moved:
+    `compaction_map_stale`), "swap" (the lent experts' layers get their old slots back: `compaction_return_wrong_layer`)
+    or "fences" (the copies after a sleep, nothing waiting for them or waited by them, and the loan's down ranges
+    written at once as the forward's first allocations may: `compaction_beside_moves`).
+    Yields its counts (`compactions`)."""
+    from holon_std.tiered import store as tiered
+
+    relocate, fired = tiered.TieredStore._relocate, collections.Counter()
+
+    def planted(self, moves):
+        fired["compactions"] += 1
+        if skip == "copies":
+            return
+        res, lent = self.residency.device, self.lent_slots
+        keep = (res.clone(), lent.clone())
+        if skip == "fences":                     # (then the forward's first writes into the loan, at once)
+            with self.fetch_stream():
+                torch.cuda._sleep(ns)
+            with mock.patch.object(tiered.TieredStore, "_compaction_fence", lambda *a, **kw: None):
+                relocate(self, moves)
+            classes = list(self.classes.values())
+            for c, m in self._step_down.items():
+                classes[c].slots()[classes[c].size - m:].fill_(0xFF)
+            return
+        relocate(self, moves)
+        if skip == "map":
+            moved = torch.zeros_like(res, dtype=torch.bool)
+            for _, moving, *_ in moves:
+                moved |= moving.view(res.shape)
+            res.copy_(torch.where(moved, keep[0], res))
+        elif skip == "swap":
+            lent.copy_(keep[1])
+    with mock.patch.object(tiered.TieredStore, "_relocate", planted):
+        yield fired
+    print(f"plant relocation-{skip} fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def tail_down_not_compacted() -> Iterator[collections.Counter]:
+    """D8w: the down classes' tails lent with their residents still mapped there (no relocation)."""
+    with _relocation("copies") as fired:
+        yield fired
+
+
+@contextlib.contextmanager
+def compaction_map_stale() -> Iterator[collections.Counter]:
+    """D8w: the relocated pieces copied, their map entries left at the tail slots the loan overwrites."""
+    with _relocation("map") as fired:
+        yield fired
+
+
+@contextlib.contextmanager
+def compaction_return_wrong_layer() -> Iterator[collections.Counter]:
+    """D8w: a lent expert's layer gets back the slot its relocated neighbour now holds, not the tail slot."""
+    with _relocation("swap") as fired:
+        yield fired
+
+
+@contextlib.contextmanager
+def compaction_beside_moves() -> Iterator[collections.Counter]:
+    """D8w (C's fence): the relocation copies after a sleep on the copy stream, with neither the last moves waited for
+    before them nor them before the forward writes the loan."""
+    with _relocation("fences", 20_000_000) as fired:
+        yield fired
+
+
+@contextlib.contextmanager
+def loan_range_overlap() -> Iterator[collections.Counter]:
+    """D8w: the tail's class's loan range handed out over a down class's range too (the provider refuses it)."""
+    from holon_plugins.kernels.expert_io import plugin
+
+    use, fired = plugin.ActivationLoan.use_ranges, collections.Counter()
+
+    def planted(self, ranges):
+        fired["uses"] += 1
+        return use(self, [*ranges, ranges[0]])
+    with mock.patch.object(plugin.ActivationLoan, "use_ranges", planted):
+        yield fired
+
+
+@contextlib.contextmanager
 def keep_copy_skipped() -> Iterator[None]:
     """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
     cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
@@ -2585,6 +2668,10 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "promote_victim_code": promote_victim_code, "landing_reuse_unfenced": landing_reuse_unfenced,
     "ondemand_round_unjoined": ondemand_round_unjoined, "keep_copy_skipped": keep_copy_skipped,
     "moves_unfenced": moves_unfenced,
+    # D8w (docs/v1-glm.md): the whole-expert tail's compaction and its loan ranges
+    "tail_down_not_compacted": tail_down_not_compacted, "compaction_map_stale": compaction_map_stale,
+    "compaction_return_wrong_layer": compaction_return_wrong_layer, "compaction_beside_moves": compaction_beside_moves,
+    "loan_range_overlap": loan_range_overlap,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
