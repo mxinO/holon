@@ -195,6 +195,11 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     assert closed == [1]               # the first engine closed before the second was built (its host pools gone)
     propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
     assert built[-1] == 990
+    # a deployment that requires its step-peak loan measures every engine's pools (its loan comes from that profile)
+    lent = EngineConfig(model="m", plugin_options={"moe.lend_peak": "require"})
+    checks = propagate.EngineChecks(lent, [], None, pool_bytes=990)
+    checks.snapshot(), checks.snapshot()
+    assert built[-2:] == [None, None]
 
 
 @pytest.mark.slow

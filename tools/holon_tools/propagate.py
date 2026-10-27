@@ -194,8 +194,12 @@ class EngineChecks:
                                {"trace": canonical_hash(self.trace), "pool_bytes": self.pool_bytes})
 
     def _pinned(self) -> Engine:
+        """An engine on the pinned pools — unless the deployment requires its step-peak loan (`moe.lend_peak =
+        require`): an explicit budget skips the startup profile the loan is measured from, so such an engine measures
+        its own pools (closed predecessors leave it the same free memory)."""
+        measures = self.config.plugin_options.get("moe.lend_peak") == "require"
         engine = self._fresh(dataclasses.replace(self.config, state_memory=self.config.state_memory or
-                                                 self.pool_bytes))
+                                                 (None if measures else self.pool_bytes)))
         if self.pool_bytes is None:
             self.pool_bytes = engine.ledger.device_bytes()
         return engine
