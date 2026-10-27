@@ -3530,7 +3530,7 @@ No blockers. Every finding is fixed on the branch; the CPU tests and `run_all.sh
   - §19.1 says the RTX 3090's trace difference between desktops has no identified cause, and Known limitations say
     traces are run-identical on one machine;
   - §4.0's legibility-branch and `bench/legibility/` references and the m04 / m05 / m07 citations of
-    `docs/brainstorm/…` are marked "(not published)"; the pilot's numbers quoted in §4.0 and plan §9 have a record,
+    the unpublished research notes are marked as such; the pilot's numbers quoted in §4.0 and plan §9 have a record,
     `evidence/legibility_pilot_2026-10-14.json` (per run: both costings, turns, files changed, success; no
     transcripts, no paths);
   - `<repository>` stays a placeholder: step 11's procedure (§8, §9) starts with a docs-only commit that fills in the

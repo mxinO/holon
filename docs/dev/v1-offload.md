@@ -5,9 +5,8 @@ Status: **closed (2026-10-18), acceptance met with the recorded shortfall (FreeT
 panel-clean** (2026-10-17: all three reviewers report nothing remaining after four rounds); its
 parameters freeze when step 0's evidence lands. Rev 4.3 applies M6's evidence (§13: the default policy is `lfu`); rev 4.4 its panel round (10 + 7 findings), panel-clean
 again on 2026-10-17; rev 4.5 sets the parameters from the desktop benches (§13) — the design is frozen. Rev 1 drew 52 findings (A 20, B 15, C 17), rev 2
-27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered (all before any code). Evidence base: the local research note
-`docs/brainstorm/v1-offload-research.md` (not published; "R §n"), which cites every reference engine by `file:line`
-in its local clone; Project Maya is R §3.1b.
+27 (A 11, B 8, C 8), rev 3 20 (A 8, B 7, C 5); §12 logs each and where it is answered (all before any code). Evidence base: an unpublished study of the
+reference engines' public sources ("R §n"), which cites each engine by `file:line` at a pinned commit; Project Maya is R §3.1b.
 
 Scope: plan §10 (v1, "Expert caching/offload"), with the owner's direction of 2026-10-16/17:
 - support **the most popular strategies of today**, with **Strata** as the primary reference, FreeToken second, and

@@ -53,7 +53,7 @@ Parameters marked "est." freeze when step 0's evidence lands (§8).
 | **HFm** / **HFx** | HF transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py` / `modular_qwen4_exp.py` | — |
 | **SG** | sglang 0.5.21, `srt/models/qwen4_exp_mtp.py` | — |
 
-"R §3.1" is X's study of Strata's tiers, `docs/brainstorm/v1-offload-research.md` §3.1.
+"R §3.1" is X's study of Strata's tiers, read from Strata's public source (unpublished study, §3.1).
 
 ## 0. The model
 

@@ -21,3 +21,8 @@ reading: start from [the README](../../README.md), [the design](../design.md) an
 | [v1-kv-tiers.md](v1-kv-tiers.md) | v1 K: KV and checkpoint tiers under the prefix index |
 | [v1-moe-prefill.md](v1-moe-prefill.md) | v1: MoE prefill speed |
 | [v1-flash-next.md](v1-flash-next.md) | v1 FN: Qwen3.8-Flash-Next and its offload, compared with Strata |
+
+Paths under `local/` (e.g. `local/fn/`, `local/models/`, `local/tmp/`) name the authors' untracked working files:
+downloads of public models, clones of the reference engines at their public commits, files built from those with the
+engines' own public tools, and scratch output. They are not part of the repository and hold no other source of
+information.

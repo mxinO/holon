@@ -17,7 +17,7 @@ milestone X's panel left for K (`docs/dev/v1-offload.md` §11, lines 585-600). T
   5080 or 5090 with an agent trace.
 
 Evidence base:
-- the local research note `docs/brainstorm/v1-offload-research.md` ("R §n"; not published), §3.7 (KV offload
+- the unpublished study of the reference engines' public sources ("R §n"), §3.7 (KV offload
   systems), §3.1 C1–C4 (Strata), §3.1b KG1–KG3 (Project Maya), §4.1–4.2 (K1–K4);
 - the pi agent test (`docs/dev/agent-test-pi-rtx5090.md`);
 - M0.3's checkpoint design (`docs/dev/m03-qwen38.md` D4, §4.8; `docs/dev/m03-in-step-snapshot.md`);
