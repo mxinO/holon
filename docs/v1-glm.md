@@ -1355,6 +1355,17 @@ DSA's selection (≈ 2.3× the unsigned form's time at 8,192 blocks: FN's decode
 on the 5090 (memory-bound there). Step 6 also checks the mode (i) 4K prefill on natural text (1.02 of Maya's
 against §7.4's 1.25 on random-id prompts) and finds the cause before step 7 if it holds.
 
+**The lead's calls during step 7 (2026-10-26/27):** 1. D8p (the ring of parts under exclusive tiers) on hold behind
+C's levers L1–L3, rev 2's fixes kept (D8p); 2. **L1, the loan's fixed bytes:** a loan that holds the prompt-logprob
+head only on the steps that ask for prompt logprobs would need a core seam (the plan the store sees does not carry
+them: the engine hands prompt-logprob rows to the executor apart), and it is not taken; nor is a smaller loan that
+lets prompt-logprob steps overflow into the fraction's headroom (the headroom is the raw allocations': lazy module
+loads, graph instantiation). `moe.loan_fixed_mib` is sized instead to the full model's measured floor plus the head
+plus a small margin (≈ 0.5 + 0.15 + 0.05 GiB ≈ 700 MiB, from `spikes/glm7/loan_need.py`), the loan's overflow staying
+0 (the store's counter, the lock check); 3. the 32K tail stays at 32K steps (16K / 8K steps cost more prefill than
+they save after the prompt, §13 step 7); 4. `expert_io.beside_ctas` 2; 5. the background refill parked (the drive is
+busy after a prompt).
+
 **Owner questions** (each with the recommended default, which the build follows until answered):
 
 | # | Question | Recommended default |
