@@ -7,6 +7,7 @@ The judge runs outside the engine and drives it only as a client (design §10.3)
 | `golden` | L2 | HF recorder: teacher-forced top-20 logprobs, the target token's logprob and the tail mass, one forward per sequence |
 | `compare` | L2 | candidate vs golden: KL p50/p99, top-1 agreement, ΔPPL, per category; pass/fail against the floor |
 | `engine` | L2 | the candidate side: scores the prompt set through a Holon engine (`prompt_logprobs=20`) |
+| `reference` | L2 | the reference form for a model with no fp32 golden (`docs/v1-glm.md` D15a): a bf16 GPU reference (Holon all-resident), absolute budgets from pairs that should agree, the candidate judged by them |
 | `l0` | L0 | `budget(dtype, reduction_len)` and `check(candidate, reference, dtype, reduction_len)` for op oracles |
 | `q8_1` | L0, L2 | llama.cpp's int8-dot matmuls emulated per path (`mmvq`, `mmq`): q8_1 activations and the stored-sum offsets; the reference of the GGUF kernels' L0 and of Tier B's floor |
 | `snapshot` | snapshot | records a fixed trace's token streams and a sha256 per delta (request, sequence, step); compares runs for byte identity; `trace(prompts)` is the snapshot trace of design §7.10 (long context, a prefix hit, the decode batch shrinking through every graph bucket up to 64, seeded n > 1, logprobs, prompt logprobs) |
@@ -36,6 +37,12 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge l2 --model Qwen/Qwen3-0.6B --pr
 # any two recordings (e.g. a saved candidate)
 python -m holon_judge compare --golden <golden> --candidate <recording> [--floor <floor>...] [--json <file>]
 # (several floors: one per kernel path the candidate's calls take, e.g. mmq and mmvq; every floor's budgets apply)
+# L2's reference form (a model with no fp32 golden, docs/v1-glm.md D15a): the reference, its budgets, a candidate
+python -m holon_judge reference --model <.gguf> --prompts <set> --out <ref> --oracle <its tiny-model HF test> \
+    --engine-args "<flags of an all-resident run>"
+python -m holon_judge budgets --reference <ref> --pair cross-card <a> <b> [--check chunked <a> <b>]
+python -m holon_judge score --model <.gguf> --prompts <set> --out <rec> --engine-args "<flags>" [--plant <bug>] \
+    [--reference <ref>]
 python -m holon_judge snapshot-diff a.json b.json
 ```
 

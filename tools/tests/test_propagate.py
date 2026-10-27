@@ -46,6 +46,10 @@ class Scripted:
         self.calls.append("l2")
         return self.l2_passed, "L2 " + ("PASS" if self.l2_passed else "FAIL")
 
+    def judged(self):
+        return {"form": "reference", "recordings": ["m/v1-reference.safetensors@" + "ab" * 32],
+                "budgets": ["m/v1-reference.budgets.json@" + "cd" * 32]}
+
 
 @pytest.fixture
 def current():
@@ -144,6 +148,22 @@ def test_write_stores_lock_and_snapshot(tmp_path, current):
     with pytest.raises(ValueError, match=r"binds approx plugins \['transforms.tail_skip'\]"):
         propagate.write(tmp_path, out)
     assert propagate.write(tmp_path, out, allow_approx=True).name == "2.lock"
+
+
+def test_a_lock_records_how_it_was_judged_and_an_advance_inherits_it(tmp_path, current):
+    """D15a (B-M1): the L2 that judged a lock is its `[judged]` table, beside `holon.api.Lock` (unchanged); a lock
+    advanced without L2 carries its predecessor's byte for byte, its digest still checking; none passes none on."""
+    first = propagate.write(tmp_path, propagate.decide(None, Scripted(_plan(), [_snap(), _snap()]), 86))
+    judged = locks.judged_of(first)
+    assert judged == Scripted(_plan(), []).judged() and plans.read(first).plan.plan_id == _plan().plan_id
+    advanced = propagate.decide(plans.read(first), Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()]), 86)
+    assert advanced.verdict == "advance" and advanced.judged is None
+    second = propagate.write(tmp_path, advanced, inherited=locks.judged_of(first))
+    table = lambda p: p.read_text().partition("[judged]")[2].partition("\n\n")[0]       # noqa: E731
+    assert table(second) == table(first) != "" and plans.read(second).plan.units["kern"].src == "bbbb"
+    bare = propagate.write(tmp_path, propagate.decide(plans.read(second), Scripted(
+        _plan(src="cccc", commit="c3"), [_snap(), _snap()]), 86))
+    assert locks.judged_of(bare) is None and plans.read(bare).plan.units["kern"].src == "cccc"
 
 
 def test_snapshot_engines_share_one_pool_size(monkeypatch):

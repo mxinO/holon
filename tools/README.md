@@ -97,7 +97,9 @@ moves, against the
 golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. A deployment whose
 quantized calls take two kernel paths (an offload store's short passes beside its long ones) gives a floor per path
 (`--floor <mmq floor> <mmvq floor>`): each call must take a path one of them emulates, and L2 must pass every
-floor's budgets. `--snapshot-runs 3`
+floor's budgets. A model with no fp32 golden is judged in L2's reference form instead (`--reference <ref>...`,
+one bf16 GPU reference per prompt set, each by the budgets beside it: `docs/v1-glm.md` D15a); the lock records
+how it was judged in a `[judged]` table, which a lock advanced without L2 inherits. `--snapshot-runs 3`
 asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
 (`docs/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
 snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can

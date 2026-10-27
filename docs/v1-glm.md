@@ -819,43 +819,67 @@ on a prompt that ends in it.
   first; steps 3–4 rebase on them, and `std.moe/units.py` and `offload.py` are edited by one step at a time.
 
 **D15a — A first lock judged against a bf16 GPU reference (`--reference`), a judge mode for every model without an
-fp32 golden** (step 8; the coordinator's call of 2026-10-27, option (a); for B and C's review). `propagate` writes a
-first lock only after L2, and L2 needs an fp32 golden and an HF floor in the activation dtype. Under the owner's rule
-(no fp32 goldens, no big-model CPU runs) GLM has neither, and HF cannot run it on any card, so every later large
-model would hit the same wall. Not taken: a lock carrying gates (c) and (d) instead of L2, which changes the meaning
-of every lock; an fp32 golden, which breaks the rule; writing it unjudged.
-- **The reference:** `holon_judge reference <model> --prompts <set> --out <rec> [engine flags]`. Holon's own engine
-  runs the model all-resident on a card that holds it (GLM: the RTX PRO 6000, `std.moe@1`, bf16, 32K steps, no
-  offload, no tiers, no drafter). It is scored by the judge's `score`, the recording a candidate makes (top-20
-  logprobs, the tail, the target logprob), with no fp32 and no CPU. The meta records `kind: reference`, the card
-  class, the plan id of the reference engine, and the settings a candidate must share (the KV format, `cpu_split`).
-  The prompt set is v1 retokenized for the model (`judge/prompts/v1-glm5_next.jsonl`, as `v1-qwen3_5`: 24 prompts,
-  up to ≈ 2.1K tokens). Recordings and budgets are tracked in `judge/goldens/<model>/`, as FN's are.
-- **Budgets, absolute and pre-registered:** `<rec>.budgets.json` holds top-1 ≥, KL mean / p50 / p99 ≤ and
-  |ΔPPL| ≤. They are calibrated from pairs that should agree, then committed before any candidate is scored (git
-  shows the order), as gate (c)'s bars were. The pairs:
-  - (i) within the reference card, one-shot against chunked at 512 tokens. On one card the deployment's store
-    changes no bits (acceptance 2), so the step is the noise left.
-  - (ii) across cards at equal settings: the PRO 6000 against the RTX 5090, both chunked at 512. That is the
-    mechanism of Q13 (mmq's split-K by SM count) on a pair that is not the candidate's. At 32K steps the
-    candidate's pair would itself be the 5090 deployment against the reference.
+fp32 golden** (step 8; the coordinator's call of 2026-10-27, option (a); **reviewed by B and C, changes applied**).
+`propagate` writes a first lock only after L2, which needs an fp32 golden and an HF floor. Under the owner's rule (no
+fp32 goldens, no big-model CPU runs) GLM has neither, HF cannot run it on any card, and the same holds for every
+later large model. Not taken: a lock carrying gates (c) and (d) instead of L2, which changes every lock's meaning; an
+fp32 golden, which breaks the rule; an unjudged lock.
+- **The reference** (`holon_judge reference <model> --prompts <set> --out <rec> --oracle <path> [engine flags]`):
+  Holon's own engine runs the model all-resident on a card that holds it, scored by the judge's `score`. That is the
+  candidate's recording (top-20, tail, target logprob), with no fp32 and no CPU. GLM: the RTX PRO 6000, `std.moe@1`,
+  bf16, `max_seqs` 1 at 32K steps, or 16K if 32K does not fit (step 5: the bits do not follow the step).
+  - The meta records `kind: reference`, the card class, the step, the plan id, the settings a candidate must share
+    (KV format, CPU split) and `oracle`: the model's tiny-model HF match (B-m3), a tracked test or evidence file that
+    must exist. GLM's is `plugins/tests/test_glm5_next_cpu.py`, gate (a).
+  - A self-reference bounds drift; it does not arbitrate correctness. Re-recording one (after a fix to a kernel the
+    reference also runs) is owner-visible, as a golden's is: by the tools only, and named in the step's record.
+- **Two prompt sets, judged separately (C-M2), both required to pass:** v1 retokenized (`v1-glm5_next`, 24 prompts,
+  32.5K tokens, up to 2,069) and `v1-long-glm5_next` (8 prompts, 119.6K tokens, up to 31K: DSA's sparse regime,
+  KDA's sub-batch carries, the 32K step's passes and loan). One reference recording per set, each with its own
+  budgets.
+- **Budgets, absolute and pre-registered** (`<rec>.budgets.json`, committed before any candidate is scored; git shows
+  the order). They are calibrated from pairs that should agree:
+  - (ii), the source: across cards at equal settings, the PRO 6000 against the RTX 5090, both chunked at 512 tokens,
+    with the 5090 in its plainest fit: RAM holds every expert, no lending, no ring, no tail (C-m1). Its side is the
+    card's kernels and nothing else, so a store bug cannot widen its own budget. This is Q13's mechanism, mmq's
+    split-K by SM count.
+  - (i), a check, not a source: the reference card, one-shot against chunked at 512 (likely bitwise; recorded either
+    way).
 
-  Each budget is `compare`'s L2 rule with the worst calibration pair in the floor's place: KL ≤ 2× its KL, top-1 ≥
-  its top-1 − 0.25 points, |ΔPPL| ≤ 0.25% + 2.5 × √2 × its standard error. They are fixed numbers, not recomputed
-  per candidate.
-- **The comparison:** `compare(reference, candidate, budgets=…)`. The KL and top-1 code is unchanged, with the
-  reference in the golden's place. There is no path check: two Holon runs of one kernel family differ in path by
-  card (the mmq / mmvq crossover), and pair (ii) carries that. The setting check (KV format, CPU split) stays.
-- **Where it plugs in:** `propagate` / `tune --new-model --reference <rec>`, in place of `--golden` plus `--floor`
-  (refused together). The lock records how it was judged, `judged = {form = "reference" | "golden", recording =
-  "<name>@<sha256>"}`, written by the tools when L2 runs. Locks advanced without L2 inherit their predecessor's.
-  This is tools and judge code only: `plans.loads` reads the plan fields it knows, and the digest covers the
-  whole file.
-- **What it catches, and what it does not:** a deployment's own errors, offload, tiers, lending, staging, step
-  sizes and a card's kernel paths, measured against the same model run plainly. It cannot catch an error the
-  reference shares (a wrong kernel on every path). Gates (a), (a′), (c), (d) and (f) keep that. **It must bite:**
-  before the first lock, `glu_clamp_off` and `kda_state_not_carried` on the full model (the RTX 5090, the lock's
-  flags) must fail the committed budgets, and the clean candidate must pass them.
+  The rules use the worst pair with prompts as the unit (a block bootstrap over prompts; the cascade correlates
+  positions within one):
+  - KL p50 ≤ 2× (the operative KL statistic) and KL p99 ≤ 2×. KL mean is reported only: any bit change saturates it
+    (gate (c): 0.055–0.058).
+  - Top-1 ≥ the pair's − max(0.25 points, 2.5·√2·SE).
+  - ΔPPL one-sided, candidate PPL ≤ reference × (1 + 0.25% + 2.5·√2·SE). The two-sided form is reported.
+
+  The false-fail rate is measured from the calibration recordings (their bootstrap resamples judged by the budgets)
+  and written into the budgets file.
+- **The comparison** (`holon_judge compare --reference <rec> --candidate <rec>`): `compare`'s KL, top-1 and ΔPPL
+  code, with the reference in the golden's place and the committed numbers in the floor's. There is no path check
+  (paths differ by card, which pair (ii) carries); the setting check stays.
+- **The lock (B-M1: no core, `holon.api.Lock` unchanged):** `propagate` / `tune --new-model --reference <rec>...`, in
+  place of `--golden` plus `--floor` (refused together). Each recording's prompt set comes from its meta, and a
+  recording without an `oracle` that exists is refused.
+  - `locks.dumps(lock, judged=None)` writes a `[judged]` table after `[snapshot]`: `form = "reference"`,
+    `recordings` and `budgets` as `<name>@<sha256>` (B-m2; the golden form: `recording` and `floors`). A tools-side
+    `judged_of(path)` reads it from the raw TOML.
+  - An advance copies its predecessor's `[judged]` byte for byte; a lock with none writes none. `plans.loads` ignores
+    the table and the digest covers it.
+  - `check_locks` verifies that every `[judged]` file exists under `judge/goldens/` with that sha256 (B-m1).
+- **It must bite (C-M1, §6.3's rule: must-fail only at ≥ 10× a budget, else reported).** Run on the RTX 5090 at the
+  lock's flags, against the committed budgets:
+  - must fail, cross-card: an RTX 5090-only fault in dense mmq's split-K fixup (the last K split dropped where the
+    card has 170 SMs);
+  - must fail, deployment: `router_bias_in_weights`, and `kda_state_not_carried` on the long set;
+  - must pass, control: the same fixup summed in another order;
+  - reported, not gated: one layer's two experts swapped (the detection limit).
+
+  `glu_clamp_off` cannot fire in prompt scoring (mmvq only), and on v1 alone `kda_state_not_carried` reaches ≈ 0.5%
+  of positions.
+- **What it catches:** a deployment's own errors (offload, tiers, lending, staging, step sizes, a card's kernel
+  paths) against the same model run plainly. It cannot catch an error the reference shares; gates (a), (a′), (c), (d)
+  and (f) keep that.
 
 **D16 — Accuracy is the owner's method (FN §18), from the start, and again on the shipped tree** (acceptance 1).
 

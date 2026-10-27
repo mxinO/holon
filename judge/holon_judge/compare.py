@@ -183,16 +183,21 @@ def _summarize(rows: dict[str, torch.Tensor], k: int) -> Metrics:
                    dppl=dppl, dppl_se=se * (1 + dppl), missing=rows["missing"].sum().item() / (n * k))
 
 
-def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metrics]]:
-    """Overall and per-category metrics of `cand` against `golden`."""
+def position_rows(golden: Recording, cand: Recording) -> dict[str, torch.Tensor]:
+    """Per scored position: top-1 agreement, the golden's top-2 gap, KL, imputed ids, ΔNLL and the sequence."""
     if golden.meta["prompts_sha256"] != cand.meta["prompts_sha256"] or not torch.equal(golden.offsets, cand.offsets):
         raise ValueError("recordings are of different prompt sets")
     kl, missing = kl_topk(golden, cand)
-    rows = {"agree": golden.topk_ids[:, 0] == cand.topk_ids[:, 0],
+    return {"agree": golden.topk_ids[:, 0] == cand.topk_ids[:, 0],
             "gap": golden.topk_lp[:, 0] - golden.topk_lp[:, 1],
             "kl": kl, "missing": missing,
             "dnll": golden.target_lp.double() - cand.target_lp.double(),
             "seq": golden.seq_index()}
+
+
+def metrics(golden: Recording, cand: Recording) -> tuple[Metrics, dict[str, Metrics]]:
+    """Overall and per-category metrics of `cand` against `golden`."""
+    rows = position_rows(golden, cand)
     seq_cats = golden.meta["categories"]
     names = list(dict.fromkeys(seq_cats))
     row_cat = torch.tensor([names.index(c) for c in seq_cats])[rows["seq"]]

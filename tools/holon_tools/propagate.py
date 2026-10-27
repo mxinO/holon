@@ -38,7 +38,7 @@ from holon.api import Binding, Lock, Plan, UnitPin, canonical_hash
 from holon.core import plans
 from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import Installed, discover
-from holon_judge import snapshot
+from holon_judge import reference, snapshot
 from holon_judge.compare import compare
 from holon_judge.engine import score
 from holon_judge.golden import model_meta
@@ -46,6 +46,9 @@ from holon_judge.recording import PromptSet, Recording
 from holon_judge.snapshot import Request, Snapshot
 
 from . import locks
+
+PROMPTS = pathlib.Path(__file__).resolve().parents[2] / "judge" / "prompts"
+GOLDENS = PROMPTS.parent / "goldens"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -55,6 +58,7 @@ class Outcome:
     evidence: list[str]
     lock: Lock | None = None           # what to append (advance; approve once approved)
     snapshot: Snapshot | None = None   # the new lock's snapshot trace (None: not run-identical)
+    judged: dict | None = None         # the L2 that judged it (`Checks.judged`); None: L2 did not run (inherited)
 
 
 class Checks(Protocol):
@@ -66,6 +70,9 @@ class Checks(Protocol):
 
     def l2(self) -> tuple[bool, str]:
         """The judge's bounded check against the reference: (passed, report)."""
+
+    def judged(self) -> dict | None:
+        """How `l2` judges, for the lock's `[judged]` table (D15a)."""
 
 
 CODE = {"commit", "uv_lock"}       # with the `unit:*` pins, the plan keys a byte-identical trace may advance
@@ -106,7 +113,7 @@ def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | N
         return Outcome("advance", changes, ["snapshot trace byte-identical", covered], lock, first)
     passed, report = checks.l2()
     return Outcome("approve" if passed else "fail", changes, [*evidence, covered, report], lock if passed else None,
-                   None if unstable else first)
+                   None if unstable else first, checks.judged() if passed else None)
 
 
 def _divergence(previous: Snapshot | None, new: Snapshot) -> str:
@@ -139,9 +146,27 @@ def _widths(meta: dict) -> str:
 
 @dataclasses.dataclass
 class L2Inputs:
+    """L2's golden form (an fp32 golden and floors, one per kernel path the deployment takes: judge `compare`), or its
+    reference form (D15a: bf16 GPU references, each judged by its committed budgets on its own prompt set)."""
     prompts: PromptSet
-    golden: pathlib.Path
-    floors: tuple[pathlib.Path, ...]      # one per kernel path the deployment takes (judge `compare`)
+    golden: pathlib.Path | None = None
+    floors: tuple[pathlib.Path, ...] = ()
+    references: tuple[pathlib.Path, ...] = ()
+
+    def judged(self) -> dict:
+        """The lock's `[judged]` table: the form and every file that decided the verdict, `<name>@<sha256>` with the
+        name relative to `judge/goldens/` where it lies there."""
+        if self.references:
+            return {"form": "reference", "recordings": [_named(r) for r in self.references],
+                    "budgets": [_named(reference.budgets_path(r)) for r in self.references]}
+        return {"form": "golden", "recording": _named(self.golden), "floors": [_named(f) for f in self.floors]}
+
+
+
+def _named(path: pathlib.Path) -> str:
+    path = pathlib.Path(path).resolve()
+    name = path.relative_to(GOLDENS).as_posix() if path.is_relative_to(GOLDENS) else path.name
+    return f"{name}@{reference.sha256(path)}"
 
 
 class EngineChecks:
@@ -174,9 +199,14 @@ class EngineChecks:
             self.pool_bytes = engine.ledger.device_bytes()
         return engine
 
+    def judged(self) -> dict | None:
+        return None if self.inputs is None else self.inputs.judged()
+
     def l2(self) -> tuple[bool, str]:
         if self.inputs is None:
-            return False, "L2: no golden and floor given (pass the model's recorded ones)"
+            return False, "L2: no golden and floor, or reference, given (pass the model's recorded ones)"
+        if self.inputs.references:
+            return self._l2_reference()
         golden, prompts = Recording.load(self.inputs.golden), self.inputs.prompts
         need = max(len(p.ids) for p in prompts.prompts) + 1
         engine = self._fresh(dataclasses.replace(self.config, max_model_len=max(self.config.max_model_len, need)))
@@ -184,6 +214,25 @@ class EngineChecks:
         floors = [Recording.load(f) for f in self.inputs.floors]
         result = compare(golden, score(engine, prompts, golden.k, meta), floors)
         return bool(result.passed), result.table()
+
+    def _l2_reference(self) -> tuple[bool, str]:
+        """Each reference's prompt set scored on a fresh engine and judged by its budgets (D15a): every set must
+        pass, each reported apart (a long-context error is not diluted by the short set)."""
+        passed, reports = True, []
+        for path in self.inputs.references:
+            ref = Recording.load(path)
+            if failed := reference.oracle_failures(ref.meta):
+                return False, f"L2: {path.name}: {'; '.join(failed)}"
+            prompts = PromptSet.load(PROMPTS / ref.meta["prompts"])
+            need = max(len(p.ids) for p in prompts.prompts) + 1
+            engine = self._fresh(dataclasses.replace(self.config, max_model_len=max(self.config.max_model_len, need)))
+            meta = model_meta(pathlib.Path(self.config.model)) | {
+                "dtype": str(self.config.dtype).removeprefix("torch."), "gpu_class": engine.ctx.fingerprint.gpu}
+            budgets = reference.Budgets.load(reference.budgets_path(path))
+            result = reference.judge(ref, score(engine, prompts, ref.k, meta), budgets, reference.sha256(path))
+            passed &= result.passed
+            reports.append(result.table())
+        return passed, "\n".join(reports)
 
     def _fresh(self, config: EngineConfig) -> Engine:
         self._built = None
@@ -205,9 +254,11 @@ def approx(plan: Plan, installed: dict[str, Installed] | None = None) -> list[st
     return sorted(n for n in plan.units if n in installed and installed[n].manifest.numerics == "approx")
 
 
-def write(plans_dir: str | pathlib.Path, outcome: Outcome, allow_approx: bool = False) -> pathlib.Path:
+def write(plans_dir: str | pathlib.Path, outcome: Outcome, allow_approx: bool = False,
+          inherited: dict | None = None) -> pathlib.Path:
     """Append the outcome's lock and store its snapshot, if it has one; a lock binding an `approx` plugin only with
-    `allow_approx`."""
+    `allow_approx`. Its `[judged]` table is the outcome's L2, else `inherited`: the predecessor's, byte for byte (a
+    lock with none passes none on)."""
     lock, snap = outcome.lock, outcome.snapshot
     if lock is None:
         raise ValueError(f"nothing to write for outcome {outcome.verdict!r}")
@@ -218,7 +269,7 @@ def write(plans_dir: str | pathlib.Path, outcome: Outcome, allow_approx: bool = 
         path = snapshot_path(plans_dir, lock.plan, lock.snapshot)
         if not path.exists():
             dataclasses.replace(snap, meta=snap.meta | {"plan_id": lock.plan.plan_id}).save(path)
-    return locks.append(plans_dir, lock)
+    return locks.append(plans_dir, lock, outcome.judged if outcome.judged is not None else inherited)
 
 
 def report(outcome: Outcome) -> str:

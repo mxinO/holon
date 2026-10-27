@@ -422,6 +422,79 @@ def glu_clamp_off() -> Iterator[None]:
     print(f"plant glu-clamp-off fired: {dict(fired)}", file=sys.stderr)
 
 
+STREAMK_SMS = 170       # the RTX 5090's: the card whose dense mmq split-K the D15a plants fault
+
+
+def _dense_mmq_on(sms: int, fault) -> Iterator[None]:
+    """kernels.ggml_cuda's dense mmq calls (`QLinear` past its mmvq rows; expert calls always tile) computed by
+    `fault(call, self, x, parts)` on a card of `sms` SMs only, as mmq's stream-k splits K by the SM count (Q13).
+    Reports how often it fired."""
+    from holon_plugins.kernels.ggml_cuda import plugin
+
+    call, fired = plugin.QLinear.__call__, collections.Counter()
+
+    def planted(self, x, parts):
+        rows = len(x if isinstance(x, torch.Tensor) else x.x)
+        if rows <= self.mmvq_rows or torch.cuda.get_device_properties(self.device).multi_processor_count != sms:
+            return call(self, x, parts)
+        fired[_when()] += 1
+        return fault(call, self, x if isinstance(x, torch.Tensor) else x.x, parts)
+    with mock.patch.object(plugin.QLinear, "__call__", planted):
+        yield
+    print(f"plant dense-mmq fired: {dict(fired)}", file=sys.stderr)
+
+
+def _k_masked(x: torch.Tensor, keep: slice) -> torch.Tensor:
+    out = torch.zeros_like(x)
+    out[:, keep] = x[:, keep]
+    return out
+
+
+@contextlib.contextmanager
+def streamk_fixup_dropped() -> Iterator[None]:
+    """D15a's cross-card must-fail (C-M1): on the RTX 5090 alone (`STREAMK_SMS`), kernels.ggml_cuda's mmq skips the
+    stream-k fixup of its dense calls (`qlinear-large-no-fixup`, the native plant): every dense projection that splits
+    K is wrong on that card, right on every other. Elsewhere it does not fire, and says so."""
+    if torch.cuda.get_device_properties(0).multi_processor_count != STREAMK_SMS:
+        print(f"plant streamk-fixup-dropped fired: {{}} (not a {STREAMK_SMS}-SM card)", file=sys.stderr)
+        yield
+        return
+    with qlinear_fixup(2, "streamk-fixup-dropped"):
+        yield
+
+
+@contextlib.contextmanager
+def streamk_fixup_reordered() -> Iterator[None]:
+    """D15a's must-pass control (C-M1): on the RTX 5090 alone, a dense mmq call summed as its two K halves, each
+    rounded to the output dtype, added in f32: the same values in other bits."""
+    def fault(call, self, x, parts):
+        half = self.k // 2 // 256 * 256 or self.k // 2
+        lo, hi = (call(self, _k_masked(x, keep), parts).float() for keep in (slice(0, half), slice(half, None)))
+        return (hi + lo).to(self.out_dtype)
+    yield from _dense_mmq_on(STREAMK_SMS, fault)
+
+
+@contextlib.contextmanager
+def experts_swapped_one_layer() -> Iterator[None]:
+    """D15a's detection limit, reported not gated (C-M1): the first routed layer's experts 0 and 1 swapped, as if their
+    slots were exchanged. Reports how often it fired."""
+    from holon_std.moe import units
+
+    route, fired, first = units.MoE._route, collections.Counter(), []
+
+    def planted(self, x):
+        weights, ids, xin = route(self, x)
+        if not first:
+            first.append(self.layer)
+        if self.layer != first[0]:
+            return weights, ids, xin
+        fired[_when()] += 1
+        return weights, torch.where(ids == 0, 1, torch.where(ids == 1, 0, ids)).to(ids.dtype), xin
+    with mock.patch.object(units.MoE, "_route", planted):
+        yield
+    print(f"plant experts-swapped-one-layer fired: {dict(fired)}", file=sys.stderr)
+
+
 def _mla_variant(name: str, old: str, new: str) -> Iterator[None]:
     """kernels.qsa_triton's `mla_attend` from its own source with `old` replaced by `new` (once), in a module of its
     own (Triton reads a kernel's source from its file), the plugin's calls routed to it. Reports how often it fired."""
@@ -472,6 +545,9 @@ GLM_PLANTS = {"mhc_comb_transposed": mhc_comb_transposed, "mhc_sinkhorn_short": 
 # (a′)'s plants (the GPU tiny run, L0): kernel paths the CPU providers do not take
 GLM_GPU_PLANTS = {"dsa_decode_select_shift": dsa_decode_select_shift, "kda_gate_softplus": kda_gate_softplus,
                   "router_prompt_softmax": router_prompt_softmax, "glu_clamp_off": glu_clamp_off}
+# L2's reference form (docs/v1-glm.md D15a): must fail / must pass / reported, against a reference's budgets
+REFERENCE_PLANTS = {"streamk_fixup_dropped": streamk_fixup_dropped, "streamk_fixup_reordered": streamk_fixup_reordered,
+                    "experts_swapped_one_layer": experts_swapped_one_layer}
 
 
 @contextlib.contextmanager
@@ -2511,7 +2587,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
     "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
     # GLM-5.3-Flash (docs/v1-glm.md §6.3): the tiny CPU model's
-    **GLM_PLANTS, **GLM_GPU_PLANTS,
+    **GLM_PLANTS, **GLM_GPU_PLANTS, **REFERENCE_PLANTS,
     # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
