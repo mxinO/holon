@@ -101,6 +101,28 @@ def test_identity_and_detection(source):
     assert detect_source(plugins, str(source.path)) == "gguf" and detect_source(plugins, str(HF)) == "hf_safetensors"
 
 
+def test_a_files_digest_is_read_once_until_the_file_changes(tmp_path, monkeypatch):
+    """A restart reads none of a file's bytes for its digest (a 75 GiB checkpoint's digest reads 75 GiB); a changed
+    file is hashed again."""
+    import hashlib
+    import os
+
+    from holon_std.weights.gguf import source as gguf_source
+
+    monkeypatch.setattr(gguf_source, "_CACHE", tmp_path / "cache")
+    reads = []
+    real = hashlib.file_digest
+    monkeypatch.setattr(gguf_source.hashlib, "file_digest", lambda f, how: reads.append(f.name) or real(f, how))
+    path = tmp_path / "w.gguf"
+    path.write_bytes(b"a" * 100)
+    first = gguf_source._file_digest(path)
+    assert gguf_source._file_digest(path) == first == hashlib.sha256(b"a" * 100).hexdigest() and len(reads) == 1
+    mtime = path.stat().st_mtime_ns
+    path.write_bytes(b"b" * 100)                         # same size: the change times tell (a coarse clock aside)
+    os.utime(path, ns=(mtime + 10**9, mtime + 10**9))
+    assert gguf_source._file_digest(path) == hashlib.sha256(b"b" * 100).hexdigest() and len(reads) == 2
+
+
 REPOS = {"o/gguf": {"Qwen3-8B-Q4_K_M.gguf": 5, "Qwen3-8B-UD-Q4_K_M.gguf": 6, "Qwen3-8B-UD-IQ3_XXS.gguf": 4,
                     "BF16/Qwen3-8B-BF16-00001-of-00002.gguf": 9, "BF16/Qwen3-8B-BF16-00002-of-00002.gguf": 9,
                     "UD-Q8_K_XL/Qwen3-8B-UD-Q8_K_XL.gguf": 8, "mmproj-F16.gguf": 1, "config.json": 1, "README.md": 1,
