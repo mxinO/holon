@@ -528,7 +528,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
   k ≥ 4 experts a call (step 6).
 - **Core:** none.
 
-**D8p — Step 7: the staging ring of parts under exclusive tiers (the deferred (b)+(e) half). On hold** (the lead's call on the panel's review, 2026-10-26): built only if mode (ii) 1K stays below ≈ 0.95 after C's cheaper levers L1–L3 (§13 step 7); rev 2's fixes below are kept for that case. **The motivation table's displaced counts and "routed SSD-only" column are inflated** (C's M1: the first probe counted an expert split across VRAM and RAM as on the SSD); its prompt bytes stand; the per-piece probe re-derives the rest.
+**D8p — Step 7: the staging ring of parts under exclusive tiers (the deferred (b)+(e) half). Superseded by D8s** (its rounds variant, keeping rev 2's `moe_tiers@3`; the ring of two parts on a side stream is not built). **Was on hold** (the lead's call on the panel's review, 2026-10-26): built only if mode (ii) 1K stays below ≈ 0.95 after C's cheaper levers L1–L3 (§13 step 7); rev 2's fixes below are kept for that case. **The motivation table's displaced counts and "routed SSD-only" column are inflated** (C's M1: the first probe counted an expert split across VRAM and RAM as on the SSD); its prompt bytes stand; the per-piece probe re-derives the rest.
 
 *Why, measured* (`spikes/glm7/after_record.py`, then `after_replay.py`: the bench's own 24 requests through the mode (ii) lock on the RTX 5090,
 the tier of every expert before and after each prompt, every decode step's routes and SSD bytes; §13 step 7). A prompt
@@ -638,7 +638,7 @@ vehicle with RAM capped.
 CPU lane (Q7).
 
 **D8s — Step 7: a prompt step's misses staged in rounds through a small fixed slot set (D8p's "RAM misses in rounds
-on main"), for B and C's review.** *Why* (the source and log study of Maya, `maya-prompt-reads`; the per-piece probe,
+on main"). Reviewed by B and C (`b-d8sw`, `c-d8sw`); their fixes below, built after D8w.** *Why* (the source and log study of Maya, `maya-prompt-reads`; the per-piece probe,
 §13 step 7): under full exclusive tiers every expert a prompt step lends costs one SSD-only expert read back, so the
 count lent is the bytes. Holon lends ≈ 786 / 1,024 / 2,944 experts a prompt at 1K / 4K / 32K, Maya ≈ 258 / 391 /
 605–940. Below the 32K tail (D8w), the largest share is staging: a stage step lends a layer's most missing pieces a
@@ -664,13 +664,23 @@ in experts — where Maya stages through ≈ 12 slots and a 96-expert landing ri
   (one role's entry in another part), `spare_lent_outside_tail`.
 - **Contracts.** `moe_tiers@3` replaces @2 (B's rev 2): its oracle in `std.moe.reference`, the CUDA provider in
   `kernels.expert_io`, an L0 against the resolve providers' `stage[r, i]` convention. No core lines.
+- **The review's fixes.** *Parts per expert* (C-M1): `moe_tiers@3` orders by expert; an expert with any piece on the
+  SSD goes wholly into an SSD round, its RAM pieces gathered into that round's slots — the part is per expert, the
+  slot per (expert, class); `part_one_role` is its plant. *Read-ahead hits through the rounds* (C-M2), as their own
+  parts after part −1, so the borrow is Q + A_od = 64 a class at every size (not 199 at ≥ 2,048 tokens). *One path
+  for both policies* (B-m1): F11's admitted pieces get outside slots past the rounds, so no later round overwrites
+  them before the moves copy them; the exclusive full-staging branch goes. *`spare_lent_outside_tail` judged by a
+  counter* (C): the reserved spares lent in a non-tail step, asserted 0 (bytes and outputs cannot see it).
 - **Predicted on the bench workload** (the probe's L3 + L1 baseline: 1K / 4K prompts read 10.63 / 14.69 GiB, 3.34 /
-  5.71 of it past the routed SSD-only set; inferred): staging lends ≈ 30–60 experts instead of ≈ 230, so ≈ −170–200
-  lent at 1K and 4K → prompt reads ≈ 8.6–9.9 / ≈ 12.8–13.5 GiB; 32K −0.5–1.5 GiB. Cells: prefill 0.705 → **0.80–0.86**,
-  0.851 → **0.93–0.98**, 0.730 → 0.73–0.76; decode 0.889 → ≈ 0.91, 0.848 → ≈ 0.90, 0.71 unchanged. The probe measures
-  the lent count, the prompt bytes and their excess before the table.
+  5.71 of it past the routed SSD-only set; the probe's marginal 4.4 / 5.7 MiB of excess a lent expert; C's, with the
+  fixes; inferred): ≈ −170–200 experts lent at 1K and 4K → prompt reads ≈ 9.4–9.9 / ≈ 13.6–13.7 GiB; 32K −0.1–0.5
+  GiB beside D8w. Cells: prefill 0.705 → **≈ 0.75–0.78** (the 1K step's 0.79 s of idle drive unchanged: no read-ahead
+  below 2,048 tokens), 0.851 → **≈ 0.91–0.93**. The probe measures the lent count, the bytes and their excess first.
+- **A separate 1K lever (C-m2):** read-ahead below 2,048 tokens, two layers deep (a 1K step routes ≈ 89% of a layer's
+  experts: ≈ 11% wasted), filling the 0.79 s the drive sits idle: ≈ +5–9% at 1K, replayed with the probe first, built
+  after D8s if it holds.
 
-**D8w — Step 7: a whole-expert tail, for B and C's review.** *Why* (the same study): `lend_tail` lends the whole
+**D8w — Step 7: a whole-expert tail. Reviewed by B and C (`b-d8sw`, `c-d8sw`); their fixes below; built first.** *Why* (the same study): `lend_tail` lends the whole
 experts holding the gate/up class's last n slots, but the activations use only the gate/up bytes; their down pieces
 (2.56–3.06 MiB against gate/up's 4.33) are displaced too, so each tail byte displaces ≈ 1.64 × its size. At 32K the
 tail is ≈ 2,665 experts — more than Maya's whole borrow — and costs ≈ 13 of the 18 GiB the 32K prompt reads past its
@@ -682,7 +692,7 @@ routed set, and the 32K decode's 79 MB a token.
   experts (their down slots now empty, anywhere in their class), it moves the resident down pieces that hold each
   down class's last m slots into those freed slots (device copies, ≈ m × 2.6 MiB; residency, host mirror and delta
   records updated as an admission's), leaving every class's tail free and contiguous. The loan is then up to three
-  ranges (gate/up's and each down class's tail).
+  ranges: one range per class with a tail.
 - **Where it lands, and the core question.** The core's `ActivationLender` only says how many tokens a step lends
   (`lend_activations`); the ranges go to `activation_loan@1`, a std contract whose provider is `kernels.expert_io`'s
   pluggable allocator. So the change is **`activation_loan@2`: `use(ranges)`** (an allocation is cut from the first
@@ -691,14 +701,28 @@ routed set, and the 32K decode's 79 MB a token.
 - **The tail's sizing.** n experts such that n × gate/up + m₁ × down₁ + m₂ × down₂ ≥ the loan's bytes, m₁ + m₂ = n by
   each tail expert's down class; the largest allocations (the 16,384-row pass buffers) must fit the gate/up range
   (asserted at the profile; the down ranges take the smaller ones).
+- **The review's fixes.** *Compaction is its own slot-movement path* (B-M1): one implementation in the store after
+  the providers' `lend_tail` pick, **gated on `store.exclusive`** (FN's RAM-holds-all lending untouched); its own
+  record kind, `(g, RELOCATE, item)` with the role and both slots, which `ResidencyMap.commit` replays; `Lent` records
+  the empty-slot swaps between layers, so the step's end returns the tail range's slots to the lent experts' layers;
+  plant `compaction_return_wrong_layer`. *An optional member, not @2* (B): `activation_loan@1` gains `use_ranges(
+  ranges)` (as `overflow()` is optional), the store using it where the provider has it, so FN's 5080 locks keep
+  their site keys. *Fit* (C): allocations placed in the smallest range that holds them (the down ranges first); n
+  sized from a replay of the worst step's allocation trace through the ranges at the profile, zero overflow
+  asserted; the gate/up range must hold the 32K step's R (2 GiB) and the 16,384-row pass buffers (≈ 2 GiB); each
+  down class's tail plus staging asserted to fit with a floor of cache left (the IQ3_XXS down class gives ≈ 45% of
+  itself). *The moves fence* (C): compaction waits for the previous step's admissions (`admitted`) on the moves
+  stream; plant `compaction_beside_moves`; the "no resident piece in a loan range" check stays in
+  `compaction_map_stale`'s test.
 - **Exactness.** Placement only (the compaction's moves are byte copies, the map follows them). The tail tests
   (`test_moe_engine.py`'s tail and lending cases, bitwise against the resident store, `_bytes_exact`) run with the
   whole tail, plus a test that each loan range holds no resident piece during the step.
 - **Plants:** `tail_down_not_compacted` (a down tail slot still mapped to a resident: the loan overwrites it),
   `compaction_map_stale` (a moved piece's map not updated), `loan_range_overlap` (two ranges overlapping).
 - **Predicted on the bench workload** (the probe: 32K reads 27.86 GiB, 17.9 past its routed set, 5,337 pieces
-  displaced; inferred): ≈ 1,000 fewer experts lent at 32K → ≈ 21 GiB; prefill 0.730 → **0.85–0.95** (≈ 9.5 s of
-  compute bounds it), decode 0.71 → ≈ 0.77. The 1K / 4K steps' small tails gain ≈ 0.2–0.5 GiB. The probe measures it
+  displaced; inferred): ≈ 1,040 fewer experts lent at 32K → ≈ 21 GiB; prefill 0.730 → **≈ 0.90–1.0** (≈ 9.5 s of
+  compute bounds it; C), decode 0.71 → **≈ 0.78–0.90** (C: the low end if the tail's experts are colder than the
+  average displaced piece). Compaction costs ≈ 4.3–4.6 GiB of device copies, ≈ 6–10 ms a 32K step. The 1K / 4K steps' small tails gain ≈ 0.2–0.5 GiB. The probe measures it
   before the table.
 
 **D9 — Prefill: one 32K step per prompt in both modes (passes of 16,384), with opt-in sub-batched activations.**
