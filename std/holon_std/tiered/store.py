@@ -880,7 +880,7 @@ class TieredStore:
             return 0
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
-        self._loan_per_token = peak * LOAN_MARGIN / max(self.ctx.options.get("max_step_tokens", 1), 1)
+        self._loan_per_token = peak * LOAN_MARGIN / _profiled_tokens(self.ctx.options)
         self.tail = tail
         return self.ring_tokens
 
@@ -1280,6 +1280,15 @@ class TieredStore:
                                  f"groups are {sorted(self._order)} of {self.items} items")
             counts[self._order[int(group)]] = row
         return counts
+
+
+def _profiled_tokens(options: dict) -> int:
+    """The prompt tokens of the startup profile's worst step, whose `peak` a loan shares out by tokens:
+    `max_step_tokens` in rows of at most `max_model_len`, at most `max_seqs` of them (the core's `profile_rows`) —
+    fewer than `max_step_tokens` at a short context (`holon_tools profile --max-model-len 4096` on a 32K-step
+    deployment: shared over 32K tokens, a 1,293-token step's share was an eighth of its need)."""
+    step = max(options.get("max_step_tokens", 1), 1)
+    return max(min(step, options.get("max_seqs", 1) * options.get("max_model_len", step)), 1)
 
 
 class _Budget:

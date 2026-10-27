@@ -1081,6 +1081,23 @@ def test_a_lent_steps_loan_holds_its_fixed_bytes(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("context", [{}, {"max_seqs": 1, "max_model_len": 128}], ids=["step", "short-context"])
+def test_a_loans_share_is_of_the_profiled_steps_tokens(gpu_moe, context):
+    """The worst step's loan is its tokens' share plus the fixed bytes, its tokens those the startup profile ran: at a
+    context shorter than a step (`holon_tools profile --max-model-len 4096` on GLM's 32K-step deployment) the
+    profile's worst step is `max_seqs` rows of `max_model_len` tokens, and a share counted per `max_step_tokens` left a
+    1,293-token step 32 MiB short."""
+    file, _, _ = gpu_moe
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on",
+            "moe.loan_fixed_mib": 32}
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts, **context)
+    store, cfg = engine.ctx.shared_objects[KEY], engine.cfg
+    worst = min(cfg.max_step_tokens, cfg.max_seqs * cfg.max_model_len)
+    assert abs(store._loan_per_token * worst + (32 << 20) - store._loan_bytes) <= store._align
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_loan_overflow_is_counted_and_said_once(gpu_moe, capsys):
     """Step 5's review B m1: a lent step whose activations outgrow its loan (here its per-token share forced to 0 and
     its fixed bytes the 20 MiB floor) takes the device's own memory; the store counts each such step and its most bytes,
