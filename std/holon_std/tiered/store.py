@@ -128,8 +128,7 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0,
-                 park_tokens: int = 0) -> None:
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -137,10 +136,6 @@ class TieredStore:
         # device's own memory, which the reserve does not hold (GLM step 5: 5K-8K-token steps with prompt logprobs ran
         # out of memory at the deployment's fraction)
         self._loan_fixed = max(loan_fixed, LOAN_SLACK)
-        # `park_tokens` (`moe.park_tokens`, step 7): under exclusive tiers a prompt step of fewer tokens parks its lent
-        # experts in free RAM units only, never over RAM's coldest (at 1K / 4K a displaced RAM piece is read back about
-        # as surely as a lent one; 0: every step displaces)
-        self._park_tokens = park_tokens
         self.loan_overflows, self.loan_overflow_most = 0, 0        # lent steps that overflowed; the most bytes
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         # `ram_heat` (`moe.ram_heat`, docs/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
@@ -1068,9 +1063,8 @@ class TieredStore:
             placed &= ranks[r] < free.sum(1)[cls[:, r]]
         to = torch.stack([free_units[cls[:, r], ranks[r].clamp(0, u_n - 1)] for r in range(roles)], 1).int()
         to = torch.where(placed[:, None], to, -1)
-        # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter (a step below
-        # `park_tokens`: none — the rest goes to the SSD)
-        rest = lent & ~placed & (self.step_tokens >= self._park_tokens)
+        # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter
+        rest = lent & ~placed
         ram = (slots == -1).all(1) & (units >= 0).all(1) & ~picked
         dropped = torch.zeros(n + 1, dtype=torch.bool, device=dev)    # (+ a sink entry, as `to`'s row below)
         at = torch.arange(n, device=dev)

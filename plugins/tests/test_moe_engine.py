@@ -1446,33 +1446,24 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("lend", ["tail", "coldest"])
-def test_a_short_prompt_parks_only_into_free_units(gpu_moe, lend):
+def test_a_lending_prompt_step_stages_in_a_single_buffer(gpu_moe, lend):
     """Step 7, exclusive tiers: a lending prompt step stages in a single buffer of a layer's most missing pieces, not a
-    pass of every expert (C's L3: with the coldest lent, 3 of 8 a class here); `moe.park_tokens`: a prompt step below
-    it parks its lent experts into free RAM units only — with RAM full, none: they go to the SSD, no RAM piece is
-    displaced. The resident store's bits and every piece's bytes, either way."""
+    pass of every expert (C's L3: with the coldest lent, 3 of 8 a class here, 8 before); the resident store's bits and
+    every piece's bytes, with the tail lent and with the coldest."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": lend,
             "moe.lend_peak": "require" if lend == "tail" else "off", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
             "moe.ram_heat": 0.9, "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    params = SamplingParams(temperature=0.0, max_tokens=24, ignore_eos=True)
-    resident = _gpu_engine(file)
-    warm = resident.generate(prompts, params)          # (decode rows first: the VRAM experts warm, RAM's stay cold)
-    resident.close()
-    for park in (0, 1 << 20):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts | {"moe.park_tokens": park})
-        store = engine.ctx.shared_objects[KEY]
-        assert engine.generate(prompts, params) == warm
-        before, lends = store.parked, []
-        store.taps.append(lambda step, record, lends=lends: lends.append(record["lends"])
-                          if record["lends"] is not None else None)
-        assert _served(engine, prompts) == want
-        assert store.exclusive and store.borrowed["stage"] and (store.parked > before) == (park == 0), store.parked
-        if lend == "coldest":                          # the rounds' lending: a layer's most missing, not `prefill`
-            most = [int(x[1:].sum(0).max()) for x in lends]
-            assert any(most) and max(most) < store.prefill, most
-        assert _bytes_exact(store) == 0
-        engine.close()
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+    store, lends = engine.ctx.shared_objects[KEY], []
+    store.taps.append(lambda step, record: lends.append(record["lends"]) if record["lends"] is not None else None)
+    assert _served(engine, prompts) == want
+    assert store.exclusive and store.borrowed["stage"]
+    if lend == "coldest":                              # the rounds' lending: a layer's most missing, not `prefill`
+        most = [int(x[1:].sum(0).max()) for x in lends]
+        assert any(most) and max(most) < store.prefill, most
+    assert _bytes_exact(store) == 0
+    engine.close()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
