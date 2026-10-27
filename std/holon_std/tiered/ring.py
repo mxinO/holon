@@ -74,28 +74,32 @@ class Lent:
         else:
             held = self._held(classes)
         # an auxiliary model's classes are not lent to (their layers never borrow: `done`)
-        # a ring's halves, or a staging ring's two parts, follow the misses lending makes: `ROUNDS` rounds
-        sized = self.mode == "ring" or self.parts > 1
+        # a ring's halves, or a staging ring's two parts, follow the misses lending makes: `ROUNDS` rounds; so does a
+        # staging step's single buffer under exclusive tiers (step 7: a layer's most missing pieces, not a pass of
+        # every expert — fewer experts lent, parked and read back)
+        single = self.mode == "stage" and self.parts == 1 and s.exclusive
+        sized = self.mode == "ring" or self.parts > 1 or single
+        buffers = 1 if single else BUFFERS
         stage = torch.where(s.lending_classes, s.prefill, 0)
         for k in range(1, 1 + (ROUNDS if sized else 1)):
-            want = self._want(res, classes) if sized else stage
+            want = self._want(res, classes, buffers) if sized else stage
             if k == ROUNDS:                                                  # the last: the worst case
-                want = torch.where(held < want, BUFFERS * -(-experts // self.parts), want)
-            if self.parts > 1:                                               # (a pass's worth: no ring needed)
+                want = torch.where(held < want, buffers * -(-experts // self.parts), want)
+            if self.parts > 1 or single:                                     # (a pass's worth: no ring needed)
                 want = want.clamp(max=s.prefill)
             s.lend_needs[k] = (want - held).clamp_min(0)
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
-        want = self._want(res, classes) if sized else stage
-        if self.parts > 1:
+        want = self._want(res, classes, buffers) if sized else stage
+        if self.parts > 1 or single:
             want = want.clamp(max=s.prefill)
         # Per class: the ring where its lent slots hold both halves, else its layers stage into them (a small class —
         # a type few layers share, FN's IQ1_M gate/up of 3 layers — cannot lend twice a layer's misses: it no longer
         # stages every class). `ring_ok`: 1 every class streamed, 2 some, 0 none.
         ok = held >= want if self.mode == "ring" else torch.zeros_like(held, dtype=torch.bool)
         s.ring_ok.copy_((ok.all().int() + (ok.any() & ~ok.all()).int() * 2).view(1))
-        s.errors.bitwise_or_(((~ok) & (held < (want if self.parts > 1 else stage))).any().int() * SHORT)
+        s.errors.bitwise_or_(((~ok) & (held < (want if self.parts > 1 or single else stage))).any().int() * SHORT)
         self._pool(res, classes)
         # a pass's misses past the ring (an earlier pass's admissions unmapped them) go to the graphed steps' staging
         # slots; a staged class's to its pool's first ones (a ring of parts: its first `want`, over and over)
@@ -119,14 +123,14 @@ class Lent:
                 self._start(g)
         s.stage_width.copy_(torch.where(ok.all(), s.staging, s.prefill).view(1))
 
-    def _want(self, res: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
-        """Per class: twice the most pieces a layer of it misses (the target's layers) — a part of them, in a staging
-        ring of parts."""
+    def _want(self, res: torch.Tensor, classes: torch.Tensor, buffers: int = BUFFERS) -> torch.Tensor:
+        """Per class: `buffers` times the most pieces a layer of it misses (the target's layers) — a part of them, in
+        a staging ring of parts."""
         missing = (res < 0).sum(1)                                           # [G, R]
         missing[self.store.borrowing_groups:] = 0
         want = torch.zeros(len(self.store.classes), dtype=torch.int64, device=res.device)
         most = want.scatter_reduce_(0, classes.reshape(-1), missing.reshape(-1), "amax")
-        return -(-most // self.parts) * BUFFERS
+        return -(-most // self.parts) * buffers
 
     def _lent(self, classes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Per layer and role, its empty stack's slots and its experts' lent slots [G, R, 2E], and which of them serve
