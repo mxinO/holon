@@ -12,7 +12,10 @@ golden and no HF floor (the owner's rule: no fp32 goldens, no big-model CPU runs
   the positions within one). With the worst source pair: KL p50 and p99 at most `KL_FACTOR` times its own (KL mean
   is reported only: any change of bits saturates it), top-1 at least its own less max(`TOP1_DELTA`, 2.5·√2·SE), and
   the ΔPPL one-sided — the candidate's perplexity at most the reference's × (1 + `DPPL_DELTA` + 2.5·√2·SE); the
-  two-sided value is reported. The false-fail rate (the source pairs' bootstrap draws judged by the budgets) is
+  two-sided value is reported. A KL budget is also at least the 99.5th percentile of that pair's bootstrap draws:
+  with 24 or 8 prompts a resample's KL sits near 2× the point estimate, so 2× alone fails ≈ 5% of correct runs per
+  statistic, the quantile ≈ 1% (the coordinator's call, 2026-10-27, before the source pair was measured). The
+  false-fail rate (the source pairs' bootstrap draws judged by the budgets) is
   recorded with them.
 - **The comparison** (`judge`) is `compare`'s metrics with the reference in the golden's place and the budgets in the
   floor's; no kernel-path check (two Holon runs differ in path by card, which a cross-card source pair carries), the
@@ -44,6 +47,7 @@ from .compare import (
 from .recording import Recording
 
 SAMPLES = 2000            # bootstrap draws over prompts
+KL_QUANTILE = 0.995       # a KL budget is at least this quantile of the worst source pair's draws (≈ 1% false-fail)
 SEED = 0
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -97,6 +101,7 @@ class Budgets:
     dppl_max: float           # one-sided: the candidate's perplexity over the reference's, less 1
     pairs: tuple[dict, ...]   # each calibration pair's numbers, source or check
     false_fail: float         # the share of the source pairs' bootstrap draws these budgets fail
+    false_fail_by: dict       # ... by statistic (KL p50, KL p99, top-1, ΔPPL): ≈ 1% or less each by construction
 
     def failures(self, m: Metrics) -> list[str]:
         checks = [(m.kl_p50 <= self.kl_p50_max, f"KL p50 {m.kl_p50:.3e} > {self.kl_p50_max:.3e}"),
@@ -118,9 +123,10 @@ def _pair(name: str, a: Recording, b: Recording, source: bool) -> tuple[dict, di
     m = metrics(a, b)[0]
     rows = position_rows(a, b)
     draws = _draws(rows)
+    q = {f"{k}_q995": torch.quantile(draws[k], KL_QUANTILE).item() for k in ("kl_p50", "kl_p99")}
     return ({"name": name, "source": source, "bitwise": a.same_tensors(b), "n": m.n, "top1": m.top1,
              "kl_mean": m.kl_mean, "kl_p50": m.kl_p50, "kl_p99": m.kl_p99, "dppl": m.dppl,
-             "se_top1": draws["top1"].std().item(), "se_dppl": draws["dppl"].std().item()}, draws)
+             "se_top1": draws["top1"].std().item(), "se_dppl": draws["dppl"].std().item()} | q, draws)
 
 
 def calibrate(reference: str | pathlib.Path, sources: Sequence[tuple[str, Recording, Recording]],
@@ -136,18 +142,22 @@ def calibrate(reference: str | pathlib.Path, sources: Sequence[tuple[str, Record
     judged = [_pair(n, a, b, True) for n, a, b in sources]
     if not judged or all(p["bitwise"] for p, _ in judged):
         raise ValueError("no source pair differs in bits: nothing to calibrate the budgets from")
-    worst = {"kl_p50": max(p["kl_p50"] for p, _ in judged), "kl_p99": max(p["kl_p99"] for p, _ in judged),
-             "top1": min(p["top1"] for p, _ in judged), "se_top1": max(p["se_top1"] for p, _ in judged),
-             "se_dppl": max(p["se_dppl"] for p, _ in judged)}
+    worst = {k: max(max(KL_FACTOR * p[k], p[f"{k}_q995"]) for p, _ in judged) for k in ("kl_p50", "kl_p99")}
+    worst |= {
+"top1": min(p["top1"] for p, _ in judged), "se_top1": max(p["se_top1"] for p, _ in judged),
+              "se_dppl": max(p["se_dppl"] for p, _ in judged)}
     margin = DPPL_Z * math.sqrt(2)
     budgets = Budgets(sha256(reference), ref.meta["prompts"], ref.meta["prompts_sha256"],
-                      KL_FACTOR * worst["kl_p50"], KL_FACTOR * worst["kl_p99"],
+                      worst["kl_p50"], worst["kl_p99"],
                       worst["top1"] - max(TOP1_DELTA, margin * worst["se_top1"]),
                       DPPL_DELTA + margin * worst["se_dppl"],
-                      tuple(p for p, _ in judged) + tuple(_pair(n, a, b, False)[0] for n, a, b in checks), 0.0)
+                      tuple(p for p, _ in judged) + tuple(_pair(n, a, b, False)[0] for n, a, b in checks), 0.0, {})
+    by = {name: max(fail(d).double().mean().item() for _, d in judged) for name, fail in (
+        ("kl_p50", lambda d: d["kl_p50"] > budgets.kl_p50_max), ("kl_p99", lambda d: d["kl_p99"] > budgets.kl_p99_max),
+        ("top1", lambda d: d["top1"] < budgets.top1_min), ("dppl", lambda d: d["dppl"] > budgets.dppl_max))}
     fails = [((d["kl_p50"] > budgets.kl_p50_max) | (d["kl_p99"] > budgets.kl_p99_max) | (d["top1"] < budgets.top1_min)
               | (d["dppl"] > budgets.dppl_max)).double().mean().item() for _, d in judged]
-    return dataclasses.replace(budgets, false_fail=max(fails))
+    return dataclasses.replace(budgets, false_fail=max(fails), false_fail_by=by)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -174,7 +184,8 @@ class Result:
                 f"{'≤' + format(b.kl_p50_max, '.2e'):>9s} {'≤' + format(b.kl_p99_max, '.2e'):>9s} {'':9s} "
                 f"{'≤' + format(b.dppl_max, '+.3%'):>17s}",
                 f"KL mean {self.overall.kl_mean:.3e} (reported); |ΔPPL| {abs(self.overall.dppl):.3%} (two-sided, "
-                f"reported); the budgets' false-fail rate {b.false_fail:.2%}"]
+                f"reported); the budgets' false-fail rate {b.false_fail:.2%} ("
+                + ", ".join(f"{k} {v:.2%}" for k, v in b.false_fail_by.items()) + ")"]
         rows += [_row(name, m) for name, m in self.categories.items()]
         where = (f"{self.candidate.get('model')} on {self.candidate.get('gpu_class') or '-'} vs the reference on "
                  f"{self.reference.get('gpu_class') or '-'}")

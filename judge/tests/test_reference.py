@@ -43,6 +43,11 @@ def test_budgets_pass_a_candidate_at_the_pairs_noise_and_fail_a_shift(case):
     path, ref, rec, targets = case
     budgets = reference.calibrate(path, [("cross-card", ref, rec(0.05))], [("chunked", ref, ref)])
     assert budgets.pairs[1]["bitwise"] and not budgets.pairs[0]["bitwise"] and 0 <= budgets.false_fail < 0.5
+    pair = budgets.pairs[0]                 # a KL budget: 2× the pair's, at least its draws' 99.5th percentile
+    for k in ("kl_p50", "kl_p99"):
+        assert getattr(budgets, f"{k}_max") == max(2 * pair[k], pair[f"{k}_q995"])
+    assert set(budgets.false_fail_by) == {"kl_p50", "kl_p99", "top1", "dppl"}
+    assert all(v <= 0.01 for v in budgets.false_fail_by.values()), budgets.false_fail_by
     budgets.save(reference.budgets_path(path))
     loaded = reference.Budgets.load(reference.budgets_path(path))
     assert loaded == budgets and loaded.reference == reference.sha256(path)

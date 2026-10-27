@@ -848,13 +848,16 @@ fp32 golden, which breaks the rule; an unjudged lock.
 
   The rules use the worst pair with prompts as the unit (a block bootstrap over prompts; the cascade correlates
   positions within one):
-  - KL p50 ≤ 2× (the operative KL statistic) and KL p99 ≤ 2×. KL mean is reported only: any bit change saturates it
-    (gate (c): 0.055–0.058).
+  - KL p50 (the operative KL statistic) and KL p99 ≤ max(2× the pair's, the 99.5th percentile of its bootstrap
+    draws). With 24 or 8 prompts a resample's KL sits near 2× its point estimate, so 2× alone failed ≈ 5% of correct
+    draws per statistic on pair (i) (11% / 4% overall on v1 / long); the quantile brings that to ≈ 1% per statistic
+    (the coordinator's call, 2026-10-27, fixed before pair (ii) was measured). KL mean is reported only: any bit
+    change saturates it (gate (c): 0.055–0.058).
   - Top-1 ≥ the pair's − max(0.25 points, 2.5·√2·SE).
   - ΔPPL one-sided, candidate PPL ≤ reference × (1 + 0.25% + 2.5·√2·SE). The two-sided form is reported.
 
   The false-fail rate is measured from the calibration recordings (their bootstrap resamples judged by the budgets)
-  and written into the budgets file.
+  and written into the budgets file, overall and by statistic.
 - **The comparison** (`holon_judge compare --reference <rec> --candidate <rec>`): `compare`'s KL, top-1 and ΔPPL
   code, with the reference in the golden's place and the committed numbers in the floor's. There is no path check
   (paths differ by card, which pair (ii) carries); the setting check stays.
@@ -876,7 +879,9 @@ fp32 golden, which breaks the rule; an unjudged lock.
   - reported, not gated: one layer's two experts swapped (the detection limit).
 
   `glu_clamp_off` cannot fire in prompt scoring (mmvq only), and on v1 alone `kda_state_not_carried` reaches ≈ 0.5%
-  of positions.
+  of positions. **Pre-registered: a must-fail plant below 10× the budgets loosens nothing.** With 24 or 8 prompts the
+  bootstrap spread is the budget, so the lever is more prompts: add them to the set that fails to bite (longer items
+  of the 72-task set, new v1-long-style spans), re-record that set's reference, recalibrate, and run the bite again.
 - **What it catches:** a deployment's own errors (offload, tiers, lending, staging, step sizes, a card's kernel
   paths) against the same model run plainly. It cannot catch an error the reference shares; gates (a), (a′), (c), (d)
   and (f) keep that.
