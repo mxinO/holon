@@ -637,6 +637,70 @@ vehicle with RAM capped.
 *Not in this design:* the background refill (parked: the drive is busy, §13), the 32K tail (the step sweep), the
 CPU lane (Q7).
 
+**D8s — Step 7: a prompt step's misses staged in rounds through a small fixed slot set (D8p's "RAM misses in rounds
+on main"), for B and C's review.** *Why* (the source and log study of Maya, `maya-prompt-reads`; the per-piece probe,
+§13 step 7): under full exclusive tiers every expert a prompt step lends costs one SSD-only expert read back, so the
+count lent is the bytes. Holon lends ≈ 786 / 1,024 / 2,944 experts a prompt at 1K / 4K / 32K, Maya ≈ 258 / 391 /
+605–940. Below the 32K tail (D8w), the largest share is staging: a stage step lends a layer's most missing pieces a
+class, ≈ 213–224 (`Lent._want`, L3's single buffer), and the two down classes cover disjoint layers, so ≈ 2 × that
+in experts — where Maya stages through ≈ 12 slots and a 96-expert landing ring.
+- **The change.** Under exclusive tiers a prompt step's layer call stages its misses in rounds of a fixed slot set a
+  class: Q slots for the RAM misses (Q = 32, one round of today's landing rows) and the A_od landing rows' slots for
+  the SSD misses, every round's pieces gathered, computed as their own part, then the slots reused — all on the main
+  stream (no ring of two parts, no side stream: a round's gather waits on nothing but the stream). `moe_tiers@3`
+  (rev 2 of D8p, kept) writes the slots and the `part [T, k]` tensor: RAM entry k → `fixed[k mod Q]`, part ⌊k / Q⌋;
+  SSD entry j → `outside[j mod A_od]`, part P + ⌊j / A_od⌋; resident entries and read-ahead hits part −1. The expert
+  pass runs per part as the pipelined passes do (`_pipelined`'s per-part compute, here on main). `Lent` wants Q +
+  A_od (+ the read-ahead set's rows in a read-ahead step) a class instead of ≈ 213.
+- **Spares.** A step lends past F10's reserved spares only in the tail (`lend_tail`, D8a); the staging rounds never
+  release them (`_held_out` kept for every non-tail lend).
+- **Admissions.** F10 admits decode misses only, so no prompt entry outlives its round. Under F11 (prompt-row
+  admissions) the step stages as today (the store's choice, logged): its admitted pieces need slots past the pass.
+- **Exactness.** Placement and staging only: the slots a piece is read from change, its bytes do not; each part's
+  rows are its experts' own (an expert's tokens never split across parts: a piece is in one round). The exclusive
+  bitwise tests (`test_moe_engine.py`'s `ssd` cases, F10 and F11) and `_bytes_exact` run with rounds on, at ≥ 3 rounds.
+- **Plants** (each judged by bytes and outputs): `round_slots_reused_early` (round r + 1 gathered into a fixed slot
+  before round r's compute), `ssd_in_ram_slots` (an SSD entry given a RAM slot of the same round), `part_one_role`
+  (one role's entry in another part), `spare_lent_outside_tail`.
+- **Contracts.** `moe_tiers@3` replaces @2 (B's rev 2): its oracle in `std.moe.reference`, the CUDA provider in
+  `kernels.expert_io`, an L0 against the resolve providers' `stage[r, i]` convention. No core lines.
+- **Predicted on the bench workload** (the probe's L3 + L1 baseline: 1K / 4K prompts read 10.63 / 14.69 GiB, 3.34 /
+  5.71 of it past the routed SSD-only set; inferred): staging lends ≈ 30–60 experts instead of ≈ 230, so ≈ −170–200
+  lent at 1K and 4K → prompt reads ≈ 8.6–9.9 / ≈ 12.8–13.5 GiB; 32K −0.5–1.5 GiB. Cells: prefill 0.705 → **0.80–0.86**,
+  0.851 → **0.93–0.98**, 0.730 → 0.73–0.76; decode 0.889 → ≈ 0.91, 0.848 → ≈ 0.90, 0.71 unchanged. The probe measures
+  the lent count, the prompt bytes and their excess before the table.
+
+**D8w — Step 7: a whole-expert tail, for B and C's review.** *Why* (the same study): `lend_tail` lends the whole
+experts holding the gate/up class's last n slots, but the activations use only the gate/up bytes; their down pieces
+(2.56–3.06 MiB against gate/up's 4.33) are displaced too, so each tail byte displaces ≈ 1.64 × its size. At 32K the
+tail is ≈ 2,665 experts — more than Maya's whole borrow — and costs ≈ 13 of the 18 GiB the 32K prompt reads past its
+routed set, and the 32K decode's 79 MB a token.
+- **The change.** The tail is whole experts used whole: their gate/up slots at the gate/up arena's end (as today)
+  **and** their down slots at each down class's arena end, so n experts lend ≈ 7 MiB each and the loan needs ≈ n /
+  1.64 of them. The arena lays classes out one after another (`after_materialize`: [null, staging, cache] each), so
+  the down slots cannot sit next to gate/up's tail; instead `lend_tail` **compacts**: after unmapping the tail's
+  experts (their down slots now empty, anywhere in their class), it moves the resident down pieces that hold each
+  down class's last m slots into those freed slots (device copies, ≈ m × 2.6 MiB; residency, host mirror and delta
+  records updated as an admission's), leaving every class's tail free and contiguous. The loan is then up to three
+  ranges (gate/up's and each down class's tail).
+- **Where it lands, and the core question.** The core's `ActivationLender` only says how many tokens a step lends
+  (`lend_activations`); the ranges go to `activation_loan@1`, a std contract whose provider is `kernels.expert_io`'s
+  pluggable allocator. So the change is **`activation_loan@2`: `use(ranges)`** (an allocation is cut from the first
+  range that holds it, else overflows as today), its oracle and provider, and the store's tail and compaction — **no
+  core lines**. The worst step's peak stays one number; the store sizes n from the ranges' sum.
+- **The tail's sizing.** n experts such that n × gate/up + m₁ × down₁ + m₂ × down₂ ≥ the loan's bytes, m₁ + m₂ = n by
+  each tail expert's down class; the largest allocations (the 16,384-row pass buffers) must fit the gate/up range
+  (asserted at the profile; the down ranges take the smaller ones).
+- **Exactness.** Placement only (the compaction's moves are byte copies, the map follows them). The tail tests
+  (`test_moe_engine.py`'s tail and lending cases, bitwise against the resident store, `_bytes_exact`) run with the
+  whole tail, plus a test that each loan range holds no resident piece during the step.
+- **Plants:** `tail_down_not_compacted` (a down tail slot still mapped to a resident: the loan overwrites it),
+  `compaction_map_stale` (a moved piece's map not updated), `loan_range_overlap` (two ranges overlapping).
+- **Predicted on the bench workload** (the probe: 32K reads 27.86 GiB, 17.9 past its routed set, 5,337 pieces
+  displaced; inferred): ≈ 1,000 fewer experts lent at 32K → ≈ 21 GiB; prefill 0.730 → **0.85–0.95** (≈ 9.5 s of
+  compute bounds it), decode 0.71 → ≈ 0.77. The 1K / 4K steps' small tails gain ≈ 0.2–0.5 GiB. The probe measures it
+  before the table.
+
 **D9 — Prefill: one 32K step per prompt in both modes (passes of 16,384), with opt-in sub-batched activations.**
 - **Why:** N0 measured Maya's 32K prompt at 3,195 tok/s, read as 2 × 16K chunks that are compute-bound (≈ 0.29 ms a
   token; its copy lane busy 4.3 s of a 4.7 s chunk). A 4K-step Holon pays the ≈ 68 GB stream eight times; from 8K
@@ -1071,7 +1135,7 @@ The 5090's measured total is **31.448 GiB** (FN `evidence/fn_close_2026-10-24.js
   stack trim (151 MiB) costs core lines and is not taken.
 - **Mode (ii):** the same VRAM; SSD-only ≈ 1,426 for Holon against ≈ 1,170–1,250 for Maya at rest, and during a prompt ≈
   1,726 / 2,116 at 1K / 4K and ≈ 2,800–3,250 at a 32K step with the staging ring of parts, against Maya's ≈ 2,114 at any
-  length (it lends ≈ 914 at every prompt; C's `c-mode2.md`). **Host memory under the 64 GiB limit** (est. until N1's
+  length (it lends ≈ 258 / 391 / 605 a prompt at 1K / 4K / 32K, ≈ 940 on its one-chunk 32K arm — corrected 2026-10-27; C's `c-mode2.md`). **Host memory under the 64 GiB limit** (est. until N1's
   mode (ii) run reads `memory.peak`; B7-m1):
 
   | Item | GiB | Note |
@@ -1138,7 +1202,7 @@ misses 336 × (1 − h) × 7.11 MB at 47–49 GB/s (Holon's measured in-engine f
 is within 1 point. **N2's replays leave prompt lending out** (C-R2-M6): Maya's live h includes its ≈ 1,020-expert lend
 a prompt; `replay.py`'s `lfu` cannot fill an emptied slot, and FN's `lend_min.py` needs a Holon engine that serves
 GLM. **Lending's effect on Holon's h is measured at the first Holon-GLM engine (step 5/6); the decode cells carry it
-per context** (C r8-m1): **≈ −1 to −2% at 1K, ≈ −4 to −6% at 32K** (Maya lends ≈ 914 at every prompt; Holon little at
+per context** (C r8-m1): **≈ −1 to −2% at 1K, ≈ −4 to −6% at 32K** (Maya lends ≈ 258 / 391 / 605 experts a prompt at 1K / 4K / 32K, ≈ 940 only on its one-chunk 32K arm; corrected 2026-10-27 from its source and logs, `maya-prompt-reads`; Holon little at
 1K and ≈ 1,900–2,350 at a 32K step, refilled by the decode's misses: ≈ +2–3.5 misses a token over 256 tokens).
 
 | Cell (bar) | Holon | Maya | Predicted ratio: central [band] | What decides it |
@@ -1148,7 +1212,7 @@ per context** (C r8-m1): **≈ −1 to −2% at 1K, ≈ −4 to −6% at 32K** (
 | (i) prefill 4K (0.9) | ≈ 68 GB stream 1.3–1.4 s ∥ compute ≈ 1.2 s: 1.45–1.6 s | 1.93 s (N1: 2,124 tok/s) | **1.25 [1.0–1.4]** | the same |
 | (i) prefill 32K (0.9), one 32K step | max(stream ≈ 1.4 s, compute ≈ 9.5 s × c), two 16,384-row passes a layer; c ≈ 1.2 at `pass_rows` 4,096 (D9: 0.63 column fill against Maya's 0.88) | 10.12 s (N1: 3,233 tok/s, 2 × 16K); the faster `CKPT_EVERY=0` arm 9.48 s (3,458 tok/s) | **≈ 1.0 [0.85–1.15] at the design's 16,384-row pass** (the A5000's measured 1.42× per-token gain on real routes; against the faster arm, N1's `CKPT_EVERY=0` at +6.8%, ≈ 9.48 s; C r5-m1); **≈ 0.83–0.87 at the 4,096-row fallback** — on the owner list if the 5090's probe does not confirm the 16K gain | the pass size (N4, step 4); the rest of c |
 | (ii) decode (1.0) | the mode (i) token + r_H × 2.86 ms (N3, no bounce); r_H from C's replay (`mode2_decode.py`): as designed (F11 deferred + keep) ≈ +54 / +77% of a Maya-like policy's reads (bench / tasks); F10 spares + keep −19 / −23% | 28.1 ms + r_M × 2.89 ms (its 8-thread pool; N3) | **as designed ≈ 0.94–1.04; with the levers ≈ 1.07–1.15 [0.9–1.2]** | r_M (N1 mode (ii): `stat.disk_reads`, 9001fdb8); F10 + `lend_tail`; the VRAM levers |
-| (ii) prefill 1K (0.9) | the routed SSD-only set, (1,426 + 300 lent) × 0.75 ≈ 1,295 experts (9.2 GB), 3.6 s beside the RAM stream (rev 9's order) | (1,200 + 914) × 0.75 ≈ 1,590 (11.3 GB), ≈ 4.4–4.8 s | **as designed ≈ 1.15–1.25; with the levers ≈ 1.2 [0.95–1.4]** | both engines' SSD sets (N1 mode (ii)); the order (serialized ≈ 0.9) |
+| (ii) prefill 1K (0.9) | the routed SSD-only set, (1,426 + 300 lent) × 0.75 ≈ 1,295 experts (9.2 GB), 3.6 s beside the RAM stream (rev 9's order) | (1,200 + 914) × 0.75 ≈ 1,590 (11.3 GB), ≈ 4.4–4.8 s (predicted; measured: Maya lends ≈ 258 at 1K and reads 7.0–7.3 GiB, corrected 2026-10-27) | **as designed ≈ 1.15–1.25; with the levers ≈ 1.2 [0.95–1.4]** | both engines' SSD sets (N1 mode (ii)); the order (serialized ≈ 0.9) |
 | (ii) prefill 4K (0.9) | ≈ 2,075 as designed (14.8 GB, ≈ 5.8 s); with the ring of parts ≈ 1,545 (11.0 GB, 4.3 s) | 2,114 × 0.98 ≈ 2,070 (14.7 GB), ≈ 5.8 s | **as designed ≈ 1.0; with the levers ≈ 1.3 [1.0–1.45]** | the staging ring of parts in mode (ii) (D9) |
 | (ii) prefill 32K (0.9) | per prompt: as designed two 16K steps read 5,652–6,552 experts (40–47 GB), 15.6–18.1 s; **one 32K step with the ring of parts** ≈ 2,936–3,386 with the out-of-ring slots' ≈ 150 lent (C r9-m2), 8.1–9.4 s under compute ≈ 9.5 s: **a ≈ 1% margin at the top end** | its faster arm, one 32K chunk (`CKPT_EVERY=0`): 2,114 (15.0 GB), 5.9 s, under its 9.5 s of compute: ≈ 9.5–10 s | **as designed ≈ 0.53–0.64; with the levers ≈ 0.95–1.0 [0.85–1.05]** (the low end: SSD-bound if the measured loan lands at the top) | one 32K step (D9); the ring of parts; compute c ≈ 1 (the 16,384-row pass); the measured loan |
 
@@ -1209,9 +1273,9 @@ frozen text above stands; this replaces its mode (i) reasoning for mode (ii)'s l
 | Lend a prompt (Holon) | SSD reads a token after it, as built | Cell effect |
 |---|---|---|
 | 0 | 4.44 (base) | — |
-| ≈ 300 (1K) | 4.57 | ≈ −1% (Maya lends ≈ 914 at every prompt: ≈ 0 against it) |
+| ≈ 300 (1K) | 4.57 | ≈ −1% (Maya lends ≈ 258 / 391 / 605 experts a prompt at 1K / 4K / 32K, ≈ 940 only on its one-chunk 32K arm; corrected 2026-10-27 from its source and logs, `maya-prompt-reads`: ≈ 0 against it) |
 | ≈ 690 (4K) | 5.08 | ≈ −2 to −5% |
-| ≈ 2,100 (32K) | **8.24** | **≈ −24%** (Maya's own ≈ 914 costs it ≈ −4.5%) |
+| ≈ 2,100 (32K) | **8.24** | **≈ −24%** (Maya's own ≈ 605–940 cost it ≈ −3 to −4.5%; corrected 2026-10-27) |
 
 **The (ii) decode 32K cell is at risk: ≈ 0.81–0.92 as built**, below its bar. Coldest-first lending and sending hot
 lent experts to the SSD do not help (8.24 / 8.99). The levers, replayed:
