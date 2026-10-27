@@ -238,7 +238,7 @@ def _parity(store, trace) -> int | None:
 
 
 def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  # noqa: F811
-    """F10 end to end on the CPU providers, half the experts cached (each layer: 3 spares, 1 resident once set up),
+    """F10 end to end on the CPU providers, three quarters of the experts cached (each layer: 3 spares once set up),
     prompts streamed through a ring of lent slots and staged in lent slots (mixed steps too, `chunk_with_decode`):
     outputs bitwise the resident store's; the residency and empty slots the replay oracle's at every step; promotions
     into spares and into the empty slots lending returned. The judge's `route_dump` records each step's residency
@@ -249,8 +249,8 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
     want = _served(_engine(file), prompts)
     engine = _engine(file, host_memory=1 << 24, chunk_with_decode=4, overlap=False, plugin_options={
-        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.5", "moe.placement": "placement.promote@1",
-        "moe.ring_tokens": 10})
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.75", "moe.placement": "placement.promote@1",
+        "moe.ring_tokens": 10})            # (three quarters: a layout lends only past the spares, step 7)
     store = engine.ctx.shared_objects[KEY]
     with _routes(engine) as trace, route_dump(engine) as dump:
         assert _served(engine, prompts) == want

@@ -32,6 +32,9 @@ class PlacementPolicy(Protocol):
     frozen: bool                  # (optional) a host policy that never swaps after the seed
     reserved: int                 # (optional) cache slots a group holds in each of its roles' classes outside what a
     #                               step can lend (F10's spares): the store's layout lends only the rest
+    prompt_admissions: bool       # (optional, default True) its resolve may admit a prompt row's misses; False (F10:
+    #                               decode misses only) lets a staging step under exclusive tiers stage in rounds
+    #                               (docs/v1-glm.md D8s): no staged piece outlives its round
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         """Device buffers its resolve contract keeps across steps, per group: name -> (shape, dtype). The store holds

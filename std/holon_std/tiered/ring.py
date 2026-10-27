@@ -40,6 +40,8 @@ from .residency import RETURN
 BUFFERS = 2                                   # the ring's halves: layer l streams while layer l − 1 computes
 ROUNDS = 4                                    # `lend` calls of a ring step, 1…ROUNDS (one suffices for staging)
 SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
+ROUND_SLOTS = 32                              # D8s: a round's RAM (and read-ahead) slots a class
+PSEUDO = -(1 << 20)                           # D8s: a rounds step's stage entry i is PSEUDO − i until its part's slot
 
 
 class Lent:
@@ -48,6 +50,11 @@ class Lent:
         # to the ring and staging (its arena's end, the tail's start); `parts`: a staging step's ring of parts
         self.store, self.mode, self.tail, self.parts = store, mode, tail, parts
         self.width: torch.Tensor | None = None      # a staging ring's slots per class (its `want`), once lent
+        # D8s: a staging step under exclusive tiers whose misses go in rounds through a fixed set of slots a class —
+        # ROUND_SLOTS for the RAM misses and read-ahead hits, the landing rows' for the SSD reads (`rounds_q`,
+        # `fixed`: [classes, Q + A] those slots), its stage entries PSEUDO − i until a part's slot replaces them
+        self.rounds = store._rounds
+        self.fixed: torch.Tensor | None = None
         self.end = store.lend_ends
         if tail is not None:                # this step's tail (its own passes' size): the rest of the class lends
             self.end = self.end.clone()
@@ -83,8 +90,9 @@ class Lent:
         sized = self.mode == "ring" or self.parts > 1 or single
         buffers = 1 if single else BUFFERS
         stage = torch.where(s.lending_classes, s.prefill, 0)
-        for k in range(1, 1 + (ROUNDS if sized else 1)):
-            want = self._want(res, classes, buffers) if sized else stage
+        fixed = torch.where(s.lending_classes, s.rounds_q + s.landing_rows, 0) if self.rounds else None
+        for k in range(1, 1 + (ROUNDS if sized and not self.rounds else 1)):
+            want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
             if k == ROUNDS:                                                  # the last: the worst case
                 want = torch.where(held < want, buffers * -(-experts // self.parts), want)
             if self.parts > 1 or single:                                     # (a pass's worth: no ring needed)
@@ -93,7 +101,7 @@ class Lent:
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
-        want = self._want(res, classes, buffers) if sized else stage
+        want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
         if self.parts > 1 or single:
             want = want.clamp(max=s.prefill)
         # Per class: the ring where its lent slots hold both halves, else its layers stage into them (a small class —
@@ -115,6 +123,11 @@ class Lent:
         ringed = ok[classes]                                                # [G, R]
         ringed[s.borrowing_groups:] = False                                 # (an auxiliary layer: none)
         s.stage_tab.copy_(torch.where(ringed[..., None], graphed[None], lent))
+        if self.rounds:                         # the fixed slots; each borrowing layer's stage entry i: PSEUDO − i
+            self.fixed = s.pool[:, :s.rounds_q + s.landing_rows].clone()
+            s.errors.bitwise_or_(((self.fixed < 0) & s.lending_classes[:, None]).any().int() * SHORT)
+            pseudo = PSEUDO - torch.arange(s.prefill, dtype=torch.int32, device=res.device)
+            s.stage_tab[:s.borrowing_groups].copy_(pseudo.expand_as(s.stage_tab[:s.borrowing_groups]))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ringed)
             if s.ring_copy == "dma":            # the step's one host sync: the second copy waits, after the first

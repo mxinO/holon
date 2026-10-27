@@ -2014,6 +2014,76 @@ def loan_range_overlap() -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def round_slots_reused_early() -> Iterator[collections.Counter]:
+    """D8s (docs/v1-glm.md): a rounds call's parts all gathered before its first part computes — later parts reuse the
+    fixed slots under the earlier parts' pieces."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    rounds, fired = DeviceResolver._rounds, collections.Counter()
+
+    def planted(self, *a, **kw):
+        slots, part, landed = rounds(self, *a, **kw)
+        fired["calls"] += 1
+        return slots, part, [lambda: [f() for f in landed]] + [lambda: None] * (len(landed) - 1)
+    with mock.patch.object(DeviceResolver, "_rounds", planted):
+        yield fired
+
+
+@contextlib.contextmanager
+def round_slot_shared() -> Iterator[collections.Counter]:
+    """D8s: two places of one round given one fixed slot (the round's set halved)."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    slot, fired = DeviceResolver._round_slot, collections.Counter()
+
+    def planted(at, pos, size):
+        fired["lists"] += 1
+        return slot(at, pos // 2, size)
+    with mock.patch.object(DeviceResolver, "_round_slot", staticmethod(planted)):
+        yield fired
+
+
+@contextlib.contextmanager
+def part_one_role() -> Iterator[collections.Counter]:
+    """D8s (C-M1): one role's pieces a part later than the expert's other pieces — the expert computes at the later
+    part, its earlier piece's slot already reused."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    part, fired = DeviceResolver._round_part, collections.Counter()
+
+    def planted(role, first, pos, size):
+        fired["lists"] += 1
+        return part(role, first, pos, size) + (role == 1)
+    with mock.patch.object(DeviceResolver, "_round_part", staticmethod(planted)):
+        yield fired
+
+
+@contextlib.contextmanager
+def spare_lent_outside_tail() -> Iterator[collections.Counter]:
+    """D8s (C): a staging step's lending (calls ≥ 1, not the tail's) given a spare's slots — the first lent expert of
+    each layer with a spare holds it. Output-invisible (a spare's bytes are its owner's): judged by the count of spare
+    slots lent outside the tail."""
+    from holon_std.tiered import store as tiered
+
+    lend, fired = tiered.TieredStore.lend, collections.Counter()
+
+    def planted(self, need, call=1):
+        picked = lend(self, need, call)
+        spare = self.state.get("spare")
+        if spare is None:
+            return picked
+        has = spare[:, 0, 0] > 0                          # [G]: a layer's first spare is set
+        first = picked.int().argmax(1)                    # each layer's first lent expert
+        hit = has & picked.any(1)
+        g = torch.arange(len(first), device=first.device)
+        self.lent_slots[g, first] = torch.where(hit[:, None], spare[:, 0, 1:], self.lent_slots[g, first])
+        fired["calls"] += 1
+        return picked
+    with mock.patch.object(tiered.TieredStore, "lend", planted):
+        yield fired
+
+
+@contextlib.contextmanager
 def keep_copy_skipped() -> Iterator[None]:
     """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
     cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
@@ -2672,6 +2742,9 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "tail_down_not_compacted": tail_down_not_compacted, "compaction_map_stale": compaction_map_stale,
     "compaction_return_wrong_layer": compaction_return_wrong_layer, "compaction_beside_moves": compaction_beside_moves,
     "loan_range_overlap": loan_range_overlap,
+    # D8s: a staging step's rounds through fixed slots
+    "round_slots_reused_early": round_slots_reused_early, "round_slot_shared": round_slot_shared,
+    "part_one_role": part_one_role, "spare_lent_outside_tail": spare_lent_outside_tail,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate

@@ -21,6 +21,7 @@ class Promote:
     exclusive_flag = "exclusive"              # the device state the store sets under exclusive tiers
     heat = "last"                             # what RAM's coldest is by under exclusive tiers: the least recent
     reserved = reference.SPARES               # each layer's spares: cache slots a step's lending never takes
+    prompt_admissions = False                 # decode misses only (a prompt step's staged pieces never move)
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         self.items, self.roles = items, roles

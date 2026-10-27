@@ -842,6 +842,31 @@ def gpu_moe(tmp_path_factory):
     return path / "moe.gguf", prompts, want
 
 
+@pytest.fixture(scope="module")
+def gpu_moe_wide(tmp_path_factory):
+    """`gpu_moe` wide enough for a staging step's rounds (docs/v1-glm.md D8s: a class lends a fixed set of a round's
+    RAM slots and the landing rows' past its tail), its down experts two classes on disjoint layers as GLM's (D8w's
+    tails, one a class): 128 experts, 8 a token, widths 512, four layers, layers 0-1's down Q5_0, 2-3's Q4_0."""
+    torch.manual_seed(2)
+    cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=512, intermediate_size=512, moe_intermediate_size=512,
+                         num_hidden_layers=4, num_attention_heads=4, num_key_value_heads=2, head_dim=128,
+                         num_experts=128, num_experts_per_tok=8, norm_topk_prob=True, tie_word_embeddings=False,
+                         eos_token_id=None)
+    path = tmp_path_factory.mktemp("gpu_moe_wide")
+    model = Qwen3MoeForCausalLM(cfg)
+    with torch.no_grad():
+        for layer in model.model.layers:
+            layer.mlp.gate.weight.mul_(8)
+    model.save_pretrained(path / "hf")
+    write(path / "hf", path / "moe.gguf", Q.Q8_0,
+          types={"0.ffn_down_exps": Q.Q5_0, "1.ffn_down_exps": Q.Q5_0, "ffn_down_exps": Q.Q4_0})
+    prompts = [torch.randint(0, 512, (n,)).tolist() for n in (1, 40, 300, 450)]
+    engine = _gpu_engine(path / "moe.gguf")
+    want = _served(engine, prompts)
+    engine.close()
+    return path / "moe.gguf", prompts, want
+
+
 @contextlib.contextmanager
 def _no_host_sync(cls, *methods, mode="error"):
     """`cls`'s methods raise on any operation that waits for the device (a borrowing step's lending and ring), or
@@ -1357,6 +1382,47 @@ def _slots_held(store) -> torch.Tensor:
     return ((store.residency.device >= 0).sum(1) + (store.n_empty + spares)[:, None]).cpu()
 
 
+def _spares_lent(store) -> int:
+    """D8s (C): the policy's spare slots among the slots this step's non-tail lending took (calls ≥ 1)."""
+    spare = store.state.get("spare")
+    if spare is None or store.lent is None:
+        return 0
+    lent = torch.where((store.lent_call >= 1)[..., None], store.lent_slots, -1)        # [G, E, R]
+    owned = torch.where((spare[..., 0] > 0)[..., None], spare[..., 1:], -2)          # [G, S, R]
+    return int((lent[:, :, None] == owned[:, None]).all(-1).sum())
+
+
+def test_a_whole_expert_tail_fits_glms_mode_ii_geometry():
+    """D8w at GLM's RTX 5090 mode (ii) geometry (no GPU: the store's sizing alone): gate/up IQ2_XXS 4.125 MiB a slot,
+    3,265 cached; down IQ3_XXS 3.0625 MiB on 8 of 42 layers, 611 cached; down IQ2_S 2.5625 MiB on 34, 2,654 cached;
+    a pass's staging 288; the 16,384-row passes' buffers ≈ 2.05 GiB and the 32K loan 7,948 MiB. The tail holds the
+    passes' buffers in gate/up's slots (their views are one range: the startup profile once found it short, the
+    buffers allocated beside it, the peak and the loan doubled, and the layout refused to start), the loan in the
+    rest and the down classes' tails, each down class keeping a pass's staging; and ≈ 1.6× fewer experts than a
+    gate/up-only tail of the same bytes."""
+    from holon_std.tiered.store import SlotClass, TieredStore
+
+    mib = 1 << 20
+    classes = {"gate_up": SlotClass("gate_up", 4224 * 1024, 1, 32, cache=3265),
+               "down.iq3": SlotClass("down.iq3", int(3.0625 * mib), 1, 32, cache=611),
+               "down.iq2": SlotClass("down.iq2", int(2.5625 * mib), 1, 32, cache=2654)}
+    store = object.__new__(TieredStore)
+    store.exclusive, store.roles, store.prefill, store.classes, store._auxiliary = True, 2, 288, classes, []
+    store._order = list(range(42))
+    store.groups = {g: {0: classes["gate_up"], 1: classes["down.iq3" if g < 8 else "down.iq2"]} for g in range(42)}
+    buffers, loan = int(2.05 * 1024 * mib), 7948 * mib
+    n = store._split(buffers, loan, 0, lambda c: c.cap)
+    m = store._down(n)
+    unit = classes["gate_up"].unit_bytes
+    assert n * unit >= buffers + 2 * 1024 * mib                         # the buffers, and the 32K R (2 GiB) beside
+    assert n * unit + sum(k * list(classes.values())[c].unit_bytes for c, k in m.items()) >= buffers + loan
+    assert all(list(classes.values())[c].cap - k >= store.prefill for c, k in m.items()), m
+    for small in (0, 256 * mib):                                        # a step's own (the profile's: no loan)
+        assert store._split(buffers, small, 0, lambda c: c.cap) * unit >= buffers
+    gate_up_only = -(-(buffers + loan) // unit)
+    assert 1.3 < gate_up_only / n < 1.7 and sorted(m) == [1, 2], (n, gate_up_only, m)
+
+
 def _loan_free(store) -> bool:
     """D8w: no piece the map names sits in this step's activation loan — its other classes' tails and its tail's
     class's last bytes (`_in_loan`'s ranges)."""
@@ -1451,6 +1517,51 @@ def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy):
                 assert ok == (True,), ok
             else:
                 assert not all(ok), (plant, ok)
+            engine.close()
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
+    """D8s (docs/v1-glm.md): under exclusive tiers and F10 a lending step stages its misses in rounds — RAM misses by
+    a round's slots, SSD reads by the landing rows — through one fixed set of slots a class, each part computed before
+    the next one's gather reuses them: it lends the fixed set, not a layer's most missing, and serves the resident
+    store's outputs with every piece's bytes the file's. Each round plant is caught."""
+    from holon_judge import planted
+
+    file, prompts, want = gpu_moe_wide
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    for plant in (None, "round_slots_reused_early", "round_slot_shared", "part_one_role", "spare_lent_outside_tail"):
+        # (the spare plant on steps that lend no tail: a tail step releases the spares before its other lending)
+        tail = {"moe.ring_lend": "coldest", "moe.lend_peak": "off"} if plant == "spare_lent_outside_tail" else {}
+        with planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired:
+            engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts | tail)
+            store, lends, rounds = engine.ctx.shared_objects[KEY], [], []
+            store.taps.append(lambda step, record, lends=lends: lends.append(record["lends"])
+                              if record["lends"] is not None else None)
+            begin = store.begin
+
+            def watched(store=store, begin=begin, rounds=rounds):
+                begin()
+                rounds.append((store.lent is not None and store.lent.rounds, _spares_lent(store), _loan_free(store)))
+            store.begin = watched
+            try:                                     # (twice: the second's lending steps meet F10's spares, set up)
+                got = [_served(engine, prompts) for _ in range(2)]
+                ok = (got == [want, want], _bytes_exact(store) == 0)
+            except RuntimeError as e:                    # (a plant the store refuses)
+                assert plant is not None, e
+                ok = (False,)
+            ok = (*ok, not any(n for _, n, _ in rounds))        # no spare's slots lent outside the tail
+            if plant is None:                         # (and D8w's tail over both down classes: no piece in the loan)
+                assert any(r for r, _, _ in rounds) and all(ok) and all(f for _, _, f in rounds), (rounds, ok)
+                assert len(store.tail_down) == 2 and _slots_once(store), store.tail_down
+                fixed = store.rounds_q + store.landing_rows
+                assert max(int(x[1:].max()) for x in lends) <= fixed, lends   # each class lends the fixed set
+                _held_once(store)
+            else:
+                assert fired and not all(ok), (plant, fired, ok)
             engine.close()
 
 

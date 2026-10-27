@@ -49,7 +49,7 @@ from holon.api import Extent, MemOp, Ref, RowKind
 from . import files
 from .residency import LAG, ResidencyMap
 from .resolver import ACTIVATION_LOAN, CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
-from .ring import ROUNDS, Lent
+from .ring import ROUND_SLOTS, ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
@@ -163,6 +163,8 @@ class TieredStore:
         # (`Lent`: twice a part of a layer's most absent pieces, each part's fetch after the part two before it ran)
         # and every pass of it pipelines (`pipelines`).
         self.pipeline, self._parts = pipeline, 1
+        self._rounds = False                    # D8s: this staging step's misses go in rounds (`Lent`)
+        self._lend_room: dict[str, int] = {}    # D8s: the slots each lending class lends (`after_materialize`)
         self.pipelining: list[Callable[[], bool]] = []       # per client: whether its passes always pipeline
         self._pipelining = False
         if ring_copy not in ("sm", "dma"):
@@ -563,6 +565,8 @@ class TieredStore:
                 floors |= short
             self.lending = can_lend and all(n - held[c] >= self.prefill for c, n in budget.taken.items()
                                             if c in lenders)
+            # D8s: each lending class's cache slots a step can lend (a rounds step lends a fixed set of them)
+            self._lend_room = {c: n - held[c] for c, n in budget.taken.items() if c in lenders}
             if self.lending and self.tail:          # the tail's class must still stage a pass outside the tail: a
                 cls, n = self.tail                  # small pool (the startup profile's minimum) stages instead
                 c = classes[cls]
@@ -616,7 +620,7 @@ class TieredStore:
         self.ring.fill_(-1)
         self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).clamp(max=self.stage_slots - 1)
                          .expand(self.roles, -1))
-        self._mode, self.lent, self._parts = None, None, 1
+        self._mode, self.lent, self._parts, self._rounds = None, None, 1, False
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
@@ -768,6 +772,7 @@ class TieredStore:
         # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
         self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
             self.large_passes(at) and not self.exclusive else 1
+        self._rounds = self._mode == "stage" and self._parts == 1 and self.rounds_able
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned and (held := self._loan.held()):
             raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
@@ -783,7 +788,7 @@ class TieredStore:
             if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
                 self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
             need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
-            n_step = min(n, self._split(need, cls, lambda c: c.cap))
+            n_step = min(n, self._split(need - self._step_loan, self._step_loan, cls, lambda c: c.cap))
             self._step_tail = (cls, n_step)
             self._step_down = {c: min(m, self.tail_down.get(c, 0)) for c, m in self._down(n_step).items()}
             down = sum(m * list(self.classes.values())[c].unit_bytes for c, m in self._step_down.items())
@@ -963,6 +968,8 @@ class TieredStore:
         else 1."""
         if self._parts > 1:
             return self._parts
+        if self._rounds:                        # D8s: every pass part by part (its resolver counts the parts)
+            return 2
         return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
     def fetch_stream(self, split: bool = False) -> torch.Stream:
@@ -1318,12 +1325,30 @@ class TieredStore:
         first = [classes.index(self.groups[g][0]) for g in self._order]
         cls = max(sorted(set(first)), key=first.count)
         c = classes[cls]
-        n = self._split(max((f() for f in self.tail_bytes), default=0) + self._loan_bytes, cls, slots)
+        n = self._split(max((f() for f in self.tail_bytes), default=0), self._loan_bytes, cls, slots)
         if slots(c) - n < self.prefill:
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
                              f"prefill pass's {self.prefill} misses")
         return cls, n
+
+    @property
+    def rounds_q(self) -> int:
+        """D8s: a round's RAM (and read-ahead) slots a class."""
+        return min(ROUND_SLOTS, max(1, self.prefill // 4))
+
+    @property
+    def rounds_able(self) -> bool:
+        """D8s (docs/v1-glm.md): a staging step under exclusive tiers may stage its misses in rounds through a fixed set
+        of slots — every pass pipelines (its clients compute part by part) and the policy admits no prompt row's
+        misses (no staged piece must outlive its round)."""
+        if not (self.exclusive and self._pipelining and getattr(self.policy, "prompt_admissions", True) is False):
+            return False
+        names = list(self.classes)                # past the tail's slots (gate/up's n, the down classes' m)
+        tail = {names[self.tail[0]]: self.tail[1]} if self.tail else {}
+        tail |= {names[c]: m for c, m in self.tail_down.items()}
+        return bool(self._lend_room) and all(n - tail.get(c, 0) >= 2 * (self.rounds_q + self.landing_rows)
+                                             for c, n in self._lend_room.items())   # (whole experts: a margin)
 
     @property
     def whole_tail(self) -> bool:
@@ -1350,17 +1375,18 @@ class TieredStore:
         classes = list(self.classes.values())
         return {c: max(0, min(int(n * share), slots(classes[c]) - self.prefill)) for c, share in self._shares().items()}
 
-    def _split(self, need: int, cls: int, slots: Callable[[SlotClass], int]) -> int:
-        """The tail's n slots in class `cls` for `need` bytes: with a whole-expert tail, n with its other classes'
-        last m (`_down`) together holding them."""
+    def _split(self, buffers: int, loan: int, cls: int, slots: Callable[[SlotClass], int]) -> int:
+        """The tail's n slots in class `cls` for the passes' `buffers` and the `loan`'s bytes: with a whole-expert
+        tail, the buffers in class `cls`'s slots (the passes' views are one range: `tail_view`) and the loan in
+        theirs past them and its other classes' last m (`_down`)."""
         classes = list(self.classes.values())
         unit = classes[cls].unit_bytes
-        n = -(-need // unit)
+        n = -(-(buffers + loan) // unit)
         if not self.whole_tail:
             return n
         per = unit + sum(share * classes[c].unit_bytes for c, share in self._shares().items())
-        n = -(-need // int(per))
-        while n * unit + sum(m * classes[c].unit_bytes for c, m in self._down(n, slots).items()) < need:
+        n = max(-(-buffers // unit), -(-(buffers + loan) // int(per)))
+        while n * unit + sum(m * classes[c].unit_bytes for c, m in self._down(n, slots).items()) < buffers + loan:
             n += 1
         return n
 
