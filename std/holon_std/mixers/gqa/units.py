@@ -33,7 +33,7 @@ class AttnMeta:
 
 class Planner:
     """Owns this group's kernel instances; a step is all prefill chunks, all decode rows, all verify rows of one
-    width, or (`BatchPlan.n_decode` > 0) decode rows then prefill chunks: a mixed step (docs/m07-perf.md §3.1). Its
+    width, or (`BatchPlan.n_decode` > 0) decode rows then prefill chunks: a mixed step (docs/dev/m07-perf.md §3.1). Its
     decode rows go through the prefill kernel when that kernel's spec has the `serves_decode_rows` prop (it serves
     them as well as the decode kernel, e.g. by splitting their KV), else through the decode kernel and the chunks
     through the prefill kernel, as two calls."""
@@ -121,7 +121,8 @@ class GQA(nn.Module):
     attending (a drafter's context).
 
     With engine state, the q/k norms, the rotation and the KV write run as one `attention.qk_rope_kv@1` kernel on every
-    step (docs/m07-perf.md D3) when the norm and rope units answer `fusion_facts()` and the KV writer's spec offers it
+    step (docs/dev/m07-perf.md D3) when the norm and rope units answer `fusion_facts()` and the KV writer's spec offers
+    it
     (`config["fused"]`); otherwise, and in a model-only build, as the units' composition.
 
     **The surface a composing unit may use** (e.g. `std.mixers.qsa@1`, which holds a GQA built by Ref and attends with

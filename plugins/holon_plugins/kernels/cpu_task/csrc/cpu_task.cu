@@ -1,4 +1,4 @@
-// `cpu_task@1` (docs/v1-offload.md D6, spike S6): a persistent native worker that CUDA graphs hand CPU work to, one
+// `cpu_task@1` (docs/dev/v1-offload.md D6, spike S6): a persistent native worker that CUDA graphs hand CPU work to, one
 // 32-bit word per slot on its own 64-byte line of mapped pinned memory:
 //
 //   GPU (in the graph):  word := REQ          … independent GPU work …          wait until word >= DONE
@@ -431,7 +431,7 @@ class Worker {
     std::thread coordinator_, watchdog_;
 };
 
-// The generic copy task (F9, docs/v1-offload.md D3, D6): the pieces a request table names, read from their
+// The generic copy task (F9, docs/dev/v1-offload.md D3, D6): the pieces a request table names, read from their
 // descriptors' extents into host units, by the I/O worker's threads (each thread its own blocking reads: two threads
 // keep two reads in flight, M7). A descriptor row is (fd, direct, offset, nbytes) — nbytes 0 past a piece's extents —;
 // an O_DIRECT descriptor is read as its aligned superset into the thread's aligned bounce buffer, then copied. The

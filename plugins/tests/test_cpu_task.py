@@ -1,4 +1,5 @@
-"""kernels.cpu_task's `cpu_task@1` (docs/v1-offload.md D6): a CUDA graph hands tasks to the native worker and waits for
+"""kernels.cpu_task's `cpu_task@1` (docs/dev/v1-offload.md D6): a CUDA graph hands tasks to the native worker and waits
+for
 them — each signal runs its slot's task once, on every thread of the pool, before the wait returns —, and the
 protocol fails open: a failing task, a hung task (the spin wait's time bound) and a dead worker (the memop flavour's
 watchdog) each raise the error word, and once the flag is set every later wait returns at once."""

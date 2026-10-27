@@ -1,4 +1,4 @@
-"""Qwen3.8-Flash-Next (`qwen4_exp`) in the golden recorder (docs/v1-flash-next.md D2): what transformers' own model
+"""Qwen3.8-Flash-Next (`qwen4_exp`) in the golden recorder (docs/dev/v1-flash-next.md D2): what transformers' own model
 needs beyond its forward, through `archs`' hooks.
 
 - **The tie rule** (D2's documented deviation from HF): QSA's indexer breaks score ties toward the lower block. HF's
@@ -137,7 +137,7 @@ def mtp_pooled(state: dict[str, torch.Tensor], config, embeds: torch.Tensor, hid
         hook.remove()
 
 
-# ---- the decode-divergence gate's dense control (docs/v1-flash-next.md acceptance 2) ----
+# ---- the decode-divergence gate's dense control (docs/dev/v1-flash-next.md acceptance 2) ----
 
 @contextlib.contextmanager
 def forced_dense():

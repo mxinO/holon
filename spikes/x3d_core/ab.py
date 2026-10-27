@@ -1,4 +1,4 @@
-"""Step 3d's keep-or-revert measurement (docs/v1-offload.md §14, docs/m07-perf.md §1.1's rule): each change to the
+"""Step 3d's keep-or-revert measurement (docs/dev/v1-offload.md §14, docs/dev/m07-perf.md §1.1's rule): each change to the
 step loop's per-step device work, measured incrementally on one engine — graphed decode at batch 1 by per-step wall,
 after a prompt of each context (and, optionally, eager prefill of single prompts by wall).
 

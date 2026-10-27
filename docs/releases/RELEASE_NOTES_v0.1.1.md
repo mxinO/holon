@@ -1,7 +1,7 @@
 # Holon v0.1.1
 
 A patch release: three fixes to the OpenAI-compatible and Anthropic endpoints, found when the pi coding agent drove
-`holon serve` on an RTX 5090 (`docs/agent-test-pi-rtx5090.md`). Everything else is as in
+`holon serve` on an RTX 5090 (`docs/dev/agent-test-pi-rtx5090.md`). Everything else is as in
 [v0.1.0](RELEASE_NOTES_v0.1.0.md).
 
 ## Fixes

@@ -1,4 +1,4 @@
-// The task ABI of `cpu_task@1` (docs/v1-offload.md D6): what a CPU kernel plugin hands the worker so that the
+// The task ABI of `cpu_task@1` (docs/dev/v1-offload.md D6): what a CPU kernel plugin hands the worker so that the
 // worker's threads run it without Python. A task runs on every thread of the worker's pool at once; the threads
 // meet at `barrier`. It returns 0, or an error code: the worker then answers the request with an error (fail-open,
 // it never stops answering). A plugin that provides tasks declares this struct itself, with the same version.

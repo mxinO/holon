@@ -1,4 +1,4 @@
-"""L0 for `kernels.qsa_triton` (docs/v1-flash-next.md acceptance 3) against std.mixers.qsa's oracles, on
+"""L0 for `kernels.qsa_triton` (docs/dev/v1-flash-next.md acceptance 3) against std.mixers.qsa's oracles, on
 Qwen3.8-Flash-Next's shapes (indexer 4 × 128, rotary 64 at θ 1e7; attention 24 q / 2 kv heads of 256; ratio 4,
 budget 2,048), through the build context.
 

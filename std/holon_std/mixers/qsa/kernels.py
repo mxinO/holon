@@ -1,4 +1,4 @@
-"""The op contracts of QSA, Qwen3.8-Flash-Next's indexed sparse attention (docs/v1-flash-next.md D6). Their oracles
+"""The op contracts of QSA, Qwen3.8-Flash-Next's indexed sparse attention (docs/dev/v1-flash-next.md D6). Their oracles
 are in `reference.py`; kernels come from kernel plugins. Kernel instances are stateless across steps and safe to call
 inside CUDA graphs. (The unit, `std.mixers.qsa@1`, lands with FN's core seams; these contracts stand alone.)
 

@@ -105,7 +105,7 @@ CLASS_SM = {"rtx-5080": 120, "rtx-5090": 120, "rtx-4090": 89, "rtx-3090": 86}   
 @pytest.mark.slow
 @pytest.mark.parametrize("floor", sorted(GOLDENS.glob("*/*-rows*-floor.safetensors")), ids=lambda p: p.stem)
 def test_a_per_shape_floor_routes_as_the_table_does(floor):
-    """D2 (docs/m07-perf.md §6): a committed per-shape floor emulates each shape on the path the ggml plugin's
+    """D2 (docs/dev/m07-perf.md §6): a committed per-shape floor emulates each shape on the path the ggml plugin's
     `mmvq_rows` picks today at its step rows on its class (`compare` refuses a candidate whose paths differ), so a
     change to the crossover table that moves a shape must re-record the floor. Needs the GGUF file and a prebuilt
     extension (llama.cpp's rule is host code), no GPU."""

@@ -1,6 +1,6 @@
 # x0 / M6: routing traces of Qwen3-30B-A3B Q4_K_M and an offline policy replay
 
-Step 0 of milestone X (`docs/v1-offload.md` §8, M6). Record:
+Step 0 of milestone X (`docs/dev/v1-offload.md` §8, M6). Record:
 [`evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json`](../../../evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json).
 
 ## Question

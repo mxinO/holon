@@ -1,4 +1,4 @@
-"""An F11-representative frozen placement for A1's human gate (docs/v1-offload.md §6): F11 (`placement.lfu@1`) runs the
+"""An F11-representative frozen placement for A1's human gate (docs/dev/v1-offload.md §6): F11 (`placement.lfu@1`) runs the
 parity decode trace (the first 8 prompts, 256 greedy tokens each, the step-3 engine settings) at a cache fit, and the
 experts it holds at the end become a routing profile `std.tiered.static@1` seeds from (each resident expert counts 1 +
 its F11 score, every other 0), written beside a link to the checkpoint (a profile is named relative to the

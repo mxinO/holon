@@ -1,5 +1,6 @@
 """Our Triton matmuls: FP8 ones as the `qlinear@2` kernel for `fp8_e4m3/hf` weights with 128 × 128 block scales (op
-contract: std.ops; docs/m06-lowp.md D12, §4.6, §4.7), on sm ≥ 89 (e4m3 `tl.dot`; below it the decode kernel would run,
+contract: std.ops; docs/dev/m06-lowp.md D12, §4.6, §4.7), on sm ≥ 89 (e4m3 `tl.dot`; below it the decode kernel would
+run,
 the prefill one would not: FP8 there is v1). Dense only: expert stacks stay on the reference provider.
 
 A dense weight's few-row matmul as `linear_rows@1` (`rows.py`; std.ops: a verify pass's rows), on sm ≥ 80.

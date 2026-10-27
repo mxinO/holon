@@ -4,7 +4,7 @@
  "base": "1b9d38e",
  "gpu_class": "rtx-5090",
  "date": "2026-10-14",
- "rule": "keep if the saving >= max(0.5%, 3 sd of the larger arm's runs / base mean) on some row (docs/m07-perf.md \u00a71.1)",
+ "rule": "keep if the saving >= max(0.5%, 3 sd of the larger arm's runs / base mean) on some row (docs/dev/m07-perf.md \u00a71.1)",
  "clock": {
   "gpu": "NVIDIA GeForce RTX 5090",
   "seconds": 74.8,

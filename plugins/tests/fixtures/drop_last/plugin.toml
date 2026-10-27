@@ -6,7 +6,7 @@ slot = "kernel"
 license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
-[resources]   # a toy route transform: its contract, oracle and provider (docs/v1-offload.md D3)
+[resources]   # a toy route transform: its contract, oracle and provider (docs/dev/v1-offload.md D3)
 provides = ["op.moe_route_transform.drop_last@1", "kernel.moe_route_transform.drop_last@1"]
 
 [properties]

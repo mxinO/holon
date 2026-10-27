@@ -49,7 +49,7 @@ def test_the_clock_is_the_least_squares_step_cost():
 
 
 def test_f5b_enters_the_lock_only_at_a_five_percent_gain():
-    """The split (docs/v1-offload.md D4): threads at half the misses, then the share at the best count; the options
+    """The split (docs/dev/v1-offload.md D4): threads at half the misses, then the share at the best count; the options
     (the table spelled out to n misses, the tier, the threads) only when the best gains ≥ 5% over F5a."""
     assert tune.plan(0.5, 6) == "1,1,2,2,3,3" and tune.plan(0.25, 4) == "0,1,1,1"
 

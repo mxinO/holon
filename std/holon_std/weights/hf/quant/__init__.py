@@ -1,4 +1,5 @@
-"""Quantized Hugging Face checkpoints (docs/m06-lowp.md D2, §4.4): one dialect per producer convention, picked by the
+"""Quantized Hugging Face checkpoints (docs/dev/m06-lowp.md D2, §4.4): one dialect per producer convention, picked by
+the
 checkpoint's `quantization_config`, names one scheme's parts; the source yields each quantized module as one
 `QTensor` of the layout `<elem>/hf` (normalized parts, `reference.py` dequantizes them) under `<module>.weight`, so
 the recipes' weight rules map it unchanged.

@@ -1,4 +1,4 @@
-"""Milestone K step 3 (docs/v1-kv-tiers.md rev 8.4, D4 / D11): the mixed factor under std.state_tier's own dispatch,
+"""Milestone K step 3 (docs/dev/v1-kv-tiers.md rev 8.4, D4 / D11): the mixed factor under std.state_tier's own dispatch,
 and the engine loop's host time beside its I/O threads (GIL).
 
 The dispatch is the tier's (`holon_std.state_tier.iothreads.IoThreads` over `holon_std.state_tier.ssd.SsdLevel`, 557,056

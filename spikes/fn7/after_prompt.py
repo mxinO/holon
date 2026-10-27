@@ -1,4 +1,4 @@
-"""FN step 7, fix 2's gate (docs/v1-flash-next.md §21.10): what a refill of a prompt's lent slots could spare. Serves
+"""FN step 7, fix 2's gate (docs/dev/v1-flash-next.md §21.10): what a refill of a prompt's lent slots could spare. Serves
 two `v1-long` prompts cut to `--ctx` tokens, `--tokens` decode tokens each; per prompt, the experts it lent (resident
 before it, absent after it) and the decode / verify rows' misses of the first `--window` steps after it: how many,
 how many distinct experts, how many repeat an expert's earlier miss, and the share the lent experts cover — against

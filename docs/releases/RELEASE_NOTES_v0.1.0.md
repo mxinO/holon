@@ -46,8 +46,8 @@ architectures serve with defaults.
 
 Measured at release steps 8 and 9 on one clock-screened desktop per card, on the locks as they stood then; the shipped
 locks differ in the Qwen3.8-27B's context and in the FlashInfer plugin's `src`, with byte-identical snapshot traces
-(`docs/release.md` §19.1–§19.2). Ratios are Holon's advantage (above 1, Holon is faster), ranges over the four cards.
-Every number comes from an evidence record; the full tables, losses included, are in `docs/release.md` §17 and the
+(`docs/dev/release.md` §19.1–§19.2). Ratios are Holon's advantage (above 1, Holon is faster), ranges over the four cards.
+Every number comes from an evidence record; the full tables, losses included, are in `docs/dev/release.md` §17 and the
 README's Performance section.
 
 - **The release gate passes on every GGUF cell:** in-process decode (tg128) 1.04–1.11× `llama-bench` at the llama.cpp

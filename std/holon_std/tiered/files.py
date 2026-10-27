@@ -1,5 +1,5 @@
 """Reading checkpoint extents into host memory: each file once, in large aligned chunks, with `O_DIRECT` where the
-filesystem allows it, so the page cache never holds a second copy of the experts (docs/v1-offload.md D10)."""
+filesystem allows it, so the page cache never holds a second copy of the experts (docs/dev/v1-offload.md D10)."""
 from __future__ import annotations
 
 import concurrent.futures

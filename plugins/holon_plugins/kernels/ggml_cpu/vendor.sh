@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ggml-cpu's quantization and dot-product sources (MIT), vendored at kernels.ggml_cuda's pin: the activation
-# quantizers and `vec_dot`s of the CPU experts (docs/v1-offload.md D7), unmodified (no patch).
+# quantizers and `vec_dot`s of the CPU experts (docs/dev/v1-offload.md D7), unmodified (no patch).
 #
 #   ./vendor.sh [llama.cpp checkout]   refresh vendor/: copy the files below from a checkout at $COMMIT (cloned when
 #                                       omitted) and record their upstream SHA256SUMS

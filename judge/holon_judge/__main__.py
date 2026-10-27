@@ -8,7 +8,7 @@
                                    [--kv q8_0|fp8]                           # ... reading K/V in that cache format
                                    [--stream]                                # a dense checkpoint one layer at a time
     python -m holon_judge gate     --model <hf dir or id | .gguf> --original <hf dir or id> [--json <file>]
-                                   # per-tensor NMSE against the bf16 original (docs/m06-lowp.md §4.8)
+                                   # per-tensor NMSE against the bf16 original (docs/dev/m06-lowp.md §4.8)
     python -m holon_judge compare  --golden <file> --candidate <file> [--floor <file>] [--json <file>]
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
                                    [--source gguf_dense] [--max-step-tokens N] [--kv q8_0|fp8] [--plant <bug>]
@@ -25,13 +25,14 @@
                                    # graphs on vs off at a batch of N sessions
                                    [--policies [--late N]]
                                    # ... or the checkpoint policies `branch` and `answer:1` with the state tier,
-                                   # late sessions added (docs/v1-kv-tiers.md §6)
+                                   # late sessions added (docs/dev/v1-kv-tiers.md §6)
     python -m holon_judge constrained --model <.gguf> --jsb <JSONSchemaBench dir> --engine-args "<speculating>"
                                    [--calibration <jsonl>] [--plant <bug>] [--json <file>]
                                    # grammar + speculation vs grammar (M0.5 §5)
     python -m holon_judge tiers    --model <hf dir or id | .gguf> --prompts <jsonl> --engine-args "<tight pool>"
                                    [--pressure-args "<overrides>"] [--plant <bug> ...] [--json <file>]
-                                   # state tiers: invariance, the null test, run-identity, plants (docs/v1-kv-tiers.md)
+                                   # state tiers: invariance, the null test, run-identity, plants
+                                   # (docs/dev/v1-kv-tiers.md)
 
 `compare`, `l2`, `gate`, `snapshot-diff`, `snapshot`, `bounded`, `constrained` and `tiers` exit with status 1 on a
 failed check.
@@ -56,7 +57,7 @@ from .compare import Result, compare, compare_drafter
 from .planted import PLANTS, TIER_PLANTS
 from .recording import PromptSet, Recording
 
-ACT = ("a4", "a8")                 # the quant.act option (docs/m06-lowp.md D3)
+ACT = ("a4", "a8")                 # the quant.act option (docs/dev/m06-lowp.md D3)
 
 
 def _golden(a: argparse.Namespace) -> int:
@@ -336,7 +337,7 @@ def _bounded(a: argparse.Namespace) -> int:
         tier = {"prefix_cache": True, "overlap": True, "slots": base.slots | {"tier": a.tier}}
         configs = {f"{p}, tier": tier | {"plugin_options": opts | {"recurrent.policy": "prompt_end," + p}}
                    for p in ("branch", "answer:1")}
-    elif a.mixed:                                        # mixed steps (docs/m07-perf.md §3.1) vs today's schedule
+    elif a.mixed:                                        # mixed steps (docs/dev/m07-perf.md §3.1) vs today's schedule
         baseline = bounded.BASELINE
         configs = {f"mixed {a.mixed}": bounded.BASELINE | {"chunk_with_decode": a.mixed},
                    f"mixed {a.mixed}, prefix on, depth 1": {"chunk_with_decode": a.mixed, "prefix_cache": True,
@@ -509,12 +510,12 @@ def main(argv: list[str] | None = None) -> int:
                    "mmvq; kernels.triton_fp8's prefill, with --act fp8)")
     g.add_argument("--rows", type=int, help="with --q8-1 rows: the candidate's step rows (its --max-step-tokens)")
     g.add_argument("--crossover", help="with --q8-1 rows: the class whose mmvq_rows pick each path, <gpu class>:<sm> "
-                   "(e.g. rtx-5080:120; docs/m07-perf.md D2)")
+                   "(e.g. rtx-5080:120; docs/dev/m07-perf.md D2)")
     g.add_argument("--pure-hf", action="store_true", help="an MoE floor with HF's own MoE block (information only)")
     g.add_argument("--kv", choices=kv_format.FORMATS, help="a floor whose attention reads K/V in this cache format")
     g.add_argument("--act", choices=modes.MODES, help="with --q8-1, a quantized HF checkpoint's activation mode on "
                    "that path (default q8_1: W4A8; fp4: W4A4-dynamic; fp4-static: W4A4-static; fp8: W8A8 on prefill, "
-                   "docs/m06-lowp.md §4.8)")
+                   "docs/dev/m06-lowp.md §4.8)")
     g.add_argument("--stream", action="store_true", help="a dense HF checkpoint one decoder layer at a time (GGUF "
                    "files and quantized checkpoints always are)")
     g.add_argument("--cpu-split", help="F5b's frozen split (JSON, `holon_judge.placement.cpu_split`): a path-aware "
@@ -541,7 +542,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--max-seqs", type=int, default=64)
     e.add_argument("--kv", choices=kv_format.FORMATS, help="the engine's KV cache format (default: the model dtype)")
     e.add_argument("--act", choices=ACT, help="quantized weights' activation precision, the quant.act option "
-                   "(default a8; docs/m06-lowp.md D3)")
+                   "(default a8; docs/dev/m06-lowp.md D3)")
     e.add_argument("--state-memory-gib", type=float, help="state pools on the CPU (Tier A), which cannot be measured")
     e.add_argument("--threads", type=int, default=0, help="CPU threads (Tier A)")
     e.add_argument("--prompts", required=True)
@@ -557,7 +558,7 @@ def main(argv: list[str] | None = None) -> int:
     e.add_argument("--ceiling", type=float, help="Tier A's sanity ceiling on KL p99 (fp32 throughout: 1e-4)")
     e.set_defaults(run=_l2)
 
-    ga = sub.add_parser("gate", help="per-tensor NMSE against the bf16 original (docs/m06-lowp.md §4.8)")
+    ga = sub.add_parser("gate", help="per-tensor NMSE against the bf16 original (docs/dev/m06-lowp.md §4.8)")
     ga.add_argument("--model", required=True, help="a quantized HF checkpoint (dir or hub id) or a .gguf file")
     ga.add_argument("--original", required=True, help="the bf16 HF checkpoint it was made from")
     ga.add_argument("--json", help="write the report here")
@@ -573,7 +574,7 @@ def main(argv: list[str] | None = None) -> int:
     st.set_defaults(run=_structure)
 
     hq = sub.add_parser("hf-quant-check", help="the reference dequantization of every quantized tensor of an HF "
-                        "checkpoint against the format owners' decoders (docs/m06-lowp.md D10)")
+                        "checkpoint against the format owners' decoders (docs/dev/m06-lowp.md D10)")
     hq.add_argument("--model", required=True, help="HF checkpoint directory or hub id")
     hq.add_argument("--llama-cpp", help="a llama.cpp checkout at the ggml pin: also gguf-py on its FP4 repacks")
     hq.add_argument("--limit", type=int, help="the first N quantized tensors only")
@@ -655,7 +656,7 @@ def main(argv: list[str] | None = None) -> int:
     cs.set_defaults(run=_constrained)
 
     ti = sub.add_parser("tiers", help="state tiers: invariance, the null test, run-identity and plants "
-                        "(docs/v1-kv-tiers.md acceptance 2, §6)")
+                        "(docs/dev/v1-kv-tiers.md acceptance 2, §6)")
     ti.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")
     ti.add_argument("--prompts", required=True)
     ti.add_argument("--engine-args", default="", help="EngineConfig flags of the tested configuration: a device pool "

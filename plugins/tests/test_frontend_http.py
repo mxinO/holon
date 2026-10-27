@@ -1,4 +1,4 @@
-"""The HTTP frontend (docs/m05-grammar.md D7): its three dialects over a scripted fake engine and a byte-level toy
+"""The HTTP frontend (docs/dev/m05-grammar.md D7): its three dialects over a scripted fake engine and a byte-level toy
 tokenizer (CPU only, no model); the format parsers and constraint builders model-free (constraints checked and
 compiled by grammar.xgrammar); the Qwen bundles' formats with the real templates; round trips on a tiny Qwen3 (CPU)
 and on Qwen3-0.6B (GPU)."""

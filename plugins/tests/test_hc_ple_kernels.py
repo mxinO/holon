@@ -1,6 +1,6 @@
 """L0 for Qwen3.8-Flash-Next's hyper-connection kernels (`kernels.hc_triton`: `hc_gr_mix@1`, `hc_gr_combine@1`) and
 PLE kernels (`kernels.ple_triton`: `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1`) against their oracles
-(docs/v1-flash-next.md acceptance 2, 3), on FN's shapes (4 streams of 2,560, rank 320; 16 hash heads, trigram, EOS
+(docs/dev/v1-flash-next.md acceptance 2, 3), on FN's shapes (4 streams of 2,560, rank 320; 16 hash heads, trigram, EOS
 248044; conv 4 taps at dilation 3), through the build context.
 
 - `hc_gr_mix@1` within `l0.check` of the oracle (x at its dtype, w in float32, over n·H terms), with and without

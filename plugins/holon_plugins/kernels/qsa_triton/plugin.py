@@ -1,4 +1,4 @@
-"""QSA's kernels in Triton (op contracts: std.mixers.qsa; docs/v1-flash-next.md D6, D10): the index write and its
+"""QSA's kernels in Triton (op contracts: std.mixers.qsa; docs/dev/v1-flash-next.md D6, D10): the index write and its
 block pooling, the block selection (float32 IEEE scores, an exact top-k with lower-block ties) and the sparse
 attention over gqa's KV layouts, q8_0 and fp8 read in the kernel."""
 from __future__ import annotations

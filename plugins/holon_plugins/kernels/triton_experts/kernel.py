@@ -1,4 +1,4 @@
-"""A grouped GEMM over dense expert stacks (docs/m02-moe.md D8): rows sorted by expert on the device, each expert's
+"""A grouped GEMM over dense expert stacks (docs/dev/m02-moe.md D8): rows sorted by expert on the device, each expert's
 rows padded to whole row blocks, one program per (row block, column block) over a grid fixed by the shapes alone —
 so a call is capture-safe and replays for any routing. Operands are the weight dtype (bf16 × bf16, f32
 accumulation: TF32 never enters), configurations are pinned (no autotuning: the summation order is fixed)."""

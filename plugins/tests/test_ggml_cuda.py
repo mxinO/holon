@@ -9,7 +9,7 @@
   unquantized oracle, run-to-run identical.
 - mmq's schedules at 512 rows, asserted from llama.cpp's own choice (tile I x J, nsm): stream-k with the fixup
   pass (out = 300), one block per tile (out = nsm * I), and the model's out 4096 and 12288. Under each, its bf16
-  output equals its f32 output cast (docs/m07-perf.md D4: the fixup's partials stay f32 until one rounding), and
+  output equals its f32 output cast (docs/dev/m07-perf.md D4: the fixup's partials stay f32 until one rounding), and
   NVFP4's `scale2` multiplies the f32 sum before that rounding (`torch.equal`, the fixup forced; native W4A4 too on
   sm_120).
 - `convert` and `get_rows` (`qembedding`) against `gguf.quants.dequantize` (Q2_0, which gguf-py 0.19 lacks: against
@@ -21,12 +21,12 @@
   fused gate/up and a prepared input read by two consumers too.
 - Workspace: every call takes at most what `workspace_bytes` sizes for its rows (the pool's high-water mark,
   `Sized`), so an undersized formula fails at any row count.
-- FP4 (docs/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
+- FP4 (docs/dev/m06-lowp.md D8, §4.8; MXFP4 and NVFP4 are in the type sweeps above as ggml blocks): the HF layouts'
   `prepare` is lossless — gguf-py on its blocks × scale2 equals `reference.py` by value, the blocks are llama.cpp's
   converter's byte for byte, the source parts untouched — and the repack plants (N2, N3, M1) break it; `scale2` on
   every path and output dtype against the q8_1 emulator in f64 on the reference weight, also in CUDA graphs; in
   mmvq's epilogue at rows 2–8 by value
-equal to the f32 multiply it replaced (docs/m07-perf.md D11). The
+equal to the f32 multiply it replaced (docs/dev/m07-perf.md D11). The
   precision check: mmq's precision is the spec's, and the default one (the N6 plant) is an error on sm_120 only;
   `quant.act = a4` selects native W4A4 on sm_120 and q8_1 elsewhere. Native FP4 activations: llama.cpp's quantizer
   against the emulator (`holon_judge.w4a4`: MXFP4 runs on any class, NVFP4 on sm_120), codes differing at a rate
@@ -180,7 +180,7 @@ def fp4_scales(name: str, shape: tuple[int, ...], rng: np.random.Generator) -> n
 
 
 def hf_fp4(elem: str, out: int, k: int, seed: int, experts: int = 0) -> dict[str, torch.Tensor]:
-    """An HF FP4 weight's normalized parts (docs/m06-lowp.md D2), random codes and realistic scales; NVFP4's scale2
+    """An HF FP4 weight's normalized parts (docs/dev/m06-lowp.md D2), random codes and realistic scales; NVFP4's scale2
     near a real checkpoint's (amax / (6 · 448)), one per expert when `experts`."""
     rng = np.random.default_rng(seed)
     lead = (experts,) if experts else ()
@@ -313,7 +313,7 @@ def test_qlinear_random_blocks(ctx, name, k):
 
 @pytest.mark.parametrize("name", ["q2_0", "iq4_nl", "q4_0", "q8_0"])
 def test_qlinear_at_in_640(ctx, name):
-    """T6 (docs/v1-moe-prefill.md §10): `in` a whole number of the type's blocks but not of 256 (FN's down
+    """T6 (docs/dev/v1-moe-prefill.md §10): `in` a whole number of the type's blocks but not of 256 (FN's down
     projections, 640 wide) on both paths; mmq's last K step stays inside each row (the bytes after the weights are
     poison: a read past them gives NaN). A 256-value type cannot hold such a row and is not served."""
     kernel = qlinear(ctx, name, 640)
@@ -351,7 +351,8 @@ LOCK_CLASSES = sorted({lock.parent.parent.name for lock in PLANS.rglob("*.lock")
 
 
 def test_qlinear_dispatch_is_mmvq_rows(sm):
-    """D2 (docs/m07-perf.md): the path `QLinear` actually takes per row count (its counted call) is `mmvq_rows`'s, for
+    """D2 (docs/dev/m07-perf.md): the path `QLinear` actually takes per row count (its counted call) is `mmvq_rows`'s,
+    for
     every lock class (the build's fingerprint names the class; llama.cpp's rule is asked at this device's capability)
     on every shape the class has an entry for and a k-quant it has none for; and llama.cpp's rule answers for another
     class's compute capability (Q4_K: mmvq up to 8 rows on Ada, 5 on Blackwell)."""
@@ -403,7 +404,7 @@ def test_mmq_schedules(ctx, sm, name):
 
 
 def test_the_large_call_plants_fire_on_the_fixup(ctx, sm):
-    """docs/v1-moe-prefill.md D5's plants (judge `qlinear-partials-bf16`, `qlinear-large-no-fixup`): on a dense call
+    """docs/dev/v1-moe-prefill.md D5's plants (judge `qlinear-partials-bf16`, `qlinear-large-no-fixup`): on a dense call
     of two chunks that takes the stream-k fixup, the counter sees the fixup, and each plant changes the output (the
     partials rounded to bf16; the fixup skipped) and is counted; a one-chunk call is never planted."""
     lib, k, rows = extension.load(sm), 4096, 2 * CHUNK

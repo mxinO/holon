@@ -37,7 +37,7 @@ int holon_ggml_mmq_schedule(int type, int prec, int64_t out, int64_t rows, int *
 // current device.
 size_t holon_ggml_workspace_bytes(int64_t in, int64_t rows);
 
-// The judge's plants on a dense mmq call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5): `bits`
+// The judge's plants on a dense mmq call's stream-k fixup past one 512-row chunk (docs/dev/v1-moe-prefill.md D5): `bits`
 // 1 rounds the partials to bf16 before the fixup, 2 skips it, 0 none; returns the previous bits. One process-wide
 // setting. `holon_ggml_mmq_fixups` reads (then zeroes) such fixups launched, and of them those planted.
 int holon_ggml_mmq_plant(int bits);
@@ -49,7 +49,7 @@ size_t holon_ggml_workspace_high_water(void);
 
 // y = x @ W.T, times `scale[0]` (NVFP4 only; NULL: none) in f32 before one rounding to y's type, bf16 or f32. mmvq:
 // rows <= 8 (the scale in llama.cpp's fused epilogue at one row; above it in the unfused kernel's epilogue, after the
-// full reduction: docs/m07-perf.md D11); `x_q8_1`, if not NULL, is x already quantized as mmvq quantizes it
+// full reduction: docs/dev/m07-perf.md D11); `x_q8_1`, if not NULL, is x already quantized as mmvq quantizes it
 // (holon_ggml_quantize_q8_1), read instead of quantizing x (D6); `gate`, if not NULL, a second weight of W's shape:
 // y = silu(x @ gate.T · scale) · (x @ W.T · scale) from the f32 sums, at one row (llama.cpp's fused gate, D6).
 // mmq: any rows (a call is sized by the workspace), the stream-k fixup's partials kept in f32 until the rounding (D4).
@@ -66,7 +66,7 @@ void holon_ggml_quantize_fp4(int type, const float * x, int64_t rows, int64_t in
                              void * stream);
 
 // mmvq's q8_1 activations of x [rows, in] (f32 or bf16) for a matmul of `type`, as it quantizes them (block_q8_1 per
-// 32 values, rows of `in` padded to 512) into `y`: the input several mmvq calls share (`x_q8_1`, docs/m07-perf.md
+// 32 values, rows of `in` padded to 512) into `y`: the input several mmvq calls share (`x_q8_1`, docs/dev/m07-perf.md
 // D6), and the quantize's own time in benchmarks (D8).
 void holon_ggml_quantize_q8_1(int type, const void * x, int x_bf16, int64_t rows, int64_t in, void * y, void * stream);
 
@@ -90,7 +90,7 @@ int holon_ggml_use_mmvq_id(int type, int64_t tokens);
 size_t holon_ggml_workspace_bytes_id(int64_t in, int64_t tokens, int64_t k, int64_t slots);
 
 // mmvq: tokens <= the mmvq limit; `x_q8_1`, if not NULL, is x already quantized (holon_ggml_quantize_q8_1 of its
-// tokens · rows_per_token rows), read instead of quantizing x (docs/v1-offload.md §14, step 3c). swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
+// tokens · rows_per_token rows), read instead of quantizing x (docs/dev/v1-offload.md §14, step 3c). swiglu: `w` is a merged stack (per expert out/2 gate rows, then out/2 up rows) and
 // y = silu(gate · gate_scale[e]) * up · up_scale[e] with out_y = out/2 (llama.cpp's fused gate); else out_y = out and
 // y = x @ W_e.T · up_scale[e]. Scales: `experts` f32 values each, or NULL (NVFP4 only). An entry whose id is below
 // `null_slots` (an offload arena's null slots: zero weights) gets rows of 0 without reading its weights.
@@ -102,7 +102,7 @@ void holon_ggml_mmvq_id(int type, const void * w, int64_t experts, int64_t out, 
 // mmq: any tokens (one call is sized by the workspace), out_y = out. `ids` name at most `slots` distinct slots of the
 // stack (it bounds the launch). A violated precondition (more slots, an id out of range, a slot repeated inside rows
 // beyond mmq's column tiles) leaves the rows it names uncomputed and ors its bit (mmid.cuh, GGML_CUDA_MM_IDS_ERR_*)
-// into the device word `errors` (if not NULL). `swiglu` (docs/v1-moe-prefill.md D4): `w` a merged gate/up stack and y
+// into the device word `errors` (if not NULL). `swiglu` (docs/dev/v1-moe-prefill.md D4): `w` a merged gate/up stack and y
 // [tokens, k, out/2] = up * silu(gate), each first scaled by its expert's `gate_scale` / `up_scale` (NVFP4; NULL: none),
 // in mmq's store: bitwise holon_ggml_swiglu of the unfused y; only where holon_ggml_mmq_glu says so. The tile width is
 // chosen against the tokens up to `ids_j_tokens` of them, above against the launch's mean rows per entry (D2).
@@ -133,7 +133,7 @@ void holon_ggml_topk_moe(const float * logits, int64_t tokens, int64_t experts, 
 // in the same launch.
 int64_t holon_ggml_moe_router_rows(void);
 
-// moe_router@1's logits for prompt chunks (docs/v1-moe-prefill.md D3): logits [tokens, experts] f32 = x · router.T,
+// moe_router@1's logits for prompt chunks (docs/dev/v1-moe-prefill.md D3): logits [tokens, experts] f32 = x · router.T,
 // x [tokens, hidden] bf16 (x_bf16) or f32, router [experts, hidden] f32; each logit
 // holon_ggml_moe_router_partials(experts) f32 fma chains over equal parts of hidden ascending, added in order (a row's
 // logits are the same at any tokens), `partials` [that many, tokens, experts] f32 scratch; hidden a multiple of 32

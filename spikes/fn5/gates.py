@@ -1,4 +1,4 @@
-"""FN step 5 (docs/v1-flash-next.md acceptance 2, §6.2): the full model's decode checks on the RTX PRO 6000,
+"""FN step 5 (docs/dev/v1-flash-next.md acceptance 2, §6.2): the full model's decode checks on the RTX PRO 6000,
 all-resident (experts, PLE table and MTP head in VRAM), one engine at a time.
 
 - `divergence`: the absolute decode check. Each `v1-long` prompt (4K-32K tokens, its chat prompt up to `gen_start`) is

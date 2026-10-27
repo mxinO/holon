@@ -1,4 +1,4 @@
-"""What a resolve variant costs per layer call (docs/v1-offload.md §13's F11 pick-and-decay term): `moe_resolve@1`
+"""What a resolve variant costs per layer call (docs/dev/v1-offload.md §13's F11 pick-and-decay term): `moe_resolve@1`
 against `moe_resolve.lfu@1` and `moe_resolve.lru@1` (kernels.expert_io) at E = 128, k = 8, two roles, all decode
 rows, 48 calls per CUDA graph (a step's layers), replayed 20 times. Every call starts from the same map and state
 (four small copies before it in every arm: the map, the counts, the state, padding), so each variant call has its

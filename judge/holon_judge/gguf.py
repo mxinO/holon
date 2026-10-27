@@ -17,7 +17,7 @@ import numpy as np
 import torch
 
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
-GATES = {"mxfp4": 0.1, "q8_0": 1e-3}     # docs/m06-lowp.md §4.8: FP4 experts; Q8_0 from its prediction (≈ 5e-5)
+GATES = {"mxfp4": 0.1, "q8_0": 1e-3}     # docs/dev/m06-lowp.md §4.8: FP4 experts; Q8_0 from its prediction (≈ 5e-5)
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
 _GLOBAL = {"token_embd.weight": "model.embed_tokens.weight", "output_norm.weight": "model.norm.weight",
            "output.weight": "lm_head.weight"}
@@ -312,7 +312,8 @@ def module_name(name: str) -> str:
 
 
 def row_paths(path: str | pathlib.Path, rows: int, fingerprint) -> dict[str, str]:
-    """D2's floors (docs/m07-perf.md §6): each quantized dense linear's kernel path (HF module name -> `q8_1.MMVQ` or
+    """D2's floors (docs/dev/m07-perf.md §6): each quantized dense linear's kernel path (HF module name -> `q8_1.MMVQ`
+    or
     `q8_1.MMQ`) in steps of `rows` activation rows on `fingerprint`'s class: mmvq up to the ggml plugin's `mmvq_rows`
     for the matmul the engine runs it in (`engine_shapes`), else mmq. Expert stacks are not covered (their crossover
     is llama.cpp's, per stack)."""
@@ -329,7 +330,7 @@ def q8_1_experts(path: str | pathlib.Path, kernel_path: str, split: dict | None 
     """Tier B's expert stacks for the floors' D3 block (`moe.mirror(experts=…)`): each applies llama.cpp's MUL_MAT_ID
     on `kernel_path` (`q8_1.linear_experts`, f32) with the type and stored-sum offsets of the file's stack; a merged
     gate/up stack takes gate's type (gate and up share one in every file in scope) and both offsets. With `split`
-    (`cpu_split`'s, a frozen placement and its split table), the floor is path-aware (docs/v1-offload.md §6): the
+    (`cpu_split`'s, a frozen placement and its split table), the floor is path-aware (docs/dev/v1-offload.md §6): the
     entries F5b's rule sends to the CPU — at one token per step — take ggml-cpu's activations (`q8_1.CPU`) instead."""
     from . import q8_1
 
@@ -381,7 +382,7 @@ def mmvq_step(path: str | pathlib.Path) -> int:
     """The largest step at which every quantized matmul of the file takes mmvq on the current GPU — dense ones by the
     ggml plugin's `mmvq_rows` for this GPU's class (q8_1 mode), expert stacks by llama.cpp's MoE limit: Tier B's
     decode run. A GGUF's tensors by their stored types; an HF checkpoint's quantized modules (`hf_quant.elems`) by
-    the type kernels.ggml_cuda repacks them into (docs/m06-lowp.md D8; one it has none for, e.g. FP8, is an error).
+    the type kernels.ggml_cuda repacks them into (docs/dev/m06-lowp.md D8; one it has none for, e.g. FP8, is an error).
     The engine merges some projections (q/k/v, gate/up) into one matmul of another shape, so a dense matmul also
     counts every class entry (`CROSSOVER`) of its type and `in`: the step is then at most what any merge could run."""
     from holon.core import platform

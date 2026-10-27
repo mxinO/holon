@@ -1,4 +1,4 @@
-"""Toys proving FN's core seams (docs/v1-flash-next.md §4) before a model uses them.
+"""Toys proving FN's core seams (docs/dev/v1-flash-next.md §4) before a model uses them.
 
 - C1, a residual wider than `hidden`: `toy.wide_embed@1` repeats its inner embedding into two float32 streams
   ([T, 2H]); `toy.wide_block@1` runs its inner block on the first stream and adds the result to the second; and

@@ -3,7 +3,7 @@
  "date": "2026-10-13",
  "command": "python bench/run.py --name m04nat-decode_b1-dflash2 --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --rounds 2 --max-batch 4 --max-step-tokens 2048 --corpus judge/prompts/v1-qwen3_5.jsonl --backends holon_http --traces bench/traces/decode_b1.jsonl",
  "commit": "a222be36f543581eb3ef94f403e8f62c5aa56b9f-dirty",
- "dirty": ["M docs/m04-spec.md", " M plugins/tests/test_rejection.py", " M plugins/tests/test_spec.py", " M plugins/tests/test_taps.py"],
+ "dirty": ["M docs/dev/m04-spec.md", " M plugins/tests/test_rejection.py", " M plugins/tests/test_spec.py", " M plugins/tests/test_taps.py"],
  "gpu_class": "rtx-a5000",
  "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
  "rounds": 2,

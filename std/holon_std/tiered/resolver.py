@@ -1,4 +1,4 @@
-"""A group's in-graph resolve and fetch (docs/v1-offload.md D5): its routed ids to arena slots per role through the
+"""A group's in-graph resolve and fetch (docs/dev/v1-offload.md D5): its routed ids to arena slots per role through the
 residency map (`moe_resolve@1`, or the policy's variant contract with the policy's device state), every miss gathered
 from the host tier into its slot — a staging slot, or the slot a device-owned policy admitted it into
 (`expert_fetch@1`, F5a). Under exclusive tiers (D10) `moe_tiers@1` then places the call's victims and SSD misses, the

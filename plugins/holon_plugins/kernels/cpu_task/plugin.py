@@ -1,4 +1,4 @@
-"""`cpu_task@1` (std.moe.kernels; docs/v1-offload.md D6, spike S6): CUDA graphs hand CPU work to a persistent native
+"""`cpu_task@1` (std.moe.kernels; docs/dev/v1-offload.md D6, spike S6): CUDA graphs hand CPU work to a persistent native
 worker — a signal op, a wait op, a word per slot in mapped pinned memory, fail-open by contract (csrc/cpu_task.cu).
 
 Each kind of work has its own worker (the fact `pool`): `compute` (CPU experts, F5b) and `io` (F9's SSD reads), so a

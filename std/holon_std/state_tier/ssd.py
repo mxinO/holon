@@ -1,4 +1,4 @@
-"""std.state_tier's SSD level, the built-in `Level` `ssd` (docs/v1-kv-tiers.md D11).
+"""std.state_tier's SSD level, the built-in `Level` `ssd` (docs/dev/v1-kv-tiers.md D11).
 
 Layout. One preallocated slot file per host pool shape in `ssd.dir` (`posix_fallocate`), its slots
 `unit bytes` rounded up to 4 KiB apart, sized by the shape's share of `ssd.bytes`. `bind` takes an exclusive `flock`

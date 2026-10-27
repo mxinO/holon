@@ -1,6 +1,6 @@
 {
  "date": "2026-10-24",
- "doc": "docs/v1-flash-next.md \u00a722.6, \u00a723.3-\u00a723.7",
+ "doc": "docs/dev/v1-flash-next.md \u00a722.6, \u00a723.3-\u00a723.7",
  "ledgers": {
   "rtx-5080": {
    "mtp_c_1": {

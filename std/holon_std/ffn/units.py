@@ -35,7 +35,7 @@ class SwiGLU(nn.Module):
 
 
 class GatedSwiGLU(SwiGLU):
-    """A shared expert gated per token (docs/v1-flash-next.md D7): `swiglu(x) · σ(gate · x)`, `gate` [1, hidden]."""
+    """A shared expert gated per token (docs/dev/v1-flash-next.md D7): `swiglu(x) · σ(gate · x)`, `gate` [1, hidden]."""
 
     def __init__(self, ctx, *, hidden: int, inter: int, layer: int = 0) -> None:
         super().__init__(ctx, hidden=hidden, inter=inter, layer=layer)

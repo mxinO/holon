@@ -1,4 +1,4 @@
-"""grammar.xgrammar (docs/m05-grammar.md D3–D9, §5).
+"""grammar.xgrammar (docs/dev/m05-grammar.md D3–D9, §5).
 
 - The oracle (model-free, D9): no strict schema the plugin accepts admits an invalid instance — every draft of the
   JSON-Schema-Test-Suite (fixtures/jsts.sh) and a typed probe table; `json_object` is xgrammar's JSON with whitespace
@@ -8,7 +8,7 @@
 - Masked L0-dist (M0.4 §5's method): speculative sampling through the real `fill` probe draws the first three tokens
   of a prefix-dependent toy grammar with exactly the enumerated masked law — greedy, T = 1, top-p, stop-token drafts;
   every output replays through a fresh matcher. The plants `mask-column-shift` and `no-rollback-after-probe` fail it
-  (run once, recorded in docs/m05-grammar.md §11: `_law_holds` under each plant; the end-to-end checks below keep
+  (run once, recorded in docs/dev/m05-grammar.md §11: `_law_holds` under each plant; the end-to-end checks below keep
   them failing permanently).
 - End to end on the CPU (a tiny Qwen3 with Qwen3's tokenizer): constrained greedy outputs and finish reasons equal
   HF's logits masked by a fresh matcher, with and without speculation (the oracle drafter: right, wrong, mixed

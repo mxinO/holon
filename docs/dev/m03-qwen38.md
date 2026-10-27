@@ -317,7 +317,7 @@ assumed. The fit records KV tokens per (`max_seqs`, payloads, KV format); the de
 - q4_0 KV.
 - A payload codec (bf16 or quantized checkpoints), judged bounded.
 - A slot-indexed chunk kernel (no gather/scatter); PIECEWISE graphs; `fork`. (The in-step snapshot that removes the
-  extra step a cut causes is built: docs/m03-in-step-snapshot.md.)
+  extra step a cut causes is built: docs/dev/m03-in-step-snapshot.md.)
 - MTP (`blk.64`, M0.4; its verify/commit index rows use −1, not 0, for "don't store" under the patched sentinel); the
   vision tower (v1). With draft slots (M0.4) the GDN mixer must index state through the core's `slot·(1+k)+j`
   mapping, not `batch.dev.slots` directly.

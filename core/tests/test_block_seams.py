@@ -1,4 +1,5 @@
-"""FN's core seams (docs/v1-flash-next.md §4), proven with toys (`holon_testing.toy_streams`) on a tiny Qwen3 before a
+"""FN's core seams (docs/dev/v1-flash-next.md §4), proven with toys (`holon_testing.toy_streams`) on a tiny Qwen3 before
+a
 model uses them:
 
 - **C1, the residual width** (`ModelSpec.residual`): the trunk carries two float32 streams ([T, 2H]); the final norm

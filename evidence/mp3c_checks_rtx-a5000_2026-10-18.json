@@ -2,7 +2,7 @@
  "name": "mp3c_checks",
  "gpu": "RTX A5000",
  "date": "2026-10-18",
- "method": "docs/v1-moe-prefill.md \u00a77.1 step 3c; plugins/tests/test_ggml_cuda.py, test_ggml_cuda_moe.py, memcheck_ggml_cuda.py, memcheck_ggml_cuda_moe.py; spikes/moe_prefill/loader_speed.py",
+ "method": "docs/dev/v1-moe-prefill.md \u00a77.1 step 3c; plugins/tests/test_ggml_cuda.py, test_ggml_cuda_moe.py, memcheck_ggml_cuda.py, memcheck_ggml_cuda_moe.py; spikes/moe_prefill/loader_speed.py",
  "commits": {
   "before": "7cd24de",
   "step3c": "d4e11f4"

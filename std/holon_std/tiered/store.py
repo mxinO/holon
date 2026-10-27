@@ -1,4 +1,4 @@
-"""std.tiered.store@1: the engine's one tiered store of offloaded pieces (docs/v1-offload.md D5) — slot classes with
+"""std.tiered.store@1: the engine's one tiered store of offloaded pieces (docs/dev/v1-offload.md D5) — slot classes with
 VRAM arenas and host tiers, the residency map, the placement policy and its device state, the per-step row kinds,
 counts and delta log.
 
@@ -9,7 +9,7 @@ binds kernels. Then, through the engine's hooks:
 - `before_materialize`: one VRAM pool for every class's arena — a fill pool growing to every piece, or the size
   `cache` pins — and per class a mapped host pool of the tier, filled from the extents; both pools' unit is the
   classes' common divisor, so a between-step copy of a piece is a MemOp of whole units; with `ring_lend = "tail"`
-  the tail (docs/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
+  the tail (docs/dev/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
   (`tail_bytes`);
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
   class's pinned slots: beside fill classes, a pinned class's hottest items first, so it gets them); then each
@@ -144,7 +144,7 @@ class TieredStore:
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
         # experts holding the last slots of the largest class arena, a contiguous range its clients' passes take their
-        # buffers from (`tail`), then the coldest ("tail", docs/v1-moe-prefill.md D11)
+        # buffers from (`tail`), then the coldest ("tail", docs/dev/v1-moe-prefill.md D11)
         if ring_lend not in ("coldest", "tail"):
             raise ValueError(f"{name}: ring_lend {ring_lend!r}: coldest or tail")
         self.ring_copy, self.ring_lend = ring_copy, ring_lend
@@ -659,7 +659,8 @@ class TieredStore:
 
     # -- a step's forward ---------------------------------------------------------------------------------------------
     def large_passes(self, tokens: int) -> bool:
-        """A step of `tokens` takes large expert passes (D8; its stacks' kernels' `pass_rows`, docs/v1-moe-prefill.md
+        """A step of `tokens` takes large expert passes (D8; its stacks' kernels' `pass_rows`,
+        docs/dev/v1-moe-prefill.md
         D1): when its prompt could stream through the ring — by its size and the store's terms, never the layout's, so
         that the startup profile's worst step (on minimum pools, where a fill cache holds nothing to lend) runs such
         passes too. A pass's misses fit a prefill pass's staging (`prefill` = every item), lent or not."""
@@ -778,7 +779,8 @@ class TieredStore:
         return self._unmap(picked, call)
 
     def lend_tail(self, cls: int, n: int) -> torch.Tensor:
-        """A tail step's call 0 (docs/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last `n`
+        """A tail step's call 0 (docs/dev/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last
+        `n`
         slots, as the resolve contract's `lend_tail` picks them (the policy's spares there released), unmapped and
         logged as `lend`'s. Returns the picks [groups, items]."""
         picked = self.resolvers[0].resolve.lend_tail(cls, n, self.residency.device, self._class_index, self.limits,

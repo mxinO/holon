@@ -35,7 +35,7 @@ peak context; the sampling parameters Claude Code sent; the tokens served and th
 counter over the run). Each session's stream and requests are kept under the gitignored `bench/.out/demo/`.
 
 Usage (release step 9: `holon serve` the class's 27B lock; first one uncounted smoke of M0.5's Claude Code session
-task at the pinned version, docs/m05-grammar.md; then 3 counted runs):
+task at the pinned version, docs/dev/m05-grammar.md; then 3 counted runs):
   python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --runs 3 --out <evidence.json>
   python bench/demo/run.py --score <dir>     # score a project directory as a run is scored
 """

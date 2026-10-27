@@ -22,7 +22,7 @@ the core at a time:
 
 | Milestone | Doc | Closes on | Core |
 |---|---|---|---|
-| **X — expert offload** (this doc) | `docs/v1-offload.md` | the development gate: Qwen3-30B-A3B on the RTX 5080, at its natural fit and at a capped ≈ 25% fit | S0–S5 (§4) |
+| **X — expert offload** (this doc) | `docs/dev/v1-offload.md` | the development gate: Qwen3-30B-A3B on the RTX 5080, at its natural fit and at a capped ≈ 25% fit | S0–S5 (§4) |
 | K — KV and checkpoint tiers | own doc, after X | resume from RAM / SSD, exact; agent-trace TTFT and concurrency | prefix-index tiers (§11) |
 | FN — Qwen3.8-Flash-Next | own doc, in parallel with X | the model on Holon, then offload vs Strata (bars §1.4) | hyper-connection residual; listed now (§4.7) |
 | GLM — GLM-5.3-Flash | own doc, after FN's shared units | the model on Holon, then offload vs Project Maya (bars §1.4) | none expected beyond FN's |
@@ -396,7 +396,7 @@ once, at X's close. FN's core seam (§4.7) follows on its own branch after X mer
 
 | Piece | State |
 |---|---|
-| MoE | `std.moe@1` (`std/holon_std/moe/units.py`): f32 router, `moe_topk@1` (softmax, unique ids), gate/up merged with SwiGLU and down as `linear_experts@2` over `[E, …]` stacks in VRAM, `moe_combine@1` in f32; named in M0.2 (`docs/m02-moe.md` D2) as the offload seam |
+| MoE | `std.moe@1` (`std/holon_std/moe/units.py`): f32 router, `moe_topk@1` (softmax, unique ids), gate/up merged with SwiGLU and down as `linear_experts@2` over `[E, …]` stacks in VRAM, `moe_combine@1` in f32; named in M0.2 (`docs/dev/m02-moe.md` D2) as the offload seam |
 | Expert kernels | `kernels.ggml_cuda`: mmvq up to llama.cpp's `use_mmvq_id` row limit, else mmq; GGUF types incl. IQ1_S / IQ2_XXS / IQ2_XS / IQ2_S / IQ3_XXS / IQ3_S / IQ4_NL / Q2_K–Q6_K / Q8_0 |
 | CPU handshake | spike S6 only (`spikes/s6_cpu_handshake/README.md`): 1.9–2.8 µs per spin handshake on the desktops, captured in FULL graphs, drain-first stop |
 | Memory | `Ledger` with fixed device pools, sized after weights load and re-materialized around the profile; `BuildCtx.pool(name, unit_bytes, segments, min_units, pref_units)`; a second request of one pool name raises; `pinned_empty` uses torch's pinned allocator |
@@ -405,7 +405,7 @@ once, at X's close. FN's core seam (§4.7) follows on its own branch after X mer
 | Lifecycle | `ShutsDown` on logits processors, called by `Engine.close` |
 | CLI | refuses a checkpoint larger than VRAM before fetching (`core/holon/core/cli.py`) |
 | Fingerprint | GPU SKU, SM, VRAM, toolchain; no CPU facts |
-| Cut from ABI 1.0 | slots `eviction_policy`, `placement_policy`, `tier`, `mover`, `connector`, `codec`, `checkpoint_policy`; `HitLen.cost`, `Payload.tier`; `Pool.base`, `capacity_dev`, `device`, `segments`; `Constraint.cpu_isa`; prop `batch_invariant` (`docs/release.md` §15.1) |
+| Cut from ABI 1.0 | slots `eviction_policy`, `placement_policy`, `tier`, `mover`, `connector`, `codec`, `checkpoint_policy`; `HitLen.cost`, `Payload.tier`; `Pool.base`, `capacity_dev`, `device`, `segments`; `Constraint.cpu_isa`; prop `batch_invariant` (`docs/dev/release.md` §15.1) |
 
 ## 4. Core seams (additive ABI minors → ABI 1.2)
 
@@ -660,7 +660,7 @@ layer; FreeToken's gather bounded at M1's rate (the same kind of kernel; panel C
 |---|---|---|
 | Holon F5a, ms per token | ≈ 5.8–6.5 | ≈ 9.1–9.7 (F5b ≈ 3–5% at 1.4–1.7 misses per layer; not counted) |
 | vs llama.cpp static split (bar 1.5×) | ≈ 2.7–3× | ≈ 2.4× |
-| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 0.92–1.47×, central ≈ 1.18× (after step 2: measured overhead 0.20 ms + F11 ≈ 0.25–0.35 ms; Holon's all-resident 30B runs 0.93× llama.cpp on sm_120, `docs/release.md`) — the band's width is llama.cpp's unknown per-layer sync, measured before step 4 | ≈ 1.05–1.4× (straddles) |
+| vs llama.cpp `--moe-cache-mib` (bar 1.1×) | ≈ 0.92–1.47×, central ≈ 1.18× (after step 2: measured overhead 0.20 ms + F11 ≈ 0.25–0.35 ms; Holon's all-resident 30B runs 0.93× llama.cpp on sm_120, `docs/dev/release.md`) — the band's width is llama.cpp's unknown per-layer sync, measured before step 4 | ≈ 1.05–1.4× (straddles) |
 | vs FreeToken (bar 1.0×) | ≈ 1.0–1.1× (thin) | ≈ 1.0–1.1× (thin) |
 | F1 (static) vs llama.cpp static split (bar 0.95×) | ≈ 0.95–1.0× with F5a | — |
 | Prefill vs llama.cpp (bar 1.0×) | staging below ≈ 512 tokens, streaming above with larger chunks; ≥ 1.0× predicted | same |

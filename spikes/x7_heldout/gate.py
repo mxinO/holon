@@ -1,4 +1,4 @@
-"""A1's human-gate figures comparable to Strata's (docs/v1-offload.md §6): tail skip against the no-skip candidate at
+"""A1's human-gate figures comparable to Strata's (docs/dev/v1-offload.md §6): tail skip against the no-skip candidate at
 the same frozen placement — KL(no-skip ‖ skip) per position (the judge's top-20 bucketed KL, a lower bound on the full
 vocabulary's), its mean, p50, p99, and top-1 agreement — at F11-representative placements (`placement.py`), beside
 each candidate against the fp32 golden (and the mmvq floor's figures):

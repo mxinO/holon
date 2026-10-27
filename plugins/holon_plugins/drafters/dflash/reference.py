@@ -1,4 +1,5 @@
-"""The DFlash2 published forward in plain torch (docs/m04-spec.md §5, L0-drafter): research note §1.4–1.5 and §2, after
+"""The DFlash2 published forward in plain torch (docs/dev/m04-spec.md §5, L0-drafter): research note §1.4–1.5 and §2,
+after
 SGLang's `models/dflash.py` (studied, not copied). One sequence: the context features of positions 0 … P − 1 (the
 target's residual streams after the tapped layers, concatenated) and the anchor token at P; the block's rows
 1 … B − 1 predict positions P + 1 … P + B − 1.

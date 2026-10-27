@@ -1,4 +1,4 @@
-"""L0 for `kernels.triton_experts` (docs/m02-moe.md §4.6): the dense grouped GEMM against the `linear_experts`
+"""L0 for `kernels.triton_experts` (docs/dev/m02-moe.md §4.6): the dense grouped GEMM against the `linear_experts`
 reference at the fp32 budget, routing edge cases, masks, poisoned memory past the stack, the merged stack, run-to-run
 equality, graph replay with routing unlike the capture's, and the operand precision against an f64 reference written
 out here (not from reference.py)."""

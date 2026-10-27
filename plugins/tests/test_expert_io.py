@@ -1,4 +1,4 @@
-"""L0 for the offload store's in-graph contracts (docs/v1-offload.md §5, D3, D4): `moe_resolve@1`, the placement
+"""L0 for the offload store's in-graph contracts (docs/dev/v1-offload.md §5, D3, D4): `moe_resolve@1`, the placement
 plugins' variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) with their `lend`, and `expert_fetch@1` —
 from kernels.expert_io (CUDA) and the CPU providers (testing.ref_kernels; each placement plugin's own) against their
 oracles, exactly.

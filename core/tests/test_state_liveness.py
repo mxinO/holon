@@ -2,7 +2,7 @@
 
 With a tier (the toy tier on a deferred stream: refused page stores, its own drops of interior blocks, loads due up to
 three launches out) and optionally an eviction policy, the same traffic plus aborts is also the property test of
-docs/v1-kv-tiers.md D6: after every step resident entries are prefix-closed, every entry's parent exists, the child
+docs/dev/v1-kv-tiers.md D6: after every step resident entries are prefix-closed, every entry's parent exists, the child
 and resident-child counts match a recount and the index's mask matches its resident units; and, at random points,
 `could_fit` says yes exactly when releasing the requests it was given and evicting frees the units (loads in flight,
 evicted loading entries and refused eviction stores included). The tier holds no copy of a block the index dropped,

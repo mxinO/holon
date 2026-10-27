@@ -1,4 +1,4 @@
-"""Drafts with a DFlash / DFlash2 checkpoint (docs/m04-spec.md D4, D5): a block of B rows — the last token, then
+"""Drafts with a DFlash / DFlash2 checkpoint (docs/dev/m04-spec.md D4, D5): a block of B rows — the last token, then
 B − 1 mask tokens — drafted in one forward of a small model that attends to the target's own features.
 
 Every step (`run`), after the target's forward:

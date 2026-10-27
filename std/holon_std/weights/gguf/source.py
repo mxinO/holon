@@ -57,7 +57,7 @@ class GGUFSource:
         if nvfp4 := [t.name for t in self._tensors if t.type == GGMLQuantizationType.NVFP4]:
             raise ValueError(f"{self.path}: NVFP4 tensors ({nvfp4[0]}, …) are not served from GGUF: llama.cpp keeps "
                              "their per-tensor scales in separate `.scale` tensors no recipe maps; serve the HF "
-                             "checkpoint instead (docs/m06-lowp.md D1)")
+                             "checkpoint instead (docs/dev/m06-lowp.md D1)")
         hub = [p for p in self.path.parts if p.startswith("models--")]
         # The display name: `<hub repo>/<file stem>` for a hub-cache file, else the stem.
         stem = SPLIT.sub("", self.path.stem)

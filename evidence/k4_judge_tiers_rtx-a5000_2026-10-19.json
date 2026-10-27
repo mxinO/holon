@@ -1,5 +1,5 @@
 {
- "measurement": "K step 4, carried from step 3 (docs/v1-kv-tiers.md \u00a79 rev 8.5): the GPU timing plants with level I/O jobs sleeping 0 or 0.1 s first (even odds; 0.1 s is \u2265 4 decode steps here): free_on_ticket and store_no_after on Qwen3-8B through the SSD level; adopt_source_reused (both variants) and free_on_ticket on the Qwen3.5-4B hybrid, the payload host pools at their floor, answer:1, in run-identity's identity and fork loops",
+ "measurement": "K step 4, carried from step 3 (docs/dev/v1-kv-tiers.md \u00a79 rev 8.5): the GPU timing plants with level I/O jobs sleeping 0 or 0.1 s first (even odds; 0.1 s is \u2265 4 decode steps here): free_on_ticket and store_no_after on Qwen3-8B through the SSD level; adopt_source_reused (both variants) and free_on_ticket on the Qwen3.5-4B hybrid, the payload host pools at their floor, answer:1, in run-identity's identity and fork loops",
  "date": "2026-10-19",
  "hardware": "NVIDIA RTX A5000",
  "storage": "the dev host's network filesystem, buffered: functional, not a rate",

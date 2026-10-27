@@ -1,5 +1,5 @@
 {
- "measurement": "K step 1: tiers-off snapshot traces, base b5b1e7f vs the step-1 seams (docs/v1-kv-tiers.md acceptance 5)",
+ "measurement": "K step 1: tiers-off snapshot traces, base b5b1e7f vs the step-1 seams (docs/dev/v1-kv-tiers.md acceptance 5)",
  "date": "2026-10-18",
  "hardware": "RTX A5000",
  "base": "b5b1e7f",

@@ -1,4 +1,5 @@
-"""Taps and sampled drafts (docs/m04-spec.md §3.4, §3.5; Gate B): a toy drafter (`tests.tap.drafter`) taps the target's
+"""Taps and sampled drafts (docs/dev/m04-spec.md §3.4, §3.5; Gate B): a toy drafter (`tests.tap.drafter`) taps the
+target's
 residual stream after its first and last layers and drafts from sparse laws it publishes in the SeqTable.
 
 - What it taps — a copy, and an fp32 accumulation of both layers — equals the residual stream of a model-only

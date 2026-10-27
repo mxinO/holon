@@ -1,5 +1,5 @@
 {
- "what": "kernels.ggml_cuda mmq with ids for one Qwen3-30B-A3B layer before vs after the forced-tiling and compact-active-slot vendor patches (docs/v1-offload.md D4): the compact launch capped at min(S, T\u00b7k, experts + top_k), the per-slot id helper where the launch lists every slot anyway (at most 64 spare z entries) and S\u00b7T\u00b7k <= 2^20; a timing note, not a gate",
+ "what": "kernels.ggml_cuda mmq with ids for one Qwen3-30B-A3B layer before vs after the forced-tiling and compact-active-slot vendor patches (docs/dev/v1-offload.md D4): the compact launch capped at min(S, T\u00b7k, experts + top_k), the per-slot id helper where the launch lists every slot anyway (at most 64 spare z entries) and S\u00b7T\u00b7k <= 2^20; a timing note, not a gate",
  "gpu": "RTX A5000",
  "sm": 86,
  "date": "2026-10-17",

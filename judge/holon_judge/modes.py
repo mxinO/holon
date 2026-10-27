@@ -1,4 +1,4 @@
-"""The activation modes a floor emulates on a quantized HF checkpoint (docs/m06-lowp.md §4.8, D3): every quantized
+"""The activation modes a floor emulates on a quantized HF checkpoint (docs/dev/m06-lowp.md §4.8, D3): every quantized
 linear and expert stack takes its input as the kernel path's mode quantizes it, then multiplies in f32 by its
 (dequantized) weight. Modes are named as `kernels.ggml_cuda` counts its calls (`<path>/<mode>`):
 
@@ -27,7 +27,7 @@ PATHS = ("mmq", "mmvq", "prefill", "rows")  # kernels.ggml_cuda's two; kernels.t
 
 
 def fp8_act(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """W8A8's activations (docs/m06-lowp.md D12): per row and 128 columns of f32 `x [R, in]`, a_s = max(amax, 1e-10)
+    """W8A8's activations (docs/dev/m06-lowp.md D12): per row and 128 columns of f32 `x [R, in]`, a_s = max(amax, 1e-10)
     / 448 and e4m3 of `x / a_s` (both IEEE divisions, clamped to ±448, rounded to nearest even): `(e4m3 [R, in], a_s
     [R, in / 128])`, bitwise `kernels.triton_fp8`'s (its L0)."""
     g = x.float().unflatten(-1, (-1, 128))

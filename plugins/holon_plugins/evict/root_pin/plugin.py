@@ -1,4 +1,4 @@
-"""`evict.root_pin` (slot `eviction_policy`, docs/v1-kv-tiers.md §5): Strata's "root pinned, others least recently
+"""`evict.root_pin` (slot `eviction_policy`, docs/dev/v1-kv-tiers.md §5): Strata's "root pinned, others least recently
 used". Among the eligible device entries the core offers (least recently used first), it skips those at depth ≤ d
 whose blocks were matched at least h times, while any other is eligible: a shared system prompt's blocks stay on the
 device under pressure, and go only when nothing else can. Options `root_pin.depth` (d) and `root_pin.hits` (h)."""

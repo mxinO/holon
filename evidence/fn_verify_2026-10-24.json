@@ -1,6 +1,6 @@
 {
  "date": "2026-10-24",
- "doc": "docs/v1-flash-next.md \u00a723.8",
+ "doc": "docs/dev/v1-flash-next.md \u00a723.8",
  "checkouts": {
   "fn-run10": "before the fixes",
   "fn-run11": "fix 1 on both streams",

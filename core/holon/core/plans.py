@@ -148,7 +148,7 @@ def unplanned_options(installed: Mapping[str, Installed]) -> set[str]:
 
 
 def state_identity(engine: Any) -> str | None:
-    """What state a tier persisted must have been made under to be reused (docs/v1-kv-tiers.md D11): the plan's id
+    """What state a tier persisted must have been made under to be reused (docs/dev/v1-kv-tiers.md D11): the plan's id
     without the tier's own options (byte-neutral by tier invariance) and the clamp-dependent `max_model_len`; None if
     the engine's plan cannot be computed."""
     try:

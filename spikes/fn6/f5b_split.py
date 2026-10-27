@@ -1,4 +1,4 @@
-"""F5b on an offload deployment (docs/v1-offload.md D4): tune's split measured at batch 1 with MTP (the RTX 5080 MTP
+"""F5b on an offload deployment (docs/dev/v1-offload.md D4): tune's split measured at batch 1 with MTP (the RTX 5080 MTP
 rows' question, owner 2026-10-21) — F5a, then the CPU's share at each thread count, the best share. Writes the record
 and the F5b options at the best share and threads, whatever the gain. Usage: f5b_split.py <model> '<engine flags>'
 <prompts.jsonl> <out.json>"""

@@ -1,5 +1,5 @@
 """No kernel of Qwen3.8-Flash-Next's step 4 (kernels.qsa_triton, kernels.hc_triton, kernels.ple_triton)
-reads or writes past its allocations (docs/v1-flash-next.md acceptance 3, run once per class):
+reads or writes past its allocations (docs/dev/v1-flash-next.md acceptance 3, run once per class):
 
     cd plugins && PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck \
         python -m tests.memcheck_fn_kernels

@@ -9,7 +9,7 @@ re-reviews.
 
 Scope: plan §10's K line ("KV and checkpoint tiers (pinned RAM / SSD under the prefix index, exact, deterministic
 resume)", `docs/plan.md:603-604`), the end-of-answer checkpoint item (`docs/plan.md:675-681`), and the requirements
-milestone X's panel left for K (`docs/v1-offload.md` §11, lines 585-600). The owner's direction (2026-10-18):
+milestone X's panel left for K (`docs/dev/v1-offload.md` §11, lines 585-600). The owner's direction (2026-10-18):
 - support the popular strategies: exact by default; a host-RAM tier in the style of Strata, llama.cpp, vLLM and
   SGLang HiCache; an SSD tier; conversation parking as the prefix index with a host tier; swap-on-preemption for free;
 - a new strategy is a plugin;
@@ -19,9 +19,9 @@ milestone X's panel left for K (`docs/v1-offload.md` §11, lines 585-600). The o
 Evidence base:
 - the local research note `docs/brainstorm/v1-offload-research.md` ("R §n"; not published), §3.7 (KV offload
   systems), §3.1 C1–C4 (Strata), §3.1b KG1–KG3 (Project Maya), §4.1–4.2 (K1–K4);
-- the pi agent test (`docs/agent-test-pi-rtx5090.md`);
-- M0.3's checkpoint design (`docs/m03-qwen38.md` D4, §4.8; `docs/m03-in-step-snapshot.md`);
-- X's step 0 rates (`docs/v1-offload.md` §13: M1 PCIe, M7 NVMe).
+- the pi agent test (`docs/dev/agent-test-pi-rtx5090.md`);
+- M0.3's checkpoint design (`docs/dev/m03-qwen38.md` D4, §4.8; `docs/dev/m03-in-step-snapshot.md`);
+- X's step 0 rates (`docs/dev/v1-offload.md` §13: M1 PCIe, M7 NVMe).
 
 **What changed from rev 1, in one paragraph.** The core now sees only the VRAM boundary: an entry is resident or not,
 and one plugin in a new single slot `tier` holds everything below (B2). The host and SSD levels, their eviction, the
@@ -50,7 +50,7 @@ The held-out proof holds out a checkpoint policy and a tier the protocol was not
 |---|---|---|---|---|---|---|
 | What moves | KV blocks, cross-layer contiguous chunks | KV pages (layer-first or page-first); a Mamba host pool for hybrids | 256-token KV chunks | whole slot state blobs (`--cache-ram`, default 8 GiB), `--ctx-checkpoints` for hybrids | recurrent checkpoints (C1, ≈ 118 MB each); whole parked conversations (C2); session files (C3); KV streaming for QSA (C4) | KDA checkpoints (≈ 146 MiB) plus indexer pool (KG2); conversation slots on SSD (KG3); DSA latent streaming (KG1) |
 | Tiers | GPU → pinned CPU → fs / object / p2p | GPU, pinned host, file / Mooncake / 3FS / NIXL | CPU, disk (O_DIRECT), GDS, remote | RAM; disk via slot save | RAM; files (C3) | RAM; SSD files, buffered writes |
-| When it stores | write-through of prompt blocks, optional N-hit threshold | `write_through`, `write_through_selective` (default), `write_back` | on store calls | synchronously, when a slot is reused (an observed 2.65 s stall before a request, `docs/release.md:2690-2692`) | at turn start, every 16K, system-prompt end ≥ 2048 (C1) | system-prompt end, last-turn start, every 16,384 (KG2) |
+| When it stores | write-through of prompt blocks, optional N-hit threshold | `write_through`, `write_through_selective` (default), `write_back` | on store calls | synchronously, when a slot is reused (an observed 2.65 s stall before a request, `docs/dev/release.md:2690-2692`) | at turn start, every 16K, system-prompt end ≥ 2048 (C1) | system-prompt end, last-turn start, every 16,384 (KG2) |
 | Load path | whole prefix, async between steps; request parks in `WAITING_FOR_REMOTE_KVS`; FULL graphs kept | layer-wise load-back in prefill (`memory_pool.py:2786-2791`) | blocking by default; layer-wise opt-in (PIECEWISE) | synchronous | restore whole state | restore whole state |
 | Lookup, eviction | chained sha256 block hash; LRU or ARC | radix tree; LRU and others | chained hashes; LRU | linear longest-prefix scan; oldest first | root pinned, others LRU (C1); oldest (C2) | 4 checkpoints; 4 slots |
 | Survives restart | fs tier | L3 | disk | slot files on request | C3 on request | `SLOT_KEEP` (opt-in) |
@@ -87,7 +87,7 @@ caches on an agent trace, with outputs that do not depend on where state was kep
      - `policies.last_turn`: Maya KG2's checkpoint at the last turn's start, a `CheckpointPolicy` by `Ref` in
        `recurrent.policy`. It tests whether `SeqView` exposes enough. The prediction is that it needs the untrimmed
        match length, which K does not add. If so, that is recorded as K's proof finding (as X's F10 was,
-       `docs/v1-offload.md:1544-1555`) and added as a minor in the same milestone;
+       `docs/dev/v1-offload.md:1544-1555`) and added as a minor in the same milestone;
      - `state_tiers.zlib`: a `Level` the protocol was not shaped around. It keeps lossless zlib blobs of variable
        size in plain memory instead of fixed slots, and compresses and decompresses on a CPU thread between its
        blobs and the host level's units.
@@ -178,7 +178,7 @@ caches on an agent trace, with outputs that do not depend on where state was kep
    - Every other lock is propagated once, by the track that closes second (D14).
 
 Moved out of K, with reasons in D2 and §10:
-- **Project Maya's multi-session ratio** (`docs/v1-offload.md:598`) needs Maya on the same trace, which is GLM's
+- **Project Maya's multi-session ratio** (`docs/dev/v1-offload.md:598`) needs Maya on the same trace, which is GLM's
   milestone. K reports Holon's own N-session / 1-session throughput ratio on `agent_park` instead.
 - **`prefill:<n>`** (rev 1's tentative in-step checkpoints) is deferred: no row measured it, and `every:<n>` already
   serves long prompts (B13).
@@ -223,7 +223,7 @@ Non-goals of K:
 
 **D2 — Vehicle, comparisons, and what moves out.**
 - **Gate vehicle: Qwen3.8-27B GGUF.** It has both kinds of state K tiers: q8_0 KV for 16 attention layers
-  (34,816 B per token) and 48 GDN layers whose checkpoints are 147 MiB each (`docs/m03-qwen38.md:59-60`). It is the
+  (34,816 B per token) and 48 GDN layers whose checkpoints are 147 MiB each (`docs/dev/m03-qwen38.md:59-60`). It is the
   pi agent test's model, and its RTX 5080 (UD-IQ3_S) and RTX 5090 (UD-Q4_K_M) locks exist
   (`plans/unsloth/Qwen3.8-27B-GGUF/…/rtx-5080/…/10.lock`: `max_seqs` 4, `recurrent.checkpoints` 4, q8_0).
 - **Development vehicle for KV-only paths and stream-timing plants: Qwen3-8B** (bf16 and Q4_K_M) on the A5000. It is
@@ -263,7 +263,7 @@ counts. N levels inside std change nothing the core decides.
 *Levels below host are std's `Level`s, bound by `Ref`* (B-N2). A new medium or codec must not re-implement a whole
 tier: the clock and its lanes, leaf-first LRU, the copier, admission and the determinism contract. So
 `std.state_tier` keeps all of those, plus the host level, and binds the levels below host by `Ref` in
-`state_tier.levels`, as X's `moe.tiers` binds its tiers (`docs/v1-offload.md:1365-1372`). The list holds built-in
+`state_tier.levels`, as X's `moe.tiers` binds its tiers (`docs/dev/v1-offload.md:1365-1372`). The list holds built-in
 names or `Ref`s, slowest last. A `Level` is structural, so plugins implement it without importing std:
 
 ```python
@@ -629,7 +629,7 @@ stays planned (D12).
 - The core reports `SeqView.branch_at`: the matched prefix's length when its last entry has children, else 0. It is
   computed in `admit` before the fixed point trims the hit.
 - The policy checkpoints there in-step during prefill. The position is block-aligned, so it is on the 64-token grid
-  and costs no cut (`docs/m03-in-step-snapshot.md:94-111`).
+  and costs no cut (`docs/dev/m03-in-step-snapshot.md:94-111`).
 - Why: today, a session sharing only a system prompt with earlier sessions gets no recurrent hit at all. Its
   `prompt_end` payloads all lie past the system prompt (`recurrent/kind.py:54`), and the fixed point trims the KV
   match to the last payload (`state.py:190-201`). On `claude_code` (16,384-token system prompt), every session's first
@@ -652,7 +652,7 @@ stays planned (D12).
   that point. K-M1 measures where re-rendered answers diverge, fixes k and predicts 3g. **Rev 8.2:** K-M1 found 38 of
   38 answers re-rendered verbatim, so `answer:1` is the default and `answer:2` an opt-in for templates that
   re-serialize (panel C).
-- Decode-produced checkpoints are `bounded` (`docs/m03-qwen38.md:22-23`), the same class as today's hits across
+- Decode-produced checkpoints are `bounded` (`docs/dev/m03-qwen38.md:22-23`), the same class as today's hits across
   generated KV pages (`docs/design.md:900-902`).
 - Verify rows publish nothing (`state.py:239`), so with MTP on the policy is idle. The 27B locks run without drafting.
 
@@ -670,7 +670,7 @@ tentatives without a tier sees a plugin's too. A position a unit without `keep` 
 keep it).
 
 **D9 — No `HitLen.cost`: the deepest hit wins; the rate check is tune's.** X's outline lists `HitLen.cost`
-(`docs/v1-offload.md:599`). A cost changes a decision only where loading a deeper hit is slower than recomputing the
+(`docs/dev/v1-offload.md:599`). A cost changes a decision only where loading a deeper hit is slower than recomputing the
 difference. Per token on these machines, that never happens for RAM and rarely for SSD:
 
 | | Load rate | Load per token | Recompute rate | Recompute per token |
@@ -694,9 +694,9 @@ per second. A remote tier slower than recompute would bring back `HitLen.cost`; 
   ≈ 0.3 s of host time on that.
 - The std copier builds the chunk address lists vectorised and issues them through a kernel op, `state_copy@1`,
   bound like any site. K adds providers in a plugin of their own, `kernels.state_copy` (rev 8.3: first planned in
-  `kernels.expert_io`, which already has both paths for experts, `docs/v1-offload.md` X step 0):
+  `kernels.expert_io`, which already has both paths for experts, `docs/dev/v1-offload.md` X step 0):
   - one `cudaMemcpyBatchAsync` per batch;
-  - the SM scatter/gather kernel, 0.97–1.02× DMA in X's M1 (`docs/v1-offload.md:645`).
+  - the SM scatter/gather kernel, 0.97–1.02× DMA in X's M1 (`docs/dev/v1-offload.md:645`).
 
   K-M2 picks between them. Without a provider (CPU, tests), the copier falls back to the per-run loop.
   **Rev 8.1:** loads default to the SM gather (rev 8.2: pinned at 8 CTAs; paced DMA stays tune's alternative). K-M2 measured both at 0.99× the blob rate on fragmented 34,816 B
@@ -832,7 +832,7 @@ change. Whether K4 shares or copies is decided in FN, on its own measurements.
 | Shared objects, step hooks (S0, S1) | `BuildCtx.shared` with `before_materialize` / `after_materialize` / `shutdown`; `before_launch` / `after_commit` (`hooks.py:150-187`; `engine.py:193-200`) |
 | Plans | Every `EngineConfig` field but `NOT_PLANNED`, and every plugin option but checkpoint paths and frontend-only options, is planned (`core/holon/core/plans.py:35-36, 80-104`); the clamp lowers `cfg.max_model_len` from free VRAM (`engine.py:255-262`) |
 | std.tiered | `TieredStore`, `ResidencyMap`, `DeviceResolver`, the `Tier` protocol (`std/holon_std/tiered/protocols.py:46-74`): an in-graph expert residency over read-only weight files. Not reused by K (D3) |
-| Cut from ABI 1.0 | slot `tier`, `HitLen.cost`, `Payload.tier` (`docs/release.md:1738`) |
+| Cut from ABI 1.0 | slot `tier`, `HitLen.cost`, `Payload.tier` (`docs/dev/release.md:1738`) |
 | ABI, budget | `ABI = "1.3"` (`core/holon/api/manifest.py:19`); `check_core_loc.py` 4,603 / 6,000 at this branch's base |
 
 ## 4. Core seams (one additive ABI minor: 1.4 or 1.5 by merge order)
@@ -956,7 +956,7 @@ options, checkpoint policies, tune's measurements, and the traces. The deferred 
 toy proofs (A11) lives in `testing/holon_testing`, as a fixture replacing the core platform's CPU stream and event.
 It adds no core lines.
 
-Seam names, from X's outline (`docs/v1-offload.md:599-600`):
+Seam names, from X's outline (`docs/dev/v1-offload.md:599-600`):
 - `Payload.tier` is dropped: nothing would read it (B4); the core's `Entry` keeps residency privately;
 - "demote" is KS1;
 - "cancellable `BLOCKED(future)`" is KS2's load gate with a tier-owned `Load`; loads are never cancelled (D7);
@@ -1059,7 +1059,7 @@ follows publish within 1–2 steps. Tiers-off configurations stay clean.
 | Qwen3.8-27B UD-IQ3_S, q8_0 KV, `max_seqs` 4, RTX 5080 16 GB | 10.9 GiB weights; 58K KV tokens ≈ 1.9 GiB; checkpoint staging 5–6 × 147 MiB (formula below; today 4) | KV 34,816 B per token; a payload 154 MB. A parked 16K conversation with its live payloads (≈ 3) ≈ 1.0 GB; `agent_park` parks ≈ 140K tokens (C11's sim, σ = 0.6) ≈ 4.9 GB of KV + ≈ 5.5 GB of payloads | 100 GB ≈ 95 parked 16K conversations |
 | Qwen3.8-27B UD-Q4_K_M, RTX 5090 32 GB | 15.3 GiB weights; roomy for 3h | same unit sizes | same |
 | Qwen3-8B Q4_K_M, bf16 KV, RTX 5080 | KV 144 KiB per token | 16 GiB ≈ 116K tokens | — |
-| Qwen3-30B-A3B Q4_K_M offload + host level, RTX 5080 (report) | X's natural fit | experts ≈ 18 GB of `host_memory` (`docs/v1-offload.md:514`); the tier takes what is left | — |
+| Qwen3-30B-A3B Q4_K_M offload + host level, RTX 5080 (report) | X's natural fit | experts ≈ 18 GB of `host_memory` (`docs/dev/v1-offload.md:514`); the tier takes what is left | — |
 
 Notes:
 - **Staging formula** (D7): per payload spec, `units ≥ max_seqs + p` with overlap (`p` = most prefill rows in two
@@ -1219,7 +1219,7 @@ Newest first.
 | C (major): `rtx-5080/12.lock`'s staging margin, ≈ 90 MB at 49,152 tokens, too thin to ship | the lead's decision: re-propagated at `max_model_len` 40,960 as `rtx-5080/13.lock`, approval delegated | below |
 | C's follow-up: when staging units are in a pool's minimum, take a shortfall out of the context instead of refusing | `docs/plan.md` §10 (generic, a later core round), with the check below | below |
 | B1: `Seq.matched` / `SeqView.matched` missing from `docs/design.md` | added to §4.5's ABI 1.4 list and §6.3's Tiers paragraph | `docs/design.md` |
-| B2: old SHAs after `main`'s rewrite | the old → new maps committed in `docs/history/`; the tag (`ec8c487`), the cap base (`d659b2b`) and the two core follow-ups (`a77a1a2`, `5739f8c`) given new-first here and in `docs/plan.md` §10 | "Close (2026-10-20)" |
+| B2: old SHAs after `main`'s rewrite | the old → new maps kept with the development archive; the tag (`ec8c487`), the cap base (`d659b2b`) and the two core follow-ups (`a77a1a2`, `5739f8c`) given new-first here and in `docs/plan.md` §10 | "Close (2026-10-20)" |
 | B3: the record's tidiness | the status line says closed; the "pending the owner" rows record the owner's approval; "Close (prepared …)" and its duplicate table dropped (the close's table is "Close (2026-10-20)"'s); §13 newest first | this section |
 | B4: GitHub CI runs the commit-message check without `.private-patterns` | one docstring line: GitHub CI checks the tracked patterns only | `scripts/ci/check_commit_messages.py` |
 | A: "lock 11 / lock 6" in the step-4, 3g, owner-decision and step-5 panel records | a note at the head of each (K's pre-merge tier locks, superseded by `rtx-5080/13.lock` / `rtx-5090/7.lock`, their texts in `evidence/k4_locks_2026-10-19.json`); the two committed-path sentences rewritten | those sections |
@@ -1250,7 +1250,7 @@ contracts 8 kept; `check_locks.py --release` ok (the newest locks pin this tree)
 ### Close (2026-10-20)
 
 **History.** `main`'s history was rewritten on 2026-10-20 (merge messages neutralised, trees identical); the old → new
-SHA maps are in `docs/history/` (`2026-10-20-main-rewrite-map.tsv`, `2026-10-20-branch-maps.tsv`). The key references
+SHA maps are kept with the development archive, not published. The key references
 (the tag, the cap base, the two core follow-ups) are given new-first with the old SHA beside them; every other SHA in
 this document is the old one, to be read through the maps. K was replanted onto the rewritten
 `main` (`a379614`, its tree identical to the old `21ec123`), and `v1-kv-tiers-api` re-signed on `ec8c487` (the old
@@ -1320,7 +1320,7 @@ trace moved by K.
 A5000); `run_all.sh main`: every check ok (ABI 1.4 listing, the commit messages, the locks), ruff clean, import
 contracts 8 kept.
 
-**Acceptance (docs/v1-kv-tiers.md §1):**
+**Acceptance (docs/dev/v1-kv-tiers.md §1):**
 
 | # | Item | Status | Where |
 |---|---|---|---|
@@ -2264,7 +2264,7 @@ closes second propagates the locks (D14).
 
 ### Rev 1 (2026-10-18): draft
 
-How the requirements X's panel left for K (`docs/v1-offload.md` §11) are answered (updated for rev 2):
+How the requirements X's panel left for K (`docs/dev/v1-offload.md` §11) are answered (updated for rev 2):
 
 | Requirement | Answered in |
 |---|---|

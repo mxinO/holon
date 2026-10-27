@@ -214,8 +214,8 @@ def _path_failures(floor: dict, cand: dict) -> list[str]:
     """A floor emulates the candidate's KV format (none: the model dtype), or it would hide KV bugs (a quantized floor)
     or fail a correct quantized cache (an exact one). A Tier B floor emulates one kernel path (`q8_1`) in one
     activation mode (`act`, default q8_1) for every quantized matmul: the candidate's calls while scoring must all
-    have taken that `path/mode` (docs/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
-    counted. A per-shape floor (`q8_1` "rows", docs/m07-perf.md §6) emulates each matmul on the path its shape takes
+    have taken that `path/mode` (docs/dev/m06-lowp.md D3: a run is scored against the floor of the mode it ran), and be
+    counted. A per-shape floor (`q8_1` "rows", docs/dev/m07-perf.md §6) emulates each matmul on the path its shape takes
     at `step_rows` rows on the class `crossover` (`routes`, by shape): the candidate must have run on that class at
     that step size, each of its matmuls taking the floor's path at that row count (its kernels' `mmvq_rows`, by
     shape), every call in the floor's mode (a step with fewer rows, a prompt's last, may take the other path).
@@ -333,7 +333,7 @@ def _logit_shift(golden: Recording, floor: Recording) -> torch.Tensor:
 
 
 def compare_drafter(golden: Recording, cand: Recording, floor: Recording) -> Result:
-    """The L0-drafter check (docs/m04-spec.md §5, as decided in §12): a draft head is judged on its top-1 agreement
+    """The L0-drafter check (docs/dev/m04-spec.md §5, as decided in §12): a draft head is judged on its top-1 agreement
     with the golden, overall and at confident positions — the golden's top-1 margin above the floor's 99th-percentile
     |Δlogit| (`_logit_shift`) — each at least the floor's less max(0.25 points, 2.5 paired standard errors of the
     difference, prompts as clusters, capped at √2 × the floor's own: `bounded`'s guard), and on KL p50, p99 and

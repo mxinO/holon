@@ -1,4 +1,5 @@
-"""FP8 (e4m3, 128 × 128 block scales) matmuls in Triton (docs/m06-lowp.md D12, §4.6): `y = x @ W.T` for `W` stored as
+"""FP8 (e4m3, 128 × 128 block scales) matmuls in Triton (docs/dev/m06-lowp.md D12, §4.6): `y = x @ W.T` for `W` stored
+as
 e4m3 bits `[out, in]` uint8 and one f32 multiplier per 128 × 128 block, `scale [out / 128, in / 128]`.
 
 - `decode` (W8A16, split-K, M ≤ 16): the weight bytes are decoded to bf16 exactly by bit operations (no fp8 type, so it

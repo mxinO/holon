@@ -1,4 +1,4 @@
-// `cpu_experts@1` (std.moe.kernels; docs/v1-offload.md D7): a layer's CPU jobs — whole experts, down(SwiGLU(gate·x,
+// `cpu_experts@1` (std.moe.kernels; docs/dev/v1-offload.md D7): a layer's CPU jobs — whole experts, down(SwiGLU(gate·x,
 // up·x)) — over GGUF blocks in place, with ggml-cpu's own activation quantization (`from_float` of the weights'
 // `vec_dot_type`) and dot products (`vec_dot`, one per weight row and token), as spike x0's M3 measured them.
 //

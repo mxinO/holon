@@ -1,4 +1,4 @@
-"""FN step 0, N3 (docs/v1-flash-next.md section 8): the proxy roofline — every acceptance-5 row predicted from
+"""FN step 0, N3 (docs/dev/v1-flash-next.md section 8): the proxy roofline — every acceptance-5 row predicted from
 measured inputs, before any FN kernel exists. Ratios are Holon / Strata on D11's contexts, Strata's denominators the
 medians of its gated runs (N1). Rev 2 takes panel C's step-0 review (§13): per-row caches, an MTP pass model, q8_0's
 gain, Strata's gather phase. The inputs:

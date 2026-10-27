@@ -1,4 +1,4 @@
-"""docs/m07-perf.md §1.3's mixed-step bars, from a `bench/run.py` record whose first backend is today's schedule
+"""docs/dev/m07-perf.md §1.3's mixed-step bars, from a `bench/run.py` record whose first backend is today's schedule
 (`holon`) and whose other arms set `chunk_with_decode`: per trace and arm,
 
 - the per-request maximum inter-token gap at p50, p99 and max, and its improvement (today's / the arm's; the bar:

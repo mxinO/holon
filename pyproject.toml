@@ -56,7 +56,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.pytest.ini_options]
 testpaths = ["core/tests", "judge/tests", "plugins/tests", "tools/tests"]
 # A dev run leaves out the slow and real-model tests; the pre-merge full run takes everything with `-m ""` (sharded
-# over GPUs: the root conftest.py), and `-m "not l0"` where the per-arch L0 job ran the kernel files (docs/release.md
+# over GPUs: the root conftest.py), and `-m "not l0"` where the per-arch L0 job ran the kernel files (docs/dev/release.md
 # §22).
 addopts = "-p no:libtmux -m 'not slow and not model'"
 markers = ["slow: over ~8 s (servers spawned, conversions, end-to-end CLIs, bounded and tier judges)",

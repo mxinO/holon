@@ -1,4 +1,4 @@
-"""`std.spec.fixed_k` (docs/m04-spec.md D7): k by the number of running requests; with a fallback, plain decoding
+"""`std.spec.fixed_k` (docs/dev/m04-spec.md D7): k by the number of running requests; with a fallback, plain decoding
 while no request has had a real draft lately, and speculation again from the first one."""
 import types
 

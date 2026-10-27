@@ -1,7 +1,7 @@
 """Assemble milestone X's reference record (evidence/x4_refs_<gpu>_<date>.json) from the runs in bench/.out/: the
 interleaved rounds (`bench/offload_ctx.py run --name x4_refs`), the n-cpu-moe and --fit sweeps, the nsys analyses of
 llama.cpp's MoE cache (`nsys_moe_gap.py`), and the recomputed roofline band of acceptance 3's natural-fit
-`--moe-cache-mib` row (docs/v1-offload.md §13).
+`--moe-cache-mib` row (docs/dev/v1-offload.md §13).
 
     python spikes/x4_refs/record.py --out evidence/x4_refs_rtx-5080_<date>.json
 """

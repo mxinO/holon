@@ -1,6 +1,6 @@
 # x5 / D10: M6's replay with an exclusive RAM tier — which placement is the RAM-short default
 
-This is the input to step 5 of milestone X (`docs/v1-offload.md` D10 and §9). The record is
+This is the input to step 5 of milestone X (`docs/dev/v1-offload.md` D10 and §9). The record is
 [`evidence/x5_exclusive_tier_replay_2026-10-17.json`](../../../evidence/x5_exclusive_tier_replay_2026-10-17.json).
 The code is `exclusive.py`. It reuses `replay.py`'s trace loader, quotas, warm start and F11 pairing. `replay.py` is
 unchanged, so M6's results reproduce as before.

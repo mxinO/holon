@@ -3,7 +3,7 @@
  "date": "2026-10-19",
  "command": "python bench/run.py --name k4-3i-offload-agent-park --gpu 0 --model unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf --lock plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/2.lock --traces bench/traces/agent_park.jsonl --corpus judge/prompts/v1.jsonl --max-batch 2 --rounds 2 --evidence-dir k4 --backends holon holon@tier --arm tier=--slots tier=std.state_tier --host-memory 34359738368 --plugin-options state_tier.host.bytes=8GiB state_tier.host.pages=1",
  "commit": "32d5945f0273098f8cb4957e805f9a35d19bdd69-dirty",
- "dirty": ["M bench/README.md", " M bench/backends/holon.py", " M bench/driver.py", " M bench/workloads.py", " M docs/v1-kv-tiers.md", " M judge/holon_judge/__main__.py", " M judge/holon_judge/planted.py", " M judge/holon_judge/tiers.py", " M judge/tests/test_judge_tiers.py", " M tools/README.md", " M tools/holon_tools/__main__.py", " M tools/holon_tools/tune.py", " M tools/tests/test_tune.py"],
+ "dirty": ["M bench/README.md", " M bench/backends/holon.py", " M bench/driver.py", " M bench/workloads.py", " M docs/dev/v1-kv-tiers.md", " M judge/holon_judge/__main__.py", " M judge/holon_judge/planted.py", " M judge/holon_judge/tiers.py", " M judge/tests/test_judge_tiers.py", " M tools/README.md", " M tools/holon_tools/__main__.py", " M tools/holon_tools/tune.py", " M tools/tests/test_tune.py"],
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5/Qwen3-30B-A3B-Q4_K_M.gguf",
  "rounds": 2,

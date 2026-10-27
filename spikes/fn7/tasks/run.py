@@ -1,4 +1,4 @@
-"""FN's task-accuracy gate (docs/v1-flash-next.md §18 (d), (e)): `fn_tasks.jsonl` through Holon and through Strata,
+"""FN's task-accuracy gate (docs/dev/v1-flash-next.md §18 (d), (e)): `fn_tasks.jsonl` through Holon and through Strata,
 greedy, on the same GGUF and the same prompt ids (the chat template's rendering, thinking on), then scored.
 
 - `generate --engine holon`: Holon's `Engine` in process, all-resident, 8 sequences, plain decoding.

@@ -1,4 +1,4 @@
-"""M0.7 step 0 (docs/m07-perf.md D1, D2, D8, D9): the ggml quantized matmul's time per call against its row count,
+"""M0.7 step 0 (docs/dev/m07-perf.md D1, D2, D8, D9): the ggml quantized matmul's time per call against its row count,
 graph-timed, for every (weight type, shape, activation mode) of the `qlinear` sites in the given locks — mmvq (rows
 1-8), mmq with today's f32 -> bf16 cast, mmq writing f32 (no cast: what D4 would cost at most), and llama.cpp's
 choice — a read-only stream over 2 GiB (D8's bandwidth reference), and mmvq's q8_1 activation quantize alone per
@@ -14,7 +14,7 @@ times the L2 cache, as a step reads its weights from DRAM.
                               [--json out]
 
 `--shapes` keeps only those (type/in x out, mode q8_1 unless `/fp4` follows): step 1's repeated sweep of D2's
-candidates (docs/m07-perf.md D2).
+candidates (docs/dev/m07-perf.md D2).
 """
 from __future__ import annotations
 

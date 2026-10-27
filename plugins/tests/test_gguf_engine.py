@@ -56,14 +56,15 @@ def test_a_quantized_gguf_serves_what_its_dequantized_weights_serve(tiny_checkpo
     if types is None:
         assert outs == [64, 64, 64 + 2 * 32, 2 * 128, 512], outs     # o, down, qkv, gate+up, lm_head
     # Projections of other types stay apart (q/k merge, v alone; gate, up): the judge's per-shape floors read the
-    # same matmul shapes (docs/m07-perf.md D2).
+    # same matmul shapes (docs/dev/m07-perf.md D2).
     sites = {(f["layout"], f["in"], f["out"]) for f in (s["facts"] for k, s in ours.ctx.kernels.items()
                                                         if k.endswith("/qlinear@2"))}
     assert sites == {(f"ggml.{t}/gguf.native", k, o) for t, k, o in engine_shapes(file).values()}
 
 
 def test_quantized_parts_say_where_their_bytes_lie_in_the_file(tiny_checkpoint, tmp_path):  # noqa: F811
-    """Weight extents (docs/v1-offload.md S4): each quantized tensor's blocks read back bitwise from its extent, so an
+    """Weight extents (docs/dev/v1-offload.md S4): each quantized tensor's blocks read back bitwise from its extent, so
+    an
     offload tier can read them again from the file."""
     from holon_std.weights.gguf.source import GGUFSource
 
@@ -141,7 +142,7 @@ def test_a_damaged_file_fails_when_opened(tiny_checkpoint, tmp_path):  # noqa: F
 
 
 def test_nvfp4_tensors_and_nan_mxfp4_scales_are_refused(tiny_checkpoint, tmp_path):  # noqa: F811
-    """llama.cpp's NVFP4 GGUFs keep each tensor's scale apart, as a `.scale` tensor (docs/m06-lowp.md D1); an MXFP4
+    """llama.cpp's NVFP4 GGUFs keep each tensor's scale apart, as a `.scale` tensor (docs/dev/m06-lowp.md D1); an MXFP4
     e8m0 scale of 0xFF is NaN, refused as std.weights.hf refuses it."""
     from holon_std.weights.gguf import reader
     from holon_std.weights.gguf.source import GGUFSource

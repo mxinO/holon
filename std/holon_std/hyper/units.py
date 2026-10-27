@@ -1,4 +1,4 @@
-"""The gated-residual hyper-connection units (docs/v1-flash-next.md D3, D4; op contracts in `kernels.py`).
+"""The gated-residual hyper-connection units (docs/dev/v1-flash-next.md D3, D4; op contracts in `kernels.py`).
 
 The trunk's residual R is [T, n·H] float32 (`ModelSpec.residual`): `expand` repeats the inner embedding n times,
 every block (`gr_block`) takes and returns it complete, and the model's `norm` is the output mixer (`gr_mix`), which

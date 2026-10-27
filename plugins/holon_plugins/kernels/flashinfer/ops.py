@@ -4,7 +4,7 @@ Op contracts are documented next to their references (std.ops.kernels, std.ffn.k
 2-D input, so leading dimensions are flattened. RoPE uses a cos/sin cache computed with the reference's formula, so
 the angles match the oracle; it is a named static buffer, so every layer with the same rope shares one copy and it
 is allocated (and accounted) at build time. The rope instance names it (`cos_sin`, std.ops' rope@1 contract), so a
-fused kernel rotates with the same table (docs/m07-perf.md D3).
+fused kernel rotates with the same table (docs/dev/m07-perf.md D3).
 """
 from __future__ import annotations
 

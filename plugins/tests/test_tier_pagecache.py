@@ -1,4 +1,5 @@
-"""tiers.pagecache (docs/v1-offload.md acceptance 1: the held-out low-RAM tier): the store's file tier read through the
+"""tiers.pagecache (docs/dev/v1-offload.md acceptance 1: the held-out low-RAM tier): the store's file tier read through
+the
 OS page cache. With RAM holding a quarter of the pieces (exclusive tiers, D10) every other piece is read by
 `cpu_task@1`'s copy task from `pread` extents with O_DIRECT off, and the outputs are the resident store's, bit for bit
 — under F11 (its victims demoted into RAM), on the CPU providers and on the GPU (the native copy task inside

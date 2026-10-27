@@ -1,4 +1,5 @@
-"""placement.promote (F10, docs/v1-offload.md D1, D3, §13: promote-on-fetch into 3 device-owned spare slots per layer):
+"""placement.promote (F10, docs/dev/v1-offload.md D1, D3, §13: promote-on-fetch into 3 device-owned spare slots per
+layer):
 its resolve contract `moe_resolve.promote@1` from both providers — the plugin's CPU provider and its own kernel plugin's
 CUDA provider (kernels.promote, around kernels.expert_io's `moe_resolve@1`) — against the oracle, exactly, and its
 `lend`; then end to end on the CPU and the GPU: bitwise the resident store, the residency the replay oracle's at every

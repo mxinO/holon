@@ -1,4 +1,4 @@
-"""`std.mixers.qsa@1`: Qwen3.8-Flash-Next's indexed sparse attention (docs/v1-flash-next.md D6; op contracts in
+"""`std.mixers.qsa@1`: Qwen3.8-Flash-Next's indexed sparse attention (docs/dev/v1-flash-next.md D6; op contracts in
 `kernels.py`).
 
 The attention is gqa's, composed by Ref (`attn`: `std.mixers.gqa@1` with the same parameters, so its projections,

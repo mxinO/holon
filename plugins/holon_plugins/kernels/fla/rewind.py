@@ -1,4 +1,5 @@
-"""Our Triton kernel for `gdn_rewind@1` (op contract: std.mixers.gdn; docs/m07-perf.md D5): one launch per verify step
+"""Our Triton kernel for `gdn_rewind@1` (op contract: std.mixers.gdn; docs/dev/m07-perf.md D5): one launch per verify
+step
 for every GDN layer of a group — the saved gates masked past each row's accepted tokens, and the conv state at the
 accepted end gathered from window ‖ saved x straight into the pool. Data movement only (the oracle's values exactly);
 nothing is read back to the host, so it captures into the verify step's graph."""

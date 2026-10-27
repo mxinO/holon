@@ -116,7 +116,7 @@ ggml_tensor with_prec(ggml_tensor dst, const int prec) {
 // A per-tensor (dense) or per-expert scale for mmvq's fused epilogue: `n` f32 values, or none.
 ggml_tensor scale_vector(const float * scale, const int64_t n) { return matrix(GGML_TYPE_F32, scale, n, 1); }
 
-// moe_router@1's logits on prompt chunks (docs/v1-moe-prefill.md D3): logits[t, e] = sum over h of x[t, h] *
+// moe_router@1's logits on prompt chunks (docs/dev/v1-moe-prefill.md D3): logits[t, e] = sum over h of x[t, h] *
 // router[e, h] from x's exact values (bf16 or f32), in an order fixed per logit: ks chains of f32 fma, chain g over
 // hidden values [g, g + 1) * hidden / ks ascending, then the chains' sums added in g order, ks = router_chains(experts)
 // (more chains for fewer experts, to fill the GPU without moving more partial sums than logits need). So a row's

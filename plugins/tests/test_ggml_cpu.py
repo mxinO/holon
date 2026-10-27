@@ -1,4 +1,5 @@
-"""kernels.ggml_cpu's `cpu_experts@1` (L0, docs/v1-offload.md D7) on this host's CPU tier: every job's rows within the
+"""kernels.ggml_cpu's `cpu_experts@1` (L0, docs/dev/v1-offload.md D7) on this host's CPU tier: every job's rows within
+the
 oracle's budget (std.moe.reference: gguf-py's weights, ggml-cpu's activation quantization emulated, float64 sums: a
 row may differ by a requantized SwiGLU value that sits at a rounding tie, which the oracle's sums put a hair to the
 other side, so the budget is tight for nine rows in ten and one such flip's size for the rest),

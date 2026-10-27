@@ -1,7 +1,7 @@
 {
  "workload": "release7-cap-bars",
  "date": "2026-10-16",
- "rule": "docs/release.md \u00a716.1 (M0.7 \u00a71.3 as read in \u00a715.4)",
+ "rule": "docs/dev/release.md \u00a716.1 (M0.7 \u00a71.3 as read in \u00a715.4)",
  "command": "python bench/mixed_bars.py <evidence/bench_release7-cap-<file>_<class>_2026-10-15.json>",
  "cells": {
   "rtx-3090/27b-ud-q4_k_m-c0": {

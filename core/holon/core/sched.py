@@ -26,14 +26,15 @@ Constrained requests (a logits processor masks their rows from their committed t
 out while it has a row in flight (the engine may commit that row first), and while BLOCKED (its processor is not
 ready), without holding up the requests queued behind it.
 
-Mixed steps (`chunk_with_decode` C > 0; docs/m07-perf.md §3.1): without a drafter, a step whose running requests
+Mixed steps (`chunk_with_decode` C > 0; docs/dev/m07-perf.md §3.1): without a drafter, a step whose running requests
 decode also carries prefill chunks — its decode rows first (`BatchPlan.n_decode` of them, each reserved before any
 chunk), then chunks of up to C tokens (the engine checks `max_step_tokens` >= max_seqs + C, so a step always has room
 for them); a step with nothing to decode prefills up to `max_step_tokens`, as today. With a drafter rows never mix: a
 prefill step capped at C alternates with a decode (verify) step while both kinds can run, else the step takes the
 kind that can.
 
-Load-gated requests (a prefix hit the tier loads, docs/v1-kv-tiers.md D4): admitted, they wait until the tier's clock
+Load-gated requests (a prefix hit the tier loads, docs/dev/v1-kv-tiers.md D4): admitted, they wait until the tier's
+clock
 reaches their loads' due time (`clock`, `StateManager.due`) while the requests behind them run; when nothing else can
 run, the earliest-due one runs at once and its step waits for its copies on the device.
 

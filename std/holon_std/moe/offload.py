@@ -1,5 +1,6 @@
 """std.moe.offload@1: a MoE layer's experts through the engine's one tiered store (`std.tiered.store@1`, shared by
-every MoE layer: docs/v1-offload.md D5). Expert stacks stay where the weight source maps them; the merge records each
+every MoE layer: docs/dev/v1-offload.md D5). Expert stacks stay where the weight source maps them; the merge records
+each
 expert's gate and up extents (gate's rows, then up's: the resident merge's layout) and down's, one piece per role in
 the class of its (role, ggml type, shape). Per chunk of tokens the layer's ids resolve to arena slots — misses
 gathered into staging slots — and `linear_experts_arena@1` runs over each class's arena.
@@ -17,7 +18,7 @@ layer's missing experts through lent ring slots in passes of up to the stacks' k
 default 512), `moe.ring_copy` (`sm`: the ring's copies a small kernel beside the pass, no host sync; `dma`: copy
 engines, one host sync per streaming step; default `sm`), `moe.ring_lend` (what a streaming step lends: `coldest`,
 the policy's coldest whole experts, X's; `tail`, first the experts holding the last slots of the largest class arena,
-a contiguous range its expert passes take their buffers from, then the coldest: docs/v1-moe-prefill.md D10, D11;
+a contiguous range its expert passes take their buffers from, then the coldest: docs/dev/v1-moe-prefill.md D10, D11;
 default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
 `moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
@@ -133,7 +134,7 @@ class Offload(nn.Module):
         self.store.pipelining.append(lambda: self._cpu is None and all(takes_buffers(s.kernel) for s in self._stacks))
         if self._cpu is not None:
             self._slot = self._cpu.bind(ctx, *self._stacks)
-        if self._transform_name:                     # docs/v1-offload.md D3: an explicit option, never by priority
+        if self._transform_name:                     # docs/dev/v1-offload.md D3: an explicit option, never by priority
             op = f"moe_route_transform.{self._transform_name}@1"
             self._transform = ctx.select_kernel(op, site=f"std.moe.offload[{self.layer}]",
                                                 **self._facts).impl(ctx, **self._facts)
@@ -149,7 +150,7 @@ class Offload(nn.Module):
 
     def pass_tokens(self, tokens: int) -> int:
         """The expert pass of the step: in a streaming step (D8) as many tokens as both stacks' kernels take at
-        their chunks' bits (docs/v1-moe-prefill.md D1), else std.moe@1's chunk."""
+        their chunks' bits (docs/dev/v1-moe-prefill.md D1), else std.moe@1's chunk."""
         return pass_rows(self._stacks) if self.store.large_passes(tokens) else CHUNK
 
     def _layout(self, tokens: int) -> list[int]:

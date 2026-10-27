@@ -1836,7 +1836,7 @@ lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
 - `chunk_with_decode` 512 on the plain 27B locks, 0 recorded on every other lock; release step 7's MTP decision sets
   it explicitly for speculative locks.
 - Unused ABI names cut at release step 6 (§17.1).
-- M0.6 Gate B's acceptance 15 (FP8 locks) closed here (`docs/m06-lowp.md`).
+- M0.6 Gate B's acceptance 15 (FP8 locks) closed here (`docs/dev/m06-lowp.md`).
 
 ### 17.6 Suite and CI
 

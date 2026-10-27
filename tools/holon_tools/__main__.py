@@ -1,5 +1,5 @@
 """Command line: the `holon impact | propagate | tune` commands of design §4.4 and §4.6, and `profile`
-(docs/v1-offload.md F2).
+(docs/dev/v1-offload.md F2).
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
@@ -13,7 +13,8 @@
 
 `propagate` and `tune` exit 0 when nothing needs doing or the lock was written (a byte-identical trace advances
 without L2), 2 when the new lock needs an approval (re-run with --approve to write it), 1 on failure — a lock binding
-an `approx` plugin (docs/v1-offload.md §6) included, unless --allow-approx says a human gated it. The golden and floor
+an `approx` plugin (docs/dev/v1-offload.md §6) included, unless --allow-approx says a human gated it. The golden and
+floor
 are needed only when the trace moves.
 
 The lock's kernel pins carry over (they isolate a model from kernels installed since); engine settings come from the

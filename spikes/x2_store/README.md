@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-offload.md` §9 step 2: is the offload store (`std.moe.offload@1` over `std.tiered`, F1 static placement,
+`docs/dev/v1-offload.md` §9 step 2: is the offload store (`std.moe.offload@1` over `std.tiered`, F1 static placement,
 F5a: every miss gathered from pinned RAM) bitwise `std.moe@1` all-resident on the vehicle, at a full, a ≈ 47% and
 a ≈ 25% fit? And the two measurements §13 asks of step 2: Holon's own offload-path overhead (decode with every
 expert cached against `std.moe@1`), and the gather's rate from the store's host allocation (`platform.host_memory`:

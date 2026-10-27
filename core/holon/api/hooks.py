@@ -99,7 +99,7 @@ class PayloadPool(Protocol):
 
 class KeepsTentatives(Protocol):
     keep_tentative: int       # a request's last this many tentative payloads (`Payload.tentative`) are kept; a newer
-                              # one drops the oldest (docs/v1-kv-tiers.md D8)
+                              # one drops the oldest (docs/dev/v1-kv-tiers.md D8)
 
 
 class RestoresPayloads(Protocol):

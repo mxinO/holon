@@ -1,4 +1,4 @@
-"""placement.lru@1 (F4, docs/v1-offload.md D1, D4): LRU fetch-on-miss over logical-step timestamps, the comparison
+"""placement.lru@1 (F4, docs/dev/v1-offload.md D1, D4): LRU fetch-on-miss over logical-step timestamps, the comparison
 arm of F11. The cache is the device's: the host seeds it (F2's warm start) and never edits it; in the graph, the
 policy's own resolve contract `moe_resolve.lru@1` (reference.py) stamps each layer's routes and gathers every miss
 it can straight into the slot of the least recently routed resident the step does not need. CUDA provider:

@@ -1,4 +1,4 @@
-"""Per-call speed of IQ1_M's mmq tile loader against IQ2_S's (docs/v1-moe-prefill.md step 3c, D9): mmq with ids on
+"""Per-call speed of IQ1_M's mmq tile loader against IQ2_S's (docs/dev/v1-moe-prefill.md step 3c, D9): mmq with ids on
 random-byte stacks (realistic scales) at FN's MoE shape (E = 512, top-10, H = 2,560, I = 640), the merged gate/up
 stack [E, 2·I, H] with bf16 activations [T, 1, H], as `LinearExperts` calls it (slots = E + k). Down (in = I = 640)
 is not a multiple of 256, so neither type can hold it. Skewed routing as spikes/moe_prefill/gemm.py's; the two types

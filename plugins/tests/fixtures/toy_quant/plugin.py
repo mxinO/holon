@@ -1,4 +1,4 @@
-"""A toy quantized layout and its kernels, for the `qlinear@2` / `linear_experts@2` contracts (docs/m06-lowp.md D4,
+"""A toy quantized layout and its kernels, for the `qlinear@2` / `linear_experts@2` contracts (docs/dev/m06-lowp.md D4,
 D5): `toy.int8/rows` holds int8 rows `q` [out, in], an f32 scale per G rows `scale` [out/G] and a per-tensor `scale2`
 ([] or [1]; per expert: [E, out, in], [E, out/G], E values; a merged gate/up stack's `scale2` is [2, E]). Every
 kernel's `prepare` folds `scale2` into `scale` and copies `q`, so the weight it reads (`toy.int8/folded`) shares no
@@ -6,8 +6,8 @@ tensor with its source; `PREPARED` records each source it was handed and a copy 
 modified.
 
 Matmuls register one spec per activation mode, as kernels.ggml_cuda does (`config["act"]`, path -> mode): one mode
-on both paths for `act_quant` a8 or a4, and, preferred under a4, the chunk path at 4 bits (docs/m07-perf.md §3.1).
-As kernels.ggml_cuda's (docs/m07-perf.md D6), `qlinear` lists `qlinear_glu@1` in `config["fused"]` — which fuses one
+on both paths for `act_quant` a8 or a4, and, preferred under a4, the chunk path at 4 bits (docs/dev/m07-perf.md §3.1).
+As kernels.ggml_cuda's (docs/dev/m07-perf.md D6), `qlinear` lists `qlinear_glu@1` in `config["fused"]` — which fuses one
 row and returns None above — and has `prepare_input`, whose handle (`Handle`) its calls take; `CALLS` logs both."""
 import dataclasses
 

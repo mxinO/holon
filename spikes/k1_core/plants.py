@@ -1,4 +1,4 @@
-"""Milestone K step 1's core plants (docs/v1-kv-tiers.md §13): each a one-line bug planted in a copy of `core/holon`,
+"""Milestone K step 1's core plants (docs/dev/v1-kv-tiers.md §13): each a one-line bug planted in a copy of `core/holon`,
 paired with the core test it must fail. Run from the repository root:
 
     python spikes/k1_core/plants.py [--discover] [--only NAME ...] [--out evidence/k1_core_plants_cpu_<date>.json]

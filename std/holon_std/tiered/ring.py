@@ -1,4 +1,4 @@
-"""A prefill step's lent slots (docs/v1-offload.md D4, D5, D8), all on the device — tables written by the step's
+"""A prefill step's lent slots (docs/dev/v1-offload.md D4, D5, D8), all on the device — tables written by the step's
 own kernels, no host sync: at the step's first resolve its layers' empty slots, then the policy's `lend(need)` —
 whole experts, the coldest — serve the step; at its end they return to their layers as empty slots, each its
 layer's first victim (the policy's next admissions fill them), so the cache never shrinks.
@@ -21,7 +21,7 @@ Two uses (`mode`, the host's choice at launch):
   lacks; FN §21.16), the stage list those slots over and over, each part's fetch after the part two before it ran
   (`DeviceResolver._pipelined`).
 
-A ring step under `ring_lend = "tail"` (docs/v1-moe-prefill.md D11) first lends the tail — call 0, the policy's
+A ring step under `ring_lend = "tail"` (docs/dev/v1-moe-prefill.md D11) first lends the tail — call 0, the policy's
 `lend_tail`: the experts holding the last n slots of the tail's class, whole —, then makes the rounds (calls
 1…ROUNDS, unchanged): the range is the step's expert passes' (D10's buffers), so it is no pool, ring or stage slot
 and is not counted as held; the experts' other slots and the empty slots outside it serve as X's do. After call 0 no

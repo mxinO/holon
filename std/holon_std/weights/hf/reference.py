@@ -1,4 +1,5 @@
-"""Reference dequantization of the `hf` layouts (docs/m06-lowp.md D10): the oracle every provider of these layouts is
+"""Reference dequantization of the `hf` layouts (docs/dev/m06-lowp.md D10): the oracle every provider of these layouts
+is
 scored against, itself cross-checked against each format owner's decoder (transformers, compressed-tensors, ModelOpt,
 amd-quark, gguf-py on llama.cpp's repacks). Group and block sizes come from the parts' shapes, so a weight merged by
 rows (D5) dequantizes as its units would; fp32 out, every product rounded once.

@@ -2,12 +2,12 @@
 expert id, slots for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) — the same CTA
 first updates the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather
 of missed units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1,
-docs/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
+docs/dev/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
 rows, the CPU's output rows into the experts' output). Op contracts: std.moe.kernels, and the placement plugins'
 (placement.lfu, placement.lru). A variant's `lend` (and F11's `lend_tail`)
 runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
 plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
-variant ships its own CUDA provider, docs/v1-offload.md D3).
+variant ships its own CUDA provider, docs/dev/v1-offload.md D3).
 
 The native module is built ahead of time (`python -m holon_plugins.kernels.expert_io.prebuild`); without it an
 instance cannot be created and the error names that command."""
@@ -79,7 +79,7 @@ STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state
 
 
 class MoeResolveLfu(MoeResolve):
-    """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/v1-moe-prefill.md D11): F11 keeps no
+    """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/dev/v1-moe-prefill.md D11): F11 keeps no
     spares, so the experts holding the range are all it picks. Device ops, no host sync."""
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
