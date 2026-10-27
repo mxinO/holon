@@ -74,7 +74,9 @@ def test_an_moe_floor_runs_the_d3_block(moe_files, tiny_prompts, gold):
     floor = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint))
     pure = golden.record(str(file), tiny_prompts, dtype=torch.bfloat16, config=str(checkpoint), pure_hf=True)
     assert floor.meta["moe_block"].startswith("d3-reference@") and "moe_block" not in pure.meta
-    assert compare(gold, floor).overall.kl_p99 <= compare(gold, pure).overall.kl_p99   # never looser than pure HF
+    # never looser than pure HF beyond float noise: both sit near 1e-7 on the tiny model, where the CPU's BLAS (threads,
+    # instruction set) moves the last bits
+    assert compare(gold, floor).overall.kl_p99 <= compare(gold, pure).overall.kl_p99 + 1e-6
 
 
 def _tier_a(file, prompts):
