@@ -237,3 +237,38 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert pools[-1] is None                                    # another class's pools may not fit here: measured
     assert run(away, "--approve") == 0
     assert plans.newest(away, lock.plan.model_id, lock.plan.fingerprint_class).snapshot == lock.snapshot
+
+
+@pytest.mark.slow
+def test_cli_first_lock_in_the_reference_form(tiny_checkpoint, tiny_prompts_file, cpu_flags, tmp_path, monkeypatch,
+                                               capsys):
+    """D15a end to end on CPU: a reference (the engine's own run, `kind: reference` with its oracle) and budgets from
+    a pair that differs in bits; `--reference` writes the first lock with its `[judged]` table naming both files, and
+    is refused beside `--golden`."""
+    from holon.core.engine import Engine
+    from holon_judge import reference
+    from holon_judge.engine import score
+    from holon_judge.recording import PromptSet
+
+    prompts = PromptSet.load(tiny_prompts_file)
+    monkeypatch.setattr(propagate, "PROMPTS", tiny_prompts_file.parent)       # where a reference's prompt set lies
+    engine = cpu_flags | {"max_model_len": 128, "state_memory": 4 << 20}
+
+    def recording(**kw):
+        return score(Engine(EngineConfig(**{"model": str(tiny_checkpoint)} | engine | kw)), prompts,
+                     meta={"kind": "reference", "oracle": "tools/tests/test_propagate.py"})
+    ref = tmp_path / "tiny-reference.safetensors"
+    recording().save(ref)
+    reference.calibrate(ref, [("bf16", reference.Recording.load(ref), recording(dtype=torch.bfloat16))]).save(
+        reference.budgets_path(ref))
+    flags = [f"--{k.replace('_', '-')}={str(v).removeprefix('torch.')}" for k, v in engine.items()]
+    base = ["propagate", str(tiny_checkpoint), "--plans", str(tmp_path / "plans"), "--prompts",
+            str(tiny_prompts_file), *flags, "--new-model", "--approve"]
+    with pytest.raises(SystemExit, match="--reference replaces"):
+        main([*base, "--reference", str(ref), "--golden", str(ref)])
+    assert main([*base, "--reference", str(ref)]) == 0
+    assert "L2 (reference form)" in capsys.readouterr().out
+    (lock,) = (tmp_path / "plans").rglob("*.lock")
+    judged = locks.judged_of(lock)
+    assert judged["form"] == "reference" and judged["recordings"] == [f"{ref.name}@{reference.sha256(ref)}"]
+    assert judged["budgets"] == [f"{ref.stem}.budgets.json@{reference.sha256(reference.budgets_path(ref))}"]
