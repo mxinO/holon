@@ -252,7 +252,7 @@ def _served(engine, prompts, mirrored=None) -> tuple[list, dict]:
     return engine.generate(prompts, GREEDY), [(got[r].token, got[r].top_ids, got[r].top) for r in rids]
 
 
-def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path):
+def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path, capsys):
     """docs/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map and
     in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
     Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
@@ -320,6 +320,11 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
         _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                            "moe.placement.profile": str(profile)})
+    capsys.readouterr()
+    cold = _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25",
+                                                              "moe.placement.profile": "absent.profile.json"})
+    assert _served(cold, prompts) == want                    # a lock's profile not written here yet: said, served cold
+    assert capsys.readouterr().out.count("no routing profile") == 1
     store.stage = store.stage[:, :store.peak_misses - 1].contiguous()       # as if staging had been too small
     for p in prompts:
         engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)

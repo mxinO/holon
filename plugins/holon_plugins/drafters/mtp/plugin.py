@@ -18,9 +18,13 @@ pack). After each step `run`:
 """
 from __future__ import annotations
 
+import os
+
 import torch
 
 NAMESPACE = "mtp"
+HOW = ("build it (README, \"Qwen3.8-Flash-Next\": `holon_tools mtp-pack`) and pass --plugin-options "
+       "mtp.path=<file>, or serve without drafting: --max-draft-tokens 0")
 
 
 class Plugin:
@@ -32,8 +36,18 @@ class Plugin:
         if spec is None:
             raise ValueError("drafters.mtp: the target's checkpoint declares no MTP draft head")
         path = ctx.options.get("plugins", {}).get("mtp.path")
+        if path and not os.path.isfile(path):
+            raise FileNotFoundError(f"drafters.mtp: no MTP pack {path} (mtp.path): {HOW}")
         tensors = ctx.weight_source(path).tensors() if path else target.tensors()
-        return MTPDrafter(ctx, target, ctx.aux_model(NAMESPACE, spec, tensors))
+        try:
+            head = ctx.aux_model(NAMESPACE, spec, tensors)
+        except Exception as e:              # the same type: its failure kind (a resolver's: no start would serve)
+            if path:
+                raise
+            raise type(e)(f"drafters.mtp: the MTP head did not load from the model's files ({e}), and no pack of its "
+                          f"own is named (mtp.path): a lock drafting from one records it under its [sources] as "
+                          f"`mtp.path` (the lock `holon serve` named at start); {HOW}") from e
+        return MTPDrafter(ctx, target, head)
 
 
 class MTPDrafter:

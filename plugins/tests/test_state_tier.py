@@ -105,10 +105,13 @@ def test_attach_refuses_a_payload_level_below_the_payloads_in_flight():
     # running without payload stores (a pool the ledger shrank to 0 units dropped every hybrid hit)
     with pytest.raises(RuntimeError, match=r"staging pools are below .* plugin.ckpt has 4, 32 bytes short"):
         _bare(max_seqs=4, payloads=5)
-    # host memory is a deployment's: the refusal names the flag and the bytes the host level takes
+    # host memory is a deployment's: the refusal names the flag and the bytes the host level takes, and stays the
+    # core's out-of-memory refusal (a lock started without --host-memory fails at once, not retried)
+    from holon.core.memory import OutOfUnits
+
     tier, _, _ = _bare()
     need = sum(p.capacity * p.unit_bytes for p in tier.host.values())
-    with pytest.raises(RuntimeError, match=rf"launch with --host-memory {need}\b"):
+    with pytest.raises(OutOfUnits, match=rf"launch with --host-memory {need}\b"):
         _bare(host_memory=need - 1)
 
 

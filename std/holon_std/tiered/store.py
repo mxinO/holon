@@ -197,6 +197,7 @@ class TieredStore:
         ref = policy if isinstance(policy, Ref) else Ref(policy or POLICY)    # POLICY: the one tier holds every expert
         self.policy, self.policy_ref = ctx.unit(ref, items=items, roles=roles), ref.target       # (pinned, inclusive)
         self._cache, self._profile = _parse_cache(cache), profile
+        self._profile_missing = False           # said once (`_profile_counts`)
         self.classes: dict[str, SlotClass] = {}
         self.groups: dict[int, dict[int, SlotClass]] = {}       # group -> role -> its class
         self.residency: ResidencyMap | None = None              # the device tables, made at `before_materialize`
@@ -1253,14 +1254,22 @@ class TieredStore:
         item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
         refused unless it was counted on this checkpoint's files (or some of them: a profile of the target serves a
         deployment whose auxiliary model, an MTP head, adds its own file and group); groups it does not name count
-        zero."""
+        zero. A profile not there (a lock's, before `holon_tools profile` wrote it here) is said once and counts
+        zero: the store starts cold and fills as it serves."""
         counts = np.zeros(self.residency.host.shape[:2])
         if not self._profile:
             return counts
         name = pathlib.PurePath(self._profile)
         if name.is_absolute() or ".." in name.parts:
             raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
-        data = json.loads((self.profile_dir / name).read_text())
+        path = self.profile_dir / name
+        if not path.is_file():
+            if not self._profile_missing:
+                self._profile_missing = True
+                print(f"holon: {self.name}: no routing profile {path} (moe.placement.profile): serving from a cold "
+                      f"cache; `holon_tools profile` writes one")
+            return counts
+        data = json.loads(path.read_text())
         files = data.get("checkpoint") or []
         if not files or any(f not in self.checkpoint for f in files):
             raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "

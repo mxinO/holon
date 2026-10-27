@@ -202,7 +202,8 @@ class HostTier:
                          for k, p in self.dev.items()}
         except Exception as e:            # host memory is a deployment's (`--host-memory`), never in a lock
             need = sum(n * self.dev[k].unit_bytes for k, n in units.items())
-            raise RuntimeError(f"state_tier: the host level (state_tier.host.bytes) takes {need} bytes of pinned "
+            # the same type: the core's out-of-memory refusal stays one (every start would fail alike: no retry)
+            raise type(e)(f"state_tier: the host level (state_tier.host.bytes) takes {need} bytes of pinned "
                                f"host memory: launch with --host-memory {need}, plus what other plugins' host "
                                f"pools hold if any ({e})") from e
         self.free = {k: collections.deque(range(p.capacity)) for k, p in self.host.items()}
