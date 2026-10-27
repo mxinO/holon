@@ -818,6 +818,45 @@ on a prompt that ends in it.
 - **Merge order:** step 1's `std.tiered` / `std.moe/offload.py` / `kernels.cpu_task` changes merge into the branch
   first; steps 3–4 rebase on them, and `std.moe/units.py` and `offload.py` are edited by one step at a time.
 
+**D15a — A first lock judged against a bf16 GPU reference (`--reference`), a judge mode for every model without an
+fp32 golden** (step 8; the coordinator's call of 2026-10-27, option (a); for B and C's review). `propagate` writes a
+first lock only after L2, and L2 needs an fp32 golden and an HF floor in the activation dtype. Under the owner's rule
+(no fp32 goldens, no big-model CPU runs) GLM has neither, and HF cannot run it on any card, so every later large
+model would hit the same wall. Not taken: a lock carrying gates (c) and (d) instead of L2, which changes the meaning
+of every lock; an fp32 golden, which breaks the rule; writing it unjudged.
+- **The reference:** `holon_judge reference <model> --prompts <set> --out <rec> [engine flags]`. Holon's own engine
+  runs the model all-resident on a card that holds it (GLM: the RTX PRO 6000, `std.moe@1`, bf16, 32K steps, no
+  offload, no tiers, no drafter). It is scored by the judge's `score`, the recording a candidate makes (top-20
+  logprobs, the tail, the target logprob), with no fp32 and no CPU. The meta records `kind: reference`, the card
+  class, the plan id of the reference engine, and the settings a candidate must share (the KV format, `cpu_split`).
+  The prompt set is v1 retokenized for the model (`judge/prompts/v1-glm5_next.jsonl`, as `v1-qwen3_5`: 24 prompts,
+  up to ≈ 2.1K tokens). Recordings and budgets are tracked in `judge/goldens/<model>/`, as FN's are.
+- **Budgets, absolute and pre-registered:** `<rec>.budgets.json` holds top-1 ≥, KL mean / p50 / p99 ≤ and
+  |ΔPPL| ≤. They are calibrated from pairs that should agree, then committed before any candidate is scored (git
+  shows the order), as gate (c)'s bars were. The pairs:
+  - (i) within the reference card, one-shot against chunked at 512 tokens. On one card the deployment's store
+    changes no bits (acceptance 2), so the step is the noise left.
+  - (ii) across cards at equal settings: the PRO 6000 against the RTX 5090, both chunked at 512. That is the
+    mechanism of Q13 (mmq's split-K by SM count) on a pair that is not the candidate's. At 32K steps the
+    candidate's pair would itself be the 5090 deployment against the reference.
+
+  Each budget is `compare`'s L2 rule with the worst calibration pair in the floor's place: KL ≤ 2× its KL, top-1 ≥
+  its top-1 − 0.25 points, |ΔPPL| ≤ 0.25% + 2.5 × √2 × its standard error. They are fixed numbers, not recomputed
+  per candidate.
+- **The comparison:** `compare(reference, candidate, budgets=…)`. The KL and top-1 code is unchanged, with the
+  reference in the golden's place. There is no path check: two Holon runs of one kernel family differ in path by
+  card (the mmq / mmvq crossover), and pair (ii) carries that. The setting check (KV format, CPU split) stays.
+- **Where it plugs in:** `propagate` / `tune --new-model --reference <rec>`, in place of `--golden` plus `--floor`
+  (refused together). The lock records how it was judged, `judged = {form = "reference" | "golden", recording =
+  "<name>@<sha256>"}`, written by the tools when L2 runs. Locks advanced without L2 inherit their predecessor's.
+  This is tools and judge code only: `plans.loads` reads the plan fields it knows, and the digest covers the
+  whole file.
+- **What it catches, and what it does not:** a deployment's own errors, offload, tiers, lending, staging, step
+  sizes and a card's kernel paths, measured against the same model run plainly. It cannot catch an error the
+  reference shares (a wrong kernel on every path). Gates (a), (a′), (c), (d) and (f) keep that. **It must bite:**
+  before the first lock, `glu_clamp_off` and `kda_state_not_carried` on the full model (the RTX 5090, the lock's
+  flags) must fail the committed budgets, and the clean candidate must pass them.
+
 **D16 — Accuracy is the owner's method (FN §18), from the start, and again on the shipped tree** (acceptance 1).
 
 **D17 — K4 (KV streaming of the latent): proposed deferral, Q12.** At ≤ 32K the latent and the indexer pages are
