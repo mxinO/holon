@@ -184,10 +184,15 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
         def has_work(self):
             return False
 
+        def close(self):
+            closed.append(len(built))
+
+    closed = []
     monkeypatch.setattr(propagate, "Engine", Measuring)
     checks = propagate.EngineChecks(EngineConfig(model="m"), [], None)
     first, again = checks.snapshot(), checks.snapshot()
     assert built == [None, 1000] and first.meta["pool_bytes"] == again.meta["pool_bytes"] == 1000
+    assert closed == [1]               # the first engine closed before the second was built (its host pools gone)
     propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
     assert built[-1] == 990
 

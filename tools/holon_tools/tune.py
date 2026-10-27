@@ -107,12 +107,15 @@ def decode_rate(config: EngineConfig, batch: int = 8, prompt_len: int = 32, toke
     prompts = prompts[:batch] if prompts else [[gen.randrange(engine.spec.vocab) for _ in range(prompt_len)]
                                                for _ in range(batch)]
     params = SamplingParams(temperature=0.0, max_tokens=tokens, ignore_eos=True)
-    engine.generate(prompts, params)
-    times = []
-    for _ in range(repeats):
-        t0 = time.perf_counter()
+    try:
         engine.generate(prompts, params)
-        times.append(time.perf_counter() - t0)
+        times = []
+        for _ in range(repeats):
+            t0 = time.perf_counter()
+            engine.generate(prompts, params)
+            times.append(time.perf_counter() - t0)
+    finally:
+        engine.close()                            # its host pools now: the next candidate's may not fit beside them
     return batch * tokens / statistics.median(times)
 
 

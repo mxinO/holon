@@ -182,6 +182,7 @@ class EngineChecks:
         self.config, self.trace, self.inputs, self.pool_bytes = config, trace, l2, pool_bytes
         self.model_id = model_id           # the build's existing history, if it has one (else the checkpoint identity)
         self._built: Engine | None = None
+        self._last: Engine | None = None   # the newest engine: closed before the next is built
 
     def plan(self) -> Plan:
         self._built = self._pinned()
@@ -235,11 +236,17 @@ class EngineChecks:
         return passed, "\n".join(reports)
 
     def _fresh(self, config: EngineConfig) -> Engine:
+        """A new engine, the previous one closed first: its pinned host pools go now, not when the collector reaches
+        it (a store's helper threads keep it alive; two of a deployment's host pools need not fit at once)."""
         self._built = None
+        if self._last is not None:
+            getattr(self._last, "close", lambda: None)()
+        self._last = None
         gc.collect()         # free the previous engine (cached blocks too) before the next one takes memory
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
-        return Engine(config)
+        self._last = Engine(config)
+        return self._last
 
 
 def snapshot_path(plans_dir: str | pathlib.Path, plan: Plan, digest: str) -> pathlib.Path:
