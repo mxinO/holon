@@ -26,3 +26,4 @@ docs/design-brainstorm.md
 # Benchmark baselines (own venvs and sources) and raw run outputs.
 bench/.envs
 bench/.out/
+*.pid
