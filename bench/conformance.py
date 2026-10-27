@@ -75,7 +75,10 @@ def precompile(args) -> None:
     tok = AutoTokenizer.from_pretrained(args.tokenizer)
     config = json.loads((pathlib.Path(args.tokenizer) / "config.json").read_text())
     vocab = config.get("vocab_size") or config["text_config"]["vocab_size"]
-    stops = sorted({tok.convert_tokens_to_ids(t) for t in ("<|im_end|>", "<|endoftext|>")})
+    gen = pathlib.Path(args.tokenizer) / "generation_config.json"     # the model's end tokens, else Qwen's two
+    eos = json.loads(gen.read_text()).get("eos_token_id") if gen.is_file() else None
+    stops = sorted(set(eos if isinstance(eos, list) else [eos]) if eos is not None else
+                   {i for t in ("<|im_end|>", "<|endoftext|>") if (i := tok.convert_tokens_to_ids(t)) is not None})
     info = xgr.TokenizerInfo.from_huggingface(tok, vocab_size=vocab, stop_token_ids=stops)
     vetting = Vetting(info.serialize_json(), vocab, stops)          # the plugin's defaults: two workers, 10 s, caps
     out, todo, pending = [], list(schemas(args.jsb, args.sample, args.sample_seed)), {}
