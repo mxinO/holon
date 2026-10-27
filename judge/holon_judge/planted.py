@@ -466,11 +466,18 @@ def streamk_fixup_dropped() -> Iterator[None]:
 @contextlib.contextmanager
 def streamk_fixup_reordered() -> Iterator[None]:
     """D15a's must-pass control (C-M1): on the RTX 5090 alone, a dense mmq call summed as its two K halves, each
-    rounded to the output dtype, added in f32: the same values in other bits."""
+    rounded to the output dtype, added in f32: the same values in other bits. A call's own chunks of rows at a time,
+    so its temporaries stay a chunk's (a whole call's would move the startup profile's peak, and with it the layout)."""
+    from holon_plugins.kernels.ggml_cuda.plugin import calls
+
     def fault(call, self, x, parts):
         half = self.k // 2 // 256 * 256 or self.k // 2
-        lo, hi = (call(self, _k_masked(x, keep), parts).float() for keep in (slice(0, half), slice(half, None)))
-        return (hi + lo).to(self.out_dtype)
+        y = torch.empty(len(x), self.out, dtype=self.out_dtype, device=x.device)
+        for start, end in calls(len(x), self.call_rows):
+            lo, hi = (call(self, _k_masked(x[start:end], keep), parts).float()
+                      for keep in (slice(0, half), slice(half, None)))
+            y[start:end] = hi + lo
+        return y
     yield from _dense_mmq_on(STREAMK_SMS, fault)
 
 
