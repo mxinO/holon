@@ -1,4 +1,4 @@
-"""The Gated DeltaNet mixer (docs/m03-qwen38.md §4.2): `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a` →
+"""The Gated DeltaNet mixer (docs/dev/m03-qwen38.md §4.2): `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a` →
 `causal_conv1d` → `gated_delta_rule` → `gated_rmsnorm` → `out_proj`.
 
 Per-request state is two `Slot` specs of one planner group (`recurrent`): the conv state ([C, K-1] per layer, in the
@@ -15,7 +15,7 @@ past its first 1 + n tokens — g = −exp(A)·softplus(−1e4) = 0 and β = sig
 writing the state after the accepted tokens; its convolution is recomputed from the saved window. Both delta-rule
 calls are planned `per_token`, so the result is bitwise what 1 + n one-token decode steps would leave.
 
-The glue runs once per step for every layer (docs/m07-perf.md D5): the replay buffers have a layer axis (one buffer
+The glue runs once per step for every layer (docs/dev/m07-perf.md D5): the replay buffers have a layer axis (one buffer
 per name, each layer's slice at its index in the group), and the group's first layer — `rewind_modules` visits a
 model's layers in order; no counter, so graph warm-up and capture behave alike — calls `gdn_rewind`, one launch that
 masks every layer's saved gates and writes every layer's conv window at the accepted end into the pool, from window ‖
@@ -60,7 +60,7 @@ class GDNMeta:
 
 
 class Planner:
-    """The group's delta-rule plans per step. A mixed step (`BatchPlan.n_decode` n > 0, docs/m07-perf.md §3.1) is
+    """The group's delta-rule plans per step. A mixed step (`BatchPlan.n_decode` n > 0, docs/dev/m07-perf.md §3.1) is
     planned per row kind: its n decode rows as a decode step's (the recurrent kernel), the prefill chunks after them
     as a prefill step's (chunked, their in-step checkpoints' rows re-based), so each row computes as in its own
     unmixed step."""

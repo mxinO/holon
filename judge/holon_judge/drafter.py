@@ -1,4 +1,4 @@
-"""L0-drafter (docs/m04-spec.md §5): a draft head's teacher-forced logits judged like L2 — against an fp32 golden of
+"""L0-drafter (docs/dev/m04-spec.md §5): a draft head's teacher-forced logits judged like L2 — against an fp32 golden of
 the published forward, with a floor (the same reference in the model's dtype) setting the budgets.
 
 The MTP head of Qwen3.5 / Qwen3.8 (`mtp.*`): at every prompt position p, the head takes token p and the target's

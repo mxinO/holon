@@ -1,4 +1,4 @@
-"""transforms.tail_skip (A1, docs/v1-offload.md D1, D3, §6: Strata's route tail skip, `approx`): its contract
+"""transforms.tail_skip (A1, docs/dev/v1-offload.md D1, D3, §6: Strata's route tail skip, `approx`): its contract
 `moe_route_transform.tail_skip@1` from both providers (the oracle on the CPU, one Triton program on CUDA) against the
 oracle, exactly; then on the GPU end to end: bound by the explicit option only, with `tail_skip.rank` at the router's
 width nothing is dropped (the outputs are the resident store's, bit for bit), below it missed routes are dropped (fewer

@@ -1,4 +1,4 @@
-"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/v1-flash-next.md D3, D10) in Triton, float32
+"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/dev/v1-flash-next.md D3, D10) in Triton, float32
 products with IEEE sums."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""The logits-processor seams (docs/m05-grammar.md §3), proven with the toy processor `testing.toy_mask` (after a
+"""The logits-processor seams (docs/dev/m05-grammar.md §3), proven with the toy processor `testing.toy_mask` (after a
 marker token, only even tokens) on a tiny Qwen3 on the CPU: masks on every path that samples, constrained rows at
 depth 0 beside overlapping free rows, the drafts on the host for verify rows, per-request errors, requests blocked
 until their processor is ready, and resumed requests."""

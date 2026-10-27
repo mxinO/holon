@@ -1,4 +1,5 @@
-"""The op contracts of the Gated DeltaNet mixer (docs/m03-qwen38.md D3). Their oracles are in `reference.py`; kernels
+"""The op contracts of the Gated DeltaNet mixer (docs/dev/m03-qwen38.md D3). Their oracles are in `reference.py`;
+kernels
 come from kernel plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs.
 
 Per-sequence state lives in a pool of units addressed by `slots` (one unit per batch row; a row with no tokens leaves
@@ -27,9 +28,9 @@ from zero state and never reads its unit, so a unit reused by a new sequence nee
 - `gated_rmsnorm@1`: instance `(o [T, H, D], z [T, H, D], weight [D]) -> [T, H, D]`: per head
   `weight · (o · rsqrt(mean(o²) + eps)) · act(z)`, the norm in f32 cast to o's dtype before the weight (HF's
   `RMSNormGated`), the gate in f32, act = silu, or sigmoid with the fact `out_gate="sigmoid"` (Qwen3.8-Flash-Next's
-  GDN, docs/v1-flash-next.md D8; given only when not silu, so the facts every other site records stay as they were).
+  GDN, docs/dev/v1-flash-next.md D8; given only when not silu, so the facts every other site records stay as they were).
   Facts: dim, eps, dtype[, out_gate].
-- `gdn_rewind@1` (after a verify step, every layer of a state group at once; docs/m07-perf.md D5): instance
+- `gdn_rewind@1` (after a verify step, every layer of a state group at once; docs/dev/m07-perf.md D5): instance
   `(state [L, units, C, K-1], window [L, R', C, K-1], x [L, T', C], a [L, T', Hv], b [L, T', Hv], slots [R],
   accepted [S], width) -> None`, with R ≤ R' rows of `width` tokens (row r's at r·width in each layer's x, a and b; its
   conv inputs before them in window[:, r]) and n_r = accepted[slots[r]] (int64) of its drafts accepted: in place,

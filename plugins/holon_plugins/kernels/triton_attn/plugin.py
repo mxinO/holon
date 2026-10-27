@@ -1,6 +1,6 @@
 """Our Triton paged attention as `attention.paged_decode@1` and `attention.paged_verify@1` kernels, a paged prefill
 for q8_0 KV, `kv_write@1` for every KV layout, and `attention.qk_rope_kv@1` (q/k norm, rotation and the KV write in
-one launch, docs/m07-perf.md D3) for the model-dtype and q8_0 layouts (op contracts: std.mixers.gqa)."""
+one launch, docs/dev/m07-perf.md D3) for the model-dtype and q8_0 layouts (op contracts: std.mixers.gqa)."""
 from __future__ import annotations
 
 import dataclasses
@@ -110,7 +110,7 @@ class Prefill:
     """Ragged chunk rows, each continuing its sequence (bottom-right causal), for KV formats FlashInfer cannot read.
     Planned from the host's row counts alone; slots, query starts and lengths are read on the device in `run`. One
     program walks a row's whole KV (no split), so a mixed step's decode rows go to the decode kernel instead (no
-    `serves_decode_rows`; docs/m07-perf.md §15)."""
+    `serves_decode_rows`; docs/dev/m07-perf.md §15)."""
 
     def __init__(self, ctx, **facts) -> None:
         pass
@@ -139,7 +139,7 @@ def _supports(layout: str, masks: bool = True):
 
 class KvWrite:
     """`kv_write@1` for the model-dtype layout (`kv.hnd`): this step's k/v copied into their pages, one Triton launch
-    for both (docs/m07-perf.md D3; it was two index_put kernels)."""
+    for both (docs/dev/m07-perf.md D3; it was two index_put kernels)."""
 
     def __init__(self, ctx, **facts) -> None:
         pass

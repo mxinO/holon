@@ -118,7 +118,7 @@ def score_model(model: str, prompts: PromptSet, dtype: torch.dtype = torch.bfloa
     (GGUF Tier B's decode run: steps small enough that every quantized matmul takes mmvq). On the CPU (Tier A)
     `state_memory` sizes the state pools, which only a GPU can measure. `kv` is the KV cache format (the
     deployment's `kv.format` option; None: the model dtype), `act` the quantized weights' `quant.act` (None: its
-    default, docs/m06-lowp.md D3)."""
+    default, docs/dev/m06-lowp.md D3)."""
     from holon.core.engine import Engine, EngineConfig
 
     path = resolve_model(model)

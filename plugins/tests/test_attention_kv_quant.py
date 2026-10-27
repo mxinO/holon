@@ -1,5 +1,6 @@
-"""L0 for quantized KV (docs/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write (the model-dtype
-layout's Triton copy too, docs/m07-perf.md D3), `attention.qk_rope_kv@1` against the judge's composition of the units'
+"""L0 for quantized KV (docs/dev/m03-qwen38.md D6): `kv_write@1` bitwise against the reference write (the model-dtype
+layout's Triton copy too, docs/dev/m07-perf.md D3), `attention.qk_rope_kv@1` against the judge's composition of the
+units'
 references (D3: partial rotary, the gated q layout, 1-token rows; its q8_0 write bitwise the reference's write of
 its own model-dtype k), the GQA unit's decode row against its last prefill row (bitwise KV), and every kernel
 that reads q8_0 or fp8 against `reference.paged_attention` reading the same stored cache — the reference dequantizes
@@ -242,9 +243,9 @@ def test_a_decode_row_is_the_last_prefill_row(tmp_path, layout):
     The last token's output agrees within the attention budget (another kernel computes it), and the KV it wrote is
     bitwise: inputs in {−1, 0, 1} and projection weights in {−1, 0, 1} / 8 make every projection exact whatever the
     matmul's order, so the same write lands at the same position; T − 1 = 16 opens a page. A decode-only position
-    error, which every relative judge misses (docs/m07-perf.md §13.7), fails the KV check.
+    error, which every relative judge misses (docs/dev/m07-perf.md §13.7), fails the KV check.
 
-    Captured too (docs/m07-perf.md §17): one request's decode row captured into a CUDA graph at position P, then
+    Captured too (docs/dev/m07-perf.md §17): one request's decode row captured into a CUDA graph at position P, then
     replayed at P, P + 1 (a page's first token) and P + 2, each step staged on the host as the engine stages a graphed
     step; output and KV bitwise another request's eager decode rows of the same tokens. A host-side decision captured
     into the graph (stale on replay) fails it."""

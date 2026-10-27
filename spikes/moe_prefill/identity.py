@@ -1,4 +1,4 @@
-"""The prefill identity check of docs/v1-moe-prefill.md §5 (D0 / D1 / D2 / D4: bitwise): the prompt logprobs of every
+"""The prefill identity check of docs/dev/v1-moe-prefill.md §5 (D0 / D1 / D2 / D4: bitwise): the prompt logprobs of every
 prompt position of one-token requests at 1,027 and 4,096 tokens, hashed, for the engine this Python imports — run it
 once with main's tree and once with the branch's (the same script, `PYTHONPATH` naming the tree), on the same GPU and
 flags, and compare the hashes (`compare`). Modelled on `holon_judge.kernel_identity`, end to end.
@@ -80,7 +80,7 @@ def run(a: argparse.Namespace) -> None:
         runs.append(hashes)
     stores = {type(m._store).__name__: m._store.pass_tokens(max(a.lengths)) for m in engine.executor.model.modules()
               if hasattr(m, "_store") and hasattr(m._store, "pass_tokens")}
-    # the offload store's borrowing steps by use, and its tail (docs/v1-moe-prefill.md D11: class, slots), if any
+    # the offload store's borrowing steps by use, and its tail (docs/dev/v1-moe-prefill.md D11: class, slots), if any
     store = engine.ctx.shared_objects.get("std.moe.offload")
     lending = None if store is None else {"borrowed": dict(store.borrowed), "tail": getattr(store, "tail", None)}
     engine.close()

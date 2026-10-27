@@ -1,7 +1,7 @@
 # moe_prefill — where Holon's all-resident MoE prefill loses to FreeToken
 
 Record: `evidence/moe_prefill_rtx-a5000_2026-10-18.json`. The step-0 diagnosis of the MoE prefill speed item (plan
-§10; `docs/v1-offload.md` §13, "Owner decision on the gate"); the design it feeds is `docs/v1-moe-prefill.md`. No code
+§10; `docs/dev/v1-offload.md` §13, "Owner decision on the gate"); the design it feeds is `docs/dev/v1-moe-prefill.md`. No code
 in core, std or plugins changed: the probes patch module constants in the worker process only.
 
 ## Method
@@ -202,7 +202,7 @@ python spikes/moe_prefill/record.py --timed <dir>/timed --nsys <dir>/nsys --gemm
 
 Every command ran pinned to one GPU (`CUDA_VISIBLE_DEVICES`) under a memory cap.
 
-## Bar cards (docs/v1-moe-prefill.md §2.1–§2.2)
+## Bar cards (docs/dev/v1-moe-prefill.md §2.1–§2.2)
 
 The same driver on the RTX 5090 (resident, the 5090 lock's flags), the RTX 5080 (the natural-fit offload lock) and
 the A5000 again, with the fixed prompt set (`--reps 5 5 3`), FreeToken's gated arm (`--max-extend-length 4096`), the

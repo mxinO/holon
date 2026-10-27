@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-offload.md` acceptance 1 and §9 step 7: after the std offload API's tag (`v1-offload-std-api`), can a new
+`docs/dev/v1-offload.md` acceptance 1 and §9 step 7: after the std offload API's tag (`v1-offload-std-api`), can a new
 strategy land as one plugin, with no core or std diff? Three held out: **F10** promote-on-fetch (a policy with its own
 resolve contract, oracle, CPU and CUDA providers), **A1** route tail skip (`approx`), and **a tier the design does not
 design** (the page-cache tier). Each must also pass its own checks: F10 exact (snapshot byte-identical to all-resident,

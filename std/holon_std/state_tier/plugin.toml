@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "tier"
 license = "Apache-2.0"
-core_abi = ">=1.4,<2.0"   # the slot `tier` (docs/v1-kv-tiers.md §4)
+core_abi = ">=1.4,<2.0"   # the slot `tier` (docs/dev/v1-kv-tiers.md §4)
 
 [resources]
 provides = ["op.state_copy@1"]

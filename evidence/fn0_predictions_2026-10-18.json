@@ -1,7 +1,7 @@
 {
  "name": "fn0_predictions",
  "date": "2026-10-18",
- "about": "Milestone FN step 0 (docs/v1-flash-next.md section 8, N0-N4): predictions written before any measurement; point estimates with a band. tok/s unless stated; contexts 1K / 4K / 32K; batch 1, 256 output tokens, greedy, ignore-EOS. Strata rows per D11: no-approx = STRATA_ROUTE_TAIL_SKIP=0 --kv fp16 --ple-io ram, calibrated; defaults = setup's command for the card (tail skip on, int8 KV above 8K, PLE O_DIRECT); drafting off = no --mtp, --suffix-draft 0; MTP matched = --spec 4 --spec-min-p 0 --suffix-draft 0, STRATA_MTP_FULL_HEAD=1.",
+ "about": "Milestone FN step 0 (docs/dev/v1-flash-next.md section 8, N0-N4): predictions written before any measurement; point estimates with a band. tok/s unless stated; contexts 1K / 4K / 32K; batch 1, 256 output tokens, greedy, ignore-EOS. Strata rows per D11: no-approx = STRATA_ROUTE_TAIL_SKIP=0 --kv fp16 --ple-io ram, calibrated; defaults = setup's command for the card (tail skip on, int8 KV above 8K, PLE O_DIRECT); drafting off = no --mtp, --suffix-draft 0; MTP matched = --spec 4 --spec-min-p 0 --suffix-draft 0, STRATA_MTP_FULL_HEAD=1.",
  "n0": {
   "eos_ids_ignore": "Strata's --eos-ids accepts an id outside the vocabulary (999999), so every request ends at its length: no EOS pre-screening needed",
   "prompt_cache_0": "every request reports 0 reused tokens",

@@ -1,4 +1,5 @@
-"""State tiers below the device (docs/v1-kv-tiers.md §4): the slot `tier` keeps copies of prefix-index blocks — pages
+"""State tiers below the device (docs/dev/v1-kv-tiers.md §4): the slot `tier` keeps copies of prefix-index blocks —
+pages
 and payloads — that device memory cannot hold, and the slot `eviction_policy` picks the device's victims.
 
 The core owns the device boundary: whether an entry is resident, device eviction (a victim the tier holds is demoted,

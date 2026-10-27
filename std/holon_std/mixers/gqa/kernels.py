@@ -25,7 +25,7 @@ implement them must not support them:
 - `window` (default 0, none): W > 0 — a query at position p sees no key at or before p − W (llama.cpp's
   `p − p_k < n_swa`; SGLang's `window_left` = W − 1), keys after p (`causal` False) included.
 
-KV layouts (the deployment's `kv.format` plugin option; docs/m03-qwen38.md D6), each a page of one layer:
+KV layouts (the deployment's `kv.format` plugin option; docs/dev/m03-qwen38.md D6), each a page of one layer:
 - `kv.hnd`: `kv` [units, 2 (k/v), Hkv, page, D] in the model dtype (kv_dtype = q_dtype);
 - `kv.hnd.fp8`: the same shape in float8_e4m3fn (kv_dtype "float8_e4m3fn"; written with saturation);
 - `kv.hnd.q8_0`: `kv` is a pair — values [units, 2, Hkv, page, D] int8 and scales [units, 2, Hkv, page, D/32] fp16
@@ -35,7 +35,8 @@ stored format. `kv_write@1`: instance `(k, v [T, Hkv, D], kv, unit [T], off [T])
 `unit[t]` at `off[t]`. Facts: layout, kv_heads, head_dim, page, dtype. A spec whose `config["fused"]` lists
 `attention.qk_rope_kv@1` has that kernel from its provider for its facts and any the units below may answer.
 
-`attention.qk_rope_kv@1` (docs/m07-perf.md D3): q/k norm, rotary embedding and the KV write in one kernel, used when the
+`attention.qk_rope_kv@1` (docs/dev/m07-perf.md D3): q/k norm, rotary embedding and the KV write in one kernel, used when
+the
 mixer's injected q/k norm and rope units answer `fusion_facts()`. Instance `(q [T, Hq, Dq], k, v [T, Hkv, D],
 positions [T], q_weight [D], k_weight [D], kv, unit [T], off [T]) -> q' [T, Hq, D]`: each head of q (its first D
 values of Dq: D, or 2D with `gated`, the output gate interleaved after each head's queries) and of k is normed

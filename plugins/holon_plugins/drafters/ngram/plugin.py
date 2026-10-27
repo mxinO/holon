@@ -1,4 +1,4 @@
-"""Prompt lookup on the device (docs/m04-spec.md §1, D7): drafts the tokens that followed the most recent earlier
+"""Prompt lookup on the device (docs/dev/m04-spec.md §1, D7): drafts the tokens that followed the most recent earlier
 occurrence of a request's last n tokens in its own history (n from `ngram.max` down to `ngram.min`, plugin options;
 defaults 3 and 2). Agent turns resend their history, so tool output and code often repeat.
 

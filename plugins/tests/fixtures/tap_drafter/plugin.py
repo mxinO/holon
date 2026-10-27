@@ -1,4 +1,4 @@
-"""A drafter that taps the target and samples its drafts — the Gate B seams (docs/m04-spec.md §3.4, §3.5) with no
+"""A drafter that taps the target and samples its drafts — the Gate B seams (docs/dev/m04-spec.md §3.4, §3.5) with no
 model of its own, everything on the device so it runs inside captured graphs:
 
 - taps: the residual stream after the target's layers `tap.layers` (plugin option; default the first and the last)

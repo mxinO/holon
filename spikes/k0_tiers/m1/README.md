@@ -1,4 +1,4 @@
-# K-M1: re-render divergence (milestone K step 0, `docs/v1-kv-tiers.md` §8)
+# K-M1: re-render divergence (milestone K step 0, `docs/dev/v1-kv-tiers.md` §8)
 
 **Question.** When an agent sends its next request, how much of the previous answer (the engine's own generated
 tokens) does the re-rendered prompt repeat token for token? That sets what D8's `answer:<k>` checkpoints can save:
@@ -7,7 +7,7 @@ tokens) does the re-rendered prompt repeat token for token? That sets what D8's 
 ## Predictions (fixed before measuring)
 
 - **3g.** The previous turn's own output was 44% (27,646 / 62,682) of the uncached input under `prompt_end` in the
-  earlier pi test (`docs/agent-test-pi-rtx5090.md`). With `answer:2` it falls to ≤ 10% **if** answers are
+  earlier pi test (`docs/dev/agent-test-pi-rtx5090.md`). With `answer:2` it falls to ≤ 10% **if** answers are
   re-rendered verbatim up to their tool calls.
 - **Decision rule** (§8): `answer` is on by default only if ≥ 50% of answers are re-rendered verbatim to within one
   block (64 tokens) of a kept checkpoint. Prediction: with the Unsloth Qwen3.8 template and pi's
@@ -18,7 +18,7 @@ tokens) does the re-rendered prompt repeat token for token? That sets what D8's 
 
 ## Method
 
-1. **Run.** The pi agent test of `docs/agent-test-pi-rtx5090.md` once more on an RTX 5090 desktop: the same model
+1. **Run.** The pi agent test of `docs/dev/agent-test-pi-rtx5090.md` once more on an RTX 5090 desktop: the same model
    file (Qwen3.8-27B UD-Q4_K_M) at its rtx-5090 lock, pi 0.73.1 with the counted runs' provider config
    (`--compat documented`), the `demo` and `workloads` tasks. `bench/demo/pi_run.py` (unchanged; its harness check
    wants a clean checkout) runs its own capture proxy; its `--server` is a second `bench/capture_proxy.py --raw` in front of

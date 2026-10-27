@@ -1,6 +1,6 @@
 """A recording proxy between a client (Claude Code, or an OpenAI chat client such as pi) and a server: forwards every
 request unchanged, streams the answer back, and writes one JSON line per request describing its shape — never its
-text, and no header values except the API version and beta flags (docs/m05-grammar.md R §5.4's unverified items:
+text, and no header values except the API version and beta flags (docs/dev/m05-grammar.md R §5.4's unverified items:
 headers, `metadata.user_id`'s shape, streaming, the tool list, `cache_control`, side calls). Each line also has the
 request's timing at the proxy (the first streamed content, or an OpenAI stream's first chunk, after `ttft_ms`; the
 whole answer after `total_ms`) and the token counts the server reported (`usage`), its stop reason, and an error's
@@ -12,7 +12,7 @@ saved for each request (its `/metrics` counter before and after; `null` when req
 keeps the bodies, for local inspection only (never committed). With `--raw`, an OpenAI chat request is forwarded with
 `return_token_ids: true` (unless the client set it), and its raw line also keeps the generated token ids (choice 0's,
 the terminating token included) and the reported `usage`; the client then sees the stream's added `token_ids` fields
-and one chunk per engine delta (some with an empty delta). K-M1 (docs/v1-kv-tiers.md §8) chains it behind
+and one chunk per engine delta (some with an empty delta). K-M1 (docs/dev/v1-kv-tiers.md §8) chains it behind
 `bench/demo/pi_run.py`'s own proxy: `pi_run.py --server http://127.0.0.1:<this port>`.
 
 Usage:

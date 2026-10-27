@@ -1,4 +1,4 @@
-"""FN step 0's oracle feasibility check (docs/v1-flash-next.md N4, D2): one `v1-long` prompt through the judge's
+"""FN step 0's oracle feasibility check (docs/dev/v1-flash-next.md N4, D2): one `v1-long` prompt through the judge's
 streamed fp32 HF driver (`golden._streamed`, transformers 5.19.0, one decoder layer resident, PLE's rows gathered
 lazily, the indexer's tie rule) on the full GGUF, on the CPU under a memory cap: wall time per layer, peak RSS, and
 the indexer's boundary-tie rate (a query whose k-th and (k+1)-th block scores are equal) on each QSA layer. If HF's

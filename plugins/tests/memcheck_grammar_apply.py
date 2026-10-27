@@ -1,4 +1,4 @@
-"""grammar.xgrammar's `apply` reads and writes only inside its tensors (docs/m05-grammar.md §5, L0-mask, per class):
+"""grammar.xgrammar's `apply` reads and writes only inside its tensors (docs/dev/m05-grammar.md §5, L0-mask, per class):
 
     cd plugins
     PYTORCH_NO_CUDA_MEMORY_CACHING=1 compute-sanitizer --tool memcheck python -m tests.memcheck_grammar_apply

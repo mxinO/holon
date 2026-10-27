@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-kv-tiers.md` §8 fixes what step 0 measures before the tier design is frozen. This directory answers, on the
+`docs/dev/v1-kv-tiers.md` §8 fixes what step 0 measures before the tier design is frozen. This directory answers, on the
 two bar cards (RTX 5080 and RTX 5090 desktops), with the RTX A5000 development host as a reference:
 
 | # | Measure | Decides (§8) |
@@ -203,7 +203,7 @@ Both drives had ≥ 2.5 TB free, so their caches, if any, reach beyond 1 TB.
 - Only the 34,816 B layer-major KV chunk is not. It is a multiple of 512, and both filesystems accepted 512-aligned
   lengths and offsets with O_DIRECT.
 
-### What the numbers suggest for K (the lead's decisions are in `docs/v1-kv-tiers.md` §13, rev 8.1)
+### What the numbers suggest for K (the lead's decisions are in `docs/dev/v1-kv-tiers.md` §13, rev 8.1)
 
 - **`state_copy@1`.**
   - On raw rate, the two paths tie on fragmented 34,816 B H2D (0.99×). The SM gather is slightly ahead on small

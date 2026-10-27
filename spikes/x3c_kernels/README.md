@@ -1,7 +1,7 @@
 # x3c_kernels — step 3c: the MoE decode glue kernels
 
 Records: `evidence/x3c_kernels_rtx-5090_2026-10-17.json`, `evidence/x3c_kernels_rtx-a5000_2026-10-17.json`.
-Design: `docs/v1-offload.md` §14 "Step 3c as built". The gap these close: `spikes/x4_gap/README.md` rows 5–6 and the
+Design: `docs/dev/v1-offload.md` §14 "Step 3c as built". The gap these close: `spikes/x4_gap/README.md` rows 5–6 and the
 RTX 5090 all-resident breakdown (glue, router, q8_1 quantization).
 
 ## What changed (one commit each, then the review's fixes)

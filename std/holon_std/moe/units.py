@@ -1,4 +1,5 @@
-"""std.moe units: the MoE ffn (router, top-k, expert stacks, combine) and its expert stacks (docs/m02-moe.md §4.2)."""
+"""std.moe units: the MoE ffn (router, top-k, expert stacks, combine) and its expert stacks (docs/dev/m02-moe.md
+§4.2)."""
 from __future__ import annotations
 
 import torch
@@ -9,7 +10,7 @@ from . import kernels
 
 CHUNK = kernels.CHUNK              # tokens per router call; an expert pass is whole CHUNKs (`pass_tokens`)
 SPLIT_ROWS = 16                    # passes of at most this many tokens (decode, verify) split an offload store's call
-ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/v1-moe-prefill.md D10)
+ALIGN = 256                        # a passed `scratch`'s alignment (`linear_experts@2`, docs/dev/v1-moe-prefill.md D10)
 
 
 def _dtype(t: torch.dtype) -> str:
@@ -25,7 +26,7 @@ def _hold(param: nn.Parameter, parts: dict[str, torch.Tensor], device: torch.dev
 
 
 def _act_quant(ctx) -> str:
-    """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/m06-lowp.md D3)."""
+    """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/dev/m06-lowp.md D3)."""
     act = ctx.options.get("plugins", {}).get("quant.act", "a8")
     if act not in kernels.ACT_QUANT:
         raise ValueError(f"quant.act {act!r}: one of {list(kernels.ACT_QUANT)} for quantized weights")
@@ -33,7 +34,8 @@ def _act_quant(ctx) -> str:
 
 
 def _one_act_mode(ctx, spec, site: str) -> None:
-    """Mixed steps (`chunk_with_decode` > 0, docs/m07-perf.md §3.1) run decode rows and a prefill chunk in one call, on
+    """Mixed steps (`chunk_with_decode` > 0, docs/dev/m07-perf.md §3.1) run decode rows and a prefill chunk in one call,
+    on
     the path the call's row count picks: a kernel whose paths compute in different activation modes (its spec's
     `config["act"]`, path -> mode) would then run a decode row at a precision its unmixed step does not use. The
     option is the engine's effective value: 0 with a drafter, whose steps alternate and never mix."""
@@ -48,7 +50,7 @@ class ExpertLinear(nn.Module):
 
     Dense (an HF checkpoint) it is the parameter itself, layout `dense/<dtype>`. Quantized, `adopt_weights` takes the
     whole stack (a GGUF file's, whose parts hold the experts' rows in order) or one expert's slice at a time (the first
-    materializes each part as [E, …] on the device, docs/m06-lowp.md D6); either way every part is held per expert,
+    materializes each part as [E, …] on the device, docs/dev/m06-lowp.md D6); either way every part is held per expert,
     [E, …], the first (the primary part) by `weight`. `merge(gate, up)` builds one gate/up stack per expert that
     applies SwiGLU (`glu="swiglu"`); the kernel is bound after merges, and its `prepare`, if any, replaces the parts
     and their layout. `act_dtype`: its input's dtype (the model dtype for gate/up, f32 for down, which takes the
@@ -94,7 +96,7 @@ class ExpertLinear(nn.Module):
 
     @staticmethod
     def merge(gate: ExpertLinear, up: ExpertLinear) -> ExpertLinear | None:
-        """One stack applying SwiGLU: per expert gate's rows, then up's. Parts merge by shape (docs/m06-lowp.md D5):
+        """One stack applying SwiGLU: per expert gate's rows, then up's. Parts merge by shape (docs/dev/m06-lowp.md D5):
         one with a value per expert ([E] or [E, 1]) is stacked [2, E], gate's row then up's; one with `out / g` rows
         per expert ([E, out / g, …]) is concatenated per expert (a stored row is a whole block run, or its rows'
         scales). None if the layouts, shapes or parts differ; gate and up give up their weights."""
@@ -126,7 +128,7 @@ class ExpertLinear(nn.Module):
         # once: `prepare` replaces the layout the facts are read from (a second bind would select for its output)
         assert self._kernel is None, "ExpertLinear.bind_kernels runs once"
         self._kernel = bind_experts(ctx, self.facts(ctx))
-        if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/m06-lowp.md D4
+        if self.layout is not None and hasattr(self._kernel, "prepare"):          # docs/dev/m06-lowp.md D4
             q = QTensor(self.layout, (self.experts, self.out_features, self.in_features), self.parts)
             if (prepared := self._kernel.prepare(q)) is not q:
                 self.layout, self.parts = prepared.layout, _hold(self.weight, prepared.parts, ctx.device)
@@ -151,7 +153,8 @@ class ExpertLinear(nn.Module):
 
 
 def takes_buffers(kernel) -> bool:
-    """Whether a `linear_experts@2` instance takes passed buffers (it defines `scratch_bytes`, docs/v1-moe-prefill.md
+    """Whether a `linear_experts@2` instance takes passed buffers (it defines `scratch_bytes`,
+    docs/dev/v1-moe-prefill.md
     D10)."""
     return hasattr(kernel, "scratch_bytes")
 
@@ -235,7 +238,8 @@ class Resident:
         return ids, weights
 
     def pass_tokens(self, tokens: int) -> int:
-        """Tokens per expert pass: as many as both stacks' kernels take at their chunks' bits (docs/v1-moe-prefill.md
+        """Tokens per expert pass: as many as both stacks' kernels take at their chunks' bits
+        (docs/dev/v1-moe-prefill.md
         D1), on a step of at least a chunk."""
         return pass_rows(self._stacks) if tokens >= CHUNK else CHUNK
 

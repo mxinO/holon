@@ -1,6 +1,6 @@
 """The residency map: [groups, items, roles] -> the arena slot of each piece, or −1 − tier when it is not in VRAM
 (the tier holding it). One device buffer the resolvers read, its host mirror, and host edits applied at a fixed
-launch (docs/v1-offload.md D4: decided at commit c, applied at launch c + 2 — or later, a two-phase edit's second
+launch (docs/dev/v1-offload.md D4: decided at commit c, applied at launch c + 2 — or later, a two-phase edit's second
 half —, each with a precondition: the value the host expects the entry to hold; one that fails is not applied and
 raises the device error word the commit checks, so a host edit never lands where a device resolver changed the map).
 

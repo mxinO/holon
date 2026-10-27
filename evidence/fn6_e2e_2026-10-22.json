@@ -1,7 +1,7 @@
 {
  "name": "fn6_e2e",
  "date": "2026-10-22",
- "method": "FN step 6 (docs/v1-flash-next.md section 20): the offload deployment end to end on the bar cards. Bench: bench/offload_ctx.py, batch 1, contexts 1K/4K/32K, corpus fn, 3 rounds, medians of tok/s; Strata with its step-0 calibration (no-approximation arms), same allocation as Holon's. Gates: spikes/fn7/consistency.py (c), spikes/fn7/tasks (d; answers in evidence/fn6_tasks_2026-10-22/). Breakdown: spikes/fn7/breakdown.py under nsys, eager steps, ms of GPU time per step (prefill GPU sums include the ring's concurrent copies; wall_ms is the step's). Hit rate: decode lookups of v1-long prompts (cut to 4,096 tokens) that found their expert resident.",
+ "method": "FN step 6 (docs/dev/v1-flash-next.md section 20): the offload deployment end to end on the bar cards. Bench: bench/offload_ctx.py, batch 1, contexts 1K/4K/32K, corpus fn, 3 rounds, medians of tok/s; Strata with its step-0 calibration (no-approximation arms), same allocation as Holon's. Gates: spikes/fn7/consistency.py (c), spikes/fn7/tasks (d; answers in evidence/fn6_tasks_2026-10-22/). Breakdown: spikes/fn7/breakdown.py under nsys, eager steps, ms of GPU time per step (prefill GPU sums include the ring's concurrent copies; wall_ms is the step's). Hit rate: decode lookups of v1-long prompts (cut to 4,096 tokens) that found their expert resident.",
  "cards": {
   "rtx-5080": {
    "file": "Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS",

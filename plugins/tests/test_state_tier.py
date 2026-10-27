@@ -1,4 +1,4 @@
-"""std.state_tier's host level (docs/v1-kv-tiers.md §5) on a bare tier over CPU pools: leaf-first page eviction, the
+"""std.state_tier's host level (docs/dev/v1-kv-tiers.md §5) on a bare tier over CPU pools: leaf-first page eviction, the
 admission options, payload stores that always succeed, nothing being loaded evicted before `loaded`, the H2D lane and
 the clock, the payload share, the host units' fences and per-key records, a load ordered after the store that wrote
 its host units (on deferred copy streams), and a reused host unit waiting for its readers (on recording streams).

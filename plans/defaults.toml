@@ -1,4 +1,4 @@
 # Engine settings `holon serve` starts from when a model has no current lock, under the flags (cli.serve_defaults).
 # Written by hand, unlike the locks. Every lock selects the grammar processor, so the defaults do too: structured
-# outputs keep working between propagation rounds (docs/release.md §22).
+# outputs keep working between propagation rounds (docs/dev/release.md §22).
 slots = { logits_processor = "grammar.xgrammar" }

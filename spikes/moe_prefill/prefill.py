@@ -6,7 +6,7 @@ whose kernels are attributed to regions by NVTX ranges pushed around each engine
   prompt is a prefix of another (FreeToken's radix cache stays cold; Holon runs with its prefix cache off).
 - Each arm runs in a fresh process: an untimed 512-token warm-up (with `--warm-set`, then an untimed pass over the
   prompt set's shapes on distinct prompts: §5.2), then `--reps` rounds over the lengths (one-token requests, greedy;
-  one count for every length, or one per length: the fixed prompt set of docs/v1-moe-prefill.md §5.2 is `--reps 5 5 3`
+  one count for every length, or one per length: the fixed prompt set of docs/dev/v1-moe-prefill.md §5.2 is `--reps 5 5 3`
   at 1K / 4K / 32K), then with `--profile` one more request per length between cudaProfilerStart/Stop, each inside an
   NVTX range `req:<length>` (for `nsys --capture-range=cudaProfilerApi`).
 - Allocator work per timed prompt (both engines): `torch.cuda.memory_stats`' `num_alloc_retries`, `num_device_alloc`
@@ -158,7 +158,7 @@ def worker(a: argparse.Namespace) -> None:
     request, close, memory = (holon_engine if a.engine == "holon" else freetoken_engine)(a)
     reps = dict(zip(a.lengths, a.reps * len(a.lengths) if len(a.reps) == 1 else a.reps, strict=True))
     request([corpus[i] for i in range(512)])                         # warm-up
-    if a.warm_set:                  # docs/v1-moe-prefill.md §5.2: the whole set's shapes, on prompts of their own (an
+    if a.warm_set:                  # docs/dev/v1-moe-prefill.md §5.2: the whole set's shapes, on prompts of their own (an
         for c in a.lengths:         # engine with a prefix cache would otherwise serve the timed prompts from it)
             for rep in range(reps[c]):
                 request(prompt(corpus, c, WARM + rep))
@@ -167,7 +167,7 @@ def worker(a: argparse.Namespace) -> None:
     torch.cuda.reset_peak_memory_stats()
     times = {str(c): [] for c in a.lengths}
     # the caching allocator's work per timed prompt: retries (a full free-and-retry), device allocations and frees
-    # (cudaMalloc / cudaFree, or expandable segments' maps): steady state is zero (docs/v1-moe-prefill.md §10 L3-2)
+    # (cudaMalloc / cudaFree, or expandable segments' maps): steady state is zero (docs/dev/v1-moe-prefill.md §10 L3-2)
     counters = ("num_alloc_retries", "num_device_alloc", "num_device_free")
     alloc = {str(c): {k: [] for k in counters} for c in a.lengths}
     for rep in range(max(reps.values())):

@@ -1,5 +1,6 @@
-"""Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3,
-D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each
+"""Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/dev/v1-offload.md acceptance
+3,
+D14; docs/dev/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each
 context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt
 time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for
 every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another:
@@ -57,7 +58,7 @@ CORPUS = ROOT / "judge" / "prompts" / "v1.jsonl"
 WARMUP = (0, 512, 64)                                   # offset, prompt tokens, output tokens
 OFFSETS = {1024: 4096, 4096: 8192, 32768: 20000}         # distinct starts: no prompt is a prefix of another
 OUTPUT = 256
-# D11's corpus (docs/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
+# D11's corpus (docs/dev/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
 FN_SETS = ("v1-long.jsonl", "v1-qwen3_5.jsonl", "v1.jsonl")
 FN_TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
 FN_WARMUP = 2048                                        # the warm-up span: the corpus's last 2,048 tokens

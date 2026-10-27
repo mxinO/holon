@@ -1,4 +1,4 @@
-"""What a dialect declares, and the normalized parts of each scheme (docs/m06-lowp.md D2): every dialect of a scheme
+"""What a dialect declares, and the normalized parts of each scheme (docs/dev/m06-lowp.md D2): every dialect of a scheme
 yields the same parts, the primary one (`weight`) first, checked at load, and the logical shape they pack."""
 from __future__ import annotations
 

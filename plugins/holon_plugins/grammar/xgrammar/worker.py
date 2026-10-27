@@ -1,4 +1,4 @@
-"""A vetting worker (docs/m05-grammar.md D5), run by `vetting.Vetting` as `python -m <this module> <parent pid>
+"""A vetting worker (docs/dev/m05-grammar.md D5), run by `vetting.Vetting` as `python -m <this module> <parent pid>
 <tokenizer fd> <vocab size> <stop ids>`: it compiles each constraint it is sent and reports only the outcome — the
 compile time, the compiled size and how far the compile grew its resident set at its peak — never the grammar
 (shipping and loading one costs more than compiling it). One JSON line per job on stdin, one per outcome on stdout.

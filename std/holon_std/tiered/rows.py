@@ -1,5 +1,5 @@
 """std.tiered.rows@1: a row table — `std.ops.embedding@1`'s contract, ids → rows in the model's dtype — that may live in
-pinned host RAM (docs/v1-flash-next.md D5). A quantized table on the host is read into a mapped host pool from its
+pinned host RAM (docs/dev/v1-flash-next.md D5). A quantized table on the host is read into a mapped host pool from its
 checkpoint extent, and its `qembedding@1` kernel gathers the step's rows from there across the bus, in place (16 rows
 × 90 B a token for Qwen3.8-Flash-Next's PLE table, one row for a token embedding). On the device it is held and read
 as `std.ops.embedding@1` holds and reads it.

@@ -47,7 +47,7 @@ directories or GGUF files. The recommended file per card and its lock
 | Qwen3.8-27B UD-Q4_K_M (`unsloth/Qwen3.8-27B-GGUF`) | does not fit (15.3 GiB) | this card's lock | this card's lock | this card's lock |
 
 **This card's lock**: written and verified on this card (L2 against the judge's floor, the snapshot trace identical
-over three runs), in the release environment (`docs/release.md` §16, §19). Every lock selects the grammar processor.
+over three runs), in the release environment (`docs/dev/release.md` §16, §19). Every lock selects the grammar processor.
 The Qwen3.8-27B locks serve a context of 49,152 tokens (40,960 on the RTX 5080) without speculation (Known
 limitations).
 
@@ -64,7 +64,7 @@ clamped to what fits.
 
 ## Install
 
-Install the release tag (v0.1.1: [docs/RELEASE_NOTES_v0.1.1.md](docs/RELEASE_NOTES_v0.1.1.md)). Steps 7–10's locks
+Install the release tag (v0.1.1: [docs/releases/RELEASE_NOTES_v0.1.1.md](docs/releases/RELEASE_NOTES_v0.1.1.md)). Steps 7–10's locks
 and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with
 identical code and a privacy-scrubbed spike README (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them;
 `evidence/history_scrub_commit_map_2026-10-16.txt` maps older SHAs). v0.1.1's locks were carried to its code with
@@ -195,7 +195,7 @@ holon: Claude Code:
 The server drops Claude Code's per-request billing-header system block, which would otherwise defeat prefix caching
 (`holon serve <model> --plugin-options http.drop_billing_header=false` keeps it; `/metrics` counts the drops).
 Serve the Qwen3.8-27B for Claude Code: its locks serve 49,152 tokens of context (40,960 on the RTX 5080). Claude Code
-2.1.300 sends, besides its main loop, side requests of ≈ 31K input tokens (`docs/release.md` §18.2), which a 32K
+2.1.300 sends, besides its main loop, side requests of ≈ 31K input tokens (`docs/dev/release.md` §18.2), which a 32K
 context would fit with about 1K tokens to spare. Its auto-compaction assumes a far larger window than the served
 context, so a long session reaches the served limit first. On an RTX 5080 that also drives a display, see Known
 limitations. The side requests need the context to stay above ≈ 32K.
@@ -205,13 +205,13 @@ function — chosen to fit a 32K context. It shows the served model completing s
 is not a claim of general agent capability. **Result** (pre-registered, Claude Code 2.1.300, each card's 27B lock,
 scored by the harness's own copy of the tests): **3 of 3 runs passed on the RTX 5080 (UD-IQ3_S) and 3 of 3 on the
 RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`evidence/agent_demo_rtx-5080_2026-10-16.json`,
-`evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/release.md` §18). Claude Code sends no temperature, so the
+`evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/dev/release.md` §18). Claude Code sends no temperature, so the
 server's default (1.0) applies; its `output_config.effort` (`high`) selects the Qwen3.8 template's highest level, which
 was the template's default before v0.1.1. Since v0.1.1 its usage shows the prefix cache's reads as
 `cache_read_input_tokens`, apart from `input_tokens`. The demo ran on the locks as they stood at release step 9, at
 the 27B's earlier 32K context; the shipped locks differ in that context, in the FlashInfer plugin's `src` and in
-v0.1.1's core, with byte-identical snapshot traces (`docs/release.md` §19.1–§19.2,
-[docs/RELEASE_NOTES_v0.1.1.md](docs/RELEASE_NOTES_v0.1.1.md)).
+v0.1.1's core, with byte-identical snapshot traces (`docs/dev/release.md` §19.1–§19.2,
+[docs/releases/RELEASE_NOTES_v0.1.1.md](docs/releases/RELEASE_NOTES_v0.1.1.md)).
 
 ## Options
 
@@ -259,7 +259,7 @@ r = client.chat.completions.create(model=model, max_tokens=512,
 ```
 
 A strict schema that uses a feature the grammar cannot enforce gets a 400 naming it; non-strict schemas compile best
-effort (the reject list: [docs/m05-grammar.md](docs/m05-grammar.md), D9). The processor runs two vetting workers,
+effort (the reject list: [docs/dev/m05-grammar.md](docs/dev/m05-grammar.md), D9). The processor runs two vetting workers,
 which take 1.6–2.2 GB of host RAM and 3–4 s to start.
 
 ## First start
@@ -278,17 +278,17 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   what does (logged).
 - **Speculation is off in every lock.** On the Qwen3.8-27B, MTP gave 11–45% lower TPOT on a sampled
   Claude-Code-shaped trace, but a speculating stream's longest pauses (p95 per-request maximum gap) grew 1.1–3.1×, past
-  the ≤ 1.10× rule fixed before measuring (`docs/release.md` §16.6). Turn it on with the flags under Options.
+  the ≤ 1.10× rule fixed before measuring (`docs/dev/release.md` §16.6). Turn it on with the flags under Options.
 - **A long prompt stalls the streams already decoding** on the locks that set `chunk_with_decode` 0: every 8B and 30B
   lock. Behind a 30K-token prompt (with the context raised to fit it) the stall was 3.2–11.8 s; `holon serve <model>
   --chunk-with-decode 512` mixes decoding into those prefill steps and cut it 23–37×, for 11–22% more time to that
-  prompt's first token (48–54% on two RTX 4090 cells) and 2–15% of its throughput (`docs/release.md` §16.5). The
+  prompt's first token (48–54% on two RTX 4090 cells) and 2–15% of its throughput (`docs/dev/release.md` §16.5). The
   Qwen3.8-27B locks set 512.
 - **On an RTX 5080 that also drives a display**, the Qwen3.8-27B's 40,960-token context leaves ≈ 260 MiB of headroom
   (its state tier's staging units are kept first) and may be clamped to what fits (logged); Claude Code's ≈ 31K side
   requests need it above ≈ 32K.
 - **Traces are run-identical on one machine, not across machines:** two RTX 3090 desktops recorded different
-  Qwen3.8-27B snapshot traces at the same lock, both within the judge's L2 budget (`docs/release.md` §19.1).
+  Qwen3.8-27B snapshot traces at the same lock, both within the judge's L2 budget (`docs/dev/release.md` §19.1).
 - **No authentication:** the server checks no API key; do not expose it beyond a trusted network.
 - **Every start compiles FlashInfer's CuTe DSL norms** in memory (about 1 s; First start).
 - **M0.6's low-precision files on the RTX 5090 and RTX 3090** (8B NVFP4 and FP8, 30B NVFP4, 30B MXFP4_MOE) run with
@@ -296,17 +296,17 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 - Under a grammar, an output can run on in whitespace, digits or a string the schema admits until `max_tokens`: on the
   27B with MTP, 2.66% of constrained outputs were truncated against 0.33% unconstrained, over a 2-point gate that was
   accepted as a recorded shortfall. Guards against such runaways are deferred; set `max_tokens`.
-- DFlash2 speculation is an opt-in, in no lock ([docs/m04-spec.md](docs/m04-spec.md)).
+- DFlash2 speculation is an opt-in, in no lock ([docs/dev/m04-spec.md](docs/dev/m04-spec.md)).
 - Stop the server before a `git pull`: the install is editable, so a supervisor restart would import the new code.
 
 ## Performance
 
 Measured at release step 8 on one desktop per card, each clock-screened before and after, with Holon serving from that
 card's lock as it stood then. The shipped locks differ from those in the Qwen3.8-27B's context and in the FlashInfer
-plugin's `src`, with byte-identical snapshot traces (`docs/release.md` §19.1–§19.2). **Ratios are the claim**: absolute tokens per second belong to one board. Each ratio below is Holon's
+plugin's `src`, with byte-identical snapshot traces (`docs/dev/release.md` §19.1–§19.2). **Ratios are the claim**: absolute tokens per second belong to one board. Each ratio below is Holon's
 advantage (above 1, Holon is faster) as a range over the four cards; the tables per card, file and trace, rendered by
 `bench/report.py` from the evidence records they link, are in
-[docs/release.md §17](docs/release.md#17-as-built-step-8), with the method and the absolute numbers per board.
+[docs/dev/release.md §17](docs/dev/release.md#17-as-built-step-8), with the method and the absolute numbers per board.
 
 | comparison | Holon's advantage |
 |---|---|

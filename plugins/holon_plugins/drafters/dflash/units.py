@@ -1,4 +1,4 @@
-"""The DFlash / DFlash2 draft model as units (docs/m04-spec.md D4; the published forward: SGLang `models/dflash.py`,
+"""The DFlash / DFlash2 draft model as units (docs/dev/m04-spec.md D4; the published forward: SGLang `models/dflash.py`,
 llama.cpp `src/models/dflash.cpp`, studied, not copied): a context projection of the target's tapped residual streams,
 pre-norm layers whose attention and MLP a grouped dynamic convolution wraps, and DFlash2's candidate selector. The
 attention is std's GQA (bidirectional within a block, a sliding window), the norms, linears, embeddings and MLP std's

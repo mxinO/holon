@@ -1,4 +1,4 @@
-"""`qwen4_exp.ple@1`: Qwen3.8-Flash-Next's PLE (docs/v1-flash-next.md D4), the `pre` unit of `std.hyper.gr_block@1`
+"""`qwen4_exp.ple@1`: Qwen3.8-Flash-Next's PLE (docs/dev/v1-flash-next.md D4), the `pre` unit of `std.hyper.gr_block@1`
 at layer 1: it updates the residual R [T, n·H] in place (`R += G + silu(conv(norm(G)))`, the ops in `kernels.py`).
 
 Its state is declared by the block (C2, C3): per request, the last two token ids before the step (`ple.history`,

@@ -1,6 +1,6 @@
 {
  "date": "2026-10-22",
- "doc": "docs/v1-flash-next.md \u00a721.6",
+ "doc": "docs/dev/v1-flash-next.md \u00a721.6",
  "benches": {
   "s7_g_rtx-5080": {
    "commit": "79855e3f523731d6dc2730d7231b64ff545fe69b",

@@ -1,4 +1,4 @@
-"""Op contracts std.moe owns (docs/m02-moe.md D2). Their oracles are in `reference.py`; kernels come from kernel
+"""Op contracts std.moe owns (docs/dev/m02-moe.md D2). Their oracles are in `reference.py`; kernels come from kernel
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs; any `T` ≥ 0.
 
 - `moe_topk@1`: instance `(logits [T, E] f32) -> (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax
@@ -17,7 +17,7 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
   It may expose `pass_rows` (a multiple of `CHUNK`; else `CHUNK`): a row's result is the same in any call of whole
   `CHUNK`s up to that many rows as in its own chunk's call, so std.moe routes an expert pass in one call
-  (docs/v1-moe-prefill.md D3′).
+  (docs/dev/v1-moe-prefill.md D3′).
 - `linear_experts@2`: instance `(x [T, R, in], parts, ids [T, k]) -> y [T, k, out_y]` of `out_dtype`: row j of token t
   applies expert `ids[t, j]` to `x[t, 0]` (R = 1) or `x[t, j]` (R = k). `parts` holds the stack's tensors by role, as
   `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
@@ -32,11 +32,12 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
   shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
   An instance may expose `pass_rows` (an int, a multiple of `CHUNK`; `CHUNK` without it), the most rows a call may
-  carry at its `CHUNK`-row calls' bits (docs/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤ `pass_rows`, a
+  carry at its `CHUNK`-row calls' bits (docs/dev/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤
+  `pass_rows`, a
   call of n·`CHUNK` rows gives each row the bits the `CHUNK`-row call of that row's own chunk gives it. Nothing is
   promised for a call that is not a whole number of `CHUNK`s, nor across placements (`linear_experts_arena@1`'s own
   term). std.moe passes at most the smaller of a layer's two stacks' `pass_rows` per call.
-  Passed buffers (docs/v1-moe-prefill.md D10): an instance that defines `scratch_bytes(tokens) -> int` (the bytes of
+  Passed buffers (docs/dev/v1-moe-prefill.md D10): an instance that defines `scratch_bytes(tokens) -> int` (the bytes of
   scratch a call of `tokens` tokens takes; 0 where it needs none) accepts the optional keywords `out` (the result, [T,
   k, out_y] f32, contiguous: written and returned) and `scratch` (a contiguous uint8 buffer of at least
   `scratch_bytes(T)` bytes, 256-byte aligned, for the call's transients); std calls every other instance without them.
@@ -51,9 +52,9 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   j]`, accumulated in f32 in slot order, into `out` (of `dtype`). Facts: hidden, top_k, dtype, y_dtype. An instance
   may define `add(y, weights, residual [T, H] of dtype, out)`: writes `residual + s`, s that sum rounded to `dtype`,
   added in f32 and rounded to `dtype` again — what `residual + out` gives after the call, so the layer's residual add
-  costs no launch of its own (docs/v1-offload.md §14, step 3c).
+  costs no launch of its own (docs/dev/v1-offload.md §14, step 3c).
 
-Expert offload (docs/v1-offload.md §5): an offload store keeps each slot class's experts in an arena `[S, unit]`
+Expert offload (docs/dev/v1-offload.md §5): an offload store keeps each slot class's experts in an arena `[S, unit]`
 whose first `top_k` slots are null slots (zero weights; slot j for routing rank j, so a token's slots stay unique),
 then `staging` slots, then cache slots.
 
@@ -90,7 +91,8 @@ then `staging` slots, then cache slots.
   staging (the caller's own staging slots, [k, k + staging): the cache slots start past them). `empty` (the layer's
   empty cache slots per role, the first `n_empty` of them), `delta` (the layer's region of the delta log), `n_delta`
   (its count) and `group` (the layer's index in the map) serve the variants: @1 leaves them as they are.
-  The CPU's share (F5b, docs/v1-offload.md D4): the call's CPU candidates are the experts a live entry routes that are
+  The CPU's share (F5b, docs/dev/v1-offload.md D4): the call's CPU candidates are the experts a live entry routes that
+  are
   missing in every role (neither resident nor in the ring) and held by the host tier the device reads (tier code −1)
   in every role; of its n of them the CPU takes c = min(`plan[n]`, n) — the last c by (best routing rank, expert id)
   ascending, the best rank being the least j of the expert's live entries (Strata's rule: the lowest-ranked misses).
@@ -104,7 +106,7 @@ then `staging` slots, then cache slots.
   whose piece the call fetches (staged or admitted) reads its slot there and its null slot j in `slots`, every other
   entry the reverse — so a caller can run the entries already resident while the fetch lands (FN step 7: the hits
   first), the two passes' outputs summing to the one pass's (a null slot's output is zero).
-- Variants (docs/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
+- Variants (docs/dev/v1-offload.md D3): `moe_resolve.<policy>@1`, a contract its placement policy's plugin owns (its own
   oracle and CPU provider), takes @1's arguments, then the policy's device state by name (`device_state`), and keeps
   @1's terms except where it says otherwise. It may change `residency` (the regions its policy owns) and the layer's
   `empty` slots, and then logs each change in the delta log: records appended at `n_delta`, which it advances (past D
@@ -119,7 +121,7 @@ then `staging` slots, then cache slots.
   expert id then group; for each class c (`classes[g, r]`: role r's slots of group g are in class c) the first
   `need[c]` of them holding a slot of c; the caller unmaps and logs them, and later returns their slots to their
   layers as empty. Its instance may also have `lend_tail(cls: int, n: int, residency [G, E, R] int32, classes [G, R]
-  int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/v1-moe-prefill.md D11), on the
+  int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/dev/v1-moe-prefill.md D11), on the
   device without a host sync: the experts holding any of class `cls`'s last `n` slots (a role r of class `cls` at a
   slot ≥ `limits[g, r]` − n, the class's arena size less n), whole — the caller evicts them in every role, unmaps,
   logs and returns them as `lend`'s —, after the policy has released its own slots in that range that no expert maps
@@ -133,7 +135,7 @@ then `staging` slots, then cache slots.
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
   ring pieces at their ring slots); graph padding rows arrive with every id −1; a negative id is dropped (the rank's
   null slot: no fetch, no count, a zero contribution). Each transform's semantics are a contract its plugin owns,
-  `moe_route_transform.<name>@1`, with its own oracle and provider (docs/v1-offload.md D3). Facts: experts, top_k.
+  `moe_route_transform.<name>@1`, with its own oracle and provider (docs/dev/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
   device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. Optional member
@@ -155,7 +157,7 @@ then `staging` slots, then cache slots.
   — `held() -> int`, the bytes allocated in it still alive, and `release()`: the range free again (nothing held). An
   allocation the range cannot hold fails.
 
-Host tiers past RAM (F9 and the exclusive RAM tier, docs/v1-offload.md D10): when RAM holds fewer pieces than the
+Host tiers past RAM (F9 and the exclusive RAM tier, docs/dev/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's
 file, always valid), and each layer call runs `moe_resolve → moe_tiers → [the SSD reads: cpu_task@1's copy task;
 signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (moves)`:
@@ -184,7 +186,7 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
   The map, `host` and `owner` take the call's result (a resident, b and kept pieces in RAM or on the SSD, displaced
   experts on the SSD). `n_moves[r]` = (demotions, moves). Deterministic. Facts: experts, top_k, roles.
 
-The CPU's share of the misses (F5b, docs/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
+The CPU's share of the misses (F5b, docs/dev/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
 CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
 
 - `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task) -> slot` (at

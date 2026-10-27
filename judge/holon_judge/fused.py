@@ -1,4 +1,4 @@
-"""References for fused kernels, composed from the oracles of the units they replace (docs/m07-perf.md D3): the std
+"""References for fused kernels, composed from the oracles of the units they replace (docs/dev/m07-perf.md D3): the std
 unit that selects a fused op registers no oracle for it, so each unit's reference stays its own (unit isolation).
 
 - `attention.qk_rope_kv@1` (std.mixers.gqa): `rmsnorm@1`, then `rope@1`, on q's and k's heads; `kv_write@1` of the

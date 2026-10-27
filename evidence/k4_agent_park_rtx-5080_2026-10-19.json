@@ -1,5 +1,5 @@
 {
- "measurement": "K step 4, 3c and 3d (docs/v1-kv-tiers.md acceptance 3): agent_park on the RTX 5080, Holon with the tier (lock 10 + host.bytes 16 GiB, staging 5, prompt_end,branch,answer:1, the tuned clock) against Holon VRAM-only (lock 10) and llama-server with --cache-ram 16 GiB (the default 8 GiB arm reported)",
+ "measurement": "K step 4, 3c and 3d (docs/dev/v1-kv-tiers.md acceptance 3): agent_park on the RTX 5080, Holon with the tier (lock 10 + host.bytes 16 GiB, staging 5, prompt_end,branch,answer:1, the tuned clock) against Holon VRAM-only (lock 10) and llama-server with --cache-ram 16 GiB (the default 8 GiB arm reported)",
  "date": "2026-10-19",
  "hardware": "NVIDIA GeForce RTX 5080 desktop",
  "commit": "32d5945f0273",

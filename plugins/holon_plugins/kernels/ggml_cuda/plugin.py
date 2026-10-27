@@ -4,11 +4,12 @@ the HF FP4 layouts (`"nvfp4/hf"`, `"mxfp4/hf"`, repacked by `prepare`), and its 
 `moe_topk@1`, `moe_router@1` and `moe_combine@1` (op contracts: std.ops.kernels, std.moe.kernels).
 
 `qlinear` dispatches from the row count: `mmvq` up to `mmvq_rows`, else `mmq` in calls of whole 512-row chunks
-(llama.cpp's ubatch) up to `call_rows`, the last partial chunk a call of its own (docs/v1-moe-prefill.md D5: bounded,
+(llama.cpp's ubatch) up to `call_rows`, the last partial chunk a call of its own (docs/dev/v1-moe-prefill.md D5:
+bounded,
 as mmq's stream-k split points move with a call's rows); both write `out_dtype` (bf16 or f32) directly, mmq's
-stream-k partials kept in f32 until its one rounding (docs/m07-perf.md D4).
+stream-k partials kept in f32 until its one rounding (docs/dev/m07-perf.md D4).
 `mmvq_rows` is llama.cpp's threshold for the type at the class's compute capability, or the class's entry for the
-shape where a repeated sweep found mmq faster (docs/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
+shape where a repeated sweep found mmq faster (docs/dev/m07-perf.md D2, `CROSSOVER`); the judge's floors ask it too.
 Both quantize the activations in a workspace shared by every instance with the same `in`. `qembedding` is
 llama.cpp's `get_rows`.
 
@@ -19,22 +20,25 @@ mmvq call of the same `in` and rows reads it while the buffer's last write is st
 counts them), else quantizes `x` itself. `qlinear_glu` (D6): mmvq's fused gate at one row on a merged gate/up
 (`silu(gate) · up` from the f32 sums, NVFP4's scale2 on both halves), None at more rows (std's SwiGLU composes).
 
-`linear_experts` is llama.cpp's MUL_MAT_ID per call of up to `pass_rows` rows (docs/v1-moe-prefill.md D0): mmvq with ids
+`linear_experts` is llama.cpp's MUL_MAT_ID per call of up to `pass_rows` rows (docs/dev/v1-moe-prefill.md D0): mmvq with
+ids
 up to the type's limit (`get_mmvq_mmid_max_batch`), for `glu="swiglu"` through its fused gate on the merged stack, else
 mmq with ids into f32, followed for swiglu by our f32 SwiGLU — or, where mmq can (`mmq_glu`: the stack's rows in whole
-tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/v1-moe-prefill.md D4: no f32 gate/up
+tiles of 128, MMA layouts), with SwiGLU in mmq's store, bitwise the same (docs/dev/v1-moe-prefill.md D4: no f32 gate/up
 output). `pass_rows` is 512 (llama.cpp's ubatch), or on an (SM, type, mode) whose L0 proves a row's bits the same in any
 call of whole 512-row chunks (`PASS_PROVEN`) up to `PASS_ROWS`, capped by the id helper's pairs, the step budget and the
 `ggml_cuda.pass_rows` option; a call's last partial chunk runs on its own. Its workspace (`ggml_cuda.id[…]`, sized for
 `pass_rows`) holds mmq's id maps besides the activations; gate/up's f32 output, where SwiGLU is not in mmq's store,
-comes from the caller's `scratch` (`scratch_bytes`, docs/v1-moe-prefill.md D10) or is allocated, and a call writes into
+comes from the caller's `scratch` (`scratch_bytes`, docs/dev/v1-moe-prefill.md D10) or is allocated, and a call writes
+into
 the caller's `out` if given. `moe_topk` is `topk-moe.cu` (softmax, top k, renormalised), `moe_router` our router kernel
 beside it (the f32 router GEMV from bf16 activations, then `moe_topk`'s selection, in one launch), and `moe_combine`
 `moe-weighted-reduction.cu`, both patched to the contracts' layouts (ids at row stride k; the combine stores bf16 into
-the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/v1-offload.md §14, step
+the caller's `out`, and its `add` the residual stream plus the rounded sum, rounded again: docs/dev/v1-offload.md §14,
+step
 3c).
 
-Activation modes (docs/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
+Activation modes (docs/dev/m06-lowp.md D3, D8, §4.5, §4.7): one spec per mode, `config["act"]` naming each path's
 activation format. `q8_1` (every class, every type, `act_quant` a4 or a8): q8_1 activations on both paths, so
 W4A8 for the FP4 types. `fp4` (sm_120, FP4 types, `act_quant` a4): mmq at llama.cpp's native W4A4 (its own
 dynamic FP4 quantizer, which reads f32 only: bf16 activations are first copied, exactly, into the named workspace
@@ -45,7 +49,7 @@ which precision it will use (`mmq_prec`): a mismatch is an error.
 FP4 (D8): `prepare` repacks the HF layouts losslessly into ggml blocks (`repack`, llama.cpp's converter layouts);
 NVFP4's per-tensor or per-expert `scale2` ([1]; [E]; [2, E] for a merged gate/up stack) is applied in f32 before SwiGLU
 on every path: mmvq in llama.cpp's fused epilogue (one row dense; any tokens with ids), dense mmvq above one row in the
-unfused kernel's epilogue (docs/m07-perf.md D11), dense mmq in its store (D4) — each before the one rounding to
+unfused kernel's epilogue (docs/dev/m07-perf.md D11), dense mmq in its store (D4) — each before the one rounding to
 `out_dtype` — and mmq with ids by our SwiGLU (gate/up) or `y *= scale2[ids]` (down). With `in` a multiple of 256, or of
 a `ROW_BLOCKS` type's block (its loaders keep the last K step inside the row: T6), no q8_1 kernel reads past the weight
 blocks, so they need no padding (L0 poisons the bytes after them); native W4A4 steps K by 512 with no tail, so the `fp4`
@@ -77,16 +81,16 @@ LINEAR_EXPERTS, MOE_TOPK, MOE_ROUTER, MOE_COMBINE = "linear_experts", "moe_topk"
 LINEAR_EXPERTS_ARENA = "linear_experts_arena"     # the same kernel over an offload store's arena (ids are its slots)
 CHUNK = 512                     # mmq rows per call: llama.cpp's ubatch; sizes the workspace and the f32 buffer
 ID_PAIRS = 32768                # the most (token, expert) pairs mmq's id helper sorts per call (mmid.cuh)
-PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/v1-offload.md D8)
+PASS_ROWS = 4096                # the largest expert pass of a prefill chunk (docs/dev/v1-offload.md D8)
 PASS_OPTION = "ggml_cuda.pass_rows"     # a lock's cap on `pass_rows` (manifest [options]; KV capacity per class)
-# An expert pass of a prefill chunk (docs/v1-moe-prefill.md D0, D1; v1-offload.md D8): mmq with ids takes the pass's
+# An expert pass of a prefill chunk (docs/dev/v1-moe-prefill.md D0, D1; v1-offload.md D8): mmq with ids takes the pass's
 # rows in one call where the id helper sorts them (4,096 at top-8: its device-wide path past one block's 16,384
 # pairs), in whole CHUNKs, so a row's chunk and path stay the reference's (a call's last partial chunk runs as a call
 # of its own: `LinearExperts.__call__` cuts it, whatever its caller passes). That holds on the (SM, ggml type, mmq
 # activation mode) pairs whose L0 shows a row's bits the same in a call of any whole number of CHUNKs as in its own
 # chunk's call (holon_testing.pass_rows, every entry run on its SM by plugins/tests/test_ggml_cuda_moe.py): the lock
 # classes' expert types per SM (from plans/: the 3090's, the 4090's, the 5080's and 5090's) and FN's MoE types
-# (docs/v1-flash-next.md D1′). Every other pair keeps CHUNK.
+# (docs/dev/v1-flash-next.md D1′). Every other pair keeps CHUNK.
 _FN_TYPES = ("iq1_m", "iq2_s", "iq2_xxs", "iq3_s", "iq3_xxs", "iq4_nl", "iq4_xs", "q2_0")
 PASS_PROVEN = frozenset({(86, t, "q8_1") for t in ("q4_k", "q6_k", *_FN_TYPES)}
                         | {(89, t, "q8_1") for t in ("q4_k", "q6_k", "mxfp4", "nvfp4", *_FN_TYPES)}
@@ -96,7 +100,7 @@ ID_ERRORS = {"slots": 1,        # more distinct slots in a call's ids than `Line
              "range": 2,        # an id outside the stack's slots
              "columns": 4}      # a slot with more pairs than mmq's column tiles (an id repeated in a row)
 # Supported ggml types (design §4.6) and their ggml type ids. IQ1_M's mmq is vendor.patch's tile loader
-# (docs/v1-moe-prefill.md D9).
+# (docs/dev/v1-moe-prefill.md D9).
 TYPES = {"q4_0": 2, "q4_1": 3, "q5_0": 6, "q5_1": 7, "q8_0": 8, "q2_k": 10, "q3_k": 11, "q4_k": 12, "q5_k": 13,
          "q6_k": 14, "iq2_xxs": 16, "iq2_xs": 17, "iq3_xxs": 18, "iq1_s": 19, "iq4_nl": 20, "iq3_s": 21, "iq2_s": 22,
          "iq4_xs": 23, "iq1_m": 29, "mxfp4": 39, "nvfp4": 40, "q2_0": 42}
@@ -107,7 +111,8 @@ BLOCKS = {"mxfp4": (32, 17), "nvfp4": (64, 36)}
 # whole 32-value blocks; IQ4_NL's reads 256-value groups, so a row of whole blocks narrower than that (FN: PLE's
 # 160-wide rows) is gathered as bytes and converted (`QEmbedding`), bitwise the same values.
 QK = {"q4_0": 32, "q4_1": 32, "q5_0": 32, "q5_1": 32, "q8_0": 32, "iq4_nl": 32}
-# The `in` widths qlinear and linear_experts serve, as multiples (256 unless listed; T6, docs/v1-moe-prefill.md §10):
+# The `in` widths qlinear and linear_experts serve, as multiples (256 unless listed; T6, docs/dev/v1-moe-prefill.md
+# §10):
 # these types' mmq tile loaders keep a row's last K step (MMQ_ITER_K = 256 values) inside the row, so any whole number
 # of their blocks serves (FN: the down projections at 640, Q2_0 and IQ4_NL); mmvq reads whole blocks only. The
 # 256-value types and FP4 keep 256 (their blocks, or native W4A4's K step).
@@ -121,13 +126,14 @@ PREC = {"q8_1": 30, "fp4": 40}
 ROW_PADDING = 512               # llama.cpp's MATRIX_ROW_PADDING: native W4A4's K step
 MMVQ_MAX = 8                    # llama.cpp's MMVQ_MAX_BATCH_SIZE: mmvq's most activation rows
 POOL_ALIGN = 256                # csrc/api.cu's workspace pool: its base, and each of its allocations, at this boundary
-# The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/m07-perf.md D6, §13.4, §17): where
+# The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/dev/m07-perf.md D6, §13.4, §17): where
 # bench/glu_sweep.py found it faster per call than the matmul and FlashInfer's silu_and_mul at the locks' gate/up
 # shapes on the RTX 5080 and 4090 by more than a sweep's noise, and within 0.4% on the 5090
 # (evidence/m07-step2_glu-sweep_<class>), and the step-level A/B kept it (the 8B rows). Q5_K (+0.6 / +1.5 / −0.3%,
 # within noise, no L2 of its own) composes, as do most i-quants and Q3_K, which ran it 1–10% slower.
 GLU_TYPES = frozenset({"q4_k", "nvfp4"})
-# The crossover per shape (docs/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up to
+# The crossover per shape (docs/dev/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up
+# to
 # this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
 # least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of
 # some lock's decode or verify step (ten sweeps of the 27B's shapes). mmq writes bf16 itself (D4), so the table is
@@ -172,7 +178,7 @@ CROSSOVER: dict[tuple[str, str, int, int, str], int] = {
     ("rtx-5090", "q6_k", 5120, 248320, "q8_1"): 6,
 }
 
-# D2's batched-decode rule per SM (docs/v1-moe-prefill.md B-dec): mmq with ids picks its tile width against a call's
+# D2's batched-decode rule per SM (docs/dev/v1-moe-prefill.md B-dec): mmq with ids picks its tile width against a call's
 # tokens up to this many, above against the launch's mean rows per entry. 16 where D2's per-call sweep and the paired
 # batched-decode rounds measured it (sm_86 RTX A5000, sm_120 RTX 5080 / 5090); step 2's 64 elsewhere — on sm_89
 # provisional until the 4090's sweep runs.
@@ -195,7 +201,7 @@ def weight_type(layout: str) -> str | None:
 
 
 def repack(elem: str, parts: dict[str, torch.Tensor], tail: int = 0, rows: int = 4096) -> torch.Tensor:
-    """An HF FP4 weight's codes and block scales (docs/m06-lowp.md D2: `weight` [..., out, in/2] u8, element 2i in
+    """An HF FP4 weight's codes and block scales (docs/dev/m06-lowp.md D2: `weight` [..., out, in/2] u8, element 2i in
     the low nibble; `scale` [..., out, in/g] u8) as ggml blocks [..., out, row_bytes], bit for bit what llama.cpp's
     converter writes (cbe28bb3 conversion/base.py): NVFP4 per 64 values the four e4m3 scales of its sub-blocks (sign
     bit cleared, as `_nvfp4_pack`), then per sub-block 8 bytes, element j low and j + 8 high; MXFP4 per 32 values the
@@ -367,7 +373,8 @@ class _Matmul:
         return blocks
 
     def prepare(self, q: QTensor) -> QTensor:
-        """The weight as this instance reads it (docs/m06-lowp.md D4, D8): an HF FP4 layout repacked into ggml blocks
+        """The weight as this instance reads it (docs/dev/m06-lowp.md D4, D8): an HF FP4 layout repacked into ggml
+        blocks
         (`{"blocks", "scale2"}` for NVFP4, its scale2 [1] dense, [E] or [2, E] per expert), under the `fp4` spec
         followed by the zeroed tail; a GGUF layout as adopted (`q` itself), under `fp4` copied with the tail."""
         if not (self.hf or self.tail):
@@ -488,7 +495,8 @@ class LinearExperts(_Matmul):
         self.pass_rows = pass_rows(ctx, self.name, act["mmq"], self.top_k)
         self._uses_mmq(self.mmvq_tokens, facts["layout"])
         # the most distinct slots a call's ids name: one per expert, plus per routing rank one standing in for a miss
-        # or a padding row (an offload arena's null slots, docs/v1-offload.md D5); it bounds mmq's compact launch, which
+        # or a padding row (an offload arena's null slots, docs/dev/v1-offload.md D5); it bounds mmq's compact launch,
+        # which
         # is how a stack of more slots than experts (a class arena) costs no more than the layer's own stack
         self.slots = self.experts + self.top_k
         # D4: SwiGLU in mmq's store (bitwise our SwiGLU of its unfused output), where mmq can for this stack
@@ -500,7 +508,7 @@ class LinearExperts(_Matmul):
         # The persistent id workspace holds the mmvq calls' id maps and q8_1 activations (up to `mmvq_tokens` rows): one
         # per `in`. An mmq call's take a part of the caller's `scratch` past gate/up's output (an offload store's lent
         # tail in a streaming step: FN step 7, its 4,096-row workspaces were 120 MiB of statics), or a fresh buffer:
-        # docs/v1-moe-prefill.md §10 L3-2 measured that at 0.2% of the 5080 offload lock's prefill. Its size depends
+        # docs/dev/v1-moe-prefill.md §10 L3-2 measured that at 0.2% of the 5080 offload lock's prefill. Its size depends
         # on in, k (the id maps, the activations per slot), E (expert_bounds) and the rows: all four name it.
         rows = max(1, self.mmvq_tokens)
         self.workspace = ctx.workspace(
@@ -534,7 +542,7 @@ class LinearExperts(_Matmul):
         return max((b - a for a, b in calls(tokens, self.pass_rows) if b - a > self.mmvq_tokens), default=0)
 
     def scratch_bytes(self, tokens: int) -> int:
-        """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/v1-moe-prefill.md D10): its mmq
+        """`scratch`'s bytes for a call of `tokens` tokens (std.moe.kernels, docs/dev/v1-moe-prefill.md D10): its mmq
         launches' transient, one launch at a time: gate/up's f32 output before our SwiGLU (none where D4's store
         applies SwiGLU), then the launch's id maps and q8_1 rows; 0 where it runs mmvq only."""
         rows = self._mmq_rows(tokens)
@@ -667,7 +675,7 @@ class MoeRouter:
     """`moe_router@1`: decode and verify calls (up to `rows` tokens) in one launch — topk-moe.cu's router kernel, ours
     through vendor.patch: per row and expert four warps' f32 fma chains over quarters of hidden, each closed by the
     warp's xor tree, added in order, then `moe_topk`'s selection on those logits in the last block of the row's tile.
-    Prompt chunks (calls of at least CHUNK rows, experts a multiple of 64; docs/v1-moe-prefill.md D3): our router
+    Prompt chunks (calls of at least CHUNK rows, experts a multiple of 64; docs/dev/v1-moe-prefill.md D3): our router
     GEMM, per logit a fixed number of f32 fma chains (2,048 / experts) over equal parts of hidden ascending, added in
     order, from x's values as given (`moe_router_logits`, no f32 copy), then `moe_topk`'s selection; calls between, as
     `moe_topk@1` composed with the f32 linear, as before (a row's logits follow its call's path, as `qlinear`'s mmvq /

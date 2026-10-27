@@ -1,4 +1,5 @@
-"""A deferred copy stream for the CPU, for the judge's tier checks and core tests (docs/v1-kv-tiers.md, panel A11): on
+"""A deferred copy stream for the CPU, for the judge's tier checks and core tests (docs/dev/v1-kv-tiers.md, panel A11):
+on
 the CPU the core's streams run their work at once, so a copy nobody waits for still lands in time and a missing wait
 passes by luck. Here work enqueued on a stream runs only when a fence after it is waited for (`wait`, `synchronize`) or
 when `pump` (one per launch) finds it due — a seeded 0 … `most` launches after it was enqueued, in order on its stream.

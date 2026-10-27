@@ -1,4 +1,4 @@
-// Step 0 of milestone X (docs/v1-offload.md §8): M1 host-to-device rates, M2 CPU/PCIe contention, M3 CPU expert
+// Step 0 of milestone X (docs/dev/v1-offload.md §8): M1 host-to-device rates, M2 CPU/PCIe contention, M3 CPU expert
 // throughput (ggml-cpu), M5 the S6 handshake with a real expert payload, M7 O_DIRECT reads. One torch extension;
 // bench.py drives it. The handshake protocol and worker follow spikes/s6_cpu_handshake (same single-word flags).
 #include <ATen/cuda/CUDAContext.h>

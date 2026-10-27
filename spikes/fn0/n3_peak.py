@@ -1,4 +1,4 @@
-"""FN step 0, N3's memory term (docs/v1-flash-next.md §7): the non-lendable step peak per token, from a trunk-only
+"""FN step 0, N3's memory term (docs/dev/v1-flash-next.md §7): the non-lendable step peak per token, from a trunk-only
 allocation profile — one GDN layer and one QSA layer of Qwen3.8-Flash-Next's shapes run in torch with the GDN chunk
 kernel Holon ships (`kernels.fla`'s vendored FLA), the peak of `torch.cuda.max_memory_allocated` above the step's
 inputs measured per token at 2K / 4K / 8K-token steps. The routed experts' buffers (the lendable part, D12c) are left

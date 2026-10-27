@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-offload.md` §9, steps 6 and 5 (run in that order): does the CPU's share of a layer's misses (F5b: the
+`docs/dev/v1-offload.md` §9, steps 6 and 5 (run in that order): does the CPU's share of a layer's misses (F5b: the
 `cpu_task@1` handshake, `cpu_experts@1` on ggml-cpu, `moe_resolve@1`'s `plan[n]`) pay on this card, stay
 run-identical with adaptive placement on, and stay within L2's bounds against a path-aware floor at a frozen placement?
 Do the F5a configurations stay byte-identical to all-resident? With RAM holding fewer experts than the store

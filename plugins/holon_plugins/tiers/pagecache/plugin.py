@@ -1,4 +1,4 @@
-"""tiers.pagecache@1: a file tier whose reads go through the OS page cache — the low-RAM tier docs/v1-offload.md
+"""tiers.pagecache@1: a file tier whose reads go through the OS page cache — the low-RAM tier docs/dev/v1-offload.md
 acceptance 1 holds out ("mmap", in effect), a `Tier` (std.tiered's protocol) the design does not design.
 
 As the store's slower tier (`moe.tiers = "std.tiered.pinned@1,tiers.pagecache@1"`, RAM capped by `moe.ram`), it

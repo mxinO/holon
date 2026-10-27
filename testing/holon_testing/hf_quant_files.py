@@ -1,4 +1,4 @@
-"""Tiny quantized HF checkpoints for CPU tests, one per dialect (docs/m06-lowp.md §5 step A2): a random Qwen3 or
+"""Tiny quantized HF checkpoints for CPU tests, one per dialect (docs/dev/m06-lowp.md §5 step A2): a random Qwen3 or
 Qwen3-MoE from transformers, its linear weights quantized and saved as each producer stores them — compressed-tensors'
 by its own compressors and config, Qwen's FP8, ModelOpt's NVFP4 and Quark's MXFP4 from their specs — in two shards
 that split modules' parts between them. `write` also returns every weight as the file means it (fp32, by HF name,

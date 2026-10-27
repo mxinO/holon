@@ -80,7 +80,7 @@ class CausalAttention:
 
 class _Dequantized:
     """Quantized-op references: ggml layouts (`ggml.<type>/gguf.native`) dequantized by gguf-py, the oracle the judge
-    uses; HF layouts (`<elem>/hf`, docs/m06-lowp.md D2) by std.weights.hf's reference."""
+    uses; HF layouts (`<elem>/hf`, docs/dev/m06-lowp.md D2) by std.weights.hf's reference."""
 
     def __init__(self, ctx, *, layout: str, **facts) -> None:
         self.elem, name = layout.split("/")
@@ -144,7 +144,8 @@ class LinearExperts:
     activation rounded to their dtype (the contract). A cached decode is checked against the stack's bytes: an offload
     store's arena (up to `experts` slots) changes between calls. A call runs CHUNK rows at a time, so it declares
     `pass_rows` (PASS_ROWS, within the step budget): std.moe's CPU tests take large passes, at the chunks' bits. It
-    takes passed buffers (docs/v1-moe-prefill.md D10): each chunk's f32 result is staged in `scratch` (`scratch_bytes`:
+    takes passed buffers (docs/dev/v1-moe-prefill.md D10): each chunk's f32 result is staged in `scratch`
+    (`scratch_bytes`:
     a chunk's), then written into `out`, so a buffer lent where it should not be shows in the outputs."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, top_k: int,

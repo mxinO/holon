@@ -1,5 +1,5 @@
 {
- "measurement": "K step 3 (docs/v1-kv-tiers.md rev 8.4, D4 / D11): the mixed factor under std.state_tier's own I/O dispatch (IoThreads over SsdLevel, 557,056 B units, O_DIRECT), a comparison arm that starts no write while a read is queued or running, and the engine loop's host time beside the I/O threads",
+ "measurement": "K step 3 (docs/dev/v1-kv-tiers.md rev 8.4, D4 / D11): the mixed factor under std.state_tier's own I/O dispatch (IoThreads over SsdLevel, 557,056 B units, O_DIRECT), a comparison arm that starts no write while a read is queued or running, and the engine loop's host time beside the I/O threads",
  "date": "2026-10-19",
  "hardware": "NVIDIA GeForce RTX 5080 desktop (the GPU idle; the drive under test is its local NVMe)",
  "storage": "the desktop's local NVMe (ext4), from the node outside the container (the container's /tmp is tmpfs: a first run there measured memory, not the drive, and is not recorded)",

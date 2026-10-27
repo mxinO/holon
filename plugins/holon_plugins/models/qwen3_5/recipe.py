@@ -1,10 +1,11 @@
 """Qwen3.5 / Qwen3.8 text model: a pure recipe (imports only holon.api).
 
 Every `full_attention_interval`-th layer is full attention (output-gated, partial rotary), the rest Gated DeltaNet
-(docs/m03-qwen38.md §2, §4.4). The HF checkpoint stores zero-centred norms (`x̂·(1 + w)`); llama.cpp's converter writes
+(docs/dev/m03-qwen38.md §2, §4.4). The HF checkpoint stores zero-centred norms (`x̂·(1 + w)`); llama.cpp's converter
+writes
 `w + 1` in f32 and `ssm_a = −exp(A_log)`, both undone here by value transforms, and orders value heads tiled, which
 the GDN kernels read as a fact. The vision tower is skipped; the MTP block is too, except in the draft head
-`draft_head("mtp")` returns (docs/m04-spec.md D2): the checkpoint's multi-token-prediction layer as a
+`draft_head("mtp")` returns (docs/dev/m04-spec.md D2): the checkpoint's multi-token-prediction layer as a
 `std.spec.mtp_head@1` over the trunk's own attention and MLP Refs, built only when a drafter asks for it.
 """
 from __future__ import annotations

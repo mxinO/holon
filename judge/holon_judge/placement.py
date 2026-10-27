@@ -1,4 +1,4 @@
-"""Routes and residency of the offload store, step by step, and the L1 policy-parity check (docs/v1-offload.md §6).
+"""Routes and residency of the offload store, step by step, and the L1 policy-parity check (docs/dev/v1-offload.md §6).
 
 `route_dump(engine)` taps the engine's offload store (`std.moe.offload@1`'s `std.tiered.store@1`, through its route
 taps) while it runs: per committed step, its routing counts [layers, experts] of decode and verify rows, the experts
@@ -12,7 +12,7 @@ that changed the map without logging it shows there.
 
 `parity(trace)` replays a trace recorded under `placement.lfu@1` (F11) with the oracle extended from the M6 replay's
 `lfu` to D4's spec (placement.lfu's `reference.replay`) from the residency, slots and empty slots the trace starts
-with (a tail step's lending, docs/v1-moe-prefill.md D11, reads the slots), and compares every step's residency and
+with (a tail step's lending, docs/dev/v1-moe-prefill.md D11, reads the slots), and compares every step's residency and
 empty slots (their stacks, as the delta log orders them) with the device's, exactly. A policy bug shows only as lost
 speed, since every placement is exact: this is the check that sees it.
 

@@ -1,7 +1,7 @@
-"""Quantized weights in std units (docs/m06-lowp.md D3–D6), on the CPU with a toy layout (fixtures/toy_quant): a
+"""Quantized weights in std units (docs/dev/m06-lowp.md D3–D6), on the CPU with a toy layout (fixtures/toy_quant): a
 unit hands its kernel every part by role (`qlinear@2`, `linear_experts@2`), binds after merges with the `act_quant`
 fact, keeps only what the kernel's `prepare` returns, merges parts by shape, and stacks experts slice by slice; a
-merged gate/up binds the fused activation, and one input prepares once for several linears (docs/m07-perf.md D6)."""
+merged gate/up binds the fused activation, and one input prepares once for several linears (docs/dev/m07-perf.md D6)."""
 import dataclasses
 import pathlib
 import types
@@ -78,7 +78,7 @@ def test_quant_act_sets_the_fact_and_a16_is_refused():
 
 @pytest.mark.parametrize("act", ["a8", "a4"])
 def test_mixed_steps_refuse_kernels_with_two_activation_modes(act):
-    """docs/m07-perf.md §3.1: with `chunk_with_decode` > 0 a quantized linear and an expert stack refuse, at bind, a
+    """docs/dev/m07-perf.md §3.1: with `chunk_with_decode` > 0 a quantized linear and an expert stack refuse, at bind, a
     kernel whose paths compute in different activation modes (the toy's a4 spec: chunks at 4 bits) — generically,
     from its spec's `config["act"]`; one mode on both paths (a8) binds, and every kernel binds without mixed steps
     (the option at 0: the engine passes 0 with a drafter, whose steps alternate). The units read that option alone,
@@ -183,7 +183,8 @@ def test_a_merged_gate_up_fuses_its_activation_and_linears_share_a_prepared_inpu
 @pytest.mark.parametrize("ours", [False, True], ids=["another-only", "another-chosen"])
 def test_a_glu_kernel_of_another_provider_binds_no_site(monkeypatch, ours):
     """A merged gate/up's `qlinear_glu@1` must be its `qlinear@2` kernel's provider's, which reads the parts that
-    provider prepared (`BuildCtx.candidates`, docs/m07-perf.md §17): when only another provider serves it, no site is
+    provider prepared (`BuildCtx.candidates`, docs/dev/m07-perf.md §17): when only another provider serves it, no site
+    is
     recorded and SwiGLU composes; when the deployment would choose another provider's over it, the build refuses."""
     ctx = _ctx()
     kernels, get = ctx.plugins.regs.kernels, ctx.plugins.regs.kernels.get

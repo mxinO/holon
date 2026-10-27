@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # The JSON-Schema-Test-Suite (MIT) at a pinned commit: the tests of every draft (draft3 … draft2020-12), unmodified,
-# for the grammar plugin's model-free oracle (plugins/tests/test_grammar.py; docs/m05-grammar.md D9).
+# for the grammar plugin's model-free oracle (plugins/tests/test_grammar.py; docs/dev/m05-grammar.md D9).
 #
 #   ./jsts.sh [checkout]   refresh jsts/ from a checkout at $COMMIT (cloned when omitted), record jsts.SHA256SUMS
 #   ./jsts.sh --check      verify jsts/ == the upstream files (jsts.SHA256SUMS), offline

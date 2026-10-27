@@ -1,4 +1,5 @@
-"""A multi-token-prediction draft head (docs/m04-spec.md D2): the shape the Qwen3.5/3.8, DeepSeek-V3, GLM-4.5 and MiMo
+"""A multi-token-prediction draft head (docs/dev/m04-spec.md D2): the shape the Qwen3.5/3.8, DeepSeek-V3, GLM-4.5 and
+MiMo
 heads share. For the token at position p and the target's final-norm hidden state of position p − 1:
 
     x = fc(concat(enorm(embed(token)), hnorm(h)))      (`order` "embed_first"; "hidden_first" swaps the halves)

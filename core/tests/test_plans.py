@@ -184,7 +184,7 @@ class _Planner:
 
 
 def test_mixed_steps_need_room_mixing_planners_and_no_drafter(tiny, monkeypatch):
-    """docs/m07-perf.md §3.1, at build: `chunk_with_decode` > 0 needs `max_step_tokens` >= max_seqs + the chunk and
+    """docs/dev/m07-perf.md §3.1, at build: `chunk_with_decode` > 0 needs `max_step_tokens` >= max_seqs + the chunk and
     planners that mix; drafts without an installed draft policy build no drafter, so steps mix (units see
     `max_draft_tokens` 0) — with one, they alternate, nothing is checked, and units see `chunk_with_decode` 0 (the
     engine's effective value)."""

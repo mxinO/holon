@@ -1,4 +1,4 @@
-"""std.hyper's units on the CPU (docs/v1-flash-next.md D3, §5): `gr_block@1` returns R complete — the attention
+"""std.hyper's units on the CPU (docs/dev/v1-flash-next.md D3, §5): `gr_block@1` returns R complete — the attention
 half's combine applied by the FFN half's mix, its own combine before it returns (the trunk contract: what taps, the
 drafter and the next block see) — equal to the ops' oracles composed by hand around the same mixer and FFN; `expand@1`
 repeats the inner embedding into n float32 streams; `gr_mix@1` (the model's norm) is the output mixer."""

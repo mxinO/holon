@@ -6,7 +6,7 @@
  "commit": "cad58d59eddcd05b2975fb03ef94949415fd8ee9",
  "code": "spikes/x0_offload/m6 (capture.py, replay.py) as committed with this record; core/std/plugins unchanged",
  "model": "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M.gguf",
- "question": "docs/v1-offload.md \u00a78 M6: default placement policy and knobs, D8's inputs, D11's recall trigger",
+ "question": "docs/dev/v1-offload.md \u00a78 M6: default placement policy and knobs, D8's inputs, D11's recall trigger",
  "commands": [
   "for w in chat code ptime mixed agent; do CUDA_VISIBLE_DEVICES=<gpu> python spikes/x0_offload/m6/capture.py --model <Qwen3-30B-A3B-Q4_K_M.gguf> --workload $w --out local/tmp/x0-m6/$w.npz; done",
   "python spikes/x0_offload/m6/replay.py --traces local/tmp/x0-m6 --gguf <gguf> --ptime local/tmp/x0-m6/ptime.json --out local/tmp/x0-m6/replay.json",

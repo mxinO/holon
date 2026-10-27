@@ -1,4 +1,4 @@
-"""Step 4's 16 GB soak (docs/v1-moe-prefill.md §7, the panel's C6): a lock's engine (its flags, `--ctx`, `--max-seqs`),
+"""Step 4's 16 GB soak (docs/dev/v1-moe-prefill.md §7, the panel's C6): a lock's engine (its flags, `--ctx`, `--max-seqs`),
 then `--rounds` × (one long prompt of `--long` tokens, then `--seats` short prompts decoding together), every request
 greedy. Per round: the caching allocator's `num_alloc_retries` / `num_device_alloc` / `num_device_free` deltas, the
 allocation peak, and the least free device memory seen after any step (`torch.cuda.mem_get_info`). An OOM fails the

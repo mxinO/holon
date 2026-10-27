@@ -1,4 +1,5 @@
-"""Drafts with the target checkpoint's multi-token-prediction head (docs/m04-spec.md D2, D3): whatever head the target's
+"""Drafts with the target checkpoint's multi-token-prediction head (docs/dev/m04-spec.md D2, D3): whatever head the
+target's
 model plugin declares as `draft_head("mtp")`, built as the auxiliary model "mtp" (its KV under `mtp.kv`).
 
 Pairing (llama.cpp's): the head's row at position p takes the token at p and the target's final-norm hidden of p − 1,

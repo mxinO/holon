@@ -1,4 +1,4 @@
-"""What a placement policy and a host tier are to the tiered store (docs/v1-offload.md D3). Plugins implement them
+"""What a placement policy and a host tier are to the tiered store (docs/dev/v1-offload.md D3). Plugins implement them
 structurally, named by a `Ref` in an open plugin option (`moe.placement`, `moe.tiers`), without importing std.
 
 Items are (group, item) pairs — a MoE layer and one of its experts —, each held in one slot per role (gate/up,
@@ -45,7 +45,7 @@ class PlacementPolicy(Protocol):
 
 
 class Tier(Protocol):
-    """A host tier of the store's pieces (docs/v1-offload.md D3, D10), fastest first in `moe.tiers`; it owns its
+    """A host tier of the store's pieces (docs/dev/v1-offload.md D3, D10), fastest first in `moe.tiers`; it owns its
     storage. The first tier is device-readable (pinned RAM); a later one holds what the first does not (the
     checkpoint's file, F9). With every piece in the first, the tiers are inclusive (each piece also in RAM); with fewer,
     exclusive: a piece lives in exactly one of VRAM, RAM and the slower tier, and the store moves it in the graph."""

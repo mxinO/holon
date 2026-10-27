@@ -1,4 +1,5 @@
-"""The floors' MoE block (docs/m02-moe.md §4.6): HF's sparse-MoE block replaced by one built from std.moe's reference
+"""The floors' MoE block (docs/dev/m02-moe.md §4.6): HF's sparse-MoE block replaced by one built from std.moe's
+reference
 functions, so a floor computes routing, the expert path and the combine with the engine's precision (design D3: an
 F32 router, f32 expert outputs and SwiGLU, an f32 slot-ordered combine) — never looser than the engine — while the
 rest of the model is HF's (a shared expert and its gate included, as HF adds them after the routed sum). D3 is defined

@@ -60,7 +60,7 @@ def paged_attention(q: torch.Tensor, kv: torch.Tensor, table: torch.Tensor, rows
     return out
 
 
-# KV formats (docs/m03-qwen38.md D6): the KV cache as stored, its write and its read.
+# KV formats (docs/dev/m03-qwen38.md D6): the KV cache as stored, its write and its read.
 Q8_BLOCK = 32
 FP8 = torch.float8_e4m3fn
 FP8_MAX = 448.0

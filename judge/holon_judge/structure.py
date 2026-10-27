@@ -1,9 +1,9 @@
-"""The structural test of an HF MoE load (docs/m02-moe.md §4.6; quantized stacks docs/m06-lowp.md §4.3): every
+"""The structural test of an HF MoE load (docs/dev/m02-moe.md §4.6; quantized stacks docs/dev/m06-lowp.md §4.3): every
 stacked expert slice the engine holds — the merged gate/up stack's halves, the down stack — equals the checkpoint's
 tensor, and the router equals it bit for bit, streamed per layer. Dense slices are compared as stored; quantized ones
 by value, the engine's parts dequantized by std.weights.hf's reference against the checkpoint's own tensors as the
 judge reads them (`hf_quant`, its own name map) — or, where the stack's kernel prepared them into ggml blocks
-(kernels.ggml_cuda's FP4 repack, docs/m06-lowp.md D8), by gguf-py × their `scale2` row, the view leaving out the
+(kernels.ggml_cuda's FP4 repack, docs/dev/m06-lowp.md D8), by gguf-py × their `scale2` row, the view leaving out the
 `fp4` spec's zeroed tail. Exact and independent of any golden: a misplaced expert, or a part of one, fails here
 whatever the routing touches."""
 from __future__ import annotations

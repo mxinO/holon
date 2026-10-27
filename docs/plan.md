@@ -46,16 +46,16 @@ the code is our own plugin-native implementation. Only kernels may be borrowed, 
 | M0.1 | Qwen3-8B GGUF (Q8_0, Q4_K_M, IQ4_XS, IQ3_XXS) | quant pipeline: GGUF weight source, ggml dialect, borrowed ggml kernels chosen per class; first 16 GB consumer data point (RTX 5080) | gguf weight source, ggml dialect, ggml_cuda kernels |
 | M0.2 | Qwen3-30B-A3B GGUF (UD-IQ3_XXS 12.0 GiB, Q4_K_M; UD-Q3_K_XL optional) + bf16 HF (correctness, RTX PRO 6000) | model isolation; format-general MoE unit and ops; a 30B MoE on a 16 GB card | qwen3_moe recipe, std.moe, GGUF MoE kernels, stacked loading, a Triton grouped GEMM |
 | M0.3 | Qwen3.8-27B: GGUF (UD-IQ3_S 11.2 GiB on 16 GB, UD-Q4_K_M) + bf16 HF (correctness, RTX PRO 6000) | heterogeneous state, publish/adopt MemOps, checkpoint prefix reuse, quantized KV cache (q8_0 ours, fp8 FlashInfer) | qwen3_5 recipe, gdn mixer + kernels, recurrent state kind, checkpoint policies, quantized-KV layouts |
-| M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP, DFlash2 draft) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; taps, auxiliary layers, Rewindable incl. GDN replay; verify graphs | mtp, dflash and gpu n-gram drafters, greedy + rejection verifiers, fixed-k policy (`docs/m04-spec.md`) |
-| M0.5 | Qwen3-8B, Qwen3.8-27B | logits-processor lifecycle, host-token depth gate, drafts to the host, per-request errors, resume (`docs/m05-grammar.md` §3; the forward/sample split only if measured necessary) | xgrammar processor, parsers, one HTTP frontend with OpenAI, Anthropic and Responses routers |
+| M0.4 | Qwen3.5 / Qwen3.8 (built-in MTP, DFlash2 draft) + Qwen3-8B | spec decoding at depth 1 on the device SeqTable; taps, auxiliary layers, Rewindable incl. GDN replay; verify graphs | mtp, dflash and gpu n-gram drafters, greedy + rejection verifiers, fixed-k policy (`docs/dev/m04-spec.md`) |
+| M0.5 | Qwen3-8B, Qwen3.8-27B | logits-processor lifecycle, host-token depth gate, drafts to the host, per-request errors, resume (`docs/dev/m05-grammar.md` §3; the forward/sample split only if measured necessary) | xgrammar processor, parsers, one HTTP frontend with OpenAI, Anthropic and Responses routers |
 | M0.6 | Qwen3-8B / Qwen3-30B-A3B in FP8 (block-scaled), NVFP4 and MXFP4 | low-precision HF checkpoints, dense and MoE: weight-source dialects over `QTensor` parts, `qlinear` / `linear_experts` providers, judge tiers per format; RTX PRO 6000 (sm_120), FP8 also on sm_89 | fp8 / nvfp4 / mxfp4 dialects and kernels |
-| M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused glue (q/k-norm + RoPE + KV store, bf16 KV store, mmq bf16 output, GDN rewind glue, gate/up + SwiGLU), the mmvq/mmq crossover per class, mixed prefill/decode steps without speculation, and a megakernel experiment gated on speed of light (design §5.7; `docs/m07-perf.md`) | fused kernels in std and the ggml plugin; an engine budget for mixed steps |
+| M0.7 | Qwen3-8B, Qwen3.8-27B GGUF | fused glue (q/k-norm + RoPE + KV store, bf16 KV store, mmq bf16 output, GDN rewind glue, gate/up + SwiGLU), the mmvq/mmq crossover per class, mixed prefill/decode steps without speculation, and a megakernel experiment gated on speed of light (design §5.7; `docs/dev/m07-perf.md`) | fused kernels in std and the ggml plugin; an engine budget for mixed steps |
 | Release | every v0 model | packaging, quickstart, rtx-5090 / rtx-3090 locks, an agent demo; the benchmark suite (decode, prefill, agent trace vs llama.cpp, FreeToken and SGLang where each runs) on the release classes | — |
 
 Order (user, 2026-10-13): M0.4 → M0.5 (whole: its grammar seam builds on verify); M0.6 runs in parallel, in its own
 worktree; then M0.7 and the release, which needs the benchmark suite first.
 
-**M0.6 status (2026-10-14): Gate A met** (`docs/m06-lowp.md` §8; panel-clean at its close). FP4 (NVFP4, MXFP4) HF and
+**M0.6 status (2026-10-14): Gate A met** (`docs/dev/m06-lowp.md` §8; panel-clean at its close). FP4 (NVFP4, MXFP4) HF and
 GGUF checkpoints load through `qlinear@2` / `linear_experts@2` at W4A8 by default. Tier A, Tier B and the plants pass
 as recorded. Bars run 0.99–1.05× of llama-bench on the same bytes. Four new locks (rtx-5080 8B NVFP4; rtx-4090 8B and 30B NVFP4,
 MXFP4_MOE GGUF), with every existing snapshot byte-identical. W4A4 (`quant.act = a4`) stays opt-in: its pre-registered default rule is
@@ -79,7 +79,7 @@ L2 budgets. Every criterion names its mode.
 | Qwen3-30B-A3B GGUF UD-IQ3_XXS | 12.0 GiB | 96 KiB | ✓ (Q4_K_M 17.3 GiB) | ✓ | 16K ≈ 15.0 GiB ✓ (more with q8_0 KV) |
 | Qwen3.5-4B bf16 text + MTP | ≈ 8.5 GiB | full-attn layers only | ✓ | ✓ | ✓ (not measured: Qwen3.5 is not an M0.3 target) |
 | Qwen3.5-9B bf16 text + MTP | 17.13 GiB | full-attn layers only | ≈ 21–22 GiB ✓ | ✓ | ✗ (GGUF builds ✓) |
-| Qwen3.8-27B GGUF UD-IQ3_S / UD-Q4_K_M | 11.2 / 15.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq (+ 147 MiB per prefix checkpoint) | ✓ (UD-Q4_K_M) | ✓ | UD-IQ3_S, 2 Seqs, 2 checkpoints: ≈ 23K tokens bf16 KV / ≈ 43K q8_0 (estimate, `docs/m03-qwen38.md` §4.8) |
+| Qwen3.8-27B GGUF UD-IQ3_S / UD-Q4_K_M | 11.2 / 15.3 GiB | 64 KiB (16 full-attn layers; ≈ 34 KiB q8_0) + GDN state ≈ 147 MiB/Seq (+ 147 MiB per prefix checkpoint) | ✓ (UD-Q4_K_M) | ✓ | UD-IQ3_S, 2 Seqs, 2 checkpoints: ≈ 23K tokens bf16 KV / ≈ 43K q8_0 (estimate, `docs/dev/m03-qwen38.md` §4.8) |
 
 Global acceptance for every milestone ≥ M0.1:
 - Every earlier model's lock is byte-unchanged, or advanced by `holon propagate` (auto-advance on a
@@ -285,7 +285,7 @@ tok/s vs llama.cpp (`llama-server`) on the same card and quant recorded.
 
 ### 4.1 Status (2026-10-08): acceptance met
 
-Design and evidence: `docs/m01-gguf.md` (rev 3.1); records in `evidence/` and `judge/results/`, locks in `plans/`.
+Design and evidence: `docs/dev/m01-gguf.md` (rev 3.1); records in `evidence/` and `judge/results/`, locks in `plans/`.
 Qwen3-8B, unsloth `Qwen3-8B-GGUF` Q4_K_M and UD-IQ3_XXS. Built differently from the work list above, by decision
 in the design: the GGUF file is self-contained (no HF base model or config), there is no `dialects/ggml` (the
 kernels read the stored blocks, `gguf.native`; gguf-py dequantizes for the judge and L0), and references never
@@ -323,15 +323,15 @@ incl. i-quants); pinned configs, provenance.
 Acceptance: qwen3 locks unchanged or advanced only by propagate; MoE L0 vs reference; L2 bounded vs a golden from
 `dequant_ref` weights (CPU fp32, ≈ 122 GB in RAM); **30B MoE on a 16 GB card**: UD-IQ3_XXS / UD-Q3_K_XL on RTX 5080
 with ≥ 16K KV tokens, Q4_K_M on 4090/A5000 (the 5080 covers sm_120); decode tok/s vs llama.cpp on the same card and quant recorded;
-core diff: the stacking weight rule only (`docs/m02-moe.md` D7).
+core diff: the stacking weight rule only (`docs/dev/m02-moe.md` D7).
 
 MoE is format-general: M0.2 also serves the bf16 HF checkpoint as a correctness path on an RTX PRO 6000 node
 (stacked loading of HF's per-expert tensors, a Triton grouped GEMM, L2; no performance bar). FP8, NVFP4 and MXFP4
-are M0.6. Design: `docs/m02-moe.md` (D1, D7, D8).
+are M0.6. Design: `docs/dev/m02-moe.md` (D1, D7, D8).
 
 ### 5.1 Status (2026-10-09): acceptance met
 
-Design and evidence: `docs/m02-moe.md` (rev 5 and its implementation review); records in `evidence/` and
+Design and evidence: `docs/dev/m02-moe.md` (rev 5 and its implementation review); records in `evidence/` and
 `judge/results/`, locks in `plans/`. Qwen3-30B-A3B, unsloth `Qwen3-30B-A3B-GGUF` UD-IQ3_XXS and Q4_K_M; the bf16
 HF checkpoint on an RTX PRO 6000. Built differently from the work list above, by decision in the design: the MoE is
 its own package (`std.moe`: `moe_topk@1`, `linear_experts@1` with a layout fact, `moe_combine@1`), the expert path
@@ -368,7 +368,7 @@ Carried forward:
 
 Merged 2026-10-09 by user decision: Qwen3.8-27B (the current, more used family) is the target; Qwen3.5 shares its
 architecture (`Qwen3_5ForConditionalGeneration`); a tiny random-weight model of it is the fast test fixture. Design and plan:
-`docs/m03-qwen38.md`.
+`docs/dev/m03-qwen38.md`.
 
 Work: `models/qwen3_5` (Qwen3.5 and Qwen3.8, HF and GGUF, text-only); `std.mixers.gdn` with `causal_conv1d`,
 `gated_delta_rule`, `gated_rmsnorm` ops; `kernels.fla` (vendored per S3) and our conv1d / gated-norm kernels;
@@ -385,8 +385,8 @@ designed state seams, all general.
 
 ### 6.1 Status (2026-10-12): acceptance met
 
-Design and evidence: `docs/m03-qwen38.md` (rev 3 and its implementation review, re-reviewed clean) and
-`docs/m03-in-step-snapshot.md` (in-step checkpoints, reviewed); records in `evidence/` and `judge/results/`, locks in
+Design and evidence: `docs/dev/m03-qwen38.md` (rev 3 and its implementation review, re-reviewed clean) and
+`docs/dev/m03-in-step-snapshot.md` (in-step checkpoints, reviewed); records in `evidence/` and `judge/results/`, locks in
 `plans/`. Qwen3.8-27B, unsloth `Qwen3.8-27B-GGUF` UD-IQ3_S and UD-Q4_K_M; the bf16 HF checkpoint on an RTX PRO 6000.
 Results are at the commit in their names; the final verdicts at the paired ΔPPL guard (65a82cb) and later.
 
@@ -439,7 +439,7 @@ Acceptance:
 
 ### 7.1 Status (2026-10-13): acceptance met (Gate A: MTP, n-gram; Gate B: DFlash2)
 
-Design and evidence: `docs/m04-spec.md` (rev 3, reviewed clean; §10 is Gate A's status with every result, decision
+Design and evidence: `docs/dev/m04-spec.md` (rev 3, reviewed clean; §10 is Gate A's status with every result, decision
 and deviation); records `evidence/bench_m04nat-*` (natural text), `fit_m04-*`, `judge/results/` (bounded, L0-drafter,
 snapshot); locks in `plans/`. The scope moved from this section's first draft: MTP from the target checkpoint itself
 (no separate MTP GGUF), DFlash2 added, `checkpoint_slots` dropped for GDN replay, the CPU lookup drafter and the
@@ -452,7 +452,7 @@ cost-model policy deferred.
 | 3 | 27B + MTP, natural text, single stream: 1.49× on the RTX 5080 (10.63 ms, llama.cpp MTP 10.53), 1.85× on the RTX 4090 (11.52 ms, llama.cpp 12.63); agent trace TPOT p50 1.71× / 1.75× (19.1 / 16.7 ms vs llama.cpp MTP 28.1 / 34.6); acceptance equal to llama.cpp's drafts; 2.6–2.8 tokens per verify step |
 | 4 | Verify steps 100% graphed, 99.6–100% at depth 1; n-gram on Qwen3-8B: agent 1.10×, single stream 0.97× (below break-even) |
 | 5 | All eight locks propagated, snapshots byte-identical (speculation off changes nothing) — at Gate A and again at Gate B |
-| 6 | Gate B (`docs/m04-spec.md` §11–§13): taps, attention `causal` / `window` facts, sparse draft laws (`std.spec.rejection` exact for sampled drafts), `drafters.dflash` (HF and GGUF checkpoints); L0-drafter passes for DFlash2 (bf16 and Q4_K_M) and the GGUF MTP head with teacher-forced chain steps; bounded spec vs plain on the 27B passes, snapshot run-identical |
+| 6 | Gate B (`docs/dev/m04-spec.md` §11–§13): taps, attention `causal` / `window` facts, sparse draft laws (`std.spec.rejection` exact for sampled drafts), `drafters.dflash` (HF and GGUF checkpoints); L0-drafter passes for DFlash2 (bf16 and Q4_K_M) and the GGUF MTP head with teacher-forced chain steps; bounded spec vs plain on the 27B passes, snapshot run-identical |
 | 7 | 27B + DFlash2 on the RTX 4090 (q8_0 KV): single stream 2.01× (10.59 ms; llama-server with DFlash 12.75), agent TPOT p50 2.14× (14.06 ms); acceptance equal to llama.cpp's on the same drafter file; 2.93 tokens per verify step single stream (predicted 3.5–5: the drafter's on this target); 54K KV tokens; llama-server with DFlash does not fit the agent trace on 24 GB |
 
 Decisions: speculation is benchmarked on natural text (`--corpus`; uniform-id prompts inflate acceptance); MTP's
@@ -475,7 +475,7 @@ Acceptance: 100% schema conformance on the JSON-schema suite (truncated response
 round trips via OpenAI and Anthropic APIs (Claude-Code-style client on `/v1/messages`); grammar + spec vs grammar
 without spec bounded; core diff target zero.
 
-Amended (2026-10-13, `docs/m05-grammar.md` D1, D7–D9): "core diff target zero" became "only the general seams of
+Amended (2026-10-13, `docs/dev/m05-grammar.md` D1, D7–D9): "core diff target zero" became "only the general seams of
 the design's §3, each with a toy proof" — grammar needs a request lifecycle, a depth rule, drafts on the host and
 per-request errors; the three API dialects are routers of one frontend package (`holon serve` runs one frontend);
 conformance is defined for strict requests against a published reject list (xgrammar silently ignores some JSON
@@ -483,7 +483,7 @@ Schema keywords); `tool_choice: "auto"` stays unconstrained unless a tool is str
 
 ### 8.1 Status (2026-10-14): acceptance met, one recorded shortfall
 
-Design and evidence: `docs/m05-grammar.md` (rev 5, reviewed clean; §11 is the build record with every result,
+Design and evidence: `docs/dev/m05-grammar.md` (rev 5, reviewed clean; §11 is the build record with every result,
 deviation and the panel round after step 5); records `evidence/conformance_*`, `gate_cost_*`, `gate_sizing_*`,
 `round_trips_*`, `constrained_bounded_*`, `claude_code_session_*`.
 
@@ -505,14 +505,14 @@ measured here).
 
 ## 8a. M0.7 — performance
 
-Work (`docs/m07-perf.md`): fused glue (bf16 KV store; q/k-norm + RoPE + KV store, `attention.qk_rope_kv@1`; mmq writing
+Work (`docs/dev/m07-perf.md`): fused glue (bf16 KV store; q/k-norm + RoPE + KV store, `attention.qk_rope_kv@1`; mmq writing
 bf16; NVFP4's `scale2` in mmvq's epilogue; gate/up + SwiGLU; one q8_1 quantization per shared input; the GDN rewind's
 glue in one launch), the mmvq/mmq crossover per class and shape, mixed prefill/decode steps without speculation
 (`chunk_with_decode`), and a megakernel experiment gated on speed of light.
 
 ### 8a.1 Status (2026-10-15): acceptance met
 
-Design and evidence: `docs/m07-perf.md` (rev 3.3, reviewed clean; §11–§16 as built per step, §17 the close: the close
+Design and evidence: `docs/dev/m07-perf.md` (rev 3.3, reviewed clean; §11–§16 as built per step, §17 the close: the close
 panel's findings, the propagation, acceptance and deviations); records `evidence/m07-step*_*`, `bench_m07-step4-*`,
 `m07-close_aa_*`, `propagate_m07-close_*`.
 
@@ -536,17 +536,17 @@ of four RTX 5090 desktops failed in a step (thermal throttling, Xid 79). Plan §
 (ABI 1.0 at its step 6, the release-class locks and the MTP decision at step 7). Follow-up, not covered by D7's
 measurement: the a8 8B / 30B GGUF locks (the 8B Q4_K_M on the RTX 5080 is where M0.5 measured the 36 s stall) stay at
 `chunk_with_decode = 0` because only the 27B was measured; release step 7 measures cap 512 on them against §1.3's bars
-or records why not. Measured at release step 7 (`docs/release.md` §16.5): the long prompt's stall falls 23–37× at 512, but the
+or records why not. Measured at release step 7 (`docs/dev/release.md` §16.5): the long prompt's stall falls 23–37× at 512, but the
 agent trace's gap bar (≥ 2×) fails on every such lock, whose agent gaps are already short, so they keep 0.
 
 ## 8b. Release
 
-Work (`docs/release.md`): packaging and `holon serve` from the lock, ABI 1.0, the public root, the release-class locks,
+Work (`docs/dev/release.md`): packaging and `holon serve` from the lock, ABI 1.0, the public root, the release-class locks,
 the benchmark suite, the agent demo, the clean install. Publishing (step 11) waits for the owner's go.
 
 ### 8b.1 Status (2026-10-16): ready for the owner's go, after the lead's final panel review
 
-Design and evidence: `docs/release.md` (rev 3.2, reviewed clean; §13–§19 as built per step); records
+Design and evidence: `docs/dev/release.md` (rev 3.2, reviewed clean; §13–§19 as built per step); records
 `evidence/release7_*`, `bench_release*`, `bars_release*`, `release8_clock_*`, `agent_demo_*`, `release10_*`.
 
 | # | Acceptance (release §1) | Result |
@@ -573,7 +573,7 @@ Decisions: the 27B locks' context raised to 49,152 (lead, after §18's ≈ 31K s
 fixed and every lock re-propagated (§19.2); MTP off and `chunk_with_decode` 0 on the 8B / 30B locks stay as decided at
 step 7 (README, Known limitations). Found on the way: the prebuild left every FlashInfer module to compile again at first
 use; an RTX 3090 desktop records another 27B trace than the one the lock was written on; the hub listing failed once
-with an HTTP error while four desktops listed it within minutes. Next: step 11 on the owner's go (§8 of `docs/release.md`).
+with an HTTP error while four desktops listed it within minutes. Next: step 11 on the owner's go (§8 of `docs/dev/release.md`).
 
 ## 9. Kill / pivot criteria
 
@@ -582,10 +582,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/release.md` §4.0; record `evidence/legibility_pilot_2026-10-14.json`) | — |
+| ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/dev/release.md` §4.0; record `evidence/legibility_pilot_2026-10-14.json`) | — |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
-| v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken and llama.cpp on the development vehicle Qwen3-30B-A3B (RTX 5080) (`docs/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
+| v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken and llama.cpp on the development vehicle Qwen3-30B-A3B (RTX 5080) (`docs/dev/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
 
 ---
 
@@ -596,18 +596,18 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   v2). It needs prebuilt wheels with Holon's CUDA extensions compiled for the pinned torch / CUDA stack and every
   supported SM, a CI build and test matrix on each card class, and `pip install holonlm` serving without a local CUDA
   toolkit.
-- **Expert caching/offload** (`docs/v1-offload.md`, four milestones): **X** expert offload — Strata's and Maya's
+- **Expert caching/offload** (`docs/dev/v1-offload.md`, four milestones): **X** expert offload — Strata's and Maya's
   strategy set as plugins (profile-seeded VRAM cache with decayed-count swaps, LRU, static, promote-on-fetch; misses
   fetched over PCIe by default so every placement is exact, CPU compute with ggml CPU kernels as a bounded opt-in
   where it gains ≥ 5%; prefill streaming of non-resident experts; an SSD expert tier) on additive core seams,
   closing on Qwen3-30B-A3B on the RTX 5080 vs FreeToken and llama.cpp; **K** KV and checkpoint tiers (pinned RAM /
   SSD under the prefix index, exact, deterministic resume); **FN** Qwen3.8-Flash-Next (QSA + indexer, PLE n-gram
-  table, hyper-connections; `docs/v1-flash-next.md`; after the MoE prefill track, which it depends on; Qwen3.6-35B-A3B
+  table, hyper-connections; `docs/dev/v1-flash-next.md`; after the MoE prefill track, which it depends on; Qwen3.6-35B-A3B
   is optional later evidence for its shared-expert units, off its critical path) compared with Strata; **GLM** GLM-5.3-Flash (MLA + DSA
   indexer, KDA, mHC) compared with Project Maya (owner, 2026-10-17). Qwen3.5-122B-A10B is dropped.
 
   **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
-  Design and evidence: `docs/v1-offload.md` (rev 4.5, panel-clean; §13 step 0's measurements and decisions, §14 the
+  Design and evidence: `docs/dev/v1-offload.md` (rev 4.5, panel-clean; §13 step 0's measurements and decisions, §14 the
   build record per step, "Step 8, part 2" the close); records `evidence/x0_*` … `x7_heldout_*`,
   `x8_close_rtx-5080_2026-10-18.json`.
 
@@ -631,7 +631,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   the 5080 decode is back at step 4's numbers, and the offload lock is propagated, `8615e26`). Next: K, FN (its MTP-on rows need the aux-model item below), GLM; the follow-ups below.
 
   **K status (2026-10-20): closed, acceptance met** (3a's SSD cells beside decoders by the owner's option 2).
-  Design and record: `docs/v1-kv-tiers.md` (rev 8.5, panel-clean; §13 the build record per step, the panels'
+  Design and record: `docs/dev/v1-kv-tiers.md` (rev 8.5, panel-clean; §13 the build record per step, the panels'
   reviews, "Owner decisions", "Close (2026-10-20)"); records `evidence/k0_*` … `k6_close_propagation_2026-10-20.json`.
 
   | # | Result |
@@ -647,12 +647,12 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   `agent_park` for 3d (the matched-KV reference fails). Found on the way: a staging pool could fall to 0 units
   silently (now refused with a tier, required when set, warned when the default); `branch_at` changed across
   preemption (kept); the clock's write lane outlasts the drive's real writes at the default write rate (3a's miss);
-  two desktops lost their GPU mid-run. Old → new SHA maps of `main`'s rewrite: `docs/history/`. Next: FN, GLM.
+  two desktops lost their GPU mid-run. Old → new SHA maps of `main`'s rewrite are kept with the development archive. Next: FN, GLM.
 
   **FN status (2026-10-24): closed, every gated row at or above its bar.** Design and record:
-  `docs/v1-flash-next.md` (§17–§21 the build and speed record, §22 the close, §23 the last speed round); records
+  `docs/dev/v1-flash-next.md` (§17–§21 the build and speed record, §22 the close, §23 the last speed round); records
   `evidence/fn*`, the close in `evidence/fn_close_final_2026-10-24.json`. The branch was replayed onto `main` to drop a
-  private name from one merge message: old → new SHAs in `docs/history/2026-10-24-fn-replay-map.tsv`.
+  private name from one merge message: the old → new SHA map is kept with the development archive.
 
   | # | Result |
   |---|---|
@@ -675,7 +675,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   serves 41,920 tokens, staging 5 kept); the engines that do not clamp refuse (`OutOfUnits`, the KV pool below the
   lock's length): propagate's L2 and the judge's snapshot, which verify a lock at its own length, as at the close's
   propagation. Generic, a later core round. Until then the RTX 5080's 27B tier lock is at 40,960 tokens for margin.
-- **F5b locks** (`docs/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
+- **F5b locks** (`docs/dev/v1-offload.md` §14, step 8 part 2): `propagate`'s L2 scores a lock's own settings, which F5b's
   path-aware floor refuses (one token per step), so no tool writes a lock with a CPU split; and S5's lookup ranks a
   tier-carrying lock first, so a benchmark deployment (the capped fit) would become a host's default. Both are the
   lead's decision before an F5b lock lands. Until then `scripts/ci/check_locks.py` refuses any lock whose class carries
@@ -690,13 +690,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **A warm-up launch before `holon serve` reports ready** (panel, X's close): a pinned arena that does not fit is
   refused at its first launch (D4), which can be the first request's. Launch once before ready, with a test that an
   oversized pinned arena fails before the server reports ready.
-- **F10 with RAM short** (`docs/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
+- **F10 with RAM short** (`docs/dev/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
   the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
   layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
   the start of the GLM milestone, which needs F10 with RAM short.
 - **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
   an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
-  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/v1-offload.md` §7) need them. FN's step 6 also
+  kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/dev/v1-offload.md` §7) need them. FN's step 6 also
   gives the arena store `fused` (the MTP pack's fused gate / up stacks, `std.moe@1(fused_gate_up=True)`: one piece
   per expert, gate's rows then up's); the resident store has it since FN step 3.
 - **KV streaming for sparse-attention mixers (K4; owner: FN, its first follow-up after its close)**: Strata streams a
@@ -705,17 +705,17 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   measures that cheaper; GLM's DSA adopts it.
 - **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
   store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
-  `docs/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
+  `docs/dev/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
 - **Bitwise placement invariance as a term of `linear_experts_arena@1`** (a std minor): the offload store's
   exactness rests on the provider's results being slot-, arena- and grouping-invariant, which only
   `kernels.ggml_cuda`'s L0 checks today (`docs/design.md` §6.5); written into the contract, every arena provider's
   L0 would check it.
-- Smaller deferrals of milestone X are listed where they were decided (`docs/v1-offload.md` §14): two-phase lending
+- Smaller deferrals of milestone X are listed where they were decided (`docs/dev/v1-offload.md` §14): two-phase lending
   for host-edit policies, prompt-time admission, F8, ARC, the AVX-512 tier's L0 on an AVX-512 host, PDL in the
   router, the remaining per-step kernels.
 - VMM ledger + live rebalance KV ↔ experts through `quiesce` (run-identical after shrink/regrow).
 - PIECEWISE graphs for mixed prefill/decode steps (mixing itself is M0.7's core budget `chunk_with_decode`, design
-  §7.1; mixing verify rows is its follow-up, `docs/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.
+  §7.1; mixing verify rows is its follow-up, `docs/dev/m07-perf.md` §9); depth 2; radix PrefixIndex if profiles warrant.
 - HF-ecosystem quantization: GPTQ/AWQ INT4 (W4A16), and FP8 on sm_86 (W8A16 via uint8 bit-decode; native FP8,
   NVFP4 and MXFP4 are M0.6); TP=2 on 2× A5000 (zero core diff); `update_weights`; LoRA; Qwen3.5 VLM.
 - **Optional self-improvement layer** (design §10): supervisor, improve API (first-version tool set), sandbox
@@ -728,12 +728,12 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **A recurrent-state checkpoint at the end of each answer** (GDN hybrids, `std.state.recurrent`): today the
   `prompt_end` policy checkpoints only where a prompt ends, so an agent's next turn reuses the previous prompt but
   prefills the previous answer again, even when it is sent back verbatim. In the pi test on an RTX 5090 that answer
-  was 44% of the uncached input tokens and ≈ 2% of wall time (`docs/agent-test-pi-rtx5090.md` §2); the gain grows
+  was 44% of the uncached input tokens and ≈ 2% of wall time (`docs/dev/agent-test-pi-rtx5090.md` §2); the gain grows
   where templates or agents keep the reasoning in later prompts and answers are long. It needs the answer's tokens
   as the template re-renders them (a checkpoint at the last aligned position the next prompt shares) and a payload
   unit per finished request.
-- **MoE prefill speed — closed (2026-10-20)** (owner, 2026-10-18; `docs/v1-offload.md` §13; the design and its record
-  are `docs/v1-moe-prefill.md`). Offload's gate had trailed FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause
+- **MoE prefill speed — closed (2026-10-20)** (owner, 2026-10-18; `docs/dev/v1-offload.md` §13; the design and its record
+  are `docs/dev/v1-moe-prefill.md`). Offload's gate had trailed FreeToken's prefill at 4K / 32K (0.92× / 0.88×); the cause
   was mmq's launch shape, not int8 against tensor cores. Built (steps 0–5): exact larger calls per class (`pass_rows`),
   a compact grouped launch, SwiGLU fused into the gate/up store, the router per pass and larger dense calls
   (bounded), FN's needs (IQ1_M's mmq loader, Q2_0, passed buffers, tail lending, T6's 640-wide rows); D3 failed its
@@ -774,13 +774,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   locks and needed a propagation round on four card classes for byte-identical traces. `src_hash` and the `holon`
   unit pin are frozen in ABI 1.0 and in every committed lock, so narrowing them (e.g. hashing the modules a model's
   step imports, without docstrings and comments, and leaving the frontend-facing records out) is a deliberate v1
-  change with its own lock migration. **First step built (owner, 2026-10-21; `docs/release.md` §22):** `src` scheme 2
+  change with its own lock migration. **First step built (owner, 2026-10-21; `docs/dev/release.md` §22):** `src` scheme 2
   leaves out tests, docs, examples and `*.md`, and hashes Python by its syntax tree without docstrings (identical
   under Python 3.12, 3.13 and 3.14); the scheme is written as the pin's prefix, so a scheme-1 lock reads as outdated.
   It outdates every lock once (with the snapshot trace now scoring its long prefix-hit request, re-recording every
   snapshot) and merges just before FN's close, whose single propagation covers it. Still open: the
   version string and response-reporting fields inside the pinned modules.
-- **The test and propagation process** (owner, 2026-10-21; `docs/release.md` §22): locks are propagated at a release
+- **The test and propagation process** (owner, 2026-10-21; `docs/dev/release.md` §22): locks are propagated at a release
   or a milestone's close only; a code change whose 2-run trace is byte-identical advances without L2 or an approval
   (another change with an identical trace skips L2 only), a moved trace runs L2 against the recorded goldens
   (`--snapshot-runs 3` for race-prone features); bounded checks at a release only, the exact tier audits kept; one plant per new check, on the CPU or a tiny model where possible; L0 on all three SMs for
@@ -792,7 +792,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   differs between two desktops of the same class, cause not identified; diagnose before the next 3090 propagation.
 
 **v2 — breadth**
-- DeepSeek-class: DSA indexer (page groups; GLM-5.3-Flash brings it into v1, `docs/v1-offload.md` D2), V4
+- DeepSeek-class: DSA indexer (page groups; GLM-5.3-Flash brings it into v1, `docs/dev/v1-offload.md` D2), V4
   compressed KV (`tokens_per_unit`) — correctness on reduced-layer configs locally, performance on datacenter GPUs.
 - PD disaggregation, EP, DP-attention, PP on datacenter GPUs (H100/GB200); draft-model drafter (nested ModelPlugin).
 - Tree verification, KVMem-style retrieval window, batch-invariant deterministic Plan (if needed), L3 quality judge,
@@ -808,4 +808,4 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   claims only from consumer desktops.
 - Every bug fix comes with a test that fails before and passes after.
 - A PR that changes shared code lists the locks it outdates (`holon_tools impact <base>..HEAD`); locks are propagated
-  at a release or a milestone's close (`docs/release.md` §22).
+  at a release or a milestone's close (`docs/dev/release.md` §22).

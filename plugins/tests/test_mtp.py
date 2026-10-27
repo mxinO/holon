@@ -1,4 +1,4 @@
-"""The MTP drafter (docs/m04-spec.md D2, D3) on a tiny Qwen3.5 with an MTP block, on CPU.
+"""The MTP drafter (docs/dev/m04-spec.md D2, D3) on a tiny Qwen3.5 with an MTP block, on CPU.
 
 - Lossless: speculative greedy decoding with `drafters.mtp` emits what plain greedy decoding does (depth 0 and 1,
   prefix hits).

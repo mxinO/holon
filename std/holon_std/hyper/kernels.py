@@ -1,4 +1,5 @@
-"""The op contracts of the gated-residual hyper-connections (docs/v1-flash-next.md D3, D13′: named for this form; GLM's
+"""The op contracts of the gated-residual hyper-connections (docs/dev/v1-flash-next.md D3, D13′: named for this form;
+GLM's
 mHC, with a stream-mixing matrix, will add siblings). Their oracles are in `reference.py`; kernels come from kernel
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs.
 

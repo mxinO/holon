@@ -9,7 +9,7 @@ module, against two bounds of the same work, CUDA-event timed (median of `--iter
   path's GEMM alone; `dequant` the whole stack's dequantization to bf16 (that path's per-pass cost).
 - `--freetoken` (run in FreeToken's venv): its `mul_mat_id` instead, on the same stacks and routing (bf16 in and out,
   as its MoE calls it: its down input is bf16) — the per-call time of its grouped launch at equal work; with `--f32`
-  its activations are f32, so it stores f32 as Holon's call does (equal I/O: docs/v1-moe-prefill.md row 2's split).
+  its activations are f32, so it stores f32 as Holon's call does (equal I/O: docs/dev/v1-moe-prefill.md row 2's split).
 - Past `ID_PAIRS` (T·k > 32,768: 8,192 tokens at top-8) Holon's call is not run (its id helper's bound); the bounds
   and the dequant still are (D7's break-even at 8,192-token passes).
 - `--j-check`: whether mmq's column-tile width J changes a row's bits — the first n tokens' rows of one call of T

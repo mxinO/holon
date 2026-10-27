@@ -1,4 +1,5 @@
-"""M0.7 step 0 (docs/m07-perf.md D1, §11): the tables of §11 derived from one class's step-0 records — glue share per
+"""M0.7 step 0 (docs/dev/m07-perf.md D1, §11): the tables of §11 derived from one class's step-0 records — glue share
+per
 row, the re-stated §5 candidates (saving as a share of their step), D1's timing ratios, D8's f, the crossover table
 (D2) and D9's trigger. Every number is computed here from the records; the method of each estimate is in §11.
 

@@ -1,4 +1,4 @@
-"""Speculative sampling (docs/m04-spec.md D5): lossless verification of deterministic or sampled drafts. With p the
+"""Speculative sampling (docs/dev/m04-spec.md D5): lossless verification of deterministic or sampled drafts. With p the
 distribution the sampler would draw the token after j accepted drafts from (`Sampler.distribution`, its temperature
 and filters), and q the law draft d at column j was drawn from, d is accepted with probability min(1, p(d) / q(d))
 (an independent coin u, sampler stream 1: accepted iff u · q(d) < p(d)); at the first rejection the token is drawn

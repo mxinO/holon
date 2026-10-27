@@ -1,4 +1,4 @@
-"""FN step 5, N5 (docs/v1-flash-next.md §8): Holon's own decode routing on the RTX PRO 6000, all-resident, written in
+"""FN step 5, N5 (docs/dev/v1-flash-next.md §8): Holon's own decode routing on the RTX PRO 6000, all-resident, written in
 Strata's `--dump-routing` record format (int32 layer, int32 k, k x int32 expert ids, k x float32 weights; one record
 per layer per decode token), so `spikes/fn0/routing.py` and N3's roofline (`n3_roofline.py --trace`) read it as they
 read Strata's. Requests: D11's corpus spans (`bench/offload_ctx.py --corpus fn`) at 1K and 4K, each generating

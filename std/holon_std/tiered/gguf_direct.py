@@ -1,4 +1,5 @@
-"""std.tiered.gguf_direct@1 (F9, docs/v1-offload.md D10): the SSD tier — every piece where the checkpoint's file holds
+"""std.tiered.gguf_direct@1 (F9, docs/dev/v1-offload.md D10): the SSD tier — every piece where the checkpoint's file
+holds
 it, read with `O_DIRECT` (buffered where the filesystem has none) by `cpu_task@1`'s copy task on the dedicated I/O
 workers into pinned staging, so the page cache never holds a second copy. Always valid: a piece leaving RAM needs no
 write. Its descriptors are the pieces' extents."""

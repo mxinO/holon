@@ -10,7 +10,7 @@ import pathlib
 from transformers import AutoTokenizer
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-DOCS = ("docs/design.md", "docs/plan.md", "docs/v1-offload.md", "docs/release.md")
+DOCS = ("docs/design.md", "docs/plan.md", "docs/dev/v1-offload.md", "docs/dev/release.md")
 ASKS = ("Explain the following passage to a new engineer.", "Summarize the key decisions in this text.",
         "What could go wrong with the design described here?", "Write Python pseudocode for what this describes.")
 

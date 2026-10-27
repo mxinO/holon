@@ -96,11 +96,11 @@ def record(model: str, prompts: PromptSet, dtype: torch.dtype = torch.float32, d
     `q8_1` "rows" (a dense GGUF): each linear on the path its matmul takes in steps of `rows` rows on the class
     `crossover` ("<gpu class>:<sm>", e.g. "rtx-5080:120"; `gguf.row_paths`): D2's small-step floors.
     `kv` ("q8_0" or "fp8"): attention reads K and V as a cache in that format stores them (`kv.emulate`).
-    A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/m06-lowp.md §4.8) or, with
+    A GGUF, a quantized HF checkpoint (its weights as `hf_quant` reads them, docs/dev/m06-lowp.md §4.8) or, with
     `stream`, a dense one runs one decoder layer at a time (`_streamed`), so its weights are never all held; a dense
     HF checkpoint otherwise loads through transformers. A floor (not fp32) of an MoE model runs the D3-mirroring MoE
     block (`moe.mirror`, M0.2 §4.6) unless `pure_hf`; the fp32 golden is always HF's own model. `cpu_split`
-    (`placement.cpu_split`'s): a GGUF MoE floor path-aware for F5b (docs/v1-offload.md §6), the experts that split
+    (`placement.cpu_split`'s): a GGUF MoE floor path-aware for F5b (docs/dev/v1-offload.md §6), the experts that split
     sends to the CPU on ggml-cpu's activations."""
     path = resolve_model(model)
     if act is not None and not q8_1:
@@ -313,7 +313,8 @@ def _moe_meta(mirrored: bool) -> dict:
 
 
 def _emulation_meta(path: str | None, act: str | None = None) -> dict:
-    """A floor's emulated path and mode, and one hash over the modules emulating them (docs/m06-lowp.md §4.8): a change
+    """A floor's emulated path and mode, and one hash over the modules emulating them (docs/dev/m06-lowp.md §4.8): a
+    change
     to any invalidates the floor."""
     if not path:
         return {}

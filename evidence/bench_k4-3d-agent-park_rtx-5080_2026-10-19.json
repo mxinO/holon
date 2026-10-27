@@ -3,7 +3,7 @@
  "date": "2026-10-19",
  "command": "python bench/run.py --name k4-3d-agent-park --gpu 0 --model unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf --lock plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/10.lock --traces bench/traces/agent_park.jsonl --corpus judge/prompts/v1.jsonl --rounds 3 --evidence-dir k4 --backends holon@tier llamaserver@sized --arm tier=--slots tier=std.state_tier --host-memory 21474836480 --plugin-options state_tier.host.bytes=16GiB recurrent.checkpoints=5 state_tier.step_cost=0.0137207,0.000366292,0.00132827 recurrent.policy=prompt_end,branch,answer:1 --arm sized=--cache-ram 16384 -c 78848",
  "commit": "e0f8e33d8d0e3e9830f41d2b618b30cddff9444f-dirty",
- "dirty": ["M README.md", " M bench/backends/http.py", " M bench/tier_resume.py", " M docs/v1-kv-tiers.md", " M judge/tests/test_judge_tiers.py", " M plugins/tests/test_qwen3_5_engine.py", " M plugins/tests/test_state_tier.py", " M std/holon_std/state/recurrent/kind.py", " M std/holon_std/state_tier/tier.py", " M tools/holon_tools/__main__.py", " M tools/holon_tools/tune.py", " M tools/tests/test_tune.py"],
+ "dirty": ["M README.md", " M bench/backends/http.py", " M bench/tier_resume.py", " M docs/dev/v1-kv-tiers.md", " M judge/tests/test_judge_tiers.py", " M plugins/tests/test_qwen3_5_engine.py", " M plugins/tests/test_state_tier.py", " M std/holon_std/state/recurrent/kind.py", " M std/holon_std/state_tier/tier.py", " M tools/holon_tools/__main__.py", " M tools/holon_tools/tune.py", " M tools/tests/test_tune.py"],
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3.8-27B-GGUF@4ca720788d1e/Qwen3.8-27B-UD-IQ3_S.gguf",
  "rounds": 3,

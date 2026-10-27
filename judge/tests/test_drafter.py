@@ -103,7 +103,7 @@ def test_a_gguf_mtp_chain_passes_and_its_swapped_concat_fails(tiny_qwen3_5_gguf,
 
 
 def test_a_draft_floor_routes_by_the_engine_s_merged_shapes():
-    """The DFlash and MTP floors' GGUF matmuls take the path of the matmul the engine runs (docs/m07-perf.md §17): a
+    """The DFlash and MTP floors' GGUF matmuls take the path of the matmul the engine runs (docs/dev/m07-perf.md §17): a
     draft's gate and up merged, as the target's floors do (`gguf.merged`) — on the RTX 5090 IQ4_XS's 5120x34816 entry
     is 7 rows, the gate's own 5120x17408 6. Needs a prebuilt extension (llama.cpp's rule is host code), no GPU."""
     import types

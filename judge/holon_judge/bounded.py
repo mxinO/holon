@@ -22,7 +22,7 @@ evidence).
 
 The trace: sessions share a system prompt and every turn resends the whole history, generated tokens included, plus
 a new user chunk, so later turns hit the prefix cache (`tokens_saved`). Each turn is one wave of requests. For the
-checkpoint policies (`--policies`, docs/v1-kv-tiers.md §6), late sessions start one or two waves after the first:
+checkpoint policies (`--policies`, docs/dev/v1-kv-tiers.md §6), late sessions start one or two waves after the first:
 a session's own wave never shows it a branch, so only they meet the system prompt's end as a branch point, and those
 of the third wave adopt the `branch` checkpoints the second published.
 """

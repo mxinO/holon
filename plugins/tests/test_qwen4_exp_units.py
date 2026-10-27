@@ -1,4 +1,4 @@
-"""The PLE unit's state on the GPU (docs/v1-flash-next.md acceptance 2, the replay half of its GPU unit test; the
+"""The PLE unit's state on the GPU (docs/dev/v1-flash-next.md acceptance 2, the replay half of its GPU unit test; the
 chunked half is test_hc_ple_kernels): a verify row of 1 + 3 tokens (its real state left as before the step, the ops run
 on a scratch copy) rewound to n accepted drafts leaves bitwise the state — and gives bitwise the residual updates of the
 accepted tokens — of 1 + n one-token decode steps, for n = 0 … 3; and an in-step checkpoint inside a prefill holds

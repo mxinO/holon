@@ -1,5 +1,5 @@
 """The reasoning and tool-call formats bundles name (`FrontendBundle.reasoning_format` / `tool_format`,
-docs/m05-grammar.md §3.8, D6, D7), each implemented once: its streaming parser and the constraint of its output.
+docs/dev/m05-grammar.md §3.8, D6, D7), each implemented once: its streaming parser and the constraint of its output.
 
 Parsers turn text into typed events. Each is a state machine over a buffer that holds back only what may still turn
 out to be a marker (or a call not yet closed), so the events do not depend on how the text is cut: a streamed answer

@@ -1,4 +1,4 @@
-"""L0 for the Gated DeltaNet kernels (docs/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
+"""L0 for the Gated DeltaNet kernels (docs/dev/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
 `kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm` (with FN's sigmoid `out_gate` too), selected through the
 build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2,
 8192 channels), Dk = Dv = 128, K = 4, in both v-head orders, plus a small shape at head dim 64.
@@ -16,7 +16,7 @@ build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channel
 - Exactness: a 64-aligned split (128 then 72 tokens) bitwise equal to one shot (both ops); a decode step (conv, rule,
   norm) replayed from a CUDA graph with new inputs bitwise equal to eager; runs repeat bitwise; plan and call
   never sync with the host.
-- `gdn_rewind` (docs/m07-perf.md D5) bitwise equal to its oracle on three layers at once, every row accepting a
+- `gdn_rewind` (docs/dev/m07-perf.md D5) bitwise equal to its oracle on three layers at once, every row accepting a
   different number of drafts, at the widths of MTP and DFlash2.
 - Plants that must fail: conv1d without its state carry; has_init ignored (states read when False); a row on slot 0
   skipped (fla's original `<= 0` sentinel, rebuilt from the vendored source).
@@ -488,7 +488,8 @@ def test_decode_step_graph_replay_equals_eager(order):
     assert torch.equal(out, eager) and torch.equal(pool, p_eager) and torch.equal(conv_state, c_eager)
 
 
-# --- in-step snapshots (docs/m03-in-step-snapshot.md §3.1) ---------------------------------------------------------
+# --- in-step snapshots (docs/dev/m03-in-step-snapshot.md §3.1)
+# ---------------------------------------------------------
 
 def _call(kernel, x, g, state, lens, init, slots, snapshots=(), view=None):
     h = kernel.plan(lens, snapshots)
@@ -582,7 +583,7 @@ def test_snapshots_must_fall_inside_their_row_on_a_chunk():
             kernel.plan([150, 0], [bad])
 
 
-# --- speculative verify rows (docs/m04-spec.md D6): per-token rows, out_slots, masked replay ---------------------
+# --- speculative verify rows (docs/dev/m04-spec.md D6): per-token rows, out_slots, masked replay ---------------------
 # Bitwise: the masked replay equals one call over the accepted tokens alone (the same kernel specialization). Against
 # one-token decode calls (a specialization storing inside its loop) the states agree within STATE_ULPS·eps(f32) of
 # their scale — the design's fallback (§1.3) — and a long run of verify/replay steps stays there without drifting.

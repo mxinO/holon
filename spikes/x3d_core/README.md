@@ -1,7 +1,7 @@
 # x3d_core — step 3d: the step loop's per-step index and copy kernels
 
 Records: `evidence/x3d_core_rtx-a5000_2026-10-17.json`, `evidence/x3d_core_rtx-5090_2026-10-17.json`. Design:
-`docs/v1-offload.md` §14 "Step 3d as built". The gap these close: step 3c's "Not done" (`spikes/x3c_kernels/README.md`):
+`docs/dev/v1-offload.md` §14 "Step 3d as built". The gap these close: step 3c's "Not done" (`spikes/x3c_kernels/README.md`):
 ≈ 30 per-step index and copy kernels issued by `core/holon/core/executor.py`.
 
 ## What changed (one commit each; no ABI change, `check_abi --base main` adds nothing to the branch's 1.3)

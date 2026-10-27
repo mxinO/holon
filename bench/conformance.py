@@ -1,4 +1,4 @@
-"""JSONSchemaBench conformance of strict JSON-schema requests (docs/m05-grammar.md D9, §1 acceptance 1; evidence).
+"""JSONSchemaBench conformance of strict JSON-schema requests (docs/dev/m05-grammar.md D9, §1 acceptance 1; evidence).
 
 The schemas: the test splits of JSONSchemaBench minus Github_trivial / Github_ultra and the 13 unsatisfiable Glaive
 schemas (upstream issue 16), optionally a seeded sample. Three steps, each writing JSON lines into a work directory:

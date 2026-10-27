@@ -1,4 +1,4 @@
-"""Oracles of placement.promote (F10, docs/v1-offload.md D1, §13: Project Maya's promote-on-fetch): the contract
+"""Oracles of placement.promote (F10, docs/dev/v1-offload.md D1, §13: Project Maya's promote-on-fetch): the contract
 `moe_resolve.promote@1`, call by call, and its `lend`; and `replay`, the L1 policy-parity oracle over a whole trace, the
 M6 replay's `promote_on_fetch` (spikes/x0_offload/m6/replay.py) in the device's terms.
 

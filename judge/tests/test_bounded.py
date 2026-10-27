@@ -13,7 +13,7 @@ from holon_judge.planted import PLANTS
 CONFIGS = {"prefix on, depth 1": {"prefix_cache": True, "overlap": True},
            "prefix on, depth 0": {"prefix_cache": True, "overlap": False},
            "prefix off, depth 1": {"prefix_cache": False, "overlap": True}}
-MIXED = {"mixed 8": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8},       # docs/m07-perf.md §3.1
+MIXED = {"mixed 8": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8},       # docs/dev/m07-perf.md §3.1
          "mixed 8, one sequence": {"prefix_cache": False, "overlap": False, "chunk_with_decode": 8, "max_seqs": 1}}
 
 

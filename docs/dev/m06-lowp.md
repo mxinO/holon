@@ -51,7 +51,7 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
     run-identical ×3; graphs vs eager bounded on the 30B NVFP4 decode (4090).
 
 **Gate B — FP8 kernels.** Status: **met** — 11, 12, 14 met; 13 met with a deviation (P3, §8) (Gate B panel, 2026-10-14);
-15 met at M0.7's close (2026-10-15, `docs/m07-perf.md` §17.2).
+15 met at M0.7's close (2026-10-15, `docs/dev/m07-perf.md` §17.2).
 
 11. **Decode gate first:** per-shape microbenchmark (the 8B's 5 projection shapes, M = 1…16) of the W8A16 split-K
     decode kernel on the 5080 and 4090, turned into an end-to-end prediction: Σ (shape time × 36 layers) + the
@@ -62,7 +62,7 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
     FP8 plants as predicted. Decode runs use steps of ≤ 16 tokens (the M ≤ 16 switch), so every call is W8A16.
 14. **Speed:** 8B FP8 tg128 ≥ 0.8× llama-bench Q8_0 of the same checkpoint on the 5080 and 4090; pp512 recorded
     against its prediction. **Memory:** 8B FP8 on the 5080 ≥ 32K KV tokens at 0.9 (34.3K predicted; fallback 0.98).
-15. **Locks:** 8B FP8 on rtx-5080 and rtx-4090, snapshots ×3. **Met** at M0.7's close (`docs/m07-perf.md` §17.2,
+15. **Locks:** 8B FP8 on rtx-5080 and rtx-4090, snapshots ×3. **Met** at M0.7's close (`docs/dev/m07-perf.md` §17.2,
     `evidence/propagate_m07-close_2026-10-15.json`): `Qwen/Qwen3-8B-FP8` lock 1 on each class at the M0.6 flags
     (`max_seqs` 32, `max_step_tokens` 2048, `max_model_len` 16384) and the grammar processor; prefill Tier B against
     the W8A8 floor PASS (RTX 5080 top-1 98.14%, KL p99 4.26e-2, ΔPPL vs floor −0.066% ± 0.127%; RTX 4090 98.19%,

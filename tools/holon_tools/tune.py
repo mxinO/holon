@@ -5,12 +5,13 @@
 Ops are tuned one at a time (coordinate descent), the others held at their current pins. Only the decode path's ops
 are tuned: a decode benchmark says nothing about prefill kernels.
 
-`split` decides F5b, the CPU's share of an offloaded MoE's misses (docs/v1-offload.md D4, §8), by the same decode
+`split` decides F5b, the CPU's share of an offloaded MoE's misses (docs/dev/v1-offload.md D4, §8), by the same decode
 benchmark: the CPU worker's thread count at half the misses, then the share at that count (M2 found plan[n] ≈ n / 2 and
 flat within ±1, so a share of the misses per miss count is the table); the lock takes the best only if it gains at
 least `GAIN` over F5a, with the CPU tier it was measured on.
 
-`clock` fits a tier's `state_tier.step_cost` (docs/v1-kv-tiers.md D4: a + b·tokens + c·rows seconds per step) to timed
+`clock` fits a tier's `state_tier.step_cost` (docs/dev/v1-kv-tiers.md D4: a + b·tokens + c·rows seconds per step) to
+timed
 steps of this lock's engine: prefill steps of one row at several chunk sizes and decode steps at every row count.
 
 `ssd_rates` measures the SSD level's clock rates on this host's drive (D4: `ssd.read`, `ssd.write`, `ssd.mixed`,

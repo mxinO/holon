@@ -1,4 +1,4 @@
-"""What selecting a logits processor costs a deployment before any request is constrained (docs/m05-grammar.md §6):
+"""What selecting a logits processor costs a deployment before any request is constrained (docs/dev/m05-grammar.md §6):
 graphs captured, capture time, the graph pool, and the KV tokens the larger pool and the masks' memory profile take
 from the state pools (evidence record).
 

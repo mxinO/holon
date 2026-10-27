@@ -1,4 +1,4 @@
-"""Session-wide test environment, set before any test module initializes CUDA (docs/release.md §22).
+"""Session-wide test environment, set before any test module initializes CUDA (docs/dev/release.md §22).
 
 - The suite sharded over idle GPUs with pytest-xdist: with several GPUs in CUDA_VISIBLE_DEVICES, worker `gw<n>`
   keeps the n-th of them (cycling), so each worker has one GPU to itself, and its share of the CPUs for torch's

@@ -1,5 +1,5 @@
 {
- "measurement": "K step 2, the panel's review (docs/v1-kv-tiers.md \u00a713 rev 8.3): the clean tier checks re-run after std.state_tier's lane, share and fence changes; load-reuse-unwaited in run-identity's reuse loop (A's configuration); adopt-source-reused in the fork loop on a hybrid with the host payload level at its floor (A's window)",
+ "measurement": "K step 2, the panel's review (docs/dev/v1-kv-tiers.md \u00a713 rev 8.3): the clean tier checks re-run after std.state_tier's lane, share and fence changes; load-reuse-unwaited in run-identity's reuse loop (A's configuration); adopt-source-reused in the fork loop on a hybrid with the host payload level at its floor (A's window)",
  "date": "2026-10-19",
  "hardware": "NVIDIA RTX A5000",
  "predictions": {

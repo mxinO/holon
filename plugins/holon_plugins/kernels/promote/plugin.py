@@ -1,5 +1,6 @@
 """placement.promote's resolve contract `moe_resolve.promote@1` (F10) on CUDA: the policy's own kernel plugin, as
-docs/v1-offload.md D3 has a resolve variant after the std offload API's tag ship its CUDA provider (kernels.expert_io
+docs/dev/v1-offload.md D3 has a resolve variant after the std offload API's tag ship its CUDA provider
+(kernels.expert_io
 takes no new policy codes). A call is three launches on the current stream: the promotion CTA (stamp, promotions
 into empty slots and spares: the map, the spares and the delta log), the store's own `moe_resolve@1` — whichever
 provider serves it here — over the map as promoted, and the settling CTA (the promoted pieces' fetches after the staged

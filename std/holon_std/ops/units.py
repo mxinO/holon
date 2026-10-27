@@ -30,7 +30,7 @@ class RMSNorm(nn.Module):
         return self._add_norm(x, residual, self.weight)
 
     def fusion_facts(self) -> dict:
-        """What a fused kernel computing this norm reads besides `weight` (docs/m07-perf.md D3): the op whose oracle
+        """What a fused kernel computing this norm reads besides `weight` (docs/dev/m07-perf.md D3): the op whose oracle
         defines it, eps and offset. Optional capability of `unit.std.ops.rmsnorm@1` providers."""
         return {"norm": kernels.RMSNORM, "eps": self._facts["eps"], "offset": self._facts["offset"]}
 
@@ -54,7 +54,8 @@ class Rope(nn.Module):
         return self._rope(q, k, positions)
 
     def fusion_facts(self) -> dict | None:
-        """What a fused kernel rotating as this unit does reads (docs/m07-perf.md D3): the op whose oracle defines it,
+        """What a fused kernel rotating as this unit does reads (docs/dev/m07-perf.md D3): the op whose oracle defines
+        it,
         its facts and the kernel's cos/sin table (`cos_sin`, rope@1's instance contract); None when the kernel names
         no table. Optional capability of `unit.std.ops.rope@1` providers (a variant that cannot answer leaves the
         composition)."""
@@ -75,7 +76,7 @@ class _Quantized:
              glu: str | None = None) -> dict[str, torch.Tensor]:
         """Select the kernel — and, for a merged gate/up (`glu`), a `qlinear_glu@1` kernel where the kernel's spec
         offers one (its `config["fused"]`) — and return the parts it reads: `parts`, or what a `qlinear@2` kernel's
-        `prepare` makes of them (docs/m06-lowp.md D4), the primary part swapped into `param` so the source parts are
+        `prepare` makes of them (docs/dev/m06-lowp.md D4), the primary part swapped into `param` so the source parts are
         released (a tied head has no `param`). `qembedding@1` has no `prepare`: a table is read as adopted."""
         self._kernel, spec = self._select(self.op, self.facts)
         if glu is not None and kernels.QLINEAR_GLU in spec.config.get("fused", ()):
@@ -130,7 +131,7 @@ def _hold(param: nn.Parameter, parts: dict[str, torch.Tensor], device: torch.dev
 
 
 def _act_quant(ctx) -> str:
-    """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/m06-lowp.md D3)."""
+    """The deployment's `quant.act` plugin option for quantized weights (default `a8`, docs/dev/m06-lowp.md D3)."""
     act = ctx.options.get("plugins", {}).get("quant.act", "a8")
     if act not in kernels.ACT_QUANT:
         raise ValueError(f"quant.act {act!r}: one of {list(kernels.ACT_QUANT)} for quantized weights")
@@ -138,7 +139,8 @@ def _act_quant(ctx) -> str:
 
 
 def _one_act_mode(ctx, spec, site: str) -> None:
-    """Mixed steps (`chunk_with_decode` > 0, docs/m07-perf.md §3.1) run decode rows and a prefill chunk in one call, on
+    """Mixed steps (`chunk_with_decode` > 0, docs/dev/m07-perf.md §3.1) run decode rows and a prefill chunk in one call,
+    on
     the path the call's row count picks: a kernel whose paths compute in different activation modes (its spec's
     `config["act"]`, path -> mode) would then run a decode row at a precision its unmixed step does not use. The
     option is the engine's effective value: 0 with a drafter, whose steps alternate and never mix."""
@@ -168,7 +170,7 @@ def _same_bits(a: torch.Tensor, b: torch.Tensor) -> bool:
 
 
 def _merged_parts(units: tuple[Linear, ...]) -> dict[str, torch.Tensor] | None:
-    """The units' quantized parts as one weight's (docs/m06-lowp.md D5): a part with `out / g` rows in every unit is
+    """The units' quantized parts as one weight's (docs/dev/m06-lowp.md D5): a part with `out / g` rows in every unit is
     concatenated by rows; any other (a per-tensor scale, [] or [1]) must be bit-equal in every unit, else None."""
     if len({tuple(u.parts) for u in units}) > 1:
         return None
@@ -229,7 +231,7 @@ class Linear(nn.Module):
         return y if self.bias is None else y + self.bias
 
     def prepare_input(self, x: torch.Tensor):
-        """`x` made ready for several linears of it — e.g. its activations quantized once (docs/m07-perf.md D6): the
+        """`x` made ready for several linears of it — e.g. its activations quantized once (docs/dev/m07-perf.md D6): the
         bound kernel's `prepare_input` handle, else `x`. Every linear takes either; the caller drops the handle after
         them, and a linear whose kernel prepared differently (another path, layout or shape), or whose handle a later
         `prepare_input` overwrote, starts from `x`. Optional capability of `unit.std.ops.linear@1` providers, used
@@ -238,7 +240,7 @@ class Linear(nn.Module):
 
     def use_glu(self, glu: str) -> None:
         """This unit is a merged gate/up (gate's rows, then up's) whose halves combine as `glu` ("swiglu"): bind a
-        `qlinear_glu@1` kernel beside the `qlinear@2` one where its spec offers one (docs/m07-perf.md D6). Called
+        `qlinear_glu@1` kernel beside the `qlinear@2` one where its spec offers one (docs/dev/m07-perf.md D6). Called
         by the composite in `finalize_weights`, so the kernel is selected in `bind_kernels` (a lock site). Optional
         capability, with `glu`."""
         self._glu = glu

@@ -1,4 +1,4 @@
-"""`cpu_experts@1` (std.moe.kernels; docs/v1-offload.md D7, F5b): the CPU's share of a layer's missed experts, over
+"""`cpu_experts@1` (std.moe.kernels; docs/dev/v1-offload.md D7, F5b): the CPU's share of a layer's missed experts, over
 their GGUF blocks in the offload store's host pools, with ggml-cpu's own quantizers and dot products (vendored at
 kernels.ggml_cuda's llama.cpp pin, MIT; csrc/cpu_experts.cpp). A token's output is bitwise the same alone or grouped
 and at any thread count (rows split across threads, never K): D7, checked by L0.

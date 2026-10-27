@@ -1,4 +1,4 @@
-// Step 0 of milestone K (docs/v1-kv-tiers.md §8): K-M2's copy paths over chunk address lists (one
+// Step 0 of milestone K (docs/dev/v1-kv-tiers.md §8): K-M2's copy paths over chunk address lists (one
 // cudaMemcpyBatchAsync, the SM copy kernel), K-M3's copy feeder beside a decoding engine, and K-M4's C reference for
 // preadv / pwritev. One torch extension; bench.py drives it.
 #include <ATen/cuda/CUDAContext.h>

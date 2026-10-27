@@ -1,4 +1,4 @@
-// placement.promote's resolve contract `moe_resolve.promote@1` on CUDA (F10, docs/v1-offload.md D3): around the store's
+// placement.promote's resolve contract `moe_resolve.promote@1` on CUDA (F10, docs/dev/v1-offload.md D3): around the store's
 // own `moe_resolve@1` launch (whichever provider serves it), one CTA before it stamps the call's routes and promotes
 // its decode misses into empty slots and spares (the map then names their new slots), and one CTA after it lists the
 // promoted pieces' fetches after the staged ones and refills the absent spares from the layer's least recently routed

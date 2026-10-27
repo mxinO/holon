@@ -1,5 +1,5 @@
 """Hugging Face checkpoint directory: config.json + one or more .safetensors files, dense or quantized (a dialect
-of `quant/` reads its `quantization_config`, docs/m06-lowp.md D2)."""
+of `quant/` reads its `quantization_config`, docs/dev/m06-lowp.md D2)."""
 from __future__ import annotations
 
 import contextlib
@@ -20,7 +20,8 @@ from . import quant
 
 _CACHE = pathlib.Path.home() / ".cache" / "holon" / "weights"     # weight-file digests remembered across restarts
 # HF's names of the projections a model may merge into one weight, each group in its merged order: this list follows
-# the composites' `finalize_weights` merge lists (std.mixers.gqa's q/k/v, std.ffn's gate/up; docs/m06-lowp.md D5), and
+# the composites' `finalize_weights` merge lists (std.mixers.gqa's q/k/v, std.ffn's gate/up; docs/dev/m06-lowp.md D5),
+# and
 # changes with them.
 MERGED = (("q_proj", "k_proj", "v_proj"), ("gate_proj", "up_proj"))
 
@@ -30,7 +31,7 @@ def adjacent[T](items: list[T]) -> list[T]:
     (`MERGED`, under one parent: the composites' `finalize_weights` merge lists) moved together, in the group's
     order, to where the first of them was. Shard order sorts names, so a sibling would sit between partners (k, o,
     q, v): a merge would then free two runs no later merge fits, which the allocator kept reserved past
-    `empty_cache` (0.87 GiB for an 8B FP8, docs/m06-lowp.md §8, B3). Together, each merge frees one run the next
+    `empty_cache` (0.87 GiB for an 8B FP8, docs/dev/m06-lowp.md §8, B3). Together, each merge frees one run the next
     layer's merge reuses."""
     member = {m: (g, i) for g, group in enumerate(MERGED) for i, m in enumerate(group)}
     anchor, keys = {}, []

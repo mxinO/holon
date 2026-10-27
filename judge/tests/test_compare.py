@@ -117,7 +117,7 @@ def test_refuses_different_prompt_sets(case):
 
 
 def test_calls_off_the_floors_path_or_mode_fail(case):
-    """Every quantized call while scoring must have run the floor's path and activation mode (docs/m06-lowp.md D3);
+    """Every quantized call while scoring must have run the floor's path and activation mode (docs/dev/m06-lowp.md D3);
     plant N7: the `fp4` spec's prefill scored against the W4A8 floor fails on the mode alone."""
     lens, logits, targets, _ = case
     g, floor = _recording(logits, targets, lens), _recording(logits, targets, lens)
@@ -153,7 +153,7 @@ def test_calls_off_the_floors_path_or_mode_fail(case):
     decode.meta["calls"]["prefill/fp8"] = 2
     assert compare(g, decode, floor).failures == ("2 calls on prefill/fp8, the floor quantizes no activations "
                                                   "(bf16 only)",)
-    # D2's per-shape floor (docs/m07-perf.md §6): each shape on the floor's path at its rows, in its mode, on its
+    # D2's per-shape floor (docs/dev/m07-perf.md §6): each shape on the floor's path at its rows, in its mode, on its
     # class at its step size
     floor.meta |= {"q8_1": "rows", "act": "q8_1", "step_rows": 8, "crossover": "rtx-5080",
                    "routes": {"iq3_s/5120x17408": "mmq", "q4_k/5120x1024": "mmvq"}}
@@ -206,7 +206,8 @@ def test_an_error_in_one_sequence_cannot_widen_its_own_budget(case):
 
 
 def test_the_drafter_rule_tolerates_near_tie_noise(case):
-    # Draft heads are judged on few positions (docs/m04-spec.md §5, §12): 288 rows of 24 prompts. A candidate flipping
+    # Draft heads are judged on few positions (docs/dev/m04-spec.md §5, §12): 288 rows of 24 prompts. A candidate
+    # flipping
     # two near-ties beyond the floor's own — a correct path's noise — passes, though L2's fixed 0.25-point bar fails it
     # (one row is 0.35 points); one that flips confident positions fails.
     _, logits, targets, _ = case
