@@ -781,6 +781,37 @@ def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path
     assert share.takes(2) and not share.takes(1) and rows and min(rows) >= 2
 
 
+def test_a_second_seed_reads_only_what_ram_did_not_hold(tiny_moe, tmp_path, monkeypatch):
+    """Exclusive tiers seeded twice (the startup profile's minimum pools, then the final ones): the second seed reads
+    from the checkpoint only the pieces RAM did not hold — a VRAM piece RAM held is copied out of its unit, a RAM piece
+    stays in its unit — and leaves what a single seed does: every piece in the same tier and VRAM slot, each RAM unit
+    holding the file's bytes of the piece the map names, the resident store's outputs."""
+    from holon_std.tiered import files
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    short = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
+             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    once = _engine(file, host_memory=1 << 24, plugin_options=short)
+    engine = _engine(file, host_memory=1 << 24, plugin_options=short)
+    store, classes = engine.ctx.shared_objects[KEY], list(engine.ctx.shared_objects[KEY].classes.values())
+    engine.ledger.materialize(None)
+    ram = [set(store.owner[k][store.owner[k] >= 0].tolist()) for k in range(len(classes))]
+    read = []
+    real = files.read
+    monkeypatch.setattr(files, "read", lambda jobs: read.append(sum(d.nbytes for _, d in jobs)) or real(jobs))
+    engine.ledger.materialize(engine.cfg.state_memory)
+    res = store.residency.device.cpu().numpy()
+    new = sum(sum(e.nbytes for e in c.pieces[store._piece_index(c, g, i, r)][3])
+              for g, layer in enumerate(store.layer_classes) for i in range(store.items) for r, c in enumerate(layer)
+              if res[g, i, r] >= -1 and g * store.items + i not in ram[classes.index(c)])
+    assert 0 < sum(read) == new < sum(sum(e.nbytes for e in p[3]) for c in classes for p in c.pieces)
+    assert np.array_equal(res, once.ctx.shared_objects[KEY].residency.device.cpu().numpy())
+    assert _bytes_exact(store) == 0
+    _held_once(store)
+    assert _served(engine, prompts) == _served(_engine(file), prompts)
+
+
 def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
     """docs/v1-offload.md D10, F9: with RAM holding a quarter of the pieces (`moe.ram`) and the checkpoint's file the
     rest (std.tiered.gguf_direct@1), every expert lives in one of VRAM, RAM and the SSD: SSD misses are read by the

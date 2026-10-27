@@ -606,13 +606,13 @@ class TieredStore:
         self.residency.host[...] = -2 if self.exclusive else -1
         if sorted(seed) != sorted(budget.granted):
             raise RuntimeError(f"{self.name}: the placement policy seeded other items than it took from the budget")
-        pending: dict[str, list[tuple[int, int]]] = {c.name: [] for c in classes}    # exclusive: (piece, slot)
+        pending: dict[str, list[tuple[int, int, int]]] = {c.name: [] for c in classes}   # (piece, slot, item)
         for g, i in seed:
             for r, c in self.groups[groups[g]].items():
                 slot = self.residency.host[g, i, r] = free[c.name].pop()
                 arena, units = arenas[c.name]
                 if self.exclusive:
-                    pending[c.name].append((self._piece_index(c, g, i, r), slot))
+                    pending[c.name].append((self._piece_index(c, g, i, r), slot, g * self.items + i))
                 else:
                     arena[slot].copy_(units[self._host[g, i, r]], non_blocking=True)
         if self.exclusive:
@@ -683,15 +683,24 @@ class TieredStore:
         """The class's index of group g's (in map order) item i's role r."""
         return int(self._pieces[c.name][g, i, r])
 
-    def _seed_exclusive(self, seed: list[tuple[int, int]], pending: dict[str, list[tuple[int, int]]],
+    def _seed_exclusive(self, seed: list[tuple[int, int]], pending: dict[str, list[tuple[int, int, int]]],
                         arenas: dict) -> None:
-        """Exclusive tiers' seed (D10): the VRAM items' pieces read from the checkpoint into their slots (through the
-        staging units), then RAM: F2's order past the VRAM items, as far as every role's class has units (the RAM
-        units reloaded where they hold something else); every other piece on the SSD."""
+        """Exclusive tiers' seed (D10): the VRAM items' pieces into their slots, then RAM: F2's order past the VRAM
+        items, as far as every role's class has units; every other piece on the SSD. A seed after the first (the
+        final pools after the startup profile's) reads only what the RAM tier does not hold: a VRAM piece RAM holds is
+        copied out of its unit, and a RAM piece stays in its unit; the rest is read from the checkpoint (VRAM's through
+        the landing rows)."""
         groups, classes = list(self._order), list(self.classes.values())
-        for c in classes:                                   # VRAM, a batch of landing rows at a time
-            arena, _ = arenas[c.name]
-            batch, (rows, _) = pending[c.name], self.landing_view(c.name, device=False)
+        now = self.owner.cpu().numpy()                       # what the RAM tier holds (its units' items)
+        holds = [{int(now[k, u]): u for u in range(c.held) if self._ram[c.name][u] >= 0 and now[k, u] >= 0}
+                 for k, c in enumerate(classes)]
+        for k, c in enumerate(classes):                     # VRAM, a batch of landing rows at a time
+            arena, units = arenas[c.name]
+            for _, slot, item in pending[c.name]:
+                if item in holds[k]:
+                    arena[slot].copy_(units[holds[k][item]])
+            batch = [(n, slot) for n, slot, item in pending[c.name] if item not in holds[k]]
+            rows, _ = self.landing_view(c.name, device=False)
             land = rows.numpy()
             for at in range(0, len(batch), self.landing_rows):
                 part = batch[at:at + self.landing_rows]
@@ -699,25 +708,34 @@ class TieredStore:
                             for e, o in _offsets(c.pieces[n][3])])
                 for j, (_, slot) in enumerate(part):
                     arena[slot].copy_(rows[j, :c.unit_bytes])
-        vram, used = set(seed), dict.fromkeys(self.classes, 0)
-        host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
-                                                                                        dtype=np.int32)
+        vram, used, ram = set(seed), dict.fromkeys(self.classes, 0), []
         for g, i in _Budget.f2(self._profile_counts()):
             role = self.groups[groups[g]]
             if (g, i) in vram or any(used[c.name] >= c.held for c in role.values()):
                 continue
-            for r, c in role.items():
-                host[g, i, r] = used[c.name]
-                owner[classes.index(c), used[c.name]] = g * self.items + i
-                self.residency.host[g, i, r] = -1
+            for c in role.values():
                 used[c.name] += 1
-        held = self.owner.cpu().numpy()                      # what the device's RAM tier holds now
+            ram.append((g, i))
+        # each piece RAM keeps stays in its unit; the others go to the units that hold nothing RAM keeps
+        wanted = [{g * self.items + i for g, i in ram if any(x is c for x in self.groups[groups[g]].values())}
+                  for c in classes]
+        keep = [{item: u for item, u in holds[k].items() if item in wanted[k]} for k in range(len(classes))]
+        free = [sorted(set(range(c.held)) - set(keep[k].values()), reverse=True) for k, c in enumerate(classes)]
+        host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
+                                                                                        dtype=np.int32)
+        for g, i in ram:
+            item = g * self.items + i
+            for r, c in self.groups[groups[g]].items():
+                k = classes.index(c)
+                u = keep[k][item] if item in keep[k] else free[k].pop()
+                host[g, i, r], owner[k, u] = u, item
+                self.residency.host[g, i, r] = -1
         jobs = []
         for k, c in enumerate(classes):
             units = arenas[c.name][1].numpy()
             for u in range(c.held):
-                want, now = owner[k, u], held[k, u] if self._ram[c.name][u] >= 0 else -1
-                if want >= 0 and want != now:
+                want, had = owner[k, u], now[k, u] if self._ram[c.name][u] >= 0 else -1
+                if want >= 0 and want != had:
                     g, i = divmod(int(want), self.items)
                     r = next(r for r, x in self.groups[groups[g]].items() if x is c)
                     extents = c.pieces[self._piece_index(c, g, i, r)][3]

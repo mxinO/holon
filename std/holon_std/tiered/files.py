@@ -12,6 +12,7 @@ from holon.api import Extent
 
 ALIGN = 4096                  # O_DIRECT's offset, length and buffer alignment (the largest logical block size)
 WINDOW = 64 << 20             # bytes per read
+GAP = 1 << 20                 # bytes between two pieces a window reads through (a larger gap starts another window)
 WORKERS = 8
 
 
@@ -24,14 +25,16 @@ def read(jobs: list[tuple[Extent, np.ndarray]]) -> None:
         by_path.setdefault(extent.path, []).append((extent, dst))
     for path, pieces in by_path.items():
         pieces.sort(key=lambda p: p[0].offset)
-        windows, lo, run = [], 0, []
-        for extent, dst in pieces:          # consecutive pieces share a window while it stays within WINDOW
-            if run and _up(extent.offset + extent.nbytes) - lo > WINDOW:
+        windows, lo, end, run = [], 0, 0, []
+        for extent, dst in pieces:          # consecutive pieces share a window while it stays within WINDOW and no
+            #                                 gap between them passes GAP (a scattered seed would read the file whole)
+            if run and (_up(extent.offset + extent.nbytes) - lo > WINDOW or extent.offset - end > GAP):
                 windows.append((lo, run))
                 run = []
             if not run:
                 lo = extent.offset // ALIGN * ALIGN
             run.append((extent, dst))
+            end = max(end, extent.offset + extent.nbytes)
         windows.append((lo, run))
         fd, direct = _open(path)
         try:
