@@ -1528,6 +1528,7 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
     the next one's gather reuses them: it lends the fixed set, not a layer's most missing, and serves the resident
     store's outputs with every piece's bytes the file's. Each round plant is caught."""
     from holon_judge import planted
+    from holon_std.tiered import store as tiered_store
 
     file, prompts, want = gpu_moe_wide
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
@@ -1556,6 +1557,10 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
             ok = (*ok, not any(n for _, n, _ in rounds))        # no spare's slots lent outside the tail
             if plant is None:                         # (and D8w's tail over both down classes: no piece in the loan)
                 assert any(r for r, _, _ in rounds) and all(ok) and all(f for _, _, f in rounds), (rounds, ok)
+                with mock.patch.object(tiered_store, "ROUNDS_BELOW", 100):    # a step of more prompt tokens than
+                    rounds.clear()                                            # the gate: no rounds (D8s)
+                    engine.generate([[(t + 7) % 512 for t in prompts[-1]]], GREEDY)
+                    assert rounds and not any(r for r, _, _ in rounds), rounds
                 assert len(store.tail_down) == 2 and _slots_once(store), store.tail_down
                 fixed = store.rounds_q + store.landing_rows
                 assert max(int(x[1:].max()) for x in lends) <= fixed, lends   # each class lends the fixed set

@@ -53,6 +53,8 @@ from .ring import ROUND_SLOTS, ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
+ROUNDS_BELOW = 8192                          # D8s: steps of fewer prompt tokens stage in rounds (a 32K step's
+#                                              rounds serialize its gathers, ≈ 3% of its wall time, for ≈ 0 bytes)
 ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (docs/v1-glm.md D8f)
 DEPTH = 2                                    # layers read ahead (D8f): layer g + DEPTH's set at layer g's end
 READ_AHEAD_TOKENS = 2048                     # a prompt step reads ahead from this many prompt tokens (D8f)
@@ -772,7 +774,7 @@ class TieredStore:
         # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
         self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
             self.large_passes(at) and not self.exclusive else 1
-        self._rounds = self._mode == "stage" and self._parts == 1 and self.rounds_able
+        self._rounds = self._mode == "stage" and self._parts == 1 and at < ROUNDS_BELOW and self.rounds_able
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned and (held := self._loan.held()):
             raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
