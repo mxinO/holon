@@ -70,6 +70,11 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 ... propagate <model> --new-model --approve --golden … --floor …
 # pin the fastest provider per decode op on this GPU, then the same checks as propagate
 ... tune <model> [--ops attention.paged_decode rmsnorm …] [--batch 8] [--tokens 64] --golden … --floor …
+
+# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it)
+python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [engine flags]
+# Qwen3.8-Flash-Next's MTP pack as its locks name it: Strata's pack with the head's dense projections in Q8_0
+python -m holon_tools mtp-pack <Strata's mtp-q2_0.gguf> mtp-q2_0-q8.gguf
 ```
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this

@@ -1,5 +1,5 @@
-"""Command line: the `holon impact | propagate | tune` commands of design §4.4 and §4.6, and `profile`
-(docs/dev/v1-offload.md F2).
+"""Command line: the `holon impact | propagate | tune` commands of design §4.4 and §4.6, `profile`
+(docs/dev/v1-offload.md F2) and `mtp-pack` (Qwen3.8-Flash-Next's MTP pack, docs/dev/v1-flash-next.md §21.11).
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
@@ -10,6 +10,7 @@
                                 [--json record] [the flags of propagate]
     python -m holon_tools profile <model> [--prompts judge/prompts/v1.jsonl] [--max-tokens 64]
                                   [--name <stem>.profile.json] [engine flags: --host-memory ...]
+    python -m holon_tools mtp-pack <Strata's mtp-q2_0.gguf> <out: mtp-q2_0-q8.gguf>
 
 `propagate` and `tune` exit 0 when nothing needs doing or the lock was written (a byte-identical trace advances
 without L2), 2 when the new lock needs an approval (re-run with --approve to write it), 1 on failure — a lock binding
@@ -39,7 +40,7 @@ from holon_judge.golden import resolve_model as checkpoint_dir
 from holon_judge.recording import PromptSet
 from holon_judge.snapshot import Snapshot, trace
 
-from . import impact, locks, profile, propagate, tune
+from . import impact, locks, mtp_pack, profile, propagate, tune
 
 DEFAULT_PROMPTS = pathlib.Path(__file__).resolve().parents[2] / "judge" / "prompts" / "v1.jsonl"
 
@@ -193,6 +194,17 @@ def _profile(a: argparse.Namespace) -> int:
     return 0
 
 
+def _mtp_pack(a: argparse.Namespace) -> int:
+    try:
+        digest = mtp_pack.convert(a.pack, a.out)
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
+    out = pathlib.Path(a.out)
+    print(f"wrote {out}: {len(mtp_pack.Q8)} tensors in Q8_0, sha256 {digest} (as a lock names it: "
+          f"{out.stem}@{digest[:16]})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="python -m holon_tools")
     sub = ap.add_subparsers(required=True)
@@ -242,6 +254,12 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--name", help="the profile's file name, beside the checkpoint (default: <stem>.profile.json)")
     engine_flags(f)
     f.set_defaults(run=_profile)
+
+    m = sub.add_parser("mtp-pack", help="Qwen3.8-Flash-Next's MTP pack as its locks name it: Strata's pack with the "
+                                        "head's dense projections in Q8_0")
+    m.add_argument("pack", help="Strata's MTP pack (its tools/mtp_pack.py --experts q2_0: mtp-q2_0.gguf)")
+    m.add_argument("out", help="the pack to write (the locks name mtp-q2_0-q8.gguf)")
+    m.set_defaults(run=_mtp_pack)
 
     a = ap.parse_args(argv)
     return a.run(a)
