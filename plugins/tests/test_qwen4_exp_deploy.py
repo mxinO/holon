@@ -1,6 +1,10 @@
 """models.qwen4_exp's deployment hooks (docs/dev/v1-auto-config.md D1, D5): the PLE spill only onto a disk that is
 not positively rotating or networked, the drives found through stacked devices; the MTP pack, unpublished, refused
 with the reason, remembered."""
+import hashlib
+import sys
+import types
+
 import pytest
 from holon_plugins.models.qwen4_exp import deploy
 
@@ -47,12 +51,26 @@ def test_the_spill_targets_any_disk_not_known_to_rotate_or_be_remote(tmp_path, m
     assert deploy.spill({"rows.place": "ple:ssd"}, "/data/model.gguf") is None        # nothing in RAM to spill
 
 
-def test_an_unpublished_pack_is_refused_with_its_cost_and_remembered(tmp_path):
+def test_the_pack_is_fetched_by_identity_and_a_failure_remembered_only_for_what_was_published(tmp_path, monkeypatch):
+    """Unpublished: refused with the cost, never remembered (publishing it serves it at the next start); a published
+    pack's failed fetch is remembered an hour, keyed by what was published; a fetched pack is linked atomically and
+    checked against the identity."""
     directory = tmp_path / deploy.MTP
     directory.mkdir()
     assert deploy.make_source("other@0123456789abcdef", str(directory)) is None
-    for _ in range(2):                                     # the second from the memo, without trying again
-        with pytest.raises(ValueError, match="not published yet.*30% slower"):
+    with pytest.raises(ValueError, match="not published yet.*30% slower"):
+        deploy.make_source(deploy.MTP, str(directory))
+    assert not (tmp_path / f"{deploy.MTP}.failed").exists()
+    blob, fetched = tmp_path / "blob", []
+    hub = types.SimpleNamespace(hf_hub_download=lambda repo, name, revision: fetched.append(revision) or str(blob))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    monkeypatch.setitem(deploy.PUBLISHED, deploy.MTP, ("org/packs", "mtp-q2_0-q8.gguf", "r1"))
+    blob.write_bytes(b"not the pack")
+    for _ in range(2):                                     # the second from the memo, without fetching again
+        with pytest.raises(ValueError, match="is not mtp-q2_0-q8@a55280a0417d4b19"):
             deploy.make_source(deploy.MTP, str(directory))
-    (directory / "mtp-q2_0-q8.gguf").write_bytes(b"pack")  # one already in the cache serves
+    # republished at r2 (here: the identity of what r2 holds): the memo of r1 does not stop the fetch
+    monkeypatch.setattr(deploy, "MTP", "mtp-q2_0-q8@" + hashlib.sha256(b"not the pack").hexdigest()[:16])
+    monkeypatch.setitem(deploy.PUBLISHED, deploy.MTP, ("org/packs", "mtp-q2_0-q8.gguf", "r2"))
     assert deploy.make_source(deploy.MTP, str(directory)) == str(directory / "mtp-q2_0-q8.gguf")
+    assert fetched == ["r1", "r2"] and (directory / "mtp-q2_0-q8.gguf").resolve() == blob

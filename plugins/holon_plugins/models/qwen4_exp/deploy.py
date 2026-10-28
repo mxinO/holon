@@ -3,6 +3,7 @@
 `make_source`, the MTP pack the locks name, downloaded once the project publishes it."""
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import pathlib
@@ -15,7 +16,7 @@ MTP = "mtp-q2_0-q8@a55280a0417d4b19"     # the pack the locks name (`[sources] m
 PUBLISHED: dict[str, tuple[str, str, str]] = {}
 NETWORK = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "lustre", "ceph", "glusterfs", "fuse.sshfs", "9p", "gpfs",
            "beegfs", "afs"}
-RETRY_S = 86400                          # a failed fetch is tried again after a day
+RETRY_S = 3600                           # a failed fetch of a published pack is tried again an hour later
 
 
 def storage(path: str, mountinfo: str = "/proc/self/mountinfo", sysfs: str = "/sys") -> str:
@@ -61,20 +62,20 @@ def spill(options: Mapping[str, object], checkpoint: str) -> tuple[dict[str, str
 
 def make_source(identity: str, directory: str) -> str | None:
     """The MTP pack `identity` names, in `directory` (a link to the hub cache's file), downloaded by identity from the
-    project's published packs and checked against it; None for another identity; ValueError why not (remembered for
-    a day beside `directory`)."""
+    project's published packs and checked against it; None for another identity; ValueError why not (a failed fetch
+    of a published pack is remembered for an hour beside `directory`, keyed by what was published)."""
     if identity != MTP:
         return None
     out = pathlib.Path(directory) / "mtp-q2_0-q8.gguf"
     if out.is_file():
         return str(out)
-    memo = pathlib.Path(f"{directory}.failed")
-    if memo.is_file() and time.time() - memo.stat().st_mtime < RETRY_S:
-        raise ValueError(memo.read_text() + " (remembered; tried again a day later)")
+    if identity not in PUBLISHED:
+        raise ValueError("not published yet; the README's Qwen3.8-Flash-Next section builds it by hand. Without it "
+                         "decode is ≈ 30% slower (est.)")
+    memo, key = pathlib.Path(f"{directory}.failed"), repr(PUBLISHED[identity])
+    if memo.is_file() and time.time() - memo.stat().st_mtime < RETRY_S and memo.read_text().startswith(key + "\n"):
+        raise ValueError(memo.read_text().partition("\n")[2] + " (remembered; tried again an hour later)")
     try:
-        if identity not in PUBLISHED:
-            raise ValueError("not published yet; the README's Qwen3.8-Flash-Next section builds it by hand. Without "
-                             "it decode is ≈ 30% slower (est.)")
         from huggingface_hub import hf_hub_download
 
         repo, name, revision = PUBLISHED[identity]
@@ -85,8 +86,12 @@ def make_source(identity: str, directory: str) -> str | None:
                 digest.update(block)
         if not digest.hexdigest().startswith(identity.rpartition("@")[2]):
             raise ValueError(f"{repo}/{name}@{revision} is not {identity} (sha256 {digest.hexdigest()[:16]})")
-        out.symlink_to(path)
+        link = out.with_name(f".{out.name}.{os.getpid()}")
+        link.unlink(missing_ok=True)
+        link.symlink_to(path)
+        os.replace(link, out)                # atomic: a concurrent first start finds one whole link
         return str(out)
     except Exception as e:  # noqa: BLE001 — offline, not found, a wrong file: serve without it, and say why
-        memo.write_text(str(e))
+        with contextlib.suppress(OSError):  # a cache that cannot be written only loses the memo
+            memo.write_text(f"{key}\n{e}")
         raise ValueError(str(e)) from None

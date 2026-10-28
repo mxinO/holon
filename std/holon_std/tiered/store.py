@@ -891,10 +891,13 @@ class TieredStore:
         """The routing counts that seed the cache, by group (docs/dev/v1-auto-config.md D4): from `profile`'s JSON
         file `{"checkpoint": …, "layers": {"<group>": [count per item]}}` beside the checkpoint (its name relative to
         the checkpoint's directory, so plans record no host path), else from a profile shipped in PROFILES, else none
-        (a cold cache). A profile counts only if it was counted on this checkpoint's files (or some of them: a profile
-        of the target serves a deployment whose auxiliary model, an MTP head, adds its own file and group); groups it
-        does not name count zero. It only seeds the cache, so one that does not fit is warned about, never fatal."""
+        (a cold cache; `none`: cold, asked for). A profile counts only if it was counted on this checkpoint's files (or
+        some of them: a profile of the target serves a deployment whose auxiliary model, an MTP head, adds its own file
+        and group); groups it does not name count zero. It only seeds the cache, so one that does not fit is warned
+        about, never fatal."""
         counts = np.zeros(self.residency.host.shape[:2])
+        if self._profile == "none":                     # `moe.placement.profile=none`: a cold cache, asked for
+            return counts
         name = pathlib.PurePath(self._profile)
         named = [self.profile_dir / name] if self._profile and not name.is_absolute() and ".." not in name.parts else []
         if self._profile and not named:

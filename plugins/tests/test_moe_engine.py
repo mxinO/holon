@@ -267,6 +267,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     import json as json_
 
     from holon_judge.placement import parity, route_dump
+    from holon_std.tiered import store as tiered
     from holon_tools.__main__ import main  # `holon_tools profile`: decode routes, beside the file
 
     checkpoint, prompts = tiny_moe
@@ -324,6 +325,11 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                        "moe.placement.profile": str(profile)})
     assert "not used (a name relative to the checkpoint's directory)" in capsys.readouterr().err   # no host path
+    with mock.patch.object(tiered, "PROFILES", tmp_path):      # a shipped profile seeds; `none` asks for a cold cache
+        seeded, cold = (_engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1"} | extra)
+                        for extra in ({}, {"moe.placement.profile": "none"}))
+        assert seeded.ctx.shared_objects[KEY]._profile_counts.any()
+        assert not cold.ctx.shared_objects[KEY]._profile_counts.any()
     store.stage = store.stage[:, :store.peak_misses - 1].contiguous()       # as if staging had been too small
     for p in prompts:
         engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)
