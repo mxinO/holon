@@ -19,11 +19,9 @@ from collections.abc import Callable
 import numpy as np
 import torch
 
+from holon.api import OutOfUnits
+
 from . import platform
-
-
-class OutOfUnits(RuntimeError):
-    pass
 
 
 class Pool:
@@ -266,6 +264,10 @@ class Ledger:
 
     def pool(self, name: str) -> Pool:
         return self.pools[name]
+
+    def host_bytes(self) -> int:
+        """What the host pools hold (within `host_memory`)."""
+        return sum(p.capacity * p.unit_bytes for p in self.pools.values() if p.host)
 
     def device_bytes(self) -> int:
         """What the device pools hold: the `state_memory` that sizes them again (host pools have their own budget)."""

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import dataclasses
 import functools
 import pathlib
@@ -34,13 +35,14 @@ from .assembly import claim_ref, resolve_model
 from .engine import EngineConfig
 from .ipc import engine_process
 from .plugins import Installed, PluginError, PluginSet, discover
-from .supervisor import supervised
+from .supervisor import Supervisor
 
 AUTO_CONTEXT = 32768      # `--max-model-len auto`: the model's trained context, at most this
 SERVE_MAX_SEQS = 8        # `holon serve` without a lock (EngineConfig's 64 leaves a large hybrid no KV on 24 GB)
 SERVE_DEFAULTS = {"max_seqs": f"`holon serve` without a lock: {SERVE_MAX_SEQS}",
                   "max_model_len": f"`holon serve`: auto = min(the model's trained context, {AUTO_CONTEXT})"}
 SERVABLE = re.compile(r"[^/@\s]+/[^/@\s]+(/[^/@\s]+)?")    # a locked model's name `holon serve` accepts as it is
+CACHE = pathlib.Path.home() / ".cache" / "holon"            # files derived on this machine (sources/: a lock's files)
 
 
 def engine_flags(parser: argparse.ArgumentParser | argparse._ArgumentGroup, given_only: bool = False) -> None:
@@ -107,22 +109,117 @@ def serve_defaults(directory: pathlib.Path) -> dict[str, object]:
 
 
 def serve_history(model: str, flags: dict[str, object], found: tuple | None, auto: int,
-                  defaults: Mapping[str, object] | None = None) -> list[tuple[EngineConfig, str | None]]:
-    """The supervisor's history, oldest first: defaults (`serve_defaults`) + flags, then the lock (`plans.find`'s
-    result) + flags. The requested `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to
-    what fits. The defaults serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
+                  defaults: Mapping[str, object] | None = None, *, lock_extra: Mapping[str, object] | None = None,
+                  spill: Mapping[str, str] | None = None, keep_defaults: bool = True
+                  ) -> list[tuple[EngineConfig, str | None]]:
+    """The supervisor's history, oldest first: defaults (`serve_defaults`) + flags unless not `keep_defaults`, then
+    the lock (`plans.find`'s result) + `lock_extra` + flags, preceded by the same with the `spill` options if any (the
+    supervisor's memory-only entry). The requested `max_model_len` is a flag's, else the lock's, else `auto`; every
+    config clamps it to what fits and derives its GPU memory's slack unless `--memory-fraction` is given. The defaults
+    serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
     def config(base: dict[str, object]) -> EngineConfig:
-        settings = {"clamp_context": True} | layered(base, flags)
+        settings = {"clamp_context": True, "memory_fraction": 0.0} | layered(base, flags)
         if settings.get("max_model_len", "auto") == "auto":
             settings["max_model_len"] = auto
         return EngineConfig(model=model, **settings)
 
-    if "max_seqs" not in flags:
+    if "max_seqs" not in flags and (keep_defaults or found is None):
         _say(f"{'the fallback' if found else 'defaults'} without a lock: max_seqs {SERVE_MAX_SEQS} (--max-seqs)")
-    history = [(config({"max_seqs": SERVE_MAX_SEQS} | dict(defaults or {})), None)]
+    history = [(config({"max_seqs": SERVE_MAX_SEQS} | dict(defaults or {})), None)] if keep_defaults else []
     if found is not None:
-        history.append((config(plans.lock_overrides(found[0])), str(found[2])))
+        lock = layered(plans.lock_overrides(found[0]), dict(lock_extra or {}))
+        history += [(config(layered(lock, {"plugin_options": dict(spill)})), str(found[2]))] if spill else []
+        history.append((config(lock), str(found[2])))
     return history
+
+
+def host_budget(flags: Mapping[str, object]) -> int | None:
+    """`holon serve`'s host memory (docs/dev/v1-auto-config.md D1): the RAM available less the headroom, read once
+    and logged; None under `--host-memory`, warned about where it cuts into the headroom."""
+    available, total, why = platform.host_ram()
+    headroom, given = platform.host_headroom(total), flags.get("host_memory")
+    budget = max(0, available - headroom)
+    _say(f"host memory: {'--host-memory ' if given is not None else ''}budget {(given or budget) / 2**30:.1f} GiB; "
+         f"{available / 2**30:.1f} GiB available ({why}), {headroom / 2**30:.1f} kept free (max 6 GiB, 5% of "
+         f"{total / 2**30:.1f})" + (": pinning past that may swap" if (given or 0) > budget else ""))
+    return None if given is not None else budget
+
+
+def admit_restart(ready: Mapping[str, object]) -> str | None:
+    """Before a restart: why to refuse it, if the host memory the first start pinned no longer fits above half the
+    headroom."""
+    available, total, _ = platform.host_ram()
+    need, room = int(ready.get("host_bytes", 0)), available - platform.host_headroom(total) // 2
+    return f"host memory: a restart needs {need / 2**30:.1f} GiB, {room / 2**30:.1f} free" if need > room else None
+
+
+def checkpoint_bytes(path: str) -> int:
+    """A checkpoint's bytes: a directory's files, a split file's shards (`-0000N-of-`), or the file."""
+    p = pathlib.Path(path)
+    files = [*p.iterdir()] if p.is_dir() else p.parent.glob(re.sub(r"-\d{5}-of-", "-*-of-", p.name))
+    return sum(f.stat().st_size for f in files if f.is_file())
+
+
+def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, checkpoint: str
+             ) -> tuple[dict[str, object], dict[str, str], list[str], list[str]]:
+    """What fits the lock to this machine (docs/dev/v1-auto-config.md D1, D5), asking `owners` (the model plugin, the
+    plugins declaring the lock's options): settings giving the lock's `[sources]` no flag gives (`MakesSources`, into
+    CACHE; when one is unavailable, speculation off instead: they are drafters' heads), the spill (`Spills`; one
+    setting an option a flag gives is dropped) with its notes, and the notes of manual alternatives."""
+    if found is None:
+        return {}, {}, [], []
+    given, extra, spill, notes = flags.get("plugin_options", {}), {"plugin_options": {}}, {}, []
+    for key, identity in found[0].plan.sources.items() if flags.get("max_draft_tokens") != 0 else ():
+        try:
+            if key not in given:
+                extra["plugin_options"][key] = source_file(identity, owners)
+        except ValueError as e:
+            _say(f"WARNING: {key} {identity} unavailable ({e}): speculation off")
+            extra = {"max_draft_tokens": 0}
+            break
+    options = layered(plans.lock_overrides(found[0]), dict(flags)).get("plugin_options", {})
+    manual = []
+    for got in (getattr(o, "spill", lambda *a: None)(options, checkpoint) for o in owners):
+        if got and not set(got[0]) & set(given):
+            spill |= got[0]
+            (notes if got[0] else manual).append("".join(f"{k}={v} " for k, v in got[0].items()) + got[1])
+    return extra, spill, notes, manual
+
+
+def source_file(identity: str, owners: list) -> str:
+    """The file `identity` names, in or into `CACHE/sources/<identity>/`, from the first owner whose `make_source`
+    claims it; ValueError why not."""
+    if not re.fullmatch(r"[A-Za-z0-9._+-]+@[0-9a-f]{16}", identity):
+        raise ValueError("not a file identity")
+    (directory := CACHE / "sources" / identity).mkdir(parents=True, exist_ok=True)
+    path = next((p for o in owners if (p := getattr(o, "make_source", lambda *a: None)(identity, str(directory)))),
+                None)
+    if path is None:
+        raise ValueError("no installed plugin makes it")
+    return path
+
+
+def refusal_hints(reason: str, budget: int | None, model_id: str, rows: list, plugins: PluginSet, fp: Fingerprint,
+                  notes: list[str]) -> str:
+    """After a start refused for host memory, what to do, in order: free RAM; serve a model of the same repository
+    whose file fits this card (by the weight source's listed sizes) under its own lock, so needing no pinned RAM;
+    start anyway at the risk of swapping; the plugins' notes."""
+    if not (m := re.search(r"needs \d+ units \(([\d.]+) GiB\), ([\d.]+) GiB left", reason)):
+        return ""
+    short, repo = float(m[1]) - float(m[2]), "/".join(model_id.split("/")[:2]) + "/"
+    fits = [n for n in sorted(m.rpartition("@")[0] for m, f in rows if isinstance(f, tuple) and not f[1])
+            if n.startswith(repo) and n != model_id.rpartition("@")[0] and _fits(n, plugins, fp)]
+    hints = [f"free at least {short:.1f} GiB of RAM and start again"]
+    hints += [f"or serve a smaller model this card's lock holds without pinned RAM: {', '.join(fits)}"] * bool(fits)
+    hints += [f"or start anyway at the risk of swapping: --host-memory {budget + int(short + 1) * 2**30}"] * (
+        budget is not None)
+    return "".join(f"\n  {h}" for h in hints + notes)
+
+
+def _fits(name: str, plugins: PluginSet, fp: Fingerprint) -> bool:
+    with contextlib.suppress(Exception):
+        return 0 < claim_ref(plugins, name).nbytes < fp.vram_gib * 2**30
+    return False
 
 
 def auto_context(model_plugin: object, source: object) -> int:
@@ -201,8 +298,8 @@ def local_model(ref: str, plugins: PluginSet, kind: str | None, rows: list[tuple
                 fp: Fingerprint | None, host_memory: int = 0) -> str:
     """The local path `holon serve` serves `ref` from: an existing path as it is; else the one weight source's claim
     of `ref` (after `repo_ref`), logged, refused before fetching when larger than the GPU's memory (`fp`; None: no
-    check) unless the deployment gives plugins host memory (`host_memory`; the build's per-pool report judges the fit
-    then), then fetched."""
+    check) unless this card has a lock for it (`rows`: the lock decides what fits) or the deployment gives plugins host
+    memory (`host_memory`; the build's per-pool report judges the fit then), then fetched."""
     if pathlib.Path(ref).exists():
         return ref
     try:
@@ -211,7 +308,11 @@ def local_model(ref: str, plugins: PluginSet, kind: str | None, rows: list[tuple
         raise SystemExit(f"holon: {e}") from None
     size = f"{claim.nbytes / 2**30:.1f} GiB" if claim.nbytes else "size unknown"
     _say(f"{ref}: {claim.what} ({size})")
-    if fp is not None and fp.vram_gib > 0 and not host_memory and claim.nbytes and claim.nbytes > fp.vram_gib * 2**30:
+    locks = {m.rpartition("@")[0] for m, found in rows if isinstance(found, tuple)}
+    stem = re.sub(r"(-\d{5}-of-\d{5})?\.\w+( \(\d+ files\))?$", "", claim.what.rpartition("/")[2])
+    locked = f"{'/'.join(claim.what.split('/')[:2])}/{stem}" in locks
+    if fp is not None and fp.vram_gib > 0 and not host_memory and not locked and claim.nbytes and \
+            claim.nbytes > fp.vram_gib * 2**30:
         raise SystemExit(f"holon: {claim.what} is {size}, more than this GPU's {fp.vram_gib} GiB: it cannot fit "
                          "(`holon models` lists the models locked for it; --no-size-check skips this check)")
     return claim.fetch()
@@ -345,9 +446,32 @@ def main(argv: list[str] | None = None) -> None:
     model = local_model(args.model, plugins, flags.get("source"), rows, sized, flags.get("host_memory", 0))
     source, model_plugin = resolve_model(plugins, EngineConfig(model, source=flags.get("source")))
     found = None if args.no_lock else find_lock(args.plans, source, fp, current)
-    history = serve_history(model, flags, found, auto_context(model_plugin, source), serve_defaults(args.plans))
+    # Fitted to this machine (docs/dev/v1-auto-config.md): the lock's files, a spill, the host budget (pin lock held
+    # from the reading until an engine is ready), no defaults entry for a lock whose defaults cannot hold the model.
+    lock_options = found[0].plan.engine.get("plugin_options", {}) if found else {}
+    owners = [model_plugin, *(plugins.load(n) for n in sorted({n for k in lock_options for n in declared.get(k, {})}))]
+    extra, spill, notes, manual = fit_lock(found, flags, owners, model)
+    pin = contextlib.ExitStack()
+    if "host_memory" not in flags:
+        pin.enter_context(platform.pin_lock(_say))
+    budget = host_budget(flags)
+    keep = not (found and fp.vram_gib and checkpoint_bytes(model) > fp.vram_gib * 2**30 and "host_memory" not in flags
+                and not flags.get("plugin_options"))
+    history = serve_history(model, flags | ({"host_memory": budget} if budget is not None else {}), found,
+                            auto_context(model_plugin, source), serve_defaults(args.plans), lock_extra=extra,
+                            spill=spill, keep_defaults=keep)
+    spilled = history[-2][0] if spill else None
     history = checked_options(history, declared)
+    if not history:
+        raise SystemExit("holon: no configuration left to serve (the lock's was refused above, and the defaults "
+                         "cannot hold this model): --no-lock serves defaults and your flags")
     config, lock = history[-1]
+    memory_only = {i: "(spilled: " + "; ".join(notes) + ")" for i, (c, _) in enumerate(history) if c is spilled}
+    admit = admit_restart if budget is not None else None
+
+    def refused(e: object) -> SystemExit:
+        return SystemExit(f"holon: {e}" + refusal_hints(str(e), budget, source.identity(), rows, plugins, fp, manual))
+
     bundle = model_plugin.bundle(source)
     names = [m.name for m in plugins.by_slot("frontend")]
     name = args.frontend or (names[0] if len(names) == 1 else None)
@@ -358,9 +482,17 @@ def main(argv: list[str] | None = None) -> None:
     async def run() -> None:
         if not args.supervised:
             async with engine_process(config, lock=lock) as client:
+                pin.close()
                 await frontend.serve(client, bundle, args.host, args.port, config.plugin_options)
             return
-        async with supervised(history) as supervisor:
+        supervisor = Supervisor(history, memory_only=memory_only, admit=admit)
+        try:
+            await supervisor.start()
+        except RuntimeError as e:
+            raise refused(e) from None
+        finally:
+            pin.close()                                       # the first engine has pinned its host memory
+        try:
             serving = asyncio.ensure_future(frontend.serve(supervisor, bundle, args.host, args.port,
                                                            config.plugin_options))
             gave_up = asyncio.ensure_future(supervisor.failed())
@@ -369,7 +501,9 @@ def main(argv: list[str] | None = None) -> None:
             gave_up.cancel()
             await asyncio.gather(serving, gave_up, return_exceptions=True)   # the frontend stops before the engine
             if gave_up in done:
-                raise SystemExit(f"holon: {gave_up.result()}")
+                raise refused(gave_up.result())
             serving.result()                                  # re-raises whatever stopped the frontend
+        finally:
+            await supervisor.close()
 
     asyncio.run(run())

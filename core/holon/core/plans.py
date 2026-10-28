@@ -199,15 +199,17 @@ def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
 
 def served(engine: Any, lock: str | None) -> dict[str, Any]:
     """What an engine process reports once ready: its plan id and, started from `lock`, that lock and how the plan
-    differs from it (planned under the lock's model id and commit, so only real differences show)."""
+    differs from it (planned under the lock's model id and commit, so only real differences show); the host memory
+    its pools pinned."""
+    pinned = {"host_bytes": engine.ledger.host_bytes()}
     try:
         if lock is None:
-            return {"plan_id": plan_of(engine).plan_id, "lock": None, "diff": []}
+            return {"plan_id": plan_of(engine).plan_id, "lock": None, "diff": []} | pinned
         want = read(lock).plan
         plan = plan_of(engine, want.model_id, want.commit)
     except Exception as e:  # noqa: BLE001 — a report never stops serving
-        return {"plan_id": None, "lock": lock, "diff": [f"plan not computed: {type(e).__name__}: {e}"]}
-    return {"plan_id": plan.plan_id, "lock": str(lock), "diff": [
+        return {"plan_id": None, "lock": lock, "diff": [f"plan not computed: {type(e).__name__}: {e}"]} | pinned
+    return pinned | {"plan_id": plan.plan_id, "lock": str(lock), "diff": [
         f"{k}: {old} -> {new}" if k.startswith("engine:") else k for k, (old, new) in diff(want, plan).items()]}
 
 

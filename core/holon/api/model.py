@@ -215,4 +215,4 @@ class ModelPlugin(Protocol):
     def bundle(self, source: WeightSource) -> FrontendBundle:
         """Tokenizer, chat template and parsers for the checkpoint `source` reads."""
 
-    # Optional hooks (`holon.api.hooks`): DeclaresDraftHead, TrainedContext.
+    # Optional hooks (`holon.api.hooks`): DeclaresDraftHead, TrainedContext, Spills, MakesSources.

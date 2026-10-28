@@ -12,6 +12,7 @@ minimum pools → capture the decode graphs.
 from __future__ import annotations
 
 import collections
+import contextlib
 import dataclasses
 import functools
 import gc
@@ -70,10 +71,12 @@ class EngineConfig:
     page_size: int = _setting(16, "tokens per page of paged state")
     max_seqs: int = _setting(64, "sequences served at once")
     max_model_len: int = _setting(8192, "prompt + generated tokens per request; pools always hold one")
-    clamp_context: bool = _setting(False, "pools may hold less: serve at most what they hold (`holon serve`)")
+    clamp_context: bool = _setting(False, "pools may hold less: serve at most what they hold, a state tier's host "
+                                          "level too (`holon serve`)")
     max_step_tokens: int = _setting(4096, "tokens one step computes at most")
     chunk_with_decode: int = _setting(0, "prefill tokens a step with decode rows may also carry (0: none)")
-    memory_fraction: float = _setting(0.9, "of the memory left after weights, for activations and state")
+    memory_fraction: float = _setting(0.9, "of the memory left after weights, for activations and state; 0: derived "
+                                           "(`holon serve`'s default; docs/dev/v1-auto-config.md D2)")
     state_memory: int | None = _setting(None, "bytes for state pools; default: measured (GPU only)")
     prefix_cache: bool = _setting(True, "reuse cached prompt blocks across requests (and payloads)")
     overlap: bool = _setting(True, "schedule step N while step N-1 runs (depth 1); off: depth 0")
@@ -130,6 +133,13 @@ class _Target:
 
 class Engine:
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
+        # One Holon at a time pins host memory (`holon serve` holds the lock from its reading of the RAM itself).
+        with contextlib.ExitStack() as pinning:
+            if cfg.host_memory and not cfg.clamp_context:
+                pinning.enter_context(platform.pin_lock(lambda s: print(f"holon: {s}", file=sys.stderr, flush=True)))
+            self._build(cfg, plugins, pinning)
+
+    def _build(self, cfg: EngineConfig, plugins: PluginSet | None, pinning: contextlib.ExitStack) -> None:
         cfg = dataclasses.replace(cfg)             # its own copy: the clamp may lower max_model_len
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
@@ -244,12 +254,16 @@ class Engine:
                                  shared=self.shared + [self.tier] * (self.tier is not None))   # its step hooks
         self.ledger.materialize(cfg.state_memory if cfg.state_memory is not None
                                 else self.executor.state_memory(self.ledger, cfg.memory_fraction))
+        if note := self.executor.memory_note:
+            print(f"holon: GPU memory: state pools {self.ledger.device_bytes() / 2**30:.2f} GiB = {note}",
+                  file=sys.stderr, flush=True)
         if cfg.clamp_context:
             self._clamp()
         self.state.reset_padding()
         if self.tier is not None:                        # after the final materialize, before graph capture
             self.state.index.restore(self.tier.attach(self._tier_ctx()))
             self.state.index.tier = self.tier
+        pinning.close()                                  # every host pool is pinned
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
             if pool.buffer is not None and not pool.host:   # (a plugin pool may get no units)
                 platform.check_expandable(pool.buffer)
@@ -291,7 +305,8 @@ class Engine:
             block=index.block, options=cfg.plugin_options, stream=lambda: platform.Stream(self.device),
             host_pool=lambda name, *, unit_bytes, segments, units, mapped=False: self.ledger.plugin_pool(
                 name, unit_bytes=unit_bytes, segments=segments, min_units=units, pref_units=units, device="host",
-                mapped=mapped, late=True))
+                mapped=mapped, late=True),
+            host_left=lambda: cfg.host_memory - self.ledger.host_bytes() if cfg.clamp_context else None)
 
     def _verify_widths(self) -> tuple[int, ...]:
         """The verify-row widths to capture: 1 + each k the policy declares (`ks()`), else every k up to the maximum."""

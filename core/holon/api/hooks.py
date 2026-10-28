@@ -238,6 +238,21 @@ class TrainedContext(Protocol):
         that); None: unknown."""
 
 
+# -- any plugin, asked by `holon serve` (docs/dev/v1-auto-config.md D1, D5) -------------------------------------------
+class Spills(Protocol):
+    def spill(self, options: Mapping[str, object], checkpoint: str) -> tuple[Mapping[str, str], str] | None:
+        """On the model plugin or a plugin declaring one of `options` (a lock's plugin options): the options under
+        which the deployment serves with less pinned host memory, byte-identical, and a note of the cost; `holon serve`
+        tries them after the lock's start fails for memory. Empty options: an alternative only named when the start
+        is refused. None: nothing to offer for `checkpoint` (its local path)."""
+
+
+class MakesSources(Protocol):
+    def make_source(self, identity: str, directory: str) -> str | None:
+        """A file a lock names by identity (`<name>@<build>`, its `[sources]`), made or fetched into `directory`;
+        its path. None: not this plugin's; ValueError: this plugin's, unavailable now (the message says why)."""
+
+
 
 # -- weight sources ---------------------------------------------------------------------------------------------------
 class ResolvesRefs(Protocol):

@@ -1,4 +1,4 @@
-abi 1.5
+abi 1.6
 
 # holon.api
 dataclass Abort
@@ -221,6 +221,7 @@ dataclass Option frozen
   #1 default: str | None = None
   #2 choices: tuple[str, ...] = ()
   #3 planned: bool = True
+class OutOfUnits(RuntimeError)
 dataclass Paged frozen
   #0 unit_bytes: int
   #1 tokens_per_unit: int
@@ -442,6 +443,7 @@ dataclass Text
 protocol TierCtx() required, implemented by core
   host_pool(self, name: 'str', *, unit_bytes: 'int', segments: 'int', units: 'int', mapped: 'bool' = False) -> 'Pool'
   stream(self) -> 'Stream'
+  host_left(self) -> 'int | None'
   pools: Mapping[str, Pool]
   identity: str | None
   max_seqs: int
@@ -544,6 +546,8 @@ protocol KeepsTentatives() optional, implemented by plugins
   keep_tentative: int
 protocol KnowsCapacity() optional, implemented by plugins
   capacity(self, seq: 'SeqView') -> 'int'
+protocol MakesSources() optional, implemented by plugins
+  make_source(self, identity: 'str', directory: 'str') -> 'str | None'
 protocol MixesRowKinds() optional, implemented by plugins
   mixes_row_kinds: bool
 protocol NeedsHostLens() optional, implemented by plugins
@@ -575,6 +579,8 @@ protocol SamplesDrafts() optional, implemented by plugins
   q_support: int
 protocol ShutsDown() optional, implemented by plugins
   shutdown(self) -> 'None'
+protocol Spills() optional, implemented by plugins
+  spill(self, options: 'Mapping[str, object]', checkpoint: 'str') -> 'tuple[Mapping[str, str], str] | None'
 protocol StateTierPlugin() optional, implemented by plugins
   build(self, ctx: 'BuildCtx') -> 'StateTier'
 protocol TrainedContext() optional, implemented by plugins

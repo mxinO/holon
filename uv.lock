@@ -432,6 +432,7 @@ source = { editable = "core" }
 dependencies = [
     { name = "msgspec", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "numpy", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "nvidia-ml-py", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pyzmq", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -440,6 +441,7 @@ dependencies = [
 requires-dist = [
     { name = "msgspec", specifier = ">=0.19" },
     { name = "numpy", specifier = ">=2" },
+    { name = "nvidia-ml-py" },
     { name = "pyzmq", specifier = ">=26" },
     { name = "torch", specifier = "==2.11.0", index = "https://download.pytorch.org/whl/cu130" },
 ]
@@ -485,6 +487,7 @@ dependencies = [
     { name = "fastapi", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "flashinfer-python", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "uvicorn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -496,6 +499,7 @@ requires-dist = [
     { name = "fastapi" },
     { name = "flashinfer-python", specifier = "==0.6.12" },
     { name = "holonlm", editable = "core" },
+    { name = "huggingface-hub" },
     { name = "transformers" },
     { name = "triton", specifier = "==3.6.0" },
     { name = "uvicorn" },
