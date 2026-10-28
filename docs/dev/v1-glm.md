@@ -989,6 +989,42 @@ and routed again by the same step.
   the model's mHC state in f32: not a store change).
 - **No core lines.** A plugin option's choice and the store's loan sizing; RAM-holds-all layouts unchanged.
 
+**D8l — Step 7: park the loan's lent experts in RAM too (design for the panel, not built; the coordinator's lever
+after Maya's stats).** *Why, measured:* a lending prompt step parks its lent experts in RAM hottest first (free units,
+else over RAM's coldest of the same classes while strictly hotter: D8b, Maya's `LEND_PARK_LRU`) — except those holding
+a slot of the step's activation loan, which go to the SSD, because the forward writes the loan before the parking
+copies may run (D8b, step 1's review S1-B1). At 32K that is ≈ 1,136 of the ≈ 1,725 lent experts (16,384-row passes),
+and its decode then reads 68% of its SSD bytes over tokens 1-32 re-reading displaced pieces. Maya parks all of its
+lent experts (601 a 32K prompt, all to RAM). **The replay** (`local` per-piece recording at mode (ii)'s flags, the
+bench's 24 requests; the loan-slot experts parked by the same rule, the victims SSD-only after — the file holds every
+piece, no writes): 32K parks 1,020 more (6.75 GiB VRAM → RAM; the victims' median heat 0.31 of theirs), decode SSD
+184 → 154 MB a token over tokens 1-32 and 38.5 → 37.3 over 33-256 (the decode model: 59.5 → 56.5 ms a token); 4K
+313 more (2.08 GiB), 83.6 → 71.8 and 38.2 → 35.7 MB (51.7 → 49.6 ms); 1K 185 (1.23 GiB), 67.5 → 58.7 and 31.4 → 29.5
+MB (47.0 → 45.3 ms).
+- **The order (the design's one question: no write before its bytes are parked, and no stalled prompt start).** The
+  parking copies start at the step's first resolve, as today, on the store's copy stream, the loan's bytes first and in
+  the order the loan's allocator hands them out (its ranges smallest first, each from its start: `use_ranges`), one
+  event per 256 MiB of copied loan bytes. The loan's allocator (`activation_loan@1`'s pluggable `malloc`, which gets
+  the allocating stream) makes that stream wait for the event covering a new segment's last byte before returning it:
+  every first write into a segment follows its bytes' copies, and a segment the allocator never reaches waits for
+  nothing. No core lines: the wait is the provider's (an optional `use_ranges(…, ready)` argument: the events by byte
+  offset), the order the store's.
+- **What the start costs.** A step's first loan segment is its mHC residual streams (2 GiB at 32K, 128 MiB at 2K:
+  §13 step 7's breakdown), allocated at the embedding: it waits for its own bytes' copies, ≈ 2 GiB at the measured
+  ≈ 48 GB/s ≈ 45 ms at 32K (≈ 3 ms at 2K). The rest (≈ 2.4 GiB at 32K) is copied while layer 0's attention and router
+  run on the residual (≈ 250 ms a layer at 32K): no further wait predicted. The copies take the device → host
+  direction, the step's gathers the other. Options if the 45 ms shows: hand the residual its own range among the
+  coldest lent experts' (parked last, or not at all: the ones whose heat is below RAM's coldest stay SSD-bound as today),
+  or park only the hottest share that the first layer's compute covers.
+- **Predicted, prompt + 256 tokens** (the replay's decode model at 16,384-row passes; prefill the residual's wait):
+  32K +0.05 s against −0.75 s (≈ −2.8% of ≈ 25.3 s); 4K +0.005 s against −0.55 s (≈ −3%); 1K +0.003 s against −0.43 s
+  (≈ −2.8%). At 8,192-row passes (D8k) the tail lends fewer experts; the replay is rerun on that recording before a
+  build.
+- **Scope.** Exclusive tiers only (an inclusive layout's lent experts are already in RAM); no SSD writes (a victim is
+  dropped: the file has it); the RAM victims as `_park`'s step 2 (same classes, strictly colder by `moe.ram_heat`);
+  a plant for the panel: `loan_write_before_parked` (the allocator's wait skipped: RAM units take overwritten bytes,
+  caught by `_bytes_exact`).
+
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
 drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes
