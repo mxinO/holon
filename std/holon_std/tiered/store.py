@@ -856,6 +856,7 @@ class TieredStore:
             reads.bind()
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
+        self._parked = None                     # no step's parking event outlives it (A's D8l-m2: a failed step's)
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
@@ -1286,7 +1287,9 @@ class TieredStore:
         goes to the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit
         now, before the step's staging overwrites it — and, for an expert holding a slot of the step's activation loan,
         before the forward writes the loan (`activations` waits for the copies: D8l). On the device, no host sync (the
-        step's first resolve, or a tail step's early start)."""
+        step's first resolve, or a tail step's early start: no synchronizing call — though under a long kernel on the
+        copy stream the main stream's kernels were seen held behind it and the host's launches blocking, A's D8l-m1,
+        open)."""
         res, host, owner, classes = self.residency.device, self.host_units, self.owner, self.classes32.long()
         groups, items, roles = res.shape
         n, (c_n, u_n) = groups * items, owner.shape

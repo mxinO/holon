@@ -2152,9 +2152,10 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
     the others (once they went to the SSD): RAM with free units here, no lent expert goes to the SSD, and every RAM
     unit holds its pieces as the file does, the streams the resident store's — the forward waits for the parking
     copies before it writes the loan. Under the copies delayed on a stream of their own and the loan written whole as
-    it is handed out (`loan_parking_late`: still exact): the wait skipped
-    (`loan_write_before_parked`) or its event recorded before the copies (`parking_event_early`) leaves RAM units
-    with overwritten bytes; the copies not issued before the loan (`loan_wait_unrecorded`) is refused."""
+    it is handed out (`loan_parking_late`: still exact): the copies issued after the loan's writes with no wait
+    (`loan_write_before_parked`) or with the event recorded before them (`parking_event_early`) leave RAM units with
+    overwritten bytes; no copy issued before the loan (`loan_wait_unrecorded`) is refused, a failed step's stale event
+    notwithstanding (A's m2). The early start makes no synchronizing torch call (A's m1)."""
     from holon_judge import planted
 
     file, prompts, want = gpu_moe_wide
@@ -2166,18 +2167,33 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
         store, to_ssd = engine.ctx.shared_objects[KEY], []
         lend_tail = store.lend_tail
 
-        def counted(cls, n):                     # the tail's experts the step sent to the SSD (eager steps: a sync)
+        def counted(cls, n):                     # the tail's experts the step sent to the SSD (read at the end)
             picked = lend_tail(cls, n)
-            to_ssd.append((int(picked.sum()), int(((store.residency.device == -2).all(-1) & picked).sum())))
+            to_ssd.append((picked.sum(), ((store.residency.device == -2).all(-1) & picked).sum()))
             return picked
         store.lend_tail = counted
-        if plant == "loan_wait_unrecorded":
+        start = store.start_step
+
+        def strict(early=False):                 # an early start enqueues, never waits for the device (A's m1)
+            if not early:
+                return start(early)
+            torch.cuda.set_sync_debug_mode("error")
+            try:
+                return start(early)
+            finally:
+                torch.cuda.set_sync_debug_mode("default")
+        store.start_step = strict
+        if plant == "loan_wait_unrecorded":      # (a stale event a failed step left is no parking either: A's m2)
+            engine.add(max(prompts, key=len), SamplingParams(temperature=0.0, max_tokens=1))
+            store._parked = torch.Event(device=torch.device("cuda"))
+            store._parked.record()
             with pytest.raises(RuntimeError, match="parking copies were not issued"):
-                _served(engine, prompts)
+                engine.step()
             engine.close()
             return
         got = _served(engine, prompts)
         wrong = _bytes_exact(store)
+        to_ssd = [(int(n), int(m)) for n, m in to_ssd]
         assert store.exclusive and store.borrowed["stage"] and store._step_loan_bytes(64) and to_ssd
         engine.close()
     if plant in (None, "loan_parking_late"):
