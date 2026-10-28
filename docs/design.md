@@ -1132,7 +1132,7 @@ device inputs (`DEVICE_LAST`) are already consistent.
   (`cuStreamWriteValue`/`WaitValue`, 6–10 µs under load; for display GPUs with a kernel watchdog, laptops and
   power-sensitive hosts — a resident spinner draws 12–32 W). `cudaLaunchHostFunc` is not used (21–39 µs). The
   CPU worker pool takes one physical core fewer than the host has and the Python loop is pinned to the free core:
-  sharing a core with a spinning worker slows the loop 1.4–2.3× on 8-core desktops. Expert inputs
+  sharing a core with a spinning worker slows the loop 1.4–2.3× on the desktops. Expert inputs
   and outputs are read and written in pinned memory directly (no memcpy nodes, which cost ≈ 14 µs per layer). GPU
   work between signal and wait overlaps the CPU. Contract: stop the worker only after draining in-flight replays
   (or abort, drain, stop); residency-map edits are applied **on the replay stream at a fixed launch** (§6.5) — no
