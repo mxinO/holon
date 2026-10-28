@@ -232,7 +232,7 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   can tell them apart in mixed steps: padding rows are masked (no fetch, no CPU job, no counts); prefill rows never
   count or admit (M6 and panel C: counting prompts costs 4–6%); decode and verify rows count every routed entry at
   resolve time, rejected drafts included (acceptance is known only after the step; deterministic either way).
-- **F11's rule, as M6 replayed it** (`spikes/x0_offload/m6/replay.py`), specified in its contract and oracle, in this
+- **F11's rule, as M6 replayed it** (`bench/placement_replay.py`), specified in its contract and oracle, in this
   order per step: decay (×0.915 in f32, on every step with at least one decode / verify row, graphed or eager;
   prefill-only steps do not decay), then increments (+1.0 per counted entry, order-independent), then pairing: per
   layer, the step's distinct misses (candidates, by count
@@ -355,7 +355,7 @@ default only where RAM holds every expert** (X's development gate). Before step 
 tier with an SSD rate and compares F11 with SSD-only victims, F11 with deferred admission (the miss staged this
 step, its victim demoted D2H, the map flipped at a fixed later step) and F10 with spares (Maya's structure); the
 RAM-short default is the least modelled time, confirmed by step 5's RAM-capped run (panel C-r4.4-1).
-**Replayed (2026-10-17, `spikes/x0_offload/m6/README_exclusive.md`, `evidence/x5_exclusive_tier_replay_2026-10-17.json`):
+**Replayed (2026-10-17, `spikes/x0_offload/m6/README_exclusive.md`, `docs/dev/evidence/x5_exclusive_tier_replay_2026-10-17.json`):
 the RAM-short default is F11 with deferred admission.** Over M6's held-out pairs at 10 / 25 / 47% VRAM and RAM
 holding 25 / 50 / 75% of the rest (SSD at 2.6 GB/s): SSD-only victims lose everywhere (1.2–3.7× the best; ≈ 235 MB
 per token of SSD re-reads at 25% cached, worse than D10's estimate because RAM drains); deferred admission is least
@@ -529,7 +529,7 @@ on the 5080). The startup profile runs a streaming step's 4,096-token expert pas
 
 ## 8. Step 0 — measure before freezing
 
-On the RTX 5080 and 5090 desktops (the bar cards), one heavy job at a time under `MemoryMax`, results in `evidence/`.
+On the RTX 5080 and 5090 desktops (the bar cards), one heavy job at a time under `MemoryMax`, results in `docs/dev/evidence/`.
 
 | # | Measure | Decides |
 |---|---|---|
@@ -601,7 +601,7 @@ mixers (with FN / GLM); the end-of-answer checkpoint (plan §10). Its own doc mu
 ## 13. Step 0 results and the decisions they set
 
 **M6 — routing traces and policy replay** (`spikes/x0_offload/m6/README.md`;
-`evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json`). Qwen3-30B-A3B Q4_K_M on one RTX A5000, eager;
+`docs/dev/evidence/x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17.json`). Qwen3-30B-A3B Q4_K_M on one RTX A5000, eager;
 244,291 routed rows (61,979 decode) over four traces (agent, mixed, chat, code); decode-only replay with the same
 profile warm start for every policy, scored on held-out traces, time = (dense + hit + fetch) / 900 GB/s +
 (fetch + admission) / PCIe at placeholder rates 25 and 50 GB/s (M1 replaces them).
@@ -637,7 +637,7 @@ Decisions (by §8's rules, fixed before measuring):
   a sequence's window, not across a batch.
 
 **M1, M2, M3, M5, M7 and prefill compute on the RTX 5080 and 5090 desktops** (`spikes/x0_offload/bench/README.md`;
-`evidence/x0_bench_rtx-5080_2026-10-17.json`, `evidence/x0_bench_rtx-5090_2026-10-17.json`). Both cards behave alike.
+`docs/dev/evidence/x0_bench_rtx-5080_2026-10-17.json`, `docs/dev/evidence/x0_bench_rtx-5090_2026-10-17.json`). Both cards behave alike.
 
 | Measure | Result | Decision |
 |---|---|---|
@@ -671,7 +671,7 @@ cannot close it); the capped rows and the F1 row are judged after step 6 with tu
 rate is re-measured at step 2 on the store's own allocation (`mmap` + `cudaHostRegister`, with and without huge
 pages), since M1 used `cudaHostAlloc` (panel C-r4.5-5).
 
-**Reference engines on the RTX 5080** (`spikes/x4_refs/README.md`, `evidence/x4_refs_rtx-5080_2026-10-17.json`;
+**Reference engines on the RTX 5080** (`spikes/x4_refs/README.md`, `docs/dev/evidence/x4_refs_rtx-5080_2026-10-17.json`;
 llama.cpp f74e2fa with `--moe-cache-mib`, FreeToken 21d9578; 3 interleaved rounds). Decode tok/s at 1K / 4K / 32K,
 natural fit (≈ 47%) | capped (≈ 25%):
 
@@ -690,8 +690,8 @@ every expert once per chunk of up to 8K). **Re-banded:** the natural-fit row aga
 llama.cpp's), against FreeToken 0.84–1.04× (bar 1.0×), against llama.cpp's default cache 1.22–1.53×; the static-split
 rows clear 1.5× at 1K / 4K and straddle at 32K. By §8's rule the cache rows go to the owner before step 4.
 
-**Where the gap is** (`spikes/x4_gap/README.md`, `evidence/x4_gap_rtx-5090_2026-10-17.json`,
-`evidence/x4_gap_rtx-5080_2026-10-17.json`): it is placement policy and prefill design, not kernels.
+**Where the gap is** (`spikes/x4_gap/README.md`, `docs/dev/evidence/x4_gap_rtx-5090_2026-10-17.json`,
+`docs/dev/evidence/x4_gap_rtx-5080_2026-10-17.json`): it is placement policy and prefill design, not kernels.
 - All-resident decode on the RTX 5090: Holon 389 / 362 tok/s at 1K / 4K against llama-server 340 / 294 and FreeToken
   341 / 322 — §13's 0.93× came from llama-bench, which has no server loop; Holon's remaining 0.41 ms per token
   against FreeToken is glue, router GEMV, the stacked gate/up GEMV and q8_1 quantization. Offload overhead fully
@@ -731,7 +731,7 @@ before GLM's RAM-short runs. A supervisor restarts the engine process after a `c
 leaked by design).
 
 **Owner decision on the gate (2026-10-18):** step 4 measured every natural-fit decode row passing (FreeToken
-1.08 / 1.06 / 1.03×, llama.cpp's pinned cache 1.21 / 1.25 / 1.12× at 1K / 4K / 32K; `spikes/x4_gate/README.md`) and the
+1.08 / 1.06 / 1.03×, llama.cpp's pinned cache 1.21 / 1.25 / 1.12× at 1K / 4K / 32K; `docs/dev/spikes/x4_gate/README.md`) and the
 FreeToken prefill row missing at 4K and 32K (0.92× / 0.88×; 1.71× at 1K). The owner accepted the shortfall: it is
 recorded here, X closes with it, and MoE prefill speed becomes its own follow-up (plan §10). Cause: not offload — the
 expert GEMMs. FreeToken's all-resident prefill already runs 1.6–2.0× Holon's on the RTX 5090; Holon's expert path is
@@ -894,13 +894,13 @@ wave). Design is updated with X's code, as M0.7 did — done at step 8 (`docs/de
 `std.tiered.pinned@1`, the static policy `std.tiered.static@1`, the `O_DIRECT` extent reader), `std.moe.offload@1`
 bound by `moe.store` (absent: `std.moe.resident@1`, today's path), the contracts `moe_resolve@1` and
 `expert_fetch@1` (oracles in `std.moe.reference`, CPU providers in `testing.ref_kernels`, CUDA in the new
-`kernels.expert_io`), F1 and F5a. Evidence: `spikes/x2_store/README.md`, `evidence/x2_store_rtx-a5000_2026-10-17.json`
+`kernels.expert_io`), F1 and F5a. Evidence: `spikes/x2_store/README.md`, `docs/dev/evidence/x2_store_rtx-a5000_2026-10-17.json`
 — on the A5000 every fit (all, fill, 47%, 25%) is snapshot-identical to `std.moe@1` all-resident, run-identical ×3 at
 25%, with the unpatched ggml kernels (stream-k never engages at the vehicle's arena sizes, ≥ 136 slots, on any card:
 for the vehicle the D4 patches cut the arenas' mmq launch cost, which grows with the slots, so no unpatched prefill
 timing feeds the roofline; a small-arena GPU test does take stream-k and waits for them); the offload path costs
 +0.20 ms per decode token with every expert cached; with the D4 patches merged the 100%, 47% and 25% fits stay
-identical (`evidence/x2_store_patched_rtx-a5000_2026-10-17.json`), and the full-fit trace runs as fast as
+identical (`docs/dev/evidence/x2_store_patched_rtx-a5000_2026-10-17.json`), and the full-fit trace runs as fast as
 all-resident (4.1 s against 4.0 s; 11.8 s unpatched); `mmap` + `cudaHostRegister` gathers at `cudaHostAlloc`'s rate (0.94–1.01×,
 noise between processes), huge pages or not.
 
@@ -946,7 +946,7 @@ with its `lend(n)`; F2's warm start for every policy (`std.tiered.static@1` incl
 (policies built with `items` / `roles`; per-group device state `[groups, *shape]`, zeroed at each seed and passed to
 the policy's variant by name; the delta log in the telemetry; host-edit preconditions; two-phase swaps as S2 MemOps;
 route taps; `TieredStore.lend`); `holon_judge.placement` (`route_dump`, the L1 policy-parity check); six plants;
-`holon_tools profile`. Evidence: `spikes/x3_policies/README.md`, `evidence/x3_policies_rtx-a5000_2026-10-17.json` — on
+`holon_tools profile`. Evidence: `spikes/x3_policies/README.md`, `docs/dev/evidence/x3_policies_rtx-a5000_2026-10-17.json` — on
 the A5000 F11 (2,115 in-graph admissions per run at 25%), F2–F3 (16 swap rounds) and F4 snapshots are byte-identical
 to `std.moe@1` all-resident and run-identical ×3 (F11, F2–F3), the n-gram-drafter run too; natural, capped and
 adaptive placements are identical to each other; F11's per-step residency equals its replay oracle exactly on every
@@ -1058,7 +1058,7 @@ Built (commits from `7e4a49b`; the panel's 3a findings in their own commits, lis
   borrowing, lending, the return and empty slots as first victims, and carried scores; the check also compares the
   device's map with the host mirror at the end.
 
-Evidence (A5000, `spikes/x3_policies/README.md` "Step 3b", `evidence/x3_policies_rtx-a5000_2026-10-17.json`
+Evidence (A5000, `spikes/x3_policies/README.md` "Step 3b", `docs/dev/evidence/x3_policies_rtx-a5000_2026-10-17.json`
 `step_3b`): every placement snapshot-identical to all-resident with borrowing on — F11 at 25% ×3, 47%, the fill, 10%;
 the n-gram drafter; the decode trace and mixed steps (`chunk_with_decode`), 3 ring and 35 staging borrowings —, F2–F3
 ×3 run-identical; F11 equal to `replay` at every step of every run (up to 23,300 admissions) with the device's map
@@ -1178,8 +1178,8 @@ that is why its 1K prefill sat at its own bound, 896 tok/s, not ≈ 2.5× below)
 
 Taken before the gate because the FreeToken decode row needs it (§13, "Re-banded after step 3"). Commits `8e606ec`
 (residual), `5473c4a` (router), `3015a3c` (q8_1), `7ea4b34` (the review's fixes; one reviewer, clean on re-review).
-Evidence: `spikes/x3c_kernels/README.md`, `evidence/x3c_kernels_rtx-5090_2026-10-17.json`,
-`evidence/x3c_kernels_rtx-a5000_2026-10-17.json`. No core change. Each change was kept by M0.7's rule (≥ max(0.5%,
+Evidence: `spikes/x3c_kernels/README.md`, `docs/dev/evidence/x3c_kernels_rtx-5090_2026-10-17.json`,
+`docs/dev/evidence/x3c_kernels_rtx-a5000_2026-10-17.json`. No core change. Each change was kept by M0.7's rule (≥ max(0.5%,
 3 sd) on some row) and classified as M0.7's D10 does.
 
 | Change | Class | Saving per decode token, RTX 5090 resident 1K / 4K | Verdict |
@@ -1237,7 +1237,7 @@ A small core round, no ABI change (`check_abi --base main` adds nothing to the b
 built" item: the core issued 25 kernels, 2 device copies and 6 host-to-device copies per batch-1 decode step (plus the
 tokens' copy back). Commits `b60328f` (prep), `5452833` (upload); `cdd4785` holds two std nits from 3c's panel.
 Evidence: `spikes/x3d_core/README.md` (the per-step inventory before and after, by phase and issuer),
-`evidence/x3d_core_rtx-5090_2026-10-17.json`, `evidence/x3d_core_rtx-a5000_2026-10-17.json`. Core 4,602 code lines.
+`docs/dev/evidence/x3d_core_rtx-5090_2026-10-17.json`, `docs/dev/evidence/x3d_core_rtx-a5000_2026-10-17.json`. Core 4,602 code lines.
 
 | Change | Class | Saving per decode step, RTX 5090: 30B resident / 30B offload 47% / 8B, at 1K | Verdict |
 |---|---|---|---|
@@ -1324,7 +1324,7 @@ Order as run: step 6 before step 5 (§9). Built:
 - Plants `cpu-wait-skipped` (the first layer's patch skips its wait: 1 of 48 layers, § 6's ≈ 1%) and
   `cpu-gate-up-order` (kernels.ggml_cpu's plant bit).
 
-Evidence (`spikes/x6_cpu/README.md`, `evidence/x6_cpu_rtx-a5000_2026-10-17.json`), RTX A5000, the vehicle:
+Evidence (`spikes/x6_cpu/README.md`, `docs/dev/evidence/x6_cpu_rtx-a5000_2026-10-17.json`), RTX A5000, the vehicle:
 - **F5b's gain** (tune, batch 1, 25% cached, F11, natural prompts, 6 workers on one NUMA node): F5a 68.1 tok/s; at half
   the misses 83.7 / 93.5 / 93.6 with 2 / 4 / 6 threads; shares 0.25 / 0.4 / 0.5 / 0.6 / 0.75 / 1.0: 76.8 / 79.6 /
   93.6 / 94.9 / 105.3 / 52.4 — **+55% at 0.75** (`1,2,2,3,4,5,5,6`), F5b taken (a first run without the 1.0 arm: 67.8
@@ -1415,7 +1415,7 @@ all-resident, F5b run-identical ×2 (the full suite: 1,445 passed).
 
 ### Step 4 (2026-10-17): the development gate's natural-fit rows on the RTX 5080
 
-Evidence: `spikes/x4_gate/README.md`, `evidence/x4_gate_rtx-5080_2026-10-17.json` (one desktop, one day, every arm
+Evidence: `docs/dev/spikes/x4_gate/README.md`, `docs/dev/evidence/x4_gate_rtx-5080_2026-10-17.json` (one desktop, one day, every arm
 interleaved; llama.cpp and FreeToken at x4_refs' pins).
 
 - **Natural fit:** 52.4% of the experts (3,220 / 1,610 / 1,610 cache slots), not ≈ 47%.
@@ -1476,7 +1476,7 @@ interleaved; llama.cpp and FreeToken at x4_refs' pins).
 ### Step 7 as built (2026-10-17): the held-out plugins (acceptance 1)
 
 After the tag `v1-offload-std-api`, three strategies landed as plugin-only commits (`spikes/x7_heldout/README.md`,
-`evidence/x7_heldout_rtx-a5000_2026-10-17.json`). Each diff against the tag touches only its plugin directories, its
+`docs/dev/evidence/x7_heldout_rtx-a5000_2026-10-17.json`). Each diff against the tag touches only its plugin directories, its
 test file and registration lines — one entry point per plugin in `plugins/pyproject.toml` and the generated listing
 `plugins/contracts.txt` —; `check_core_diff.sh` is empty and no `core/` or `std/` path changed:
 
@@ -1566,7 +1566,7 @@ contracts 8 kept; ABI 1.3; core LOC 4,603 / 6,000).
 
 ### Step 8, part 2 (2026-10-18): the close — F5b on the RTX 5080, the capped-fit and F1 rows, the offload locks, D15
 
-Evidence: `spikes/x8_close/README.md`, `evidence/x8_close_rtx-5080_2026-10-18.json` (one RTX 5080 desktop, one day,
+Evidence: `spikes/x8_close/README.md`, `docs/dev/evidence/x8_close_rtx-5080_2026-10-18.json` (one RTX 5080 desktop, one day,
 every arm interleaved, 3 rounds; llama.cpp and FreeToken at x4_refs' pins; the propagation on four card classes).
 
 **F5b's tune (D4, §13's prediction +5–8%).** `holon_tools tune --cpu-split` at the capped fit under F11 (the
@@ -1637,7 +1637,7 @@ regression comes with that merge (`1588c0e`): +0.05–0.06 ms per decode token (
   - The rest is `k_resolve`'s layout residue, +0.22 µs per call.
   - The natural-fit offload lock was propagated to the fix (1 → 2, `8615e26`): its trace is byte-identical, L2 is
     unchanged and passes, the snapshot ×3 is run-identical, and it was approved (delegated).
-  - Record: `evidence/x8_bisect_2026-10-18.json`.
+  - Record: `docs/dev/evidence/x8_bisect_2026-10-18.json`.
 
 **The offload locks.**
 - **Natural fit, F5a — committed** (`plans/unsloth/…/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/1.lock`,

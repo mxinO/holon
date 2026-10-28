@@ -80,16 +80,16 @@ Copyright (c) 2012 Julian Berman. License text below and in `plugins/tests/fixtu
   model-free oracle, `plugins/tests/test_grammar.py`), unmodified upstream files fetched by
   `plugins/tests/fixtures/jsts.sh`; `plugins/tests/fixtures/jsts.SHA256SUMS` pins them.
 
-## In spikes (research code, not part of the engine)
+## In spikes (`docs/dev/spikes/`: research records, not part of the engine)
 
 Each spike fetches its third-party code with a script at a pinned commit; the fetched trees are not committed. The
 tracked scripts and patches below contain or modify upstream lines.
 
-- `spikes/s2_gguf/scripts/vendor_kernels.sh`, `spikes/s2_gguf/patches/0001-iq3_s-grid.patch`,
-  `spikes/s2_gguf/csrc/compat.h` — SGLang's GGUF CUDA kernels (https://github.com/sgl-project/sglang at
+- `docs/dev/spikes/s2_gguf/scripts/vendor_kernels.sh`, `docs/dev/spikes/s2_gguf/patches/0001-iq3_s-grid.patch`,
+  `docs/dev/spikes/s2_gguf/csrc/compat.h` — SGLang's GGUF CUDA kernels (https://github.com/sgl-project/sglang at
   `968726f3`, Apache-2.0; derived via vLLM from llama.cpp, MIT), and llama.cpp's IQ3_S grid (MIT).
-- `spikes/s2_gguf/patches/llama.cpp-s2-perf-cases.patch` — llama.cpp test cases (MIT), at the commit above.
-- `spikes/s3_gdn/vendor.sh`, `spikes/s3_gdn/vendor.patch` — vLLM's copy of flash-linear-attention
+- `docs/dev/spikes/s2_gguf/patches/llama.cpp-s2-perf-cases.patch` — llama.cpp test cases (MIT), at the commit above.
+- `docs/dev/spikes/s3_gdn/vendor.sh`, `docs/dev/spikes/s3_gdn/vendor.patch` — vLLM's copy of flash-linear-attention
   (https://github.com/vllm-project/vllm at `6dd813e0`, Apache-2.0; flash-linear-attention, MIT).
 
 ## License texts

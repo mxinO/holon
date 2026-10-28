@@ -278,7 +278,8 @@ def main() -> None:
               + f" --engine-args {shlex.quote(args.engine_args)}",
               "commit": git("rev-parse", "HEAD"), "state_memory": state_memory, "processor_selected": selected,
               **({"summary": summarize(rounds, costs), "grammar": costs, "rounds": rounds} if rounds else {})}
-    out = ROOT / "evidence" / f"gate_{'cost' if rounds else 'sizing'}_{args.name}_{gpu}_{date}.json"
+    out = ROOT / "local" / "evidence" / f"gate_{'cost' if rounds else 'sizing'}_{args.name}_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     print(json.dumps(record.get("summary"), indent=1))
     print(out)

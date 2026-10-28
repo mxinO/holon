@@ -21,7 +21,8 @@ GPU class (absolute numbers are per board; ratios are the claim).
   - `aa`: A/A arms (`holon_http@aa`, no flags) against `holon_http`, in the ratios' direction: the per-round ratios
     and their mean and sd, the noise floor of the ratios above.
 
-    python bench/report.py evidence/<record>.json ... [--relative-to docs] [--tables bars ratios absolute spec aa]
+    python bench/report.py docs/dev/evidence/<record>.json ... [--relative-to docs] \\
+        [--tables bars ratios absolute spec aa]
 """
 from __future__ import annotations
 

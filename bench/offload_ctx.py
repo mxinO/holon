@@ -120,7 +120,7 @@ def plan(a: argparse.Namespace) -> dict:
 
 
 def requests(a: argparse.Namespace, corpus: list[int] | None = None) -> tuple[dict, list[dict]]:
-    """A worker's warm-up and timed requests: `--requests`' file, else (callers from spikes/) the v1 offsets."""
+    """A worker's warm-up and timed requests: `--requests`' file, else (callers without one) the v1 offsets."""
     if getattr(a, "requests", None):
         p = json.loads(pathlib.Path(a.requests).read_text())
         return p["warmup"], p["requests"]
@@ -293,8 +293,8 @@ def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
 
 
 def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
-    """Holon's `Engine` in process (as spikes/x4_gap/ctx.py), a stamp as each token reaches the host; prefix cache
-    off, so no request reuses another's tokens."""
+    """Holon's `Engine` in process (as milestone X's context spike did), a stamp as each token reaches the host; prefix
+    cache off, so no request reuses another's tokens."""
     import dataclasses
 
     import torch

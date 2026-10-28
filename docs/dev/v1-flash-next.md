@@ -723,7 +723,7 @@ Each plant changes only its own path.
 **One rule for both cards:** budget = 0.9 × (visible − context − weights) − non-lendable peak − staging. The expert
 cache is the budget less KV and per-request state.
 - **Visible VRAM:**
-  - RTX 5080: X measured 15,841 MiB = 16.61 GB (`evidence/x4_gate_rtx-5080_2026-10-17.json`).
+  - RTX 5080: X measured 15,841 MiB = 16.61 GB (`docs/dev/evidence/x4_gate_rtx-5080_2026-10-17.json`).
   - RTX 5090: the nominal 32 GiB less the same ≈ 460 MiB, so 33.88 GB (est.).
 - **Context:** ≈ 0.9 GB, derived from the same evidence. X's 30B pool budget was 11.747 GiB = 12.61 GB with 1.05 GB
   of weights and its ≈ 0.6 GB step peak, so 0.9 × (16.61 − c − 1.05) − 0.6 = 12.61 gives c ≈ 0.88.
@@ -1057,7 +1057,7 @@ document.
 **Status: step 0 measured; N3's decision rule tripped** (rows predicted below 0.9×, §8). Escalated to the owner before
 step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond what the oracle check needed (the judge's
 `qwen4exp` reader and the tiny model, below). Predictions were committed before any run
-(`evidence/fn0_predictions_2026-10-18.json`).
+(`docs/dev/evidence/fn0_predictions_2026-10-18.json`).
 
 **N0, the harness** (`bench/offload_ctx.py`, `spikes/fn0/arms_*.json`, `bench/setup_baselines.sh fn`):
 - **Strata.** Built at `296b59d` with its pinned ggml (llama.cpp `3cf03257`), for sm_120, with `-march=native` on the
@@ -1070,7 +1070,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
 - **No reuse.** With `--prompt-cache 0`, every timed request logged 0 reused tokens. `--max-context 33792` is set.
 - **Drafting off.** A native pack refuses `--spec` < 2, so drafting off is `--spec 2` without `--mtp`, with
   `--suffix-draft 0`. With no drafts, `--spec 2` and `--spec 4` decode alike (89.1 vs 90.8 tok/s).
-- **Calibration** (`tools/calibrate.py`, setup's command, recorded in `evidence/fn0_calibrate_<card>`):
+- **Calibration** (`tools/calibrate.py`, setup's command, recorded in `docs/dev/evidence/fn0_calibrate_<card>`):
   - RTX 5080: `--pcie-frac 0.55 --spec-min-p 0.70 --adapt-every 1 --adapt-swaps 160 --adapt-decay 0.97`;
   - RTX 5090: `--adapt-every 1 --adapt-swaps 80 --adapt-decay 0.97`.
   - Every Strata arm takes them. The MTP-matched arms keep `--spec-min-p 0`.
@@ -1091,7 +1091,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
 | | defaults, MTP | 1,909 · 3,996 · 6,464 | 206.7 · 177.0 · 197.3 | 2.64 · 2.13 · 2.94 | |
 | | llama.cpp 27c7a76 (`-fit`, 3 rounds) | 479 · 507 · 477 | 47.1 · 47.0 · 46.6 | — | |
 
-- **Against the predictions** (`evidence/fn0_predictions_2026-10-18.json`):
+- **Against the predictions** (`docs/dev/evidence/fn0_predictions_2026-10-18.json`):
   - Strata's decode came in above them: no-approx off 90 vs 70 (RTX 5080) and 113 vs 95 (RTX 5090); MTP-matched
     131 / 109 / 119 vs 110 / 105 / 95 on the 5080.
   - Its prefill was within the band: 1.62K / 2.73K / 3.09K vs 1.6K / 3.0K / 3.0K (5080), 2.12K / 4.61K / 5.65K vs
@@ -1101,7 +1101,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
   - IQ2_XS fails with "no ggml MoE kernel for iq1_m with T=2048";
   - IQ3_S drops every prompt over 8,192 tokens despite `--max-seq-len-override 33792`. At 1K / 4K only (3 rounds), it
     runs at 907 / 3,202 prefill and 112.5 / 113.1 decode tok/s on the RTX 5090
-    (`evidence/fn0_n1_freetoken_rtx-5090_2026-10-18.json`).
+    (`docs/dev/evidence/fn0_n1_freetoken_rtx-5090_2026-10-18.json`).
   - Its row stays reported-only (D11).
 
 **Found on the way:**
@@ -1113,7 +1113,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
 - **D11's 1K premise is wrong but harmless.** Strata reads a 1,024-token prompt as a 1,023-token chunk, so its CPU
   share (on by default below 1,024; its log says mean KL ≈ 0.004) is armed. Measured with
   `STRATA_PREFILL_CPU_SHARE=0` it makes no difference: 1,623 vs 1,623 and 2,120 vs 2,124 tok/s (3 rounds,
-  `evidence/fn0_n1_cpu_share_<card>`).
+  `docs/dev/evidence/fn0_n1_cpu_share_<card>`).
 - **The MTP bytes differ.** Strata's runtime draft layer (`tools/mtp_rt.py`) re-quantizes the pack's BF16 dense parts
   to Q8_0. "Identical bytes" (D9) holds for the pack, not for Strata's runtime: Holon's BF16 reads are larger per
   draft.
@@ -1124,7 +1124,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
   unfused) is **222 KB per token** at 2K–8K steps (predicted 200). §7's 8K-step cache on the 5080 drops from 6.7 to
   6.5 GB.
 
-**N2** (`spikes/fn0/n2_rows.py`, `evidence/fn0_n2_rows_<card>`):
+**N2** (`spikes/fn0/n2_rows.py`, `docs/dev/evidence/fn0_n2_rows_<card>`):
 - **Zero-copy row gather.** 6.7 / 7.4 µs for 1 token, then 0.50 / 0.43 µs per token from 1K tokens on (RTX 5080 /
   5090). That is 3.4× the predicted 0.15 µs, but 4 ms per 8K step is still negligible.
 - **O_DIRECT 4 KiB reads.** The SSD saturates at about 380K IOPS (1.56 GB/s) from queue depth 64 with 2 submitting
@@ -1132,7 +1132,7 @@ step 1. Step 1 waits for K's core round anyway. Step 2 is not started beyond wha
   - At 16 rows per token without deduplication, that serves about 24K prefill tok/s.
   - **D5's read-ahead:** queue depth 64 over 2 threads.
 
-**N3, the proxy roofline** (`spikes/fn0/n3_roofline.py` rev 2, `evidence/fn0_n3_roofline_<card>`; method in its
+**N3, the proxy roofline** (`spikes/fn0/n3_roofline.py` rev 2, `docs/dev/evidence/fn0_n3_roofline_<card>`; method in its
 docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
 - **Caches per row.** §7's budget at the lock's step, with the measured 222 KB/token peak.
   - RTX 5080 at 4K steps: 7.41 GB with the MTP pack for the MTP rows; 8.30 GB without it for the drafting-off rows.
@@ -1211,7 +1211,7 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
     non-goal). Rev 1's "int8 KV" cause for the defaults prefill was mostly a modelling gap.
 - `stable_topk` moves to `std.mixers.qsa`'s reference once step 3 writes it (panel A, optional).
 
-**The oracle check (N4's 32K run)** (`spikes/fn0/n4_oracle.py`):
+**The oracle check (N4's 32K run)** (`bench/fn_oracle.py`):
 - **The judge reads FN's GGUFs** (`judge/holon_judge/gguf.py`, `golden.py`, `moe.py`): the `qwen4exp` name map, split
   files, the indexer's fused q/k, lazy PLE rows with the hash constants checked, the scoped tie rule, the mixer as the
   final norm, and the head in row blocks.
@@ -1225,7 +1225,7 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
     is not needed**, and the golden's metadata records the one-shot mode.
   - **Tie rate on the real model:** 57 boundary ties in 357,924 sparse selections (0.016%) over the 12 QSA layers. The
     tie rule rarely changes the full model's selections, unlike the tiny model's ReLU sums.
-  - Record: `evidence/fn0_n4_oracle_cpu_2026-10-18.json`.
+  - Record: `docs/dev/evidence/fn0_n4_oracle_cpu_2026-10-18.json`.
 
 **Lead decisions on the stop (2026-10-18):**
 1. **Decided by the owner (2026-10-20): the Strata defaults rows are reported, not gated.** The gated rows are the
@@ -1313,7 +1313,7 @@ Steps 1 and 3 wait for milestone K's core seams.
 | C-R2-m | The 0.896 / 0.899 cells | **Accepted:** they sit inside the model's error band and are re-predicted after step 7 from measured costs. |
 | A-R2-m | The Q2_0 release item; the judge's std dependency; `stable_topk`'s home | **Accepted.** Plan §10 has the release item. `judge/pyproject.toml` declares `holonlm-std` (pre-existing: the judge imports `holon_std` at 40 sites; relocked). `stable_topk` moves to `std.mixers.qsa`'s reference in step 3. |
 | B-R2-n | The mirror test should show the shared term is nonzero | **Accepted:** it asserts `shared.abs().max() > 1e-4`. |
-| C-m | N1's no-approx arms ran with the CPU share on | **Accepted, noted.** N1 ran with Strata's CPU share on (the as-run arms, with their environments, are inside each `evidence/fn0_n1_*` record's `arms`). It measured as immaterial (`evidence/fn0_n1_cpu_share_<card>`). The committed `spikes/fn0/arms_*` files now set it off. |
+| C-m | N1's no-approx arms ran with the CPU share on | **Accepted, noted.** N1 ran with Strata's CPU share on (the as-run arms, with their environments, are inside each `docs/dev/evidence/fn0_n1_*` record's `arms`). It measured as immaterial (`docs/dev/evidence/fn0_n1_cpu_share_<card>`). The committed `spikes/fn0/arms_*` files now set it off. |
 
 ## 14. Step 4 record: the kernel batch before the core seams (2026-10-19)
 
@@ -1396,7 +1396,7 @@ The fusions that close 20–24 → 16, with owners:
   calls. It edits `kernels.ggml_cuda`, so it goes through the MoE prefill track's ownership rules and FN's own
   propagation.
 
-**QSA latency** (`evidence/fn4_qsa_rtx-a5000_2026-10-19.json`, `..._4k_...`; `bench/fn_kernels.py`): CUDA-graph replay
+**QSA latency** (`docs/dev/evidence/fn4_qsa_rtx-a5000_2026-10-19.json`, `..._4k_...`; `bench/fn_kernels.py`): CUDA-graph replay
 on N4's real indexer inputs (layer 3 of `recall-32k`, 31,878 tokens, 7,969 blocks; layer 7 within 1.5 µs), every
 per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_attend` gated on bf16 KV.
 
@@ -1428,7 +1428,7 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | B-4 | The fp16 comment | **Reworded** as triton_attn's. |
 | C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the attention half's combine into the FFN half's mix (5 HC launches per layer, after A's major), `_write_raw` + `_pool` into `_index`. The serial last-split merge variant was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; the step-7 gate (now ≤ 768 launches per decode token). |
 | C-M2 | Key reads per tile | **Measured, not adopted:** three row-grouped forms, none faster from 2 to 512 rows on sm_86 (above). Shape invariance holds. |
-| C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`spikes/fn0/n4_oracle.py --capture`). |
+| C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`bench/fn_oracle.py --capture`). |
 | C-m2 | Top-k variants | **Measured, dropped** (above). The CUDA radix top-k stays a step-7 contingency. |
 | C-m3 | N3's QSA term | **Done:** rev 4 of §13. One more gated cell is predicted to miss: the RTX 5080's 4K drafting-off decode (0.99; 1.01 at step 7's memory target). |
 | C | Acceptance 3's target | **Restated:** ≤ 20 µs at 4 rows of one sequence; 8 rows reported, not gated. |
@@ -1613,7 +1613,7 @@ qembedding fix, IQ1_M, Q2_0, lending, `pass_rows`) at b6a79f2, then ran step 5 o
 all-resident: experts, the 28.8 GB PLE table and the MTP pack in VRAM. The fp32 goldens streamed one layer at a time
 on the CPU (32 threads; 1.5–3.6 h and 40–72 GB peak RSS per file and set). Every result below is on the final code
 (30c7fd7 and the judge's 9bf717c), re-run after the two fixes. The numbers are in
-`evidence/fn5_step5_rtx-pro-6000_2026-10-20.json`; the drivers are `spikes/fn5/` and the judge's commands.
+`docs/dev/evidence/fn5_step5_rtx-pro-6000_2026-10-20.json`; the drivers are `spikes/fn5/` and the judge's commands.
 
 **Two bugs found and fixed during the step:**
 - **QSA's index kernels addressed units as if dense** (ba55212). The unit views each idx unit's layer segment as raw keys
@@ -1774,7 +1774,7 @@ per unit, strided); `qsa_pool_rope_last` is recorded as caught by the tiny-model
 ### 17.2 Re-runs with the fixed mix (2026-10-21)
 
 Every decode-path result of §17 re-ran on the RTX PRO 6000 with 1f88194. The records are in
-`evidence/fn5_step5_rerun_rtx-pro-6000_2026-10-21.json`, the racy runs beside them as history.
+`docs/dev/evidence/fn5_step5_rerun_rtx-pro-6000_2026-10-21.json`, the racy runs beside them as history.
 
 | Check | With the fixed mix | Step 5 (racy mix) |
 |---|---|---|
@@ -1849,13 +1849,13 @@ history. Acceptance 1(b) is restated (§1). FN's accuracy gates are now all fast
   8K and 32K, a couple of multi-turn. Holon and Strata greedy on the same file, both scored. Bar: Holon within a
   tolerance stated before the run, and no gibberish answer; the answers saved for the owner to read. Licensing
   checked and provenance recorded in the repository.
-  - **The set** (`spikes/fn7/tasks/fn_tasks.jsonl`, 72 items, written by `spikes/fn7/tasks/build.py` with seed 7):
+  - **The set** (`judge/tasks/fn_tasks.jsonl`, 72 items, written by `judge/tasks/build.py` with seed 7):
     all synthetic, so it carries this repository's license and no third-party text — math 24 (eight templates with
     exact answers computed by the generator), code 14 (specifications and asserts written here), reasoning 16
     (seating orders and knights-and-knaves generated with one solution, weekday arithmetic; A–E), recall 12 (needle,
     two-hop and sum needles in generated ledger filler of ≈ 8K and ≈ 31K tokens), multi-turn 6. Reference answers
     (local) score 72 of 72 through the scorer, so the tests and answers agree.
-  - **The run** (`spikes/fn7/tasks/run.py`): IQ2_XS on the RTX PRO 6000; the chat template with thinking on; greedy,
+  - **The run** (`judge/tasks/run.py`): IQ2_XS on the RTX PRO 6000; the chat template with thinking on; greedy,
     8,192 new tokens at most; Holon plain decoding, Strata's no-approximation arm of §17 (drafting off).
   - **The bar, stated before the first run:** Holon within 5 items (6.9 points) of Strata's score on the 72, and no
     Holon answer degenerate (the token limit hit inside the reasoning, nothing after it, or a 40-character span
@@ -1871,7 +1871,7 @@ golden or floor are dropped; MTP, bounded, snapshot, the Strata comparison, laun
 
 **What (c) can see** (measured on the step-5 recordings, §17.1's correction): decode vs prefill on `v1-long` gives KL
 mean 0.04–0.06, KL p50 0.002–0.003 and band \|ΔNLL\| up to 0.5 nats between correct paths, and the HC race did not
-move those statistics. The bars (`spikes/fn7/consistency.py`: KL mean ≤ 0.13, KL p50 ≤ 0.007, every 1K band's
+move those statistics. The bars (`judge/consistency.py`: KL mean ≤ 0.13, KL p50 ≤ 0.007, every 1K band's
 \|ΔNLL\| ≤ 0.75, MTP vs plain KL mean ≤ 0.13 up to the first differing token) are set at about twice that noise, and
 the decode-only plant `qsa_decode_select_shift` must fail them. Kernel races and other errors below the noise are
 L0's to find, on all three SMs.
@@ -1887,7 +1887,7 @@ suite sharded at hand-off, no lock propagation before FN's close, plants and bou
 ### 19.1 Item 0: the breakdown
 
 `spikes/fn7/breakdown.py` profiles eager steps under nsys (graphs off, so every kernel sits under the host's NVTX
-ranges) and attributes each kernel's GPU time to its component. Records: `evidence/fn7_breakdown_2026-10-21.json`.
+ranges) and attributes each kernel's GPU time to its component. Records: `docs/dev/evidence/fn7_breakdown_2026-10-21.json`.
 The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's changes (7d94ed5); 4K / 32K context
 (31,744 tokens, the longest prompt's chat part); ms of GPU time per step, kernels in brackets:
 
@@ -1939,7 +1939,7 @@ The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's chang
 
 ### 19.3 Accuracy gate (c), first run
 
-`spikes/fn7/consistency.py` on IQ2_XS, RTX PRO 6000, bf16 (`evidence/fn7_consistency_IQ2_XS_2026-10-21.json`;
+`judge/consistency.py` on IQ2_XS, RTX PRO 6000, bf16 (`docs/dev/evidence/fn7_consistency_IQ2_XS_2026-10-21.json`;
 a952ba9, the HC and indexer changes in): **passes**.
 
 | Pair (4 prompts, 49,596 positions) | KL mean (≤ 0.13) | KL p50 (≤ 0.007) | KL p99 | mean ΔNLL | worst 1K band (≤ 0.75) |
@@ -1953,7 +1953,7 @@ The pre-registered plant (`qsa_decode_select_shift`, which must fail) runs once 
 ### 19.4 Accuracy gate (d) and the sample dump (e)
 
 The 72-item set on IQ2_XS, RTX PRO 6000, greedy with thinking on, 8,192 new tokens at most
-(`evidence/fn7_tasks_IQ2_XS_2026-10-21/`: both engines' answers, the scores, `samples.md`). **Passes** the bar
+(`docs/dev/evidence/fn7_tasks_IQ2_XS_2026-10-21/`: both engines' answers, the scores, `samples.md`). **Passes** the bar
 stated before the run (within 5 items, no Holon-only degenerate answer):
 
 | | Correct | Math 24 | Code 14 | Reasoning 16 | Recall 12 | Multi-turn 6 | Degenerate |
@@ -2018,7 +2018,7 @@ item 1. From step 7 so far only FN-only units changed (`kernels.hc_triton`, the 
 at FN's close only FN's own locks are new; no other model's lock moves.
 
 **Items 2 and 3 — where the GPU time goes, per component, in all three engines** (RTX PRO 6000, IQ2_XS; ms of GPU
-time; `evidence/fn7_component_comparison_2026-10-21.json`). Holon: nsys breakdowns (§19.1, with levers C and B).
+time; `docs/dev/evidence/fn7_component_comparison_2026-10-21.json`). Holon: nsys breakdowns (§19.1, with levers C and B).
 llama.cpp: its own `qwen4exp` graph and CUDA kernels at 27c7a76 (newer than the pin), `llama-bench` under nsys, each
 graphed decode kernel attributed by its place in the half-layer (`dsv4_hc_post` delimits). Strata: its own stage
 timers (`STRATA_VERIFY_PROFILE`, `STRATA_PREFILL_TIMING`), whose GPU stamps add about a fifth to its decode (9.0 ms
@@ -2064,7 +2064,7 @@ lfu with F5a, lent prefill scratch with tail lending, the 5080's memory levers);
 (IQ2_XS) and an RTX 5090 (IQ3_S) — a chat, gates (c) and (d), decode / MTP decode / prefill against Strata on the
 same card; the 5080 decode step per component. Not yet: the PLE SSD tier (later, per the owner), tune's interleaved
 F5b benchmark (step 6 (b)), the plants and exactness checks of step 6's close. Records:
-`evidence/fn6_e2e_2026-10-22.json`, the task answers in `evidence/fn6_tasks_2026-10-22/`; the measuring scripts in
+`docs/dev/evidence/fn6_e2e_2026-10-22.json`, the task answers in `docs/dev/evidence/fn6_tasks_2026-10-22/`; the measuring scripts in
 `spikes/fn6/` (`ring_diag.py`, `ring_exact.py`, `cached.py`, `hitrate.py`, `f5b_split.py`).
 
 ### 20.1 What was built
@@ -2145,7 +2145,7 @@ Before the lending fixes: decode 0.92 / 0.98 / 0.88, prefill 0.67 / 0.46 / 0.41,
 
 - **Chat** through `holon serve` (OpenAI frontend, MTP on): a haiku and its explanation, 406 tokens in 5.8 s on the
   5080, 333 in 3.8 s on the 5090 (wall, from the request; reasoning included).
-- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, 4 prompts, 49,596 positions; the deployment's
+- **(c) GPU self-consistency** (`judge/consistency.py`, bf16, 4 prompts, 49,596 positions; the deployment's
   flags, its own step as the reference). Ran on 21bb40f, before the lending fixes: a ring step is bitwise a staged one
   on the card, and placement changes no bits (the offload store is bitwise the resident store). **Both pass**:
 
@@ -2246,7 +2246,7 @@ The items, in order: 0 the bench's hit rates both ways; 1 the ring's copies and 
 3 the shared expert on a forked stream; 4 F5b's CPU speed, then a Strata-style split; 5 memory reclaim; 6 MTP
 (catch-up, the head's experts pinned); 7 the HC prefill as bf16x3; 8 D/E. F5b as it measured in §20.5 is dropped as
 a lever. Each item: L0, the GPU self-consistency gate, a 3-round A/B. Development rules as §19's. Records:
-`evidence/fn7_step7_2026-10-22.json`; the scripts in `spikes/fn6/` and `spikes/fn7/`.
+`docs/dev/evidence/fn7_step7_2026-10-22.json`; the scripts in `spikes/fn6/` and `spikes/fn7/`.
 
 **Gate (d)'s degenerate clause** (§20.3): the lead's recommendation is recorded there, pending the owner.
 
@@ -2558,7 +2558,7 @@ come from the policy and the recorded needs; ring and stage copies never change 
 
 ### 21.8 Why the CPU split loses (the lead's item 1), and the likely-routed measurement (item 2's gate)
 
-**The timeline** (`spikes/fn7/f5b_timeline.py`: the 5080's graphed MTP steps under nsys with `--cuda-graph-trace=node`,
+**The timeline** (`bench/timeline.py`: the 5080's graphed MTP steps under nsys with `--cuda-graph-trace=node`,
 an NVTX range per CPU task in kernels.cpu_task; verify-only share 0.25 at 6 threads; 40 steps):
 - *Overlap:* the CPU's work is off the critical path. A layer's task starts 1.5 µs after the GPU's `k_signal` and
   takes 86 µs (p50; 218 at p90) while the GPU's own work between the signal and its wait is 190 µs (fetch, the hits'
@@ -2684,7 +2684,7 @@ revisited only if a row is still more than 5% short on acceptance after the pass
 
 **Where a pass goes** (the 5080 at 1K, graphed steps in nsys). A first split charged the drafter 5.24 ms: it counted
 the time between graphed steps, which the timeline spike's per-step sync and per-node tracing make (1.3 ms of host
-and launch). Without the sync and traced per graph (`spikes/fn7/f5b_timeline.py run --no-sync`), the GPU idles 0.03 ms between steps (the next
+and launch). Without the sync and traced per graph (`bench/timeline.py run --no-sync`), the GPU idles 0.03 ms between steps (the next
 step launches while one runs). The drafter is 3.9 ms against Strata's 2.36: the head's experts were fetched every
 sub-step (0.83 ms, its mmvq waiting on it) — the profile never counted the head's group, so F2 seeded 4 of its 512
 experts — while Strata keeps its draft layer resident (871 MiB, 675 of them experts). The output head is 1.15 ms of
@@ -3048,7 +3048,7 @@ Strata's prefill 4–5% slower, its decode the same):
 
 Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows, and the 5090's 1K prefill. For the last,
 the replay now names the prompt's own lending first (3.7–3.9 GB of its ≈ 18.7), then the share (1.2–1.9 GB).
-Evidence: `evidence/fn7_step7i_2026-10-23.json`.
+Evidence: `docs/dev/evidence/fn7_step7i_2026-10-23.json`.
 
 **The lesson, and the rule from here on** (the lead's call, 2026-10-23): §21.14's replay decoded 8 tokens a request
 against the bench's 256, and so predicted holes that the bench's own decode refills. Every prediction now replays the
@@ -3177,7 +3177,7 @@ queued but did not get a node and was cancelled.
 | Prefill | 0.97 | 1.20 | 1.02 | **0.92** | 1.14 | 1.03 |
 
 Still below the bar: MTP decode at the 5080's 1K and the 5090's three rows. The 5090's 1K prefill is now above its
-0.9 bar. Evidence: `evidence/fn7_step7j_2026-10-23.json`.
+0.9 bar. Evidence: `docs/dev/evidence/fn7_step7j_2026-10-23.json`.
 
 ### 21.17 Where FN's speed stands (for the owner)
 
@@ -3324,7 +3324,7 @@ experts against Holon's 48.1%):
 - The hole fill `lfu.fill` (the holes refill themselves within 256 decode tokens).
 - `moe.lend_peak` on the 5090.
 
-Speed work for FN stops here. Evidence: `evidence/fn7_step7k_2026-10-23.json`.
+Speed work for FN stops here. Evidence: `docs/dev/evidence/fn7_step7k_2026-10-23.json`.
 
 **Owner's ruling (2026-10-24):** the speed bars stay "Holon ≥ Strata", MTP-matched decode included, judged in tok/s;
 the per-pass rate × pooled acceptance is reported, not a substitute. FN's speed work is reopened (a round after the
@@ -3408,7 +3408,7 @@ close's plants run; locks and propagation wait for it, so the locks propagate on
 - **The bar cards keep the RAM tier** (the lead's call): their hosts hold the table. The SSD tier is the fallback for a
   desktop that cannot, at 4 I/O threads there (a lock setting).
 
-Evidence: `evidence/fn_close_ple_ssd_2026-10-23.json`.
+Evidence: `docs/dev/evidence/fn_close_ple_ssd_2026-10-23.json`.
 
 ### 22.2 A serving OOM at 64 sequences, fixed (the lead's call: a real serving bug)
 
@@ -3439,7 +3439,7 @@ sequences ran out of memory in the snapshot trace. Found by `exact.py` at the cl
 
 ### 22.3 Offload exactness (acceptance 4)
 
-`spikes/fn7/exact.py` records the snapshot trace (`holon_judge.snapshot`) under named configurations of one
+`judge/exact.py` records the snapshot trace (`holon_judge.snapshot`) under named configurations of one
 deployment and diffs each against the first run of the first configuration. The trace is an 8K prompt, its
 prefix-hit extension, and 62 short requests through every graph bucket, with logprobs and seeded sampling. Each
 configuration gets a fresh engine on the same state budget, the MTP head drafting, and a plant must differ:
@@ -3467,7 +3467,7 @@ F5b is not used by any deployment, so its bound against the path-aware floor doe
 
 ### 22.4 Gates (c) and (d) on the final deployments
 
-- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, the 4 `v1-long` prompts, 49,596 positions, the
+- **(c) GPU self-consistency** (`judge/consistency.py`, bf16, the 4 `v1-long` prompts, 49,596 positions, the
   deployed MTP pack, 5346d3a). Each card's drafting-off deployment flags; the MTP pair adds the head. **Both pass:**
 
   | Pair | 5080 KL mean / p50 / p99 | 5090 KL mean / p50 / p99 |
@@ -3528,7 +3528,7 @@ ple_state_bf16, shexp_gate_off and mtp_stream0):
 - **A cheap cover:** the PLE block and the QSA selection on the real model checked against their oracles on the
   engine's own inputs. Built in §22.6; all four plants fail it.
 
-### 22.6 The cover, built (`spikes/fn7/cover.py`; the lead's call, 2026-10-24)
+### 22.6 The cover, built (`judge/cover.py`; the lead's call, 2026-10-24)
 
 **What it checks.** The engine serves one long prompt in prompt steps of the deployment's size. Its PLE block and its
 first QSA layer's selection are then checked against their float32 oracles, which take the whole prompt in one piece
@@ -3642,7 +3642,7 @@ Panel C: the MTP-vs-plain pair's bar (KL mean ≤ 0.13) could not see a verify-p
 - gate (d) ran drafting off;
 - `exact.py` compares placements of one tree.
 
-**The bars from here** (`spikes/fn7/consistency.py`, `MTP_BARS`), about 5× the clean pairs of 5346d3a (KL mean 0.0020
+**The bars from here** (`judge/consistency.py`, `MTP_BARS`), about 5× the clean pairs of 5346d3a (KL mean 0.0020
 / 0.0044, p99 0.023 / 0.063 on the 5080 / 5090):
 - KL mean ≤ 0.02;
 - KL p99 ≤ 0.3;
@@ -3747,7 +3747,7 @@ The pair runs at the reference's step: the deployment's, `--prefill-step`. It ha
 
 ### 22.10 The final tree (8818cdca): locks, propagation, gates, D11
 
-Evidence: `evidence/fn_close_final_2026-10-24.json`. The runtime is 8818cdca; gate (c)'s script is 00ebb81d (the same
+Evidence: `docs/dev/evidence/fn_close_final_2026-10-24.json`. The runtime is 8818cdca; gate (c)'s script is 00ebb81d (the same
 runtime: spikes and docs only).
 
 **The second runtime round** (panels B and C, re-review):
@@ -3824,7 +3824,7 @@ warm-up run first in each allocation; Holon / Strata no-approx; per round in bra
 The lead's order: A the VRAM ledger, B the allocator's reserve, C a peak diet, D the PCIe rate, E the draft-quality
 check, F 8 or more prompts per MTP row. Locks and propagation wait for this round.
 
-### 23.1 A: the VRAM ledger (`spikes/fn7/ledger.py`, each card's final deployments, a fresh engine per row)
+### 23.1 A: the VRAM ledger (`bench/ledger.py`, each card's final deployments, a fresh engine per row)
 
 | 5090, MTP deployment (5K steps, 0.985; GiB) | 1 seq | 4 | 8 | 16 |
 |---|---|---|---|---|
@@ -4005,7 +4005,7 @@ a stack of 0 bytes, after the plan's 1K, 4K and 32K prompts and a sampled reques
 
 ### 23.7 F and the round's bench: 8 prompts per row, the ship rule per item
 
-**The run** (`evidence/fn_speed_2026-10-24.json`). One allocation per card. Each of the bench's three contexts
+**The run** (`docs/dev/evidence/fn_speed_2026-10-24.json`). One allocation per card. Each of the bench's three contexts
 had 8 prompts, the first 3 the earlier rows', and each arm ran 2 rounds in the bench's alternating order: 16 samples
 per row. Three checkouts of each deployment ran side by side:
 - **a** — b6f75fc6, before 168562e and C;

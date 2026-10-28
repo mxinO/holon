@@ -63,7 +63,7 @@ W4 weights and **8-bit activations by default on every class** (D3). Two gates, 
 14. **Speed:** 8B FP8 tg128 ≥ 0.8× llama-bench Q8_0 of the same checkpoint on the 5080 and 4090; pp512 recorded
     against its prediction. **Memory:** 8B FP8 on the 5080 ≥ 32K KV tokens at 0.9 (34.3K predicted; fallback 0.98).
 15. **Locks:** 8B FP8 on rtx-5080 and rtx-4090, snapshots ×3. **Met** at M0.7's close (`docs/dev/m07-perf.md` §17.2,
-    `evidence/propagate_m07-close_2026-10-15.json`): `Qwen/Qwen3-8B-FP8` lock 1 on each class at the M0.6 flags
+    `docs/dev/evidence/propagate_m07-close_2026-10-15.json`): `Qwen/Qwen3-8B-FP8` lock 1 on each class at the M0.6 flags
     (`max_seqs` 32, `max_step_tokens` 2048, `max_model_len` 16384) and the grammar processor; prefill Tier B against
     the W8A8 floor PASS (RTX 5080 top-1 98.14%, KL p99 4.26e-2, ΔPPL vs floor −0.066% ± 0.127%; RTX 4090 98.19%,
     4.17e-2, −0.127% ± 0.092%); snapshots run-identical ×3 on both.
@@ -409,7 +409,7 @@ As M0.1 / M0.2: `bench/llama_bench.py` in-process vs llama-bench at the pin (`-p
 on`), medians of repetitions 2–5, from the fixed bench worktree; `llama-server` vs Holon over HTTP on the decode and
 agent traces. Predictions: FP4 at W4A8 0.95–1.1× (same kernels; the post-scale folds into an existing copy); FP8
 tg128 0.85–1.0× Q8_0 (gate B1 predicts it end to end first), pp512 0.4–0.9× (sm_89's fp8 MMA peak is half its
-int8 peak). Evidence: `evidence/<name>_<gpu-class>_<date>.json`.
+int8 peak). Evidence: `docs/dev/evidence/<name>_<gpu-class>_<date>.json`.
 
 ## 5. Implementation plan
 
@@ -576,7 +576,7 @@ copy is a named plan-time workspace.
 | GGUF NVFP4 layout | refused at the source | the kernels accept `ggml.nvfp4/gguf.native` (no `scale2`): only L0 builds it (the type sweeps); the GGUF source still refuses such files |
 | W4A4 emulator | A4 (emulators) | `holon_judge.w4a4`, written in A3 for L0 (A4's W4A4-dynamic floor reuses it). The code check's tie classes are the outcomes of the emulation with the fast-math results nudged by up to 4 ulp — 1/r and 0.5 / s together, max\|v\| / 6 alone; MXFP4's log2(amax) by max(4 ulp, 2^-20) — NVFP4's row scale read from the kernel. MXFP4's activation quantizer is not Blackwell-only, so its check runs on sm_86 too (0 differing codes there) |
 | test-only entry | the quantized activation blocks | FP4 only (`quantize_fp4`: llama.cpp's native quantizer for a dense f32 input, as mmq calls it); q8_1 codes stay `q8_1.py`'s emulation |
-| acceptance 4 | the five HF FP4 files; the two 8B NVFP4 byte-equal to the pin's converter | `python -m holon_judge hf-quant-check --repack cuda --llama-cpp …`: every FP4 module of all five files byte-compared with the converter's `_nvfp4_pack` / `repack_mxfp4_blocks` (the bytes it writes into a GGUF; no GGUF conversion is made), besides gguf-py × scale2 against the reference. Met: 252 + 252 + 252 + 18624 + 18432 modules, 0 ulp, 0 differing bytes (`evidence/repack_hf-fp4_rtx-a5000_*`) |
+| acceptance 4 | the five HF FP4 files; the two 8B NVFP4 byte-equal to the pin's converter | `python -m holon_judge hf-quant-check --repack cuda --llama-cpp …`: every FP4 module of all five files byte-compared with the converter's `_nvfp4_pack` / `repack_mxfp4_blocks` (the bytes it writes into a GGUF; no GGUF conversion is made), besides gguf-py × scale2 against the reference. Met: 252 + 252 + 252 + 18624 + 18432 modules, 0 ulp, 0 differing bytes (`docs/dev/evidence/repack_hf-fp4_rtx-a5000_*`) |
 | provenance of the repack | "our code", following the converter (D8) | adapted from llama.cpp cbe28bb3 (`_nvfp4_pack`, `repack_mxfp4_blocks`, ggml-cuda.cu's row padding): marked in `plugin.py`, listed in `[provenance]` and THIRD_PARTY_NOTICES.md |
 | sm_120a L0 at `fa5b701` | — | `test_native_w4a4_experts_against_their_own_codes` failed at `in` 2048, 513 tokens (both FP4 types): the test scored the one-token second chunk, which runs mmvq at q8_1 as the plugin dispatches per 512-token chunk, against native W4A4 codes. The reference now follows each chunk's path (the q8_1 emulator on mmvq) and the call counters must show both; the kernels were right (the 512-token chunk within 0.005 of its own codes on the RTX PRO 6000) |
 | note for A4 | — | the D3 mode check and plant N7 need the dense counters too: `Linear` keeps its kernel at `m._q._kernel` (not `m._kernel`, which `judge/holon_judge/engine.py` reads), and `_by_path` folds the modes into paths |
@@ -596,7 +596,7 @@ copy is a named plan-time workspace.
 | Tier A | 1e-4 sanity ceiling | `l2 --ceiling 1e-4` beside the A16 floor's budgets. The reference kernels cache an expert stack's f32 decode up to 128 MiB (every test model's) and above decode only the experts each call routes to (a 30B's stacks, ≈ 122 GB in all, are never held), so a 30B Tier A fits 64 GB; its cost is a decode per layer and step: MXFP4 in torch ≈ 1 s a layer (vectorized, `ref_kernels.ggml_mxfp4`), gguf-py's k- and i-quants on one core ≈ 10–20 s a layer, so a 30B GGUF Tier A of those types takes hours |
 | owners (D10) | every target tensor | the five FP4 files in A3's record (with the repack), amd-quark's `Pack_fp4` in A2's; A4 ran the two FP8 files |
 
-**A4 results** (A5000 host; records `evidence/*_m06-lowp_*_2026-10-14.json`, `evidence/owners_m06-hf-files_cpu_2026-10-14.json`).
+**A4 results** (A5000 host; records `docs/dev/evidence/*_m06-lowp_*_2026-10-14.json`, `docs/dev/evidence/owners_m06-hf-files_cpu_2026-10-14.json`).
 
 - **Owners per real file** (D10, 0 modules over bound): nvidia 8B / 30B NVFP4 — ModelOpt `NVFP4QTensor` (≤ 1 ulp) and
   gguf-py on llama.cpp's repack (exact); RedHatAI 8B NVFP4 — compressed-tensors (≤ 2 ulp), gguf-py; Yi30 8B MXFP4 —
@@ -700,7 +700,7 @@ copy is a named plan-time workspace.
 | bounded | 30B NVFP4 graphs vs eager on the 4090 (§4.8; acceptance 10 lists it with the locks) | run now with the rest of the bounded checks, with M0.2's padding plant as its calibration; acceptance 10's lock-time run stays A6's |
 | W4A4 noise reference | — | the two W4A4-dynamic floors recorded again on the RTX PRO 6000 (local, not goldens): a second bf16 realization of the same emulation, scored against the recorded floors |
 
-**A5 results** (records `evidence/tier-b_m06-lowp_<class>_2026-10-14.json`, `evidence/w4a4-report_m06-lowp_rtx-5080_2026-10-14.json`).
+**A5 results** (records `docs/dev/evidence/tier-b_m06-lowp_<class>_2026-10-14.json`, `docs/dev/evidence/w4a4-report_m06-lowp_rtx-5080_2026-10-14.json`).
 Runs at 9dd588d or f5a37b1. The second only counts a quantized LM head apart, so the HF files' runs, whose heads are
 bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
 
@@ -802,7 +802,7 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
 | **bug found** — a lock's stored pools across classes | — | `holon_tools` seeded the checks' state pools with the start lock's stored snapshot `pool_bytes` even when that lock is another class's (`nearest_class`). The RTX 4090 lock's 12.78 GiB pools ran the RTX 5080 tune out of memory. Fixed in e6c9f53: they seed only on the lock's own class, and from another class the pools are measured. `test_propagate.py::test_cli_on_cpu` is extended and failed before the fix. It never showed before because every second class so far had more memory than the first (Qwen3-8B bf16: 4090, then 5090), where the carried pools merely went unmeasured |
 | commits | — | measured at 74bfabb (the code of A5 + the decisions); the RTX 5080 8B NVFP4 lock at e6c9f53 (the tools fix, outside every lock's units) |
 
-**A6 results** (records `evidence/{fit,bars}_m06-lowp_<class>_2026-10-14.json`, `evidence/bench_m06-8b-nvfp4-*_rtx-5080_2026-10-14.json`, `evidence/locks_m06-lowp_2026-10-14.json`).
+**A6 results** (records `docs/dev/evidence/{fit,bars}_m06-lowp_<class>_2026-10-14.json`, `docs/dev/evidence/bench_m06-8b-nvfp4-*_rtx-5080_2026-10-14.json`, `docs/dev/evidence/locks_m06-lowp_2026-10-14.json`).
 
 - **Clock screen** (60 s of bf16 matmuls before each desktop's runs): SM median / min 2722 / 2610 MHz (RTX 5080),
   2670 / 2670 (RTX 4090), 2602 / 2400 (RTX 5090). Thermal slowdown was 0% of samples on all three. The power cap was
@@ -871,10 +871,10 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
   values. A2 onward changes `std.weights.*` hashes again, so approving per step would repeat approvals for
   byte-identical results; the delegated approval (passing verdicts only) is taken at the close.
 - **A0's bar:** Qwen3-8B Q4_K_M on the RTX 5080 pp512 8356 / tg128 155.05 vs M0.1's 8291 / 155.0 (+0.8%, +0.0%);
-  llama-bench at `cbe28bb3`, the new baseline, 7906 / 158.3 (`evidence/bars_qwen3-8b-gguf-cbe28bb3_*`). L0 at A0 + A1:
+  llama-bench at `cbe28bb3`, the new baseline, 7906 / 158.3 (`docs/dev/evidence/bars_qwen3-8b-gguf-cbe28bb3_*`). L0 at A0 + A1:
   sm_120a 242 passed, sm_89 241 passed, memcheck 0 errors.
 - **Quark's oracle:** the real `amd-quark/Qwen3-30B-A3B-MXFP4` agrees exactly with `quark.Pack_fp4` and with gguf-py on
-  llama.cpp's repack over all 18432 modules (`evidence/owner_qwen3-30b-a3b-mxfp4-amd-quark_cpu_*`).
+  llama.cpp's repack over all 18432 modules (`docs/dev/evidence/owner_qwen3-30b-a3b-mxfp4-amd-quark_cpu_*`).
 - **A5's three items (lead, 2026-10-14):**
   1. **The W4A4 report is recorded as is; no rule change.** Acceptance 7 asks that the files be scored, not that
      they pass. The KL budgets hold (1.04×, 1.08×). Top-1 is below the 0.25-point slack, at −0.29 (NVFP4) and −0.54
@@ -889,14 +889,14 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
      count, and sampled rows are never scored); no metric bar was loosened.
 
 **Gate A close (panel, 2026-10-14).** No code blockers. The two missing records and the minors are done:
-- **Acceptance 3, recorded** (`evidence/chat_m06-lowp_rtx-a5000_2026-10-14.json`): the M0.1 chat set's six
+- **Acceptance 3, recorded** (`docs/dev/evidence/chat_m06-lowp_rtx-a5000_2026-10-14.json`): the M0.1 chat set's six
   requests ran in process on the six serving targets (nvidia 8B / 30B NVFP4, RedHatAI 8B NVFP4, Yi30 8B MXFP4,
   amd-quark 30B MXFP4, the MXFP4_MOE GGUF). Settings: greedy, the files' chat templates, max_tokens 400, `a8`. Every
   file loads through `models/qwen3` / `models/qwen3_moe` unchanged, and every answer is correct and well formed.
   The three 30B files reach the 215-minute trip; the 8B files' thinking is still on correct steps at the 400-token
   cap, as in M0.1's record. The math and multi-turn prompts were rebuilt from M0.1's record, since its script was
   not kept. The GGUF NVFP4 refusal and the FP8 files' CPU loading were A2's / A4's tests and Tier A.
-- **Acceptance 5 at the head after A3's fix** (`evidence/l0_m06-lowp_gate-a_2026-10-14.json`, commit 2695df7; the
+- **Acceptance 5 at the head after A3's fix** (`docs/dev/evidence/l0_m06-lowp_gate-a_2026-10-14.json`, commit 2695df7; the
   later commits change only the judge's mode check and docs). A3's L0 script ran: ggml dense / MoE, the quantized
   units, the W4A4 emulator, and memcheck. sm_120a (RTX 5080): 230 passed, 1 skipped (an sm_86-only split). sm_89
   (RTX 4090): 222 passed, 9 skipped (PDL and native W4A4 are sm_90+ / Blackwell). Memcheck was 0 errors on both,
@@ -936,7 +936,7 @@ bf16, are the same at either, and the GGUF prefill verdicts are f5a37b1's.
 | L0's decode check | e4m3 → bf16 over the 254 finite codes | through the decode kernel itself (weight row r = code r, one-hot activations, one row and two), so P4 bites it; the random-weight GEMM checks do not see P4 (it moves only the smallest weights, as §4.8 predicts for L2) |
 | new files | the plugin | `plugins/holon_plugins/kernels/triton_fp8/` (kernel, plugin, manifest), `plugins/tests/test_triton_fp8.py`, `plugins/tests/memcheck_triton_fp8.py`, `bench/fp8_kernels.py`, the plants; no core or std change |
 
-**B1 results — acceptance 11, the decode gate: passes on both cards** (`evidence/decode-gate_m06-lowp_<class>_2026-10-14.json`;
+**B1 results — acceptance 11, the decode gate: passes on both cards** (`docs/dev/evidence/decode-gate_m06-lowp_<class>_2026-10-14.json`;
 kernel at 55616dd). Clock screens: SM median 2722 MHz (RTX 5080, power cap active 54% of samples), 2715 MHz (RTX
 4090, 0%), no thermal slowdown. Times per decode step at batch 1 (36 layers):
 
@@ -955,14 +955,14 @@ M = 1 … 16 costs the same within 5% on every shape (the kernel stays bandwidth
 runs 100.9 / 93.3 tok/s (llama-bench 101.2 / 91.7). The bf16 head is 14% of the 4090's predicted step (cuBLAS's GEMV
 reaches 743 GB/s there); a Q8_0 head costs llama.cpp about half that.
 
-**B2 results — acceptance 12: met** (`evidence/l0_m06-lowp_gate-b_2026-10-14.json`). `plugins/tests/test_triton_fp8.py`:
+**B2 results — acceptance 12: met** (`docs/dev/evidence/l0_m06-lowp_gate-b_2026-10-14.json`). `plugins/tests/test_triton_fp8.py`:
 9 passed on sm_120a (RTX 5080) and sm_89 (RTX 4090) with the default and then the pinned prefill configurations
 (4b1d6fc, 8f00005); memcheck 0 errors on both, twice. The first sm_89 run (55616dd) failed 6 of 8 (the double
 rounding above), sm_120a passed. Plants under L0 on both classes: P1 and P2 fail every GEMM check (5), P3 the act
 quant check and every W8A8 check (6), P4 the decode exactness check (2): all as predicted.
 
 A first end-to-end run of `Qwen/Qwen3-8B-FP8` in process (`bench/llama_bench.py`, the FP4 locks' flags; recorded in
-`evidence/fp8-prefill_m06-lowp_<class>_2026-10-14.json`, not B3's bars): tg128 95.7 (RTX 5080) and 87.6 (RTX 4090),
+`docs/dev/evidence/fp8-prefill_m06-lowp_<class>_2026-10-14.json`, not B3's bars): tg128 95.7 (RTX 5080) and 87.6 (RTX 4090),
 0.946× and 0.955× llama-bench Q8_0, within 2.3% / 1.2% of the B1 prediction; pp512 10340 and 15110, **1.20× and
 1.16×** llama-bench Q8_0 (8598 / 13065), above §4.10's predicted 0.4–0.9× band (it assumed llama.cpp's int8 mmq
 near its peak, twice sm_89's fp8 rate; the prefill sweep's best W8A8 GEMMs reach 149–192 TFLOPS on the 5080 and
@@ -991,8 +991,8 @@ no `[build]` module (Triton JIT, as `triton_attn` / `triton_experts`). Recorded 
 | fit | `empty_cache()` after load, merges and `prepare`, or confirm `expandable_segments` (Gate A close) | expandable segments take effect (every segment expandable; the release's engine checks it), and `platform.free_memory` already empties the cache before its read. Neither returns the hole: **finding below** |
 | RTX 4090 node | — | the first B3 node's clock screen read SM median 525 MHz with software thermal slowdown in 100% of samples; its bars (pp512 0.46×, tg128 0.47×) are void and its runs were moved aside (`local/`, not evidence). Everything on the 4090 was rerun on another node (2670 MHz, no slowdown) |
 
-**B3 results** (records `evidence/{tier-b-fp8,bars-fp8}_m06-lowp_<class>_2026-10-14.json`,
-`evidence/fit-fp8_m06-lowp_rtx-5080_2026-10-14.json`; commit 6f90dfe, the floor at 76cc7e1 only adds its report).
+**B3 results** (records `docs/dev/evidence/{tier-b-fp8,bars-fp8}_m06-lowp_<class>_2026-10-14.json`,
+`docs/dev/evidence/fit-fp8_m06-lowp_rtx-5080_2026-10-14.json`; commit 6f90dfe, the floor at 76cc7e1 only adds its report).
 Clock screens: RTX 5080 SM median 2677 MHz (power cap 50% of samples), RTX 4090 2670 MHz; no thermal slowdown.
 
 - **W8A8 floor** (bf16, one A5000; vs the golden): KL p99 4.14e-2, top-1 98.20% (A16: 5.60e-3, 98.96%). It is 3.3× the
@@ -1073,7 +1073,7 @@ Clock screens: RTX 5080 SM median 2677 MHz (power cap 50% of samples), RTX 4090 
    gone (both pass).
 4. **Locks and snapshots** (acceptance 15) wait for the lead.
 
-**Results after decision 1** (`evidence/fit-merge-order_m06-lowp_2026-10-14.json`, commit 2eb40e4).
+**Results after decision 1** (`docs/dev/evidence/fit-merge-order_m06-lowp_2026-10-14.json`, commit 2eb40e4).
 Each fit was run twice on the same node and commit: once as built, and once with `adjacent` disabled (shard order, as
 before). Flags: the FP4 locks' (0.9, `max_seqs` 32, bf16 KV); a 16128-token prompt served each time. Clock screens
 2670 MHz on both cards, no thermal slowdown.
@@ -1107,9 +1107,9 @@ before). Flags: the FP4 locks' (0.9, `max_seqs` 32, bf16 KV); a 16128-token prom
   reciprocal, which is not the correctly rounded quotient: 572483 of 2^20 random f32 values differ. Triton had
   lowered the kernel's `/ 448.0` the same way, so the earlier L0 agreed. The W8A8 emulation (`modes.fp8_act`) now
   divides by a tensor (IEEE). The FP8 L0 at e6fcce5: 9 passed on the RTX 5080 (sm_120a) and the RTX 4090 (sm_89),
-  memcheck 0 errors on both; clock screens 2670 MHz, no thermal slowdown (`evidence/l0_m06-lowp_gate-b_2026-10-14.json`).
+  memcheck 0 errors on both; clock screens 2670 MHz, no thermal slowdown (`docs/dev/evidence/l0_m06-lowp_gate-b_2026-10-14.json`).
 - **The W8A8 floor re-recorded** (f43ed18): KL p99 4.18e-2 (was 4.14e-2), top-1 98.17%. Scored against it, also in
-  `evidence/tier-b-fp8_m06-lowp_<class>_2026-10-14.json`:
+  `docs/dev/evidence/tier-b-fp8_m06-lowp_<class>_2026-10-14.json`:
   - prefill Tier B passes: RTX 5080 1.02×, top-1 98.21%; RTX 4090 0.98×, 98.28%;
   - P3 still fails (1.46×, top-1 97.78% < 97.92%);
   - P7 fails (2.15×; fail if > 2×), as predicted.

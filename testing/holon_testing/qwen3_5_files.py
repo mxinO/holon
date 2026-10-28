@@ -15,7 +15,7 @@ from transformers import Qwen3_5TextConfig
 from transformers.models.qwen3_5 import modeling_qwen3_5 as hf
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-LLAMA = ROOT / "spikes" / "s2_gguf" / "third_party" / "llama.cpp"
+LLAMA = ROOT / "local" / "llama.cpp"           # a llama.cpp checkout (git-ignored), for its converter
 TOKENIZER = sorted(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3.8-27B/snapshots/*"))
 
 

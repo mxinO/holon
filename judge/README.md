@@ -146,3 +146,15 @@ prompt plus 128 tokens; give the host payload level its floor in `--pressure-arg
 (`branch-off-by-one`, `tentative-shift`) are judged by `bounded --policies`, which adds sessions starting in the second
 and third waves so `branch` checkpoints are taken and adopted; `tentative-shift` is also a tier plant, which the audit
 catches (a payload filed away from its position) when the policy is `answer:1` alone.
+
+## Accuracy scripts beside the package
+
+Full-model checks run from the repository root, each documented in its docstring (`--help`):
+
+| script | check |
+|---|---|
+| `consistency.py` | FN's GPU self-consistency gate: decode, chunked and MTP paths against one prefill (docs/dev/v1-flash-next.md §18 (c)) |
+| `cover.py` | FN's PLE block and QSA selection against their float32 oracles on the engine's own inputs (§22.6) |
+| `exact.py` | the snapshot trace under named configurations of one deployment: run-identity, placements, offload vs all-resident, plants (§22) |
+| `tasks/` | FN's task-accuracy set (`build.py`, `fn_tasks.jsonl`) and its Holon / Strata runs and scoring (`run.py`; §18 (d), (e)) |
+| `f5b_l2.py` | F5b's bounded L2 candidate and its split for the path-aware floor (docs/dev/v1-offload.md §6) |

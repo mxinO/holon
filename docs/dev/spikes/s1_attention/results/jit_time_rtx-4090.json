@@ -1,0 +1,81 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA GeForce RTX 4090",
+  "sm": "89",
+  "num_sms": 128,
+  "host": "rtx-4090-desktop",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12"
+ },
+ "per_module": [
+  {
+   "module": "decode_cudacore_bf16_hd128",
+   "cold_s": 10.963204234023578,
+   "warm_s": 0.3566328169836197,
+   "cache_bytes": 1204911
+  },
+  {
+   "module": "decode_cudacore_bf16_hd256",
+   "cold_s": 10.117964335018769,
+   "warm_s": 0.3774454759841319,
+   "cache_bytes": 1204575
+  },
+  {
+   "module": "decode_cudacore_fp8_hd128",
+   "cold_s": 10.189006011001766,
+   "warm_s": 0.14058091599144973,
+   "cache_bytes": 1319162
+  },
+  {
+   "module": "decode_cudacore_fp8_hd256",
+   "cold_s": 10.271203779004281,
+   "warm_s": 0.028850784001406282,
+   "cache_bytes": 1301874
+  },
+  {
+   "module": "prefill_fa2_bf16_hd128",
+   "cold_s": 25.219817670993507,
+   "warm_s": 0.5078621839929838,
+   "cache_bytes": 5408502
+  },
+  {
+   "module": "prefill_fa2_bf16_hd256",
+   "cold_s": 26.03372868601582,
+   "warm_s": 0.13955758599331602,
+   "cache_bytes": 5290214
+  },
+  {
+   "module": "prefill_fa2_fp8_hd128",
+   "cold_s": 28.569574054999975,
+   "warm_s": 0.2886185840179678,
+   "cache_bytes": 6674489
+  },
+  {
+   "module": "prefill_fa2_fp8_hd256",
+   "cold_s": 60.982994740013964,
+   "warm_s": 0.5050760330050252,
+   "cache_bytes": 7641983
+  }
+ ],
+ "prebuild": {
+  "modules": 8,
+  "build_jit_specs_s": 121.84455663300469,
+  "wall_s": 125.72082798799966,
+  "cache_bytes": 29364704,
+  "layout": [
+   ".cache/flashinfer/0.6.12/89/cached_ops/.ninja_deps",
+   ".cache/flashinfer/0.6.12/89/cached_ops/.ninja_log",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/89/cached_ops/tmp"
+  ]
+ }
+}

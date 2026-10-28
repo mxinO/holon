@@ -26,7 +26,7 @@
 - The fused q/k norm + rope + KV write (docs/dev/m07-perf.md D3, §6): a token that opens a page written one slot late
   (L2 fails; so would its L0), and decode rows rotated one position late (`bounded`: the configurations' decode
   rows against the reference's teacher-forced prefill rows).
-- Expert offload (docs/dev/v1-offload.md §6, the snapshots with adaptive placement on: spikes/x3_policies): a staged
+- Expert offload (docs/dev/v1-offload.md §6, the snapshots with adaptive placement on): a staged
   miss read from the neighbouring slot; a two-phase swap's copy unordered and unwaited (with an unseeded delay on
   the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
   precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
@@ -277,7 +277,7 @@ def linear_rows_swap() -> Iterator[None]:
 @contextlib.contextmanager
 def rows_off_by_one() -> Iterator[None]:
     """The PLE table's SSD tier (§6.3, D5): every row read one row past its id's (`std.tiered.rows@1`'s read list), in
-    eager steps and graph captures alike; the RAM-vs-SSD identity fails (spikes/fn7/ple_ssd.py, the GPU unit test)."""
+    eager steps and graph captures alike; the RAM-vs-SSD identity fails (judge/exact.py, the GPU unit test)."""
     from holon_std.tiered import rows
     with mock.patch.object(rows._Reads, "plant", 1):
         yield
@@ -1983,7 +1983,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     **QWEN35_PLANTS,
     # The fused q/k norm + rope + KV write (docs/dev/m07-perf.md D3)
     "qk-rope-kv-page-slot": qk_rope_kv_page_slot, "qk-rope-kv-decode-position": qk_rope_kv_decode_position,
-    # Expert offload with adaptive placement (docs/dev/v1-offload.md §6; spikes/x3_policies)
+    # Expert offload with adaptive placement (docs/dev/v1-offload.md §6)
     "resolve-off-by-one": resolve_off_by_one, "map-before-landing": map_before_landing,
     "map-stale-slot": map_stale_slot, "owner-race": owner_race,
     "owner-race-unchecked": lambda: owner_race(checked=False),

@@ -33,7 +33,7 @@ declaring `core_abi = ">=1.0,<2.0"` load unchanged (`core/abi.txt`).
 The core change moved the core's `src`, which every lock pins, so all 22 lock histories were carried to v0.1.1's
 code on one clock-screened desktop per card: 22 of 22 approved, each with the judge's L2 inside its floor budget, a
 snapshot trace byte-identical to the previous lock's and run-identical over three runs
-(`evidence/v011_lock_propagation_2026-10-16.json`).
+(`docs/dev/evidence/v011_lock_propagation_2026-10-16.json`).
 
 | card | locks | sweep |
 |---|---|---|
@@ -44,7 +44,7 @@ snapshot trace byte-identical to the previous lock's and run-identical over thre
 
 Performance was not re-measured: the kernels, settings and outputs are the same, and the pi re-run's decode TPOT p50
 (11.79 ms) is within v0.1.0's runs on that card (11.72–11.90 ms). The pi re-run on the RTX 5090's new lock
-(`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`) passed the demo task at three thinking levels, with the level
+(`docs/dev/evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`) passed the demo task at three thinking levels, with the level
 changing the rendered prompt and pi reporting the server's cache reads.
 
 ## Install

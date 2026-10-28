@@ -21,11 +21,15 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
 | `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
 | `mtp_decision.py` | release design D3's MTP default rule from `run.py` records of a plain lock against MTP over it (`holon@mtp`): per-round TPOT, p95 gap and p95 TTFT ratios, the power estimate after 4 rounds, the verdict |
-| `offload_ctx.py` | v1 offload's reference rows (docs/dev/v1-offload.md acceptance 3, D14; docs/dev/v1-flash-next.md D11): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts (`--corpus fn`: D11's corpus and span offsets), llama-server, FreeToken, Strata (`--serve`, raw ids) and Holon arms interleaved over rounds, peak VRAM; `spikes/x4_refs/`, `spikes/fn0/` |
+| `offload_ctx.py` | v1 offload's reference rows (docs/dev/v1-offload.md acceptance 3, D14; docs/dev/v1-flash-next.md D11): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts (`--corpus fn`: D11's corpus and span offsets), llama-server, FreeToken, Strata (`--serve`, raw ids) and Holon arms interleaved over rounds, peak VRAM |
 | `tier_resume.py` | milestone K's resume rows on a 27B lock with the state tier (`docs/dev/v1-kv-tiers.md` acceptance 3): 3a (a parked conversation resumed from VRAM, RAM and SSD, idle or beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain steps), 3f (the two-engine restart); same-session interleaved arms, clocks sampled per row |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 | `perf_smoke.py` | the per-change perf smoke (docs/dev/release.md §22): `holon_tg.py` batch-1 decode of this tree against main's checkout, ABBA rounds of fresh processes, each asserted to import its own tree, clock-screened |
 | `client_smoke.py` | the real-client smoke at each merge (docs/dev/release.md §22): `holon serve` driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes |
+| `ledger.py` | a deployment's VRAM ledger per `max_seqs`: parameters per component, device pools, the startup profile's reserve, the arena; `--peak` traces the worst step (docs/dev/v1-flash-next.md §23.1) |
+| `timeline.py` | where a verify pass's CPU share sits against the GPU's work on graphed steps, under nsys (`run`, then `summarize`; docs/dev/v1-flash-next.md §21) |
+| `placement_replay.py` | M6's offline replay of expert placement policies over routing traces, CPU only (`--selfcheck`; docs/dev/v1-offload.md §8; the placement plugins' references) |
+| `fn_oracle.py` | FN N4's streamed fp32 oracle run on the CPU; `--capture` saves the QSA indexer inputs `fn_kernels.py` reads (docs/dev/v1-flash-next.md N4) |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
@@ -40,8 +44,8 @@ HTTP backends fit the same protocol: `add` posts a streaming request, `step` ret
 | llama.cpp, upstream | `f12aaa344c97` (2026-10-16) | the same build; the newest upstream, an ungated second column (re-pinned when the suite ran, release step 8) |
 | [SGLang](https://github.com/sgl-project/sglang) | release 0.5.21 (2026-10-01) | own venv: torch 2.13.0+cu130 and its pinned kernels; HF checkpoints only |
 | [FreeToken](https://github.com/FlashML-org/FreeToken) | `74a387777708` (2026-10-10) | own venv: torch 2.14.1+cu130, `[accel]` (FlashInfer, sglang-kernel); its extension built against that torch |
-| llama.cpp and FreeToken, offload (`setup_baselines.sh offload`) | `f74e2fa6a31c` / `21d9578bde22` (2026-10-16) | `llama.cpp-offload` (with `--moe-cache-mib`) and `freetoken-offload`: v1 offload's references (`spikes/x4_refs/`) |
-| llama.cpp and [Strata](https://github.com/Niko1221/Strata), FN (`setup_baselines.sh fn`) | `27c7a769da16` (2026-10-17) / `296b59d2f73c` (2026-10-14), Strata's ggml at llama.cpp `3cf03257f219` | `llama.cpp-fn` (`qwen4exp`) and Strata's engine (`.envs/strata/strata`, sm_120, CPU code `-march=native`, so built on the bar cards' host class): FN's references (docs/dev/v1-flash-next.md D11, `spikes/fn0/`) |
+| llama.cpp and FreeToken, offload (`setup_baselines.sh offload`) | `f74e2fa6a31c` / `21d9578bde22` (2026-10-16) | `llama.cpp-offload` (with `--moe-cache-mib`) and `freetoken-offload`: v1 offload's references (docs/dev/v1-offload.md D14) |
+| llama.cpp and [Strata](https://github.com/Niko1221/Strata), FN (`setup_baselines.sh fn`) | `27c7a769da16` (2026-10-17) / `296b59d2f73c` (2026-10-14), Strata's ggml at llama.cpp `3cf03257f219` | `llama.cpp-fn` (`qwen4exp`) and Strata's engine (`.envs/strata/strata`, sm_120, CPU code `-march=native`, so built on the bar cards' host class): FN's references (docs/dev/v1-flash-next.md D11) |
 
 Both use their defaults otherwise (mini-sglang: overlap scheduling, CUDA graphs, radix cache; nano-vllm: CUDA
 graphs, prefix cache, 256-token KV blocks). Every backend gets the same `--max-batch` (max running sequences) and
@@ -101,9 +105,10 @@ taken before release step 7 drew each turn at its own offset, so their corpus pr
   step reporting delay. Warmup (every session's first turn at t=0, 16 output tokens, other prompt tokens so nothing
   is cached for the measured run) is excluded.
 - **ABBA**: every round runs each backend once in a fresh process (model load, warmup, all traces), in reverse order on odd rounds; rounds ≥ 2.
-- Evidence: `evidence/bench_<workload>_<gpu-class>_<date>.json` with the command, commit, GPU class, baseline
-  commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
-  timings and worker logs stay in `bench/.out/` (gitignored).
+- Evidence: `local/evidence/bench_<workload>_<gpu-class>_<date>.json` (`--evidence-dir`; gitignored) with the command,
+  commit, GPU class, baseline commits and package versions, engine configs and KV capacities, per-request rows and
+  summaries; a record a document cites moves to `docs/dev/evidence/`. Raw per-step timings and worker logs stay in
+  `bench/.out/` (gitignored).
 
 ## Smokes per change and per merge (docs/dev/release.md §22)
 
@@ -148,7 +153,7 @@ L=plans/<model id>/<class>/cu130-torch2.11/<n>.lock
 python bench/bars.py --name qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L --rounds 3
 python bench/run.py --name release-qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L \
     --backends holon llamaserver --corpus judge/prompts/v1.jsonl --traces bench/traces/decode_b1.jsonl
-python bench/report.py evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
+python bench/report.py docs/dev/evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
 ```
 
 ## Agent demo (release design D7)
@@ -165,7 +170,7 @@ first.
 ```bash
 holon serve unsloth/Qwen3.8-27B-GGUF                 # the card's 27B lock
 python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --runs 3 \
-    --out evidence/demo_rtx-5080_<date>.json
+    --out local/evidence/demo_rtx-5080_<date>.json
 ```
 
 `demo/pi_run.py` is a report-only test with the pi coding agent instead (OpenAI chat completions, through
@@ -176,8 +181,8 @@ own tests (`demo/workloads_task/`). `--report` adds the speed and endpoint summa
 
 ```bash
 python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 --pi <prefix>/node_modules/.bin/pi \
-    --task demo --runs 3 --out evidence/agent_test_pi_rtx-5090_<date>.json
-python bench/demo/pi_run.py --report evidence/agent_test_pi_rtx-5090_<date>.json
+    --task demo --runs 3 --out local/evidence/agent_test_pi_rtx-5090_<date>.json
+python bench/demo/pi_run.py --report local/evidence/agent_test_pi_rtx-5090_<date>.json
 ```
 
 ## Reproduce
@@ -201,7 +206,7 @@ rounds are meant to have the GPU to themselves (check `nvidia-smi` first).
 
 Holon at commit 826e467 (E4): **eager, depth 0** — no CUDA graphs, no overlap — against mini-sglang's defaults, so
 the gap is expected: these are baseline numbers for the harness, not a verdict on the design. 2 ABAB rounds each,
-GPU idle before every run; pooled over rounds. Evidence: `evidence/bench_{decode,agent,cpu_step}_rtx-a5000_2026-10-07.json`.
+GPU idle before every run; pooled over rounds. Evidence: `docs/dev/evidence/bench_{decode,agent,cpu_step}_rtx-a5000_2026-10-07.json`.
 
 **Decode throughput, Qwen3-8B bf16, prompt 256 + output 256** (acceptance §3.4-2: within 10% of mini-sglang)
 

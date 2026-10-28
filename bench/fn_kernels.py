@@ -3,7 +3,7 @@ at
 4 rows of one sequence, 32K context, on the RTX 5080; 8 rows reported), replayed from a CUDA graph as the decode step
 runs them, on real indexer inputs, with the caches out of L2.
 
-- **Inputs:** a QSA layer's raw index keys and last 8 queries from N4's 32K oracle run (`spikes/fn0/n4_oracle.py
+- **Inputs:** a QSA layer's raw index keys and last 8 queries from N4's 32K oracle run (`bench/fn_oracle.py
   --capture`, the `recall-32k` prompt: 31,878 tokens, 7,969 blocks); the pooled keys built from them by
   `qsa_index@1`. Query rows: the last positions of one sequence (a decode row and its drafts), or one row each of
   separate sequences (separate copies of the keys). `qsa_attend` reads random bf16 KV and applies the output gate.
@@ -23,7 +23,7 @@ from holon_std.mixers.qsa import reference
 PAGE, RATIO, BUDGET, HQ, HKV, D, ROT, THETA, EPS = 16, 4, 2048, 24, 2, 256, 64, 1e7, 1e-6
 
 ap = argparse.ArgumentParser()
-ap.add_argument("--capture", required=True, help="spikes/fn0/n4_oracle.py --capture's file")
+ap.add_argument("--capture", required=True, help="bench/fn_oracle.py --capture's file")
 ap.add_argument("--layer", type=int, default=3)
 ap.add_argument("--tokens", type=int, default=None, help="the prompt's first this many tokens (default: all)")
 ap.add_argument("--rows", default="1,2,4,8,512", help="query rows; above 8, of one sequence only (a prefill sub-batch)")

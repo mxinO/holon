@@ -131,7 +131,7 @@ Non-goals:
 
 **Measured on the 5080:**
 - UD-IQ3_S with q8_0 KV at `max_seqs` 4 and 4 checkpoints: 1940 MiB of KV, which is 3654 units, which is
-  **58 464 tokens** (`evidence/fit_qwen3.8-27b-gguf_2026-10-09.json`).
+  **58 464 tokens** (`docs/dev/evidence/fit_qwen3.8-27b-gguf_2026-10-09.json`).
 - A batch-1 decode step takes **15.6 ms** (tg128 63.7 tok/s); a batch-4 step takes 21.2 ms.
 - GDN state is 147 MiB per sequence.
 
@@ -566,7 +566,7 @@ No model, mixer or drafter names enter the core; the CI denylist enforces this.
 
 ## 10. Gate A status (2026-10-13): acceptance met for MTP and n-gram; Gate B (DFlash2) next
 
-Records in `evidence/` (`bench_m04nat-*`, natural text; `bench_m04-*`, uniform token ids) and `judge/results/`;
+Records in `docs/dev/evidence/` (`bench_m04nat-*`, natural text; `bench_m04-*`, uniform token ids) and `judge/results/`;
 locks in `plans/`. Gate A's code review: the panel of three, clean after two rounds (§9 style findings fixed in
 37f8368, d002fd7 and 96f8d50).
 

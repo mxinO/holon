@@ -47,7 +47,7 @@ dev = ["pytest>=8", "pytest-xdist", "ruff>=0.6", "import-linter>=2.1", "httpx", 
 [tool.ruff]
 line-length = 120
 target-version = "py312"
-extend-exclude = ["spikes",  # throwaway spike code; reviewed per spike README, not linted
+extend-exclude = ["docs/dev/spikes",  # spike records; reviewed per spike README, not linted
                   "plugins/holon_plugins/kernels/fla/vendor"]  # vendored upstream code (vendor.sh, vendor.patch)
 
 [tool.ruff.lint]

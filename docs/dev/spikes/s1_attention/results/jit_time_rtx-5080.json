@@ -1,0 +1,137 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA GeForce RTX 5080",
+  "sm": "120",
+  "num_sms": 84,
+  "host": "rtx-5080-desktop",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12"
+ },
+ "per_module": [
+  {
+   "module": "decode_cudacore_bf16_hd128",
+   "cold_s": 7.849846316996263,
+   "warm_s": 0.3565375870093703,
+   "cache_bytes": 1246270
+  },
+  {
+   "module": "decode_cudacore_bf16_hd256",
+   "cold_s": 6.948193921009079,
+   "warm_s": 0.3561935879988596,
+   "cache_bytes": 1244462
+  },
+  {
+   "module": "decode_cudacore_fp8_hd128",
+   "cold_s": 7.192867763995309,
+   "warm_s": 0.03537605601013638,
+   "cache_bytes": 1351635
+  },
+  {
+   "module": "decode_cudacore_fp8_hd256",
+   "cold_s": 7.047268015987356,
+   "warm_s": 0.0250788690027548,
+   "cache_bytes": 1335341
+  },
+  {
+   "module": "prefill_fa2_bf16_hd128",
+   "cold_s": 15.43444380001165,
+   "warm_s": 0.1470125819905661,
+   "cache_bytes": 5939046
+  },
+  {
+   "module": "prefill_fa2_bf16_hd256",
+   "cold_s": 15.70378736499697,
+   "warm_s": 0.283169018002809,
+   "cache_bytes": 5748791
+  },
+  {
+   "module": "prefill_fa2_fp8_hd128",
+   "cold_s": 15.837782992006396,
+   "warm_s": 0.13535265100654215,
+   "cache_bytes": 7084086
+  },
+  {
+   "module": "prefill_fa2_fp8_hd256",
+   "cold_s": 17.20779876598681,
+   "warm_s": 0.030090796994045377,
+   "cache_bytes": 7983949
+  },
+  {
+   "module": "xqa_bf16_p16_hd128_g4_q1",
+   "cold_s": 4.069756974000484,
+   "warm_s": 0.11260611799662001,
+   "cache_bytes": 650685
+  },
+  {
+   "module": "xqa_bf16_p16_hd128_g4_q3",
+   "cold_s": 4.078167108993512,
+   "warm_s": 0.11435023800004274,
+   "cache_bytes": 670922
+  },
+  {
+   "module": "xqa_bf16_p16_hd256_g6_q1",
+   "cold_s": 4.056380709007499,
+   "warm_s": 0.0968100640020566,
+   "cache_bytes": 666461
+  },
+  {
+   "module": "xqa_bf16_p16_hd256_g6_q3",
+   "cold_s": 4.085150812010397,
+   "warm_s": 0.0964163769967854,
+   "cache_bytes": 694249
+  },
+  {
+   "module": "xqa_fp8_p16_hd128_g4_q1",
+   "cold_s": 4.037516308002523,
+   "warm_s": 0.09725080100179184,
+   "cache_bytes": 635549
+  },
+  {
+   "module": "xqa_fp8_p16_hd128_g4_q3",
+   "cold_s": 4.057974440001999,
+   "warm_s": 0.09692697299760766,
+   "cache_bytes": 660982
+  },
+  {
+   "module": "xqa_fp8_p16_hd256_g6_q1",
+   "cold_s": 4.022803939995356,
+   "warm_s": 0.10292535700136796,
+   "cache_bytes": 650237
+  },
+  {
+   "module": "xqa_fp8_p16_hd256_g6_q3",
+   "cold_s": 4.045223602995975,
+   "warm_s": 0.10102973799803294,
+   "cache_bytes": 670742
+  }
+ ],
+ "prebuild": {
+  "modules": 16,
+  "build_jit_specs_s": 60.19250653400377,
+  "wall_s": 63.38135673999204,
+  "cache_bytes": 36375340,
+  "layout": [
+   ".cache/flashinfer/0.6.12/120f/cached_ops/.ninja_deps",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/.ninja_log",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/tmp",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3"
+  ]
+ }
+}

@@ -285,7 +285,7 @@ def d9(sweeps: list[dict], profile: dict, table: dict) -> dict:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--class", dest="cls", required=True)
-    ap.add_argument("--dir", default="evidence")
+    ap.add_argument("--dir", default="docs/dev/evidence")
     ap.add_argument("--json")
     args = ap.parse_args()
     profiles = load(args.dir, args.cls, "profile")
