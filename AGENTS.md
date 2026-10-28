@@ -11,6 +11,7 @@
 | a std unit or another plugin (state, sampling, speculation, frontends) | `docs/design.md` §5–§7 and §9 (feature → plugin map) |
 | the judge, goldens, locks and their tools | `docs/design.md` §4.4, §4.6, §10.3; `judge/README.md`; `tools/README.md` |
 | benchmarks | `bench/README.md` |
+| an experiment or a one-off measurement | "Experiments live in `local/`" below |
 
 `docs/plan.md` (roadmap and milestone status) and the development records in `docs/dev/` (one per milestone) hold
 the history and decisions; read them only for the item at hand, never as required reading.
@@ -43,7 +44,12 @@ the history and decisions; read them only for the item at hand, never as require
 - References (mini-sglang, nano-vllm, vLLM, SGLang, FreeToken, Strata, kvmem) are **studied, not copied**. Write
   our own plugin-native code. Only kernels may be borrowed, under design §5.6, as "Third-party code" below says.
 - No claim without a measurement. Every performance claim gets an evidence record (command, fingerprint class,
-  plan_id or commit, raw numbers) under `evidence/` or the spike's `results/`.
+  plan_id or commit, raw numbers). Only records a tracked document cites go in `docs/dev/evidence/`, under the name
+  the document uses.
+- **Experiments live in `local/`** (gitignored): new experiments, one-off spikes, their scratch output and records not
+  yet cited (the bench tools write to `local/evidence/` by default). A tool that outlives its question moves to
+  `judge/` (accuracy) or `bench/` (performance) under a plain name, with `--help`; a spike a document cites as how
+  its numbers were produced may stay, with its README, under `docs/dev/spikes/`.
 - Every bug fix comes with a test that fails before and passes after.
 - **Lean tests.** A new test catches something no existing test catches; otherwise extend or parametrize an existing
   one. Share expensive setup (module-scoped engines, one run checked by several assertions), prefer tiny models on

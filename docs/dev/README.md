@@ -1,9 +1,16 @@
 # Development records
 
 One record per milestone: its design, the review rounds that challenged it, the decisions taken, and the build record
-step by step, with links to the measurements in `evidence/` and the experiments in `spikes/`. They explain why the
-code is the way it is; code comments cite them by section (e.g. "v1-offload.md D8"). They are history, not required
-reading: start from [the README](../../README.md), [the design](../design.md) and [the roadmap](../plan.md).
+step by step, with links to the measurements in [`evidence/`](evidence/README.md) and the experiments that produced
+them. They explain why the code is the way it is; code comments cite them by section (e.g. "v1-offload.md D8"). They
+are history, not required reading: start from [the README](../../README.md), [the design](../design.md) and
+[the roadmap](../plan.md).
+
+The records keep only what a document cites: measurement records in `docs/dev/evidence/`, and in
+[`docs/dev/spikes/`](spikes/README.md) the spikes cited as how a document's numbers were produced. Tools that outlived
+their spike are in `judge/` (`consistency.py`, `cover.py`, `exact.py`, `f5b_l2.py`, `tasks/`) and `bench/`
+(`ledger.py`, `timeline.py`, `placement_replay.py`, `fn_oracle.py`). Other `spikes/<name>/…` paths in these records
+name experiments not kept in the repository. New experiments live in the untracked `local/`.
 
 | Record | Milestone |
 |---|---|

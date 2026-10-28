@@ -26,6 +26,10 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
 | `perf_smoke.py` | the per-change perf smoke (docs/dev/release.md §22): `holon_tg.py` batch-1 decode of this tree against main's checkout, ABBA rounds of fresh processes, each asserted to import its own tree, clock-screened |
 | `client_smoke.py` | the real-client smoke at each merge (docs/dev/release.md §22): `holon serve` driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes |
+| `ledger.py` | a deployment's VRAM ledger per `max_seqs`: parameters per component, device pools, the startup profile's reserve, the arena; `--peak` traces the worst step (docs/dev/v1-flash-next.md §23.1) |
+| `timeline.py` | where a verify pass's CPU share sits against the GPU's work on graphed steps, under nsys (`run`, then `summarize`; docs/dev/v1-flash-next.md §21) |
+| `placement_replay.py` | M6's offline replay of expert placement policies over routing traces, CPU only (`--selfcheck`; docs/dev/v1-offload.md §8; the placement plugins' references) |
+| `fn_oracle.py` | FN N4's streamed fp32 oracle run on the CPU; `--capture` saves the QSA indexer inputs `fn_kernels.py` reads (docs/dev/v1-flash-next.md N4) |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
