@@ -1787,9 +1787,9 @@ _BESIDE += [("stage", p, late, 1) for p, late in (("readahead_wait_after_tiered"
 @pytest.mark.parametrize("variant, plant, late, seqs", _BESIDE)
 def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide_one, variant, plant, late, seqs):
     """D8g (docs/dev/v1-glm.md): an eager staging step's gathers by copy engines beside the compute — in rounds through
-    the fixed set (steps below ROUNDS_BELOW: front parts of 8, SSD rounds of 8 landing rows in two halves), or each
-    miss in its own staging slot (`stage`, here from any size, with read-ahead hits; at four sequences, steps with
-    decode rows too) — serve the
+    the fixed set (steps below ROUNDS_BELOW), or each miss in its own staging slot (`stage`, here from any size, with
+    read-ahead hits; at four sequences, steps with decode rows too) — front parts of 8, SSD rounds of 8 landing rows in
+    two halves — serve the
     resident store's outputs with every piece's bytes the file's, under each of the delayed-producer harness's delays
     (`_beside_delayed`; and a late worker, `worker_late`). Each plant, one fence dropped under the delay that would
     expose it, is caught where its condition occurred."""
@@ -1828,7 +1828,7 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
         assert calls and all(r == (variant == "rounds") for r, *_ in calls), calls
         fronts, rounds, hits = (max(c[i] for c in calls) for i in (1, 2, 3))
         assert same and not wrong, (same, wrong)
-        assert fronts >= (2 if variant == "rounds" else 1) and rounds >= (3 if seqs == 1 else 1), (fronts, rounds)
+        assert fronts >= 2 and rounds >= (3 if seqs == 1 else 1), (fronts, rounds)
         assert plant is None or fired["deferred"], fired
         assert late != "worker" or hits, calls        # (the late worker delayed read-ahead hits)
     else:

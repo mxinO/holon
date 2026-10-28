@@ -300,8 +300,8 @@ class DeviceResolver:
                 n: torch.Tensor):
         """D8g (docs/dev/v1-glm.md): an eager staging call's gathers by copy engines beside the compute. After the tier
         op round 0's reads are signalled (landing half 0), each miss gets its part — the read-ahead hits' and the RAM
-        misses' (in rounds: by `rounds_q`, through the fixed set; else one part, each miss its own staging slot), then
-        the SSD rounds' (by the landing rows) —, the read-ahead set waited for (A G3-m1: before `tiered`, so every
+        misses' by `rounds_q` (in rounds: through the fixed set; else each miss in its own staging slot), then the SSD
+        rounds' (by the landing rows) —, the read-ahead set waited for (A G3-m1: before `tiered`, so every
         stream after it follows the read), and the lists read back (`tiered`). Returns (slots, part [T, k], landed):
         `landed` a `_Beside`, its length known once the lists are back — taken after part −1 is enqueued."""
         store, g = self.store, self.group
@@ -309,11 +309,10 @@ class DeviceResolver:
         self._tier_op(ids, kinds, fetch, n)
         store.round_rows(0)                      # round 0's reads first, on main before `tiered` (half 0)
         store.io.signal(self.io_slots[0])
-        rounds, a = store.lent.rounds, store.landing_rows
-        size = store.rounds_q if rounds else self.stage.shape[1]
+        rounds, a, size = store.lent.rounds, store.landing_rows, store.rounds_q
         c_hit, c_ram = store.n_hit.max().long(), store.n_ram.max().long()
-        first_ram = -(-c_hit // size) if rounds else 0
-        first_ssd = first_ram + -(-c_ram // size) if rounds else (c_hit + c_ram > 0).long()
+        first_ram = -(-c_hit // size)
+        first_ssd = first_ram + -(-c_ram // size)
         lists = [(store.hit, store.n_hit, 0, size, 0)] if store._ahead else []
         lists += [(fetch, store.n_ram, first_ram, size, 0), (store.ssd, store.n_ssd, first_ssd, a, size)]
         if rounds:
@@ -437,21 +436,17 @@ class _Beside:
         return self.load()[i]
 
     def load(self) -> list:
-        """The call's lists back (the host waits `tiered`), its first copies issued: front part 0 (stage: its one
-        front part) under the control stream after `tiered`, round 1's signal, round 0's copies."""
+        """The call's lists back (the host waits `tiered`), its first copies issued: front part 0 (stage: every front
+        part, each miss its own slot) under the control stream after `tiered`, round 1's signal, round 0's copies."""
         if self.parts is not None:
             return self.parts
         s, res = self.store, self.resolver
         self.lists = s.read_lists(self.tiered)
         q, a = s.rounds_q, s.landing_rows
-        size = q if self.rounds else res.stage.shape[1]
         n_hit, n_ram, n_ssd = (int(self.lists[k].max()) for k in ("n_hit", "n_ram", "n_ssd"))
-        n_hit = n_hit if s._ahead else 0
-        if self.rounds:                          # (kind, first entry, past its last) per front part
-            self.front = [[("hit", p, p + size)] for p in range(0, n_hit, size)] + \
-                [[("ram", p, p + size)] for p in range(0, n_ram, size)]
-        else:
-            self.front = [[("hit", 0, n_hit), ("ram", 0, n_ram)]] if n_hit + n_ram else []
+        n_hit = n_hit if s._ahead else 0          # (kind, first entry, past its last) per front part
+        self.front = [[("hit", p, p + q)] for p in range(0, n_hit, q)] + \
+            [[("ram", p, p + q)] for p in range(0, n_ram, q)]
         self.n_rounds = -(-n_ssd // a)
         self.keys = [[] for _ in self.front]
         self.events, self.computed, self.signalled, self.waited = {}, {}, {0}, set()

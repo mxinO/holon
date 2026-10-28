@@ -863,11 +863,13 @@ it).
   is enqueued (`moe.units`' pipelined pass takes it then), the host waits `tiered` there (`TieredStore.read_lists`) and
   issues the call's copies part by part. G3-m1 is its first fix: the read-ahead set's `k_wait` sits on main before
   `tiered` (every stream after `tiered` follows the read). Where it differs from the text above:
-  - **Stage mode's parts:** one front part (every read-ahead hit and RAM miss, each in its own staging slot, started
-    under the control stream after `tiered`), then the SSD rounds through the same control-stream machinery as rounds
-    mode (two halves, their own tables, F5), minus F3b (slots used once). Rounds mode: front parts of `rounds_q`, part
-    0 under control, the others with main current (asserted), then SSD rounds with F3b; read-ahead hits (steps of
-    2,048 prompt tokens or more: 4K) go through the front parts as the RAM misses do.
+  - **Stage mode's parts:** front parts of `rounds_q` (read-ahead hits, then RAM misses, each in its own staging slot),
+    all started under the control stream after `tiered`, then the SSD rounds through the same control-stream machinery
+    as rounds mode (two halves, their own tables, F5), minus F3b (slots used once). (A first build gave stage one
+    front part: at 32K main then waited the whole call's copies after part −1, ≈ 2.5 s of the step — the timeline
+    below.) Rounds mode: front parts of `rounds_q`, part 0 under control, the others with main current (asserted),
+    then SSD rounds with F3b; read-ahead hits (steps of 2,048 prompt tokens or more: 4K) go through the front parts as
+    the RAM misses do.
   - **One readback buffer, copied out:** the host copies the lists into its own arrays after waiting `tiered` and
     before the next call's readback is enqueued, so F6's parity is moot (its plant `readback_parity_stale` became
     `readback_unwaited`: the lists taken without the wait); `read_back` refuses to run over lists the host never
@@ -888,7 +890,7 @@ it).
   - **Plants** (`test_gathers_beside_the_compute_hold_their_fences`, the delayed-producer harness `_beside_delayed`:
     late copies, late requests, a late worker — a read-ahead's signal on a stream of its own after a sleep, its wait
     after it — or late readers; `worker_late` defers round 0's request past round 1's rows): each clean run exact under
-    every delay (rounds: ≥ 2 front parts and ≥ 3 SSD rounds a call; stage: one front part, ≥ 3 rounds; the late
+    every delay (≥ 2 front parts and, at one sequence, ≥ 3 SSD rounds a call; the late
     worker's with read-ahead hits; and four sequences, steps with decode rows), and every plant caught where its
     condition occurred, by its outputs or its bytes, never by a wait's timeout or a refusal (A's code review m1;
     `readback_unwaited`'s stale lists may also index past a table) — `gather_part_unwaited`,
