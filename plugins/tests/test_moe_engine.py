@@ -1653,6 +1653,37 @@ def test_a_loan_takes_its_margin_its_tapered_fixed_bytes_and_a_range_its_largest
     engine.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("pass_rows", [512, 2048, 4096, 8192, 16384])
+def test_a_tail_holds_a_loan_range_for_the_largest_allocation_at_every_pass_size(gpu_moe_wide, tmp_path, pass_rows):
+    """D8k (docs/dev/v1-glm.md): the tail the startup profile sizes holds one loan range of a step's largest
+    allocation (`moe.loan_largest` of the profiled peak) whatever its passes' buffers, at every `ggml_cuda.pass_rows`
+    choice (2 KiB a row here: 1-32 MiB beside a 30 MiB peak), and so does a lent step's share of it — on GLM's shape,
+    down pieces near a gate/up piece's size. The tail was sized before the profile's peak per token was set, its
+    largest range there by chance: GLM's 32K step at 8,192-row passes found none for its 2 GiB residual streams."""
+    from holon_std.tiered.store import _profiled_tokens
+
+    file, _, _ = gpu_moe_wide                    # gate/up Q4_0, down Q8_0 and Q5_0 (GLM: IQ2_XXS, IQ3_XXS and IQ2_S)
+    write(file.parent / "hf", tmp_path / "moe.gguf", Q.Q4_0,
+          types={"0.ffn_down_exps": Q.Q8_0, "1.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q5_0})
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+            "moe.loan_margin": 1.0, "moe.loan_largest": 1.0}
+    engine = _gpu_engine(tmp_path / "moe.gguf", host_memory=1 << 29, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    tokens, peak, buffers = _profiled_tokens(engine.ctx.options), 30 << 20, pass_rows << 11
+    store.tail_bytes[:] = [lambda tokens=None: buffers]
+    assert store.lend_activations(peak) and store.whole_tail
+    big, cap, classes = store._largest(tokens), (lambda c: c.cap), list(store.classes.values())
+    cls, n = store.tail
+    for n_at in (n, min(n, store._split(buffers, store._step_loan_bytes(tokens), cls, cap, big))):    # the step's
+        ranges = [n_at * classes[cls].unit_bytes - buffers,
+                  *(m * classes[c].unit_bytes for c, m in store._down(n_at).items())]
+        assert max(ranges) >= big > 0.99 * peak, (pass_rows, n_at, ranges, big)
+    engine.close()
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):

@@ -1019,6 +1019,7 @@ class TieredStore:
         tokens = _profiled_tokens(self.ctx.options)
         loan = -(-(int(peak * self._loan_margin) + self._fixed(tokens)) // self._align) * self._align
         self._loan_bytes = loan
+        self._peak_per_token = peak / tokens           # (before the tail: its range for the largest allocation)
         try:
             tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
         except ValueError:                             # its class cannot hold it beside a pass's staging
@@ -1030,7 +1031,6 @@ class TieredStore:
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
         self._loan_per_token = peak * self._loan_margin / tokens
-        self._peak_per_token = peak / tokens
         self.tail = tail
         self.tail_down = self._down(tail[1], lambda c: c.cap)
         return self.ring_tokens
