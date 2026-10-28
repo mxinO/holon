@@ -1065,6 +1065,11 @@ class TieredStore:
             return None
         if self.exclusive:                       # its lent experts parked before the forward writes the loan
             self.start_step(early=True)
+            if self._step_tail is not None and self.residency.device.is_cuda:   # D8l: the loan's experts too
+                if self._parked is None:         # (an event never recorded is no wait: refused, C's D8l-m2)
+                    raise RuntimeError(f"{self.name}: a tail step's parking copies were not issued before its "
+                                       "activation loan is handed out")
+                self.wait_parked()               # one event after every parking copy (A's D8l-m1)
         if self._step_down:                     # D8w: one range a class with a tail, the smallest first
             classes = list(self.classes.values())
             ranges = [classes[c].slots()[classes[c].size - m:].view(-1) for c, m in self._step_down.items() if m]
@@ -1275,11 +1280,13 @@ class TieredStore:
         return picked
 
     def _park(self, picked: torch.Tensor) -> None:
-        """Exclusive tiers (docs/dev/v1-glm.md D8b, Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups, items],
-        still mapped to their slots, leave VRAM hottest first (ties by group, then id): into free RAM units of their
-        classes, else into the units of RAM's coldest expert of the same classes when strictly hotter (that one goes to
-        the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit now,
-        before the step's staging overwrites it. On the device, no host sync (the step's first resolve)."""
+        """Exclusive tiers (docs/dev/v1-glm.md D8b, D8l; Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups,
+        items], still mapped to their slots, leave VRAM hottest first (ties by group, then id): into free RAM units of
+        their classes, else into the units of RAM's coldest expert of the same classes when strictly hotter (that one
+        goes to the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit
+        now, before the step's staging overwrites it — and, for an expert holding a slot of the step's activation loan,
+        before the forward writes the loan (`activations` waits for the copies: D8l). On the device, no host sync (the
+        step's first resolve, or a tail step's early start)."""
         res, host, owner, classes = self.residency.device, self.host_units, self.owner, self.classes32.long()
         groups, items, roles = res.shape
         n, (c_n, u_n) = groups * items, owner.shape
@@ -1289,10 +1296,10 @@ class TieredStore:
         slots, units = res.reshape(n, roles), host.reshape(n, roles)
         picked = picked.reshape(-1)
         # a lent expert already in RAM (a policy's released spare's owner, mapped back to its spare's slots by its
-        # `lend_tail`) stays there; one holding a slot of this step's activation loan goes to the SSD (the forward
-        # writes the loan before these copies may run: docs/dev/v1-glm.md D8b, step 1's review S1-B1)
+        # `lend_tail`) stays there; one holding a slot of this step's activation loan is parked as the others (D8l:
+        # the forward waits for the copies — once it went to the SSD, step 1's review S1-B1)
         already = picked & (units >= 0).all(1)
-        lent = picked & ~already & ~self._in_loan(cls, slots)
+        lent = picked & ~already
         # 1. free units: the k-th lent expert (hottest first) needing class c takes c's k-th free unit, if each of its
         # classes has one (a unit a skipped expert would have taken stays free)
         order = torch.argsort(torch.where(lent, -heat, math.inf), stable=True)
@@ -1343,17 +1350,6 @@ class TieredStore:
         cls, _ = self._step_tail
         c = list(self.classes.values())[cls]
         return cls, (c.size * c.unit_bytes - self._step_gu_loan) // c.unit_bytes
-
-    def _in_loan(self, cls: torch.Tensor, slots: torch.Tensor) -> torch.Tensor:
-        """[n] bool: the pieces' experts holding a slot of this step's activation loan (`_loan_slots`)."""
-        if (tail := self._loan_slots()) is None:
-            return torch.zeros(slots.shape[0], dtype=torch.bool, device=slots.device)
-        c, first = tail
-        held = (cls == c) & (slots >= first) if self._step_gu_loan else torch.zeros_like(slots, dtype=torch.bool)
-        classes = list(self.classes.values())
-        for d, m in self._step_down.items():         # D8w: the other classes' tails, the loan's too
-            held |= (cls == d) & (slots >= classes[d].size - m) & (m > 0)
-        return held.any(1)
 
     def _copy_parked(self, cls: torch.Tensor, slots: torch.Tensor, to: torch.Tensor, placed: torch.Tensor) -> None:
         """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit), on the

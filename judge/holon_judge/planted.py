@@ -1950,6 +1950,8 @@ def parking_late(waited: bool = True, ns: int = 20_000_000) -> Iterator[collecti
             fired["delayed"] += 1
             if not waited:
                 deferred.append((a, kw))
+                self._parked = torch.Event(device=a[1].device)     # (recorded now: a tail step's guard sees one)
+                self._parked.record(torch.cuda.current_stream(a[1].device))
                 return None
             with self.fetch_stream():
                 torch.cuda._sleep(ns)
@@ -1970,6 +1972,99 @@ def parking_late(waited: bool = True, ns: int = 20_000_000) -> Iterator[collecti
             mock.patch.object(tiered.TieredStore, "layer_done", last):
         yield fired
     print(f"plant parking-late (waited {waited}) fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _loan_parking(kind: str, ns: int = 20_000_000) -> Iterator[collections.Counter]:
+    """D8l (docs/dev/v1-glm.md): a tail step's parking copies (the activation loan's lent experts' among them) on a
+    stream of their own after a sleep, and the forward's first writes made to cover its whole loan (every range filled
+    on the main stream as the loan is handed out: a 32K step's residual streams reach most of it, a small model's few
+    bytes would not). "control" breaks nothing (the harness: the waits hold, the copies late but issued in place);
+    the others issue the copies only after the loan is handed out and written — deterministically after the writes,
+    not by a race a host sync could hide (the loan's hand-out may wait for the device) — with the wait broken:
+    "skip" (`loan_write_before_parked`: the forward waits for nothing before its writes; the staging still waits for
+    the copies), "early" (`parking_event_early`: the parking event recorded before the copies, every wait on it),
+    "unissued" (`loan_wait_unrecorded`: the early start skipped, so no parking copy precedes the loan — the store
+    refuses: an event never recorded would be no wait). Yields its counts: `delayed` parkings, `filled` loans."""
+    from holon_std.tiered import store as tiered
+
+    cls_ = tiered.TieredStore
+    copy, acts, start = cls_._copy_parked, cls_.activations, cls_.start_step
+    fired, streams, deferred = collections.Counter(), {}, []
+
+    def issue(self, args):
+        side = streams.setdefault(id(self), torch.cuda.Stream(device=args[1].device))
+        side.wait_stream(torch.cuda.current_stream(args[1].device))
+        with torch.cuda.stream(side):
+            torch.cuda._sleep(ns)
+        fired["delayed"] += 1
+        self.fetch_stream = lambda split=False: side            # (the copies on the late stream)
+        try:
+            copy(self, *args)
+        finally:
+            del self.fetch_stream
+
+    def late(self, cls, slots, to, placed):
+        if not slots.is_cuda:
+            return copy(self, cls, slots, to, placed)
+        if kind == "control":
+            return issue(self, (cls, slots, to, placed))
+        deferred.append((cls, slots, to, placed))
+        self._parked = torch.Event(device=slots.device)         # recorded now: the guard sees an event
+        self._parked.record(torch.cuda.current_stream(slots.device))
+        return None
+
+    def activations(self, step):
+        loan, ranges = self._loan, []
+        if loan is not None:                     # (the ranges handed out, to fill as the forward's writes)
+            use_ranges, use = type(loan).use_ranges, type(loan).use
+            loan.use_ranges = lambda rs: (ranges.extend(rs), use_ranges(loan, rs))[1]
+            loan.use = lambda r: (ranges.append(r), use(loan, r))[1]
+        try:
+            out = acts(self, step)
+        finally:
+            if loan is not None:
+                loan.__dict__.pop("use_ranges", None)
+                loan.__dict__.pop("use", None)
+        for r in ranges:
+            r.fill_(0xA5)
+        fired["filled"] += bool(ranges)
+        early = self._parked
+        for args in deferred:                    # the copies after the loan's writes
+            issue(self, args)
+        deferred.clear()
+        if kind == "early" and early is not None:
+            self._parked = early                 # (the waits keep the event recorded before the copies)
+        return out
+
+    def start_step(self, early=False):
+        if kind == "unissued" and early:
+            return None
+        return start(self, early)
+    with mock.patch.object(cls_, "_copy_parked", late), mock.patch.object(cls_, "activations", activations), \
+            mock.patch.object(cls_, "start_step", start_step):
+        yield fired
+    print(f"plant loan-parking ({kind}) fired: {dict(fired)}", file=sys.stderr)
+
+
+def loan_parking_late() -> contextlib.AbstractContextManager[collections.Counter]:
+    """D8l's harness: the parking copies late, the loan written whole, every wait as built (must stay exact)."""
+    return _loan_parking("control")
+
+
+def loan_write_before_parked() -> contextlib.AbstractContextManager[collections.Counter]:
+    """D8l: the forward writes the loan before the loan's experts are parked (`_loan_parking` "skip")."""
+    return _loan_parking("skip")
+
+
+def parking_event_early() -> contextlib.AbstractContextManager[collections.Counter]:
+    """D8l: the parking event recorded before the copies (`_loan_parking` "early")."""
+    return _loan_parking("early")
+
+
+def loan_wait_unrecorded() -> contextlib.AbstractContextManager[collections.Counter]:
+    """D8l: no parking copy issued before the loan is handed out (`_loan_parking` "unissued")."""
+    return _loan_parking("unissued")
 
 
 @contextlib.contextmanager

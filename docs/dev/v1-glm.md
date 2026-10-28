@@ -989,8 +989,8 @@ and routed again by the same step.
   the model's mHC state in f32: not a store change).
 - **No core lines.** A plugin option's choice and the store's loan sizing; RAM-holds-all layouts unchanged.
 
-**D8l — Step 7: park the loan's lent experts in RAM too (design for the panel, not built; the coordinator's lever
-after Maya's stats).** *Why, measured:* a lending prompt step parks its lent experts in RAM hottest first (free units,
+**D8l — Step 7: park the loan's lent experts in RAM too (the panel cleared it; built in B's simpler shape, below;
+the coordinator's lever after Maya's stats).** *Why, measured:* a lending prompt step parks its lent experts in RAM hottest first (free units,
 else over RAM's coldest of the same classes while strictly hotter: D8b, Maya's `LEND_PARK_LRU`) — except those holding
 a slot of the step's activation loan, which go to the SSD, because the forward writes the loan before the parking
 copies may run (D8b, step 1's review S1-B1). At 32K that is ≈ 1,136 of the ≈ 1,725 lent experts (16,384-row passes),
@@ -1024,6 +1024,20 @@ MB (47.0 → 45.3 ms).
   dropped: the file has it); the RAM victims as `_park`'s step 2 (same classes, strictly colder by `moe.ram_heat`);
   a plant for the panel: `loan_write_before_parked` (the allocator's wait skipped: RAM units take overwritten bytes,
   caught by `_bytes_exact`).
+
+- **As built (B-D8l-m1's shape: no contract change, no `ready`).** `_park` parks the loan's lent experts as the
+  others, in its one pass (the drop and the park together, A); `activations` makes the main stream wait the one
+  parking event — recorded after every parking copy, the loan's included (A's m1) — right after the early start and
+  before the loan is handed out, and refuses where a tail step's copies were not issued before it (an event never
+  recorded is no wait: C's m2). The cost is the whole copy up front (B: ≈ 140 ms at 32K, ≈ 25 ms at 1K); `ready` (B's
+  per-range monotone (offset, event) contract) only if that shows in a gated cell. **Re-priced (C):** the decode
+  slope within one context is 0.42 ms a MB (the D8k table at every pass size; 1K 0.33), not the cross-context 0.6:
+  the replay gives −0.53 s over 256 tokens at 32K, −0.38 s at 4K, −0.24 s at 1K (16,384-row passes; the 8,192-row
+  recording's replay is §13's). Plants (the test, under copies late on a stream of their own and the loan written
+  whole as it is handed out — `loan_parking_late` stays exact): `loan_write_before_parked` and `parking_event_early`
+  leave RAM units with overwritten bytes, `loan_wait_unrecorded` is refused. Found on the way: `_park` blocks the
+  host on the main stream's queued work (a 0.5 s kernel ahead of it: a 0.56 s call), though its text says no host
+  sync — an early start's cost, not a correctness question (open).
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the

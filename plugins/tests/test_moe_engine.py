@@ -2145,6 +2145,50 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("plant", [None, "loan_parking_late", "loan_write_before_parked", "parking_event_early",
+                                   "loan_wait_unrecorded"])
+def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan(gpu_moe_wide, plant):
+    """D8l (docs/dev/v1-glm.md): a tail step's lent experts holding slots of its activation loan are parked in RAM as
+    the others (once they went to the SSD): RAM with free units here, no lent expert goes to the SSD, and every RAM
+    unit holds its pieces as the file does, the streams the resident store's — the forward waits for the parking
+    copies before it writes the loan. Under the copies delayed on a stream of their own and the loan written whole as
+    it is handed out (`loan_parking_late`: still exact): the wait skipped
+    (`loan_write_before_parked`) or its event recorded before the copies (`parking_event_early`) leaves RAM units
+    with overwritten bytes; the copies not issued before the loan (`loan_wait_unrecorded`) is refused."""
+    from holon_judge import planted
+
+    file, prompts, want = gpu_moe_wide
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    with getattr(planted, plant)() if plant else contextlib.nullcontext() as fired:
+        engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts)
+        store, to_ssd = engine.ctx.shared_objects[KEY], []
+        lend_tail = store.lend_tail
+
+        def counted(cls, n):                     # the tail's experts the step sent to the SSD (eager steps: a sync)
+            picked = lend_tail(cls, n)
+            to_ssd.append((int(picked.sum()), int(((store.residency.device == -2).all(-1) & picked).sum())))
+            return picked
+        store.lend_tail = counted
+        if plant == "loan_wait_unrecorded":
+            with pytest.raises(RuntimeError, match="parking copies were not issued"):
+                _served(engine, prompts)
+            engine.close()
+            return
+        got = _served(engine, prompts)
+        wrong = _bytes_exact(store)
+        assert store.exclusive and store.borrowed["stage"] and store._step_loan_bytes(64) and to_ssd
+        engine.close()
+    if plant in (None, "loan_parking_late"):
+        assert got == want and not wrong and sum(n for n, _ in to_ssd) and not any(m for _, m in to_ssd), \
+            (wrong, to_ssd)
+        assert plant is None or fired["delayed"] and fired["filled"]
+    else:
+        assert fired["delayed"] and fired["filled"] and wrong, plant
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("lend", ["tail", "coldest"])
 def test_a_lending_prompt_step_stages_in_a_single_buffer(gpu_moe, lend):
     """Step 7, exclusive tiers: a lending prompt step stages in a single buffer of a layer's most missing pieces, not a
