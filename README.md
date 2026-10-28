@@ -267,8 +267,8 @@ lock's is warned about and that lock not used.
   tokens with a verify step. `--chunk-with-decode 0` turns both off.
 - **Pinned host memory** is a host's, never a lock's: `holon serve` budgets it from the RAM available (Host RAM);
   `--host-memory BYTES` sets the budget. A start whose pools do not fit is refused once with the bytes they need and
-  what to do. One Holon start at a time reads the RAM and pins (`/tmp/holon-host-memory.lock`): a second start waits
-  for the first to be ready.
+  what to do. One `holon serve` of a user at a time reads the RAM and pins (`~/.cache/holon/pin.lock`): a second start
+  waits for the first to be ready; two users' starts at the same moment are not serialized.
 - **Ignore the lock:** `holon serve <model> --no-lock` serves defaults (`plans/defaults.toml`: the grammar processor)
   and your flags. Use it if a start hangs: the server tries a start that fails other than with a plugin or memory
   error 4 times, each up to 600 s, before falling back to defaults.
@@ -323,7 +323,8 @@ Qwen3.8-Flash-Next locks.
 - **Routing profile:** a JSON file of routing counts that seeds the cache; it only decides what the cache holds
   first, so outputs do not depend on it. Holon ships the profiles its locks were measured with
   (`std/holon_std/tiered/profiles/`, matched to the model file); a lock's named profile beside the model file
-  (`moe.placement.profile`) is read first, and without either the cache starts cold, logged. `python -m holon_tools
+  (`moe.placement.profile`) is read first, and without either the cache starts cold, logged
+  (`--plugin-options moe.placement.profile=none` starts it cold on purpose). `python -m holon_tools
   profile <model file>` makes one from greedy generations over `judge/prompts/v1.jsonl` (`--prompts`), starting from
   the model's lock for this card, and writes it beside the file as `<file stem>.profile.json` (`--name` sets another);
   `--ship` imports one into the shipped profiles.

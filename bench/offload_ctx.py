@@ -20,9 +20,9 @@ request ends only at its length; `--prompt-cache 0`; every request must report 0
 `Engine` in process (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
 `holon serve`'s, with `--auto` the values `holon serve` derives where no flag gives them: the host budget, the GPU
-slack, a tier fitted to the RAM; without it the engine's own defaults), and an arm's `env` its environment. Arms
-are interleaved: every round runs each arm once, in reverse order on odd rounds, each after checking that the GPU is
-idle; peak VRAM is sampled with nvidia-smi.
+slack, a tier fitted to the RAM, though no pin lock; without it the engine's own defaults), and an arm's `env` its
+environment. Arms are interleaved: every round runs each arm once, in reverse order on odd rounds, each after checking
+that the GPU is idle; peak VRAM is sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
         [--contexts 1024 4096 32768] [--ctx 33792] [--corpus v1|fn] [--spans 0 1 2] [--server <llama-server>] \\

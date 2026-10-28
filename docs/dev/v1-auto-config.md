@@ -102,25 +102,26 @@ headroom  = max(6 GiB, 5% of min(MemTotal, the lowest limit))
 - **The 6 GiB floor** is provisional. §9.3 measures the growth after the snapshot (the grammar workers, the engine),
   and the floor becomes that growth plus ≈ 3 GiB for a desktop (C).
 
-**One pinning Holon at a time (A-M3).** `platform.pin_lock()` takes an exclusive `flock` on
-`/tmp/holon-host-memory.lock`.
-- **Who takes it, and for how long:**
-  - `holon serve`: from its reading until the first engine reports ready;
-  - an in-process engine that pins (`host_memory > 0` without `clamp_context`, e.g. a propagation of an offload
-    lock): from the start of its build to after its host pools are pinned.
-- **Opening it.** The file is opened read-only, without `O_CREAT`, when it exists. Under `fs.protected_regular`,
-  opening another user's file in sticky `/tmp` with `O_CREAT` fails. Otherwise it is created with `O_EXCL`, then
-  `fchmod` 0666 against the umask (B-R4, A-R2).
-- **It never fails a start.** Any failure to lock is a warning. A wait over 900 s warns and goes on.
-- **Starts on one host queue behind each other**, for as long as a build takes (minutes for Flash-Next's first start).
-- **Docker.** Two containers without memory limits do not share `/tmp`, so they still race. The README notes it.
+**One `holon serve` at a time pins (A-M3; after the code review, B A1).** The CLI's `pin_lock()` takes an exclusive
+`flock` on the per-user `~/.cache/holon/pin.lock`.
+- **Who takes it:** every `holon serve` start, explicit `--host-memory` ones too, from its reading until the first
+  engine reports ready; and every restart, for its admission and start. In-process engines take none: their caps are
+  the caller's (P2), and a host-wide lock would serialize test shards, propagations and the bench.
+- **Opening it:** `O_RDWR | O_CREAT` without `O_EXCL`, so two first starts that create it at once open the same file
+  (A C-M1). A cache that cannot be written, or a lock held past 900 s, is a warning, never a failed start.
+- **Not serialized:** two users' starts at the same moment, and two containers without memory limits. The README
+  says so.
 
-**Crash restarts (A-R2-M3).**
-- Before every restart, the supervisor calls the CLI's `admit(ready)` once. `ready` is the first start's ready message,
-  which now reports the pinned bytes (`host_bytes`, from `plans.served`).
-- If `host_bytes > available − headroom/2`, read live, the restart is refused with kind "memory". The refusal rolls
-  back to the spill entry, or gives up with the shortfall.
-- Sizes stay deterministic: the restart refuses rather than shrinking differently.
+**Crash restarts (A-R2-M3, A C-M3).**
+- The supervisor keeps each history entry's last ready report, which carries the pinned bytes (`host_bytes`, from
+  `plans.served`). Before a restart it runs the CLI's `admit_restart(config, that entry's report)`, a context held
+  across the start.
+- **An entry that has run:** refused with kind "memory" if its `host_bytes > available − headroom/2`, read live under
+  the pin lock. The refusal rolls back to the spill entry, or gives up with the shortfall.
+- **An entry that never ran** (the spill after a refused lock, the defaults): its derived cap is lowered to what is
+  free above half the headroom, so the ledger refuses an oversized pool rather than pinning into the headroom. It is
+  never checked against another entry's bytes.
+- **Under `--host-memory`:** only the lock; the cap is the user's.
 
 **When RAM is short.**
 1. **The KV tier shrinks.** Under `clamp_context`, `TierCtx.host_left()` returns the budget less the host pools held;
@@ -286,24 +287,23 @@ Unchanged from rev 2:
 
 ## 4. Core impact (invariant 5; `check_core_loc.py`: 5019 / 6000 before)
 
-As built, `check_core_loc.py` counts **+218 → 5237 / 6000**, against rev 3's estimate of ≈ 115:
+As built after the code review, `check_core_loc.py` counts **+201 → 5220 / 6000**, against rev 3's estimate of
+≈ 115 and the coordinator's target of ≈ +170 after B's part A:
 
 | Change | Where | Code lines |
 |---|---|---|
-| `host_ram()` (meminfo + cgroup v2), `host_headroom()`, `pin_lock()` with its bounded wait, `gpu_shared()`, the overshoot in `peak_memory` | `platform` | 64 |
-| `memory_fraction` 0, `TierCtx.host_left`, the in-process pin lock (an `ExitStack` around `_build`, so a failed build releases it), the GPU start line | `engine.py` | 14 |
-| the slack rule with the fill-pool test | `executor.py` | 16 |
-| the budget; the `flock` until ready; `admit`; the history `[defaults?, lock + spill, lock]`; `fit_lock` (sources, spills, notes); `source_file`; the refusal's four hints and the same-repository search; `checkpoint_bytes`; the size guard | `cli.py` | 100 |
-| memory-only entries with their notes, `admit`, each failure printed | `supervisor.py` | 13 |
-| `host_bytes` in the ready report and the ledger | `plans.py`, `memory.py` | 2 |
+| `host_ram()` (meminfo + cgroup v2, an unreadable cgroup falling back to meminfo), `host_headroom()`, `gpu_shared()` (None without NVML), the overshoot in `peak_memory` | `platform` | 43 |
+| `memory_fraction` 0, `TierCtx.host_left`, the GPU start line | `engine.py` | 6 |
+| the slack rule with the fill-pool test, via the ledger's public `sizes` | `executor.py` | 17 |
+| the per-user pin lock; the budget; per-entry restart admission; the history `[defaults?, lock + spill, lock]`; `fit_lock` (sources, spills, notes; owners skip kernels and survive load failures); `source_file`; `checkpoint_bytes`; the size guard on `repo_ref`'s name; the refusal's notes | `cli.py` | 111 |
+| memory-only entries with their notes, `admit` per entry, each failure printed, the one `_say` | `supervisor.py` | 13 |
+| the refusal's shortfall and override; `host_bytes` | `memory.py`, `plans.py` | 5 |
 | `OutOfUnits`; `Spills`, `MakesSources`; `TierCtx.host_left` | `holon.api` | 6 |
 
-The estimate left out the coordinator's later asks:
-- the refusal's hints and the same-repository search (≈ 22);
-- restart admission and the memory-only spill entry (≈ 20);
-- the pin lock's open sequence and bounded wait (≈ 20);
-- the shared-GPU test (≈ 13);
-- the cgroup reader (≈ 20).
+B's part A took out the engine-side lock, the `/tmp` open sequence, the regex over our own message, the hub lookups in
+the error path and the regex over the weight source's display string. What brought the total back above +170 is what
+the code review asked to add: the lock on explicit serves and restarts, per-entry admission with the cap lowered for
+an entry that never ran, the unreadable-cgroup fallback, and the "unknown" reserve without NVML (≈ +20).
 
 - The ABI gains only additions, so the bump is minor (1.5 → 1.6).
 - `nvidia-ml-py` becomes core's fifth dependency (B-R1).
@@ -360,7 +360,7 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 **CPU** (`pytest`, lean):
 - `host_memory()` over fake trees: v2 with a limited ancestor, `memory.high`, file and dirty pages, the
   `cgroupns=host` root, v1, none;
-- `pin_lock`: an existing file opened without `O_CREAT`; a failure only warns;
+- `pin_lock`: a second holder waits, then warns; a cache that cannot be made only warns;
 - `gpu_shared` with a stubbed NVML: own PIDs excluded, invisible PIDs, no NVML;
 - the slack rule: no fill pool, a fill pool at its preference, a fill pool short of it;
 - history: defaults kept without a lock, or with `--host-memory` or plugin-option flags; an empty history exits with
@@ -440,7 +440,7 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 | A-R2-M2 / C-N2 the bench cannot run automatic arms | **Fixed:** the bench's `--auto` (P2) |
 | A-R2-M3 a carried cap pins into the headroom on restart | **Fixed:** `admit` reads live once and refuses (kind "memory") when `host_bytes > available − headroom/2` |
 | A-R2 page cache: dirty and writeback | **Fixed:** subtracted |
-| A-R2 `flock` open sequence, in-process pinners, serialized starts, containers | **Fixed** (D1): no `O_CREAT` on an existing file, `fchmod`, failures warn; in-process pinners lock; queueing and containers documented |
+| A-R2 `flock` open sequence, in-process pinners, serialized starts, containers | **Fixed** (D1): no `O_CREAT` on an existing file, `fchmod`, failures warn; in-process pinners lock; queueing and containers documented (superseded after the code review: a per-user CLI lock, none in-process) |
 | A-R2 / C-N4 the spill entry catches every rollback | **Fixed:** memory-only target, logged |
 | A-R2 the tier's `except Exception` | **Fixed:** narrowed to `OutOfUnits`, re-raised as `OutOfUnits` |
 | A-R2 the speculation-off fallback on both entries | **Fixed** (D5) |
@@ -458,3 +458,20 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 | C-N7 "not run" is not a pass; "other use" | **Fixed** (§9, §8) |
 | C, the 32 GB case | **Taken:** refuse, with the four ordered hints; the floor from §9.3's measurement |
 | Coordinator: MTP pack | **Changed:** published-pack download is the primary path; no local build (not cheap); speculation off until published |
+| **Code review of the build (2a55ab3b)** | |
+| A C-B1 no lock re-propagated | **Merge gate, as planned:** the combined round with GLM's close. Found meanwhile: on `main` itself 22 of 25 newest locks are already outdated (they pin an older `holon`, `kernels.ggml_cuda` and `std.weights.gguf` than `main` holds), so `main` already serves defaults for them; the round fixes both |
+| A C-M1 the pin lock's create race | **Fixed:** per-user file opened `O_RDWR \| O_CREAT` (B A1) |
+| A C-M2 an unwritable cache crashes Flash-Next | **Fixed:** `fit_lock` catches `OSError`; the plugin's memo write is suppressed; test |
+| A C-M3 admission against the first entry's bytes | **Fixed:** reports per entry; an entry that never ran gets its cap lowered to what is free; test |
+| A minor 1 the "not published" memo | **Fixed:** never memoized; a published fetch's failure is remembered an hour, keyed by what was published |
+| A minor 2 concurrent first fetches | **Fixed:** the link is made under a temporary name and renamed |
+| A minor 3, B the defaults kept on any plugin option | **Fixed:** dropped; only `--host-memory` keeps the defaults entry of a lock larger than the card |
+| A minor 4 shipped profiles override "no profile" | **Changed:** `moe.placement.profile=none` asks for a cold cache (the CLI's `key=` deletes, so an empty value cannot be told from unset); README and manifest say so |
+| A minor 5 an unreadable cgroup; `why` | **Fixed:** falls back to meminfo, saying so; `why` names the binding level |
+| A minor 6 NVML failure shown as headless | **Fixed:** "unknown without NVML", reserve 256 MiB, `--memory-fraction` named |
+| A minor 7 unlocked pinning starts | **Fixed:** explicit serves and restarts take the lock; the bench's `--auto` arms take none (said in its docstring) |
+| A minor 8 Flash-Next off its lock until the pack is published | **For the owner:** unchanged (§10 Q2) |
+| B A1–A5 | **Taken:** per-user CLI lock, the ledger's own refusal text, `repo_ref`'s name, one `_say`, owners over options and sources, kernels skipped, load failures survived |
+| B: `executor.slack` on `_sizes` | **Fixed:** `Ledger.sizes` is public |
+| B O1, O2 (drop the spill tag, admission) | **Kept** at the coordinator's call |
+| B part B (a `deploy` slot) | **Deferred** to the auto-tune library |
