@@ -654,7 +654,7 @@ def test_the_workspace_formula_is_tight(ctx, sm):
 @pytest.mark.parametrize("elem", FP4)
 def test_hf_fp4_prepare_is_lossless_and_scale2_holds_on_every_path(ctx, elem):
     """Acceptance 4 on random weights: `prepare`'s ggml blocks, dequantized by gguf-py × scale2, equal the reference
-    by value, and are llama.cpp's converter's byte for byte (with the pin's checkout, git-ignored under spikes/); the
+    by value, and are llama.cpp's converter's byte for byte (with the pin's checkout, git-ignored under local/); the
     repack plants change them. Then `scale2` (one value
     per tensor: mmvq's epilogue at every row count (D11), mmq's store (D4))
     against the q8_1 emulator on the reference weight, both output dtypes and both input dtypes."""

@@ -686,7 +686,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   step — before they are approved.
 - **Tune's F5b benchmark is biased** (panel, X's close): one prompt set, arms run one after another and a median of 3
   measured +5.4% at the natural fit where the interleaved rows measured −6%. Interleave the arms over several natural
-  prompts (as `spikes/x6_cpu/decode.py` does) before FN or GLM rely on tune's split.
+  prompts (as milestone X's step-6 decode A/B did, docs/dev/v1-offload.md) before FN or GLM rely on tune's split.
 - **A warm-up launch before `holon serve` reports ready** (panel, X's close): a pinned arena that does not fit is
   refused at its first launch (D4), which can be the first request's. Launch once before ready, with a test that an
   oversized pinned arena fails before the server reports ready.

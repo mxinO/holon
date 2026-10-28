@@ -1,7 +1,0 @@
-[
- {"name": "holon_ship", "engine": "holon", "args": ""},
- {"name": "holon_pass4k", "engine": "holon", "args": "--pass-tokens 4096"},
- {"name": "holon_e4k", "engine": "holon", "args": "--pass-tokens 4096 --expert-rows 4096"},
- {"name": "holon_all4k", "engine": "holon", "args": "--pass-tokens 4096 --expert-rows 4096 --dense-rows 4096"},
- {"name": "ft_fused", "engine": "freetoken", "args": "--flags '--moe-strategy fused'"}
-]

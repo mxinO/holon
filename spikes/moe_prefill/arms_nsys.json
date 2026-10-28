@@ -1,8 +1,0 @@
-[
- {"name": "nsys_holon_ship", "engine": "holon", "args": "--reps 1 --profile",
-  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"},
- {"name": "nsys_holon_all4k", "engine": "holon", "args": "--reps 1 --profile --pass-tokens 4096 --expert-rows 4096 --dense-rows 4096",
-  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"},
- {"name": "nsys_ft_fused", "engine": "freetoken", "args": "--reps 1 --profile --flags '--moe-strategy fused'",
-  "nsys": "nsys profile -t cuda,nvtx --capture-range=cudaProfilerApi --capture-range-end=stop -f true -o {out}"}
-]
