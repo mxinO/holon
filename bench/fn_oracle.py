@@ -4,7 +4,7 @@ lazily, the indexer's tie rule) on the full GGUF, on the CPU under a memory cap:
 the indexer's boundary-tie rate (a query whose k-th and (k+1)-th block scores are equal) on each QSA layer. If HF's
 attention runs out of memory at this length, the record says so: D2's query-block mode is then needed.
 
-    python spikes/fn0/n4_oracle.py --gguf <...-00001-of-00002.gguf> --config <Qwen3.8-Flash-Next snapshot> \\
+    python bench/fn_oracle.py --gguf <...-00001-of-00002.gguf> --config <Qwen3.8-Flash-Next snapshot> \\
         --prompt recall-32k --threads 32 --out <record.json>       # in the golden venv, under systemd-run MemoryMax
 
 `--capture <file> --stop-after <layer>` (FN step 4's `qsa_select` bench, panel C-m1): the real indexer inputs of every
@@ -25,7 +25,7 @@ import transformers
 from holon_judge import gguf, golden, qwen4exp
 from holon_judge.recording import Prompt, PromptSet
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 def main() -> None:
@@ -55,7 +55,7 @@ def main() -> None:
     record = {"name": "fn0_n4_oracle", "date": datetime.date.today().isoformat(), "device": "cpu",
               "threads": a.threads, "torch": torch.__version__, "transformers": transformers.__version__,
               "model": gguf.file_meta(path)["model"], "prompt": a.prompt, "tokens": len(row["ids"]),
-              "command": f"python spikes/fn0/n4_oracle.py --prompt {a.prompt} --threads {a.threads}",
+              "command": f"python bench/fn_oracle.py --prompt {a.prompt} --threads {a.threads}",
               "status": "running", "layers": times, "indexer_ties": ties}
 
     def save() -> None:            # after every layer: a run the memory cap kills keeps how far it got

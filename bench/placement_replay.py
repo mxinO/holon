@@ -1,4 +1,5 @@
-"""M6 step 3: offline replay of expert placement policies over captured routing traces (CPU only, numpy).
+"""M6 step 3: offline replay of expert placement policies over captured routing traces (CPU only, numpy). The traces
+are `.npz` files of per-row routing (M6's capture, docs/dev/v1-offload.md §8 M6); `--selfcheck` needs none.
 
 Decode steps only: a step needs the distinct (layer, expert) pairs its decode rows route to (D12: a miss is paid once
 per step); prefill rows never change residency (D8 streams or stages them; their coverage is reported apart). Every
@@ -27,8 +28,8 @@ copies over PCIe; fetch-on-miss policies admit the fetched blob in place, so the
 per token = (dense + hit + fetch bytes) / GPU rate + (fetch + admission) / PCIe rate + ssd / SSD rate, per step,
 summed over steps / decode tokens. The rates are PLACEHOLDERS until M1/M3 land.
 
-    python spikes/x0_offload/m6/replay.py --traces local/tmp/x0-m6 --gguf <file.gguf> --out <json>
-    python spikes/x0_offload/m6/replay.py --selfcheck
+    python bench/placement_replay.py --traces local/tmp/x0-m6 --gguf <file.gguf> --out <json>
+    python bench/placement_replay.py --selfcheck
 """
 from __future__ import annotations
 
@@ -415,11 +416,11 @@ def sweep(pairs: list[tuple[Decode, np.ndarray]], ebytes_key, dense, fractions=(
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--traces", help="directory of capture.py's .npz files")
+    ap.add_argument("--traces", help="directory of M6 capture .npz files")
     ap.add_argument("--gguf")
     ap.add_argument("--train", nargs="+", default=["chat", "code"])
     ap.add_argument("--test", nargs="+", default=["agent", "mixed"])
-    ap.add_argument("--ptime", help="capture.py's ptime record (prefill compute vs chunk size)")
+    ap.add_argument("--ptime", help="M6 capture's ptime record (prefill compute vs chunk size)")
     ap.add_argument("--ram-fraction", type=float, default=1.0, help="share of experts a RAM tier holds (SSD hook)")
     ap.add_argument("--out")
     ap.add_argument("--selfcheck", action="store_true")

@@ -13,11 +13,36 @@ import collections
 import gc
 import json
 import pathlib
-import sys
+import shlex
 
 import torch
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+STORE = "std.moe.offload"
+COMPONENTS = ("mtp", "hc", "gdn", "linear_attn", "self_attn", "qsa", "shared", "experts", "router", "gate", "ple",
+              "embed", "lm_head", "norm")
+
+
+def engine(model: str, flags: str, **base):
+    """An engine from `holon serve`-style flags over `base` (the flags win; `plugin_options` given in `base` merge on
+    top of theirs)."""
+    from holon.core.cli import engine_flags, engine_settings, layered
+    from holon.core.engine import Engine, EngineConfig
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    extra = base.pop("plugin_options", None)
+    cfg = layered(base, engine_settings(parser.parse_args(shlex.split(flags))))
+    return Engine(EngineConfig(model, **(layered(cfg, {"plugin_options": extra}) if extra else cfg)))
+
+
+def component(name: str) -> str:
+    """A parameter's or buffer's component (the MTP head's prefixed `mtp.`)."""
+    parts = name.split(".")
+    head = "mtp." if "mtp" in parts[:2] or name.startswith("aux") else ""
+    for c in COMPONENTS[1:]:
+        if any(c in p for p in parts):
+            return head + c
+    return head + (parts[-2] if len(parts) > 1 else parts[0])
 
 
 def main() -> None:
@@ -28,10 +53,7 @@ def main() -> None:
     ap.add_argument("--max-len", type=int, default=33792)
     ap.add_argument("--peak", action="store_true")
     a = ap.parse_args()
-    sys.path.insert(0, str(ROOT / "spikes/fn6"))
-    from _engine import STORE, engine
     from holon.core import executor, platform
-    from vram import component
     peak, growth = platform.peak_memory, platform.reserved_growth
     state_memory, capture = executor.Executor.state_memory, executor.Executor.capture_graphs
 

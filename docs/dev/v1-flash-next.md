@@ -1211,7 +1211,7 @@ docstring). Rev 2 takes panel C's review of the step-0 evidence (below):
     non-goal). Rev 1's "int8 KV" cause for the defaults prefill was mostly a modelling gap.
 - `stable_topk` moves to `std.mixers.qsa`'s reference once step 3 writes it (panel A, optional).
 
-**The oracle check (N4's 32K run)** (`spikes/fn0/n4_oracle.py`):
+**The oracle check (N4's 32K run)** (`bench/fn_oracle.py`):
 - **The judge reads FN's GGUFs** (`judge/holon_judge/gguf.py`, `golden.py`, `moe.py`): the `qwen4exp` name map, split
   files, the indexer's fused q/k, lazy PLE rows with the hash constants checked, the scoped tie rule, the mixer as the
   final norm, and the head in row blocks.
@@ -1428,7 +1428,7 @@ per-layer buffer in 24 copies (1.6 GB) so no call finds its keys in L2; `qsa_att
 | B-4 | The fp16 comment | **Reworded** as triton_attn's. |
 | C-M1 | Launches | **Done in part.** `_rstd` folds into `_down`, the attention half's combine into the FFN half's mix (5 HC launches per layer, after A's major), `_write_raw` + `_pool` into `_index`. The serial last-split merge variant was measured (+24 µs at decode) and rejected; the output gate folds into the attend's store instead (same count). Table above; the step-7 gate (now ≤ 768 launches per decode token). |
 | C-M2 | Key reads per tile | **Measured, not adopted:** three row-grouped forms, none faster from 2 to 512 rows on sm_86 (above). Shape invariance holds. |
-| C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`spikes/fn0/n4_oracle.py --capture`). |
+| C-m1 | Measurement | **Done:** 24 copies of every per-layer buffer (1.6 GB) and real indexer q / k from N4's oracle run (`bench/fn_oracle.py --capture`). |
 | C-m2 | Top-k variants | **Measured, dropped** (above). The CUDA radix top-k stays a step-7 contingency. |
 | C-m3 | N3's QSA term | **Done:** rev 4 of §13. One more gated cell is predicted to miss: the RTX 5080's 4K drafting-off decode (0.99; 1.01 at step 7's memory target). |
 | C | Acceptance 3's target | **Restated:** ≤ 20 µs at 4 rows of one sequence; 8 rows reported, not gated. |
@@ -1849,13 +1849,13 @@ history. Acceptance 1(b) is restated (§1). FN's accuracy gates are now all fast
   8K and 32K, a couple of multi-turn. Holon and Strata greedy on the same file, both scored. Bar: Holon within a
   tolerance stated before the run, and no gibberish answer; the answers saved for the owner to read. Licensing
   checked and provenance recorded in the repository.
-  - **The set** (`spikes/fn7/tasks/fn_tasks.jsonl`, 72 items, written by `spikes/fn7/tasks/build.py` with seed 7):
+  - **The set** (`judge/tasks/fn_tasks.jsonl`, 72 items, written by `judge/tasks/build.py` with seed 7):
     all synthetic, so it carries this repository's license and no third-party text — math 24 (eight templates with
     exact answers computed by the generator), code 14 (specifications and asserts written here), reasoning 16
     (seating orders and knights-and-knaves generated with one solution, weekday arithmetic; A–E), recall 12 (needle,
     two-hop and sum needles in generated ledger filler of ≈ 8K and ≈ 31K tokens), multi-turn 6. Reference answers
     (local) score 72 of 72 through the scorer, so the tests and answers agree.
-  - **The run** (`spikes/fn7/tasks/run.py`): IQ2_XS on the RTX PRO 6000; the chat template with thinking on; greedy,
+  - **The run** (`judge/tasks/run.py`): IQ2_XS on the RTX PRO 6000; the chat template with thinking on; greedy,
     8,192 new tokens at most; Holon plain decoding, Strata's no-approximation arm of §17 (drafting off).
   - **The bar, stated before the first run:** Holon within 5 items (6.9 points) of Strata's score on the 72, and no
     Holon answer degenerate (the token limit hit inside the reasoning, nothing after it, or a 40-character span
@@ -1871,7 +1871,7 @@ golden or floor are dropped; MTP, bounded, snapshot, the Strata comparison, laun
 
 **What (c) can see** (measured on the step-5 recordings, §17.1's correction): decode vs prefill on `v1-long` gives KL
 mean 0.04–0.06, KL p50 0.002–0.003 and band \|ΔNLL\| up to 0.5 nats between correct paths, and the HC race did not
-move those statistics. The bars (`spikes/fn7/consistency.py`: KL mean ≤ 0.13, KL p50 ≤ 0.007, every 1K band's
+move those statistics. The bars (`judge/consistency.py`: KL mean ≤ 0.13, KL p50 ≤ 0.007, every 1K band's
 \|ΔNLL\| ≤ 0.75, MTP vs plain KL mean ≤ 0.13 up to the first differing token) are set at about twice that noise, and
 the decode-only plant `qsa_decode_select_shift` must fail them. Kernel races and other errors below the noise are
 L0's to find, on all three SMs.
@@ -1939,7 +1939,7 @@ The full model (IQ2_XS, all-resident) on the RTX PRO 6000, before step 7's chang
 
 ### 19.3 Accuracy gate (c), first run
 
-`spikes/fn7/consistency.py` on IQ2_XS, RTX PRO 6000, bf16 (`evidence/fn7_consistency_IQ2_XS_2026-10-21.json`;
+`judge/consistency.py` on IQ2_XS, RTX PRO 6000, bf16 (`evidence/fn7_consistency_IQ2_XS_2026-10-21.json`;
 a952ba9, the HC and indexer changes in): **passes**.
 
 | Pair (4 prompts, 49,596 positions) | KL mean (≤ 0.13) | KL p50 (≤ 0.007) | KL p99 | mean ΔNLL | worst 1K band (≤ 0.75) |
@@ -2145,7 +2145,7 @@ Before the lending fixes: decode 0.92 / 0.98 / 0.88, prefill 0.67 / 0.46 / 0.41,
 
 - **Chat** through `holon serve` (OpenAI frontend, MTP on): a haiku and its explanation, 406 tokens in 5.8 s on the
   5080, 333 in 3.8 s on the 5090 (wall, from the request; reasoning included).
-- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, 4 prompts, 49,596 positions; the deployment's
+- **(c) GPU self-consistency** (`judge/consistency.py`, bf16, 4 prompts, 49,596 positions; the deployment's
   flags, its own step as the reference). Ran on 21bb40f, before the lending fixes: a ring step is bitwise a staged one
   on the card, and placement changes no bits (the offload store is bitwise the resident store). **Both pass**:
 
@@ -2558,7 +2558,7 @@ come from the policy and the recorded needs; ring and stage copies never change 
 
 ### 21.8 Why the CPU split loses (the lead's item 1), and the likely-routed measurement (item 2's gate)
 
-**The timeline** (`spikes/fn7/f5b_timeline.py`: the 5080's graphed MTP steps under nsys with `--cuda-graph-trace=node`,
+**The timeline** (`bench/timeline.py`: the 5080's graphed MTP steps under nsys with `--cuda-graph-trace=node`,
 an NVTX range per CPU task in kernels.cpu_task; verify-only share 0.25 at 6 threads; 40 steps):
 - *Overlap:* the CPU's work is off the critical path. A layer's task starts 1.5 µs after the GPU's `k_signal` and
   takes 86 µs (p50; 218 at p90) while the GPU's own work between the signal and its wait is 190 µs (fetch, the hits'
@@ -2684,7 +2684,7 @@ revisited only if a row is still more than 5% short on acceptance after the pass
 
 **Where a pass goes** (the 5080 at 1K, graphed steps in nsys). A first split charged the drafter 5.24 ms: it counted
 the time between graphed steps, which the timeline spike's per-step sync and per-node tracing make (1.3 ms of host
-and launch). Without the sync and traced per graph (`spikes/fn7/f5b_timeline.py run --no-sync`), the GPU idles 0.03 ms between steps (the next
+and launch). Without the sync and traced per graph (`bench/timeline.py run --no-sync`), the GPU idles 0.03 ms between steps (the next
 step launches while one runs). The drafter is 3.9 ms against Strata's 2.36: the head's experts were fetched every
 sub-step (0.83 ms, its mmvq waiting on it) — the profile never counted the head's group, so F2 seeded 4 of its 512
 experts — while Strata keeps its draft layer resident (871 MiB, 675 of them experts). The output head is 1.15 ms of
@@ -3439,7 +3439,7 @@ sequences ran out of memory in the snapshot trace. Found by `exact.py` at the cl
 
 ### 22.3 Offload exactness (acceptance 4)
 
-`spikes/fn7/exact.py` records the snapshot trace (`holon_judge.snapshot`) under named configurations of one
+`judge/exact.py` records the snapshot trace (`holon_judge.snapshot`) under named configurations of one
 deployment and diffs each against the first run of the first configuration. The trace is an 8K prompt, its
 prefix-hit extension, and 62 short requests through every graph bucket, with logprobs and seeded sampling. Each
 configuration gets a fresh engine on the same state budget, the MTP head drafting, and a plant must differ:
@@ -3467,7 +3467,7 @@ F5b is not used by any deployment, so its bound against the path-aware floor doe
 
 ### 22.4 Gates (c) and (d) on the final deployments
 
-- **(c) GPU self-consistency** (`spikes/fn7/consistency.py`, bf16, the 4 `v1-long` prompts, 49,596 positions, the
+- **(c) GPU self-consistency** (`judge/consistency.py`, bf16, the 4 `v1-long` prompts, 49,596 positions, the
   deployed MTP pack, 5346d3a). Each card's drafting-off deployment flags; the MTP pair adds the head. **Both pass:**
 
   | Pair | 5080 KL mean / p50 / p99 | 5090 KL mean / p50 / p99 |
@@ -3528,7 +3528,7 @@ ple_state_bf16, shexp_gate_off and mtp_stream0):
 - **A cheap cover:** the PLE block and the QSA selection on the real model checked against their oracles on the
   engine's own inputs. Built in §22.6; all four plants fail it.
 
-### 22.6 The cover, built (`spikes/fn7/cover.py`; the lead's call, 2026-10-24)
+### 22.6 The cover, built (`judge/cover.py`; the lead's call, 2026-10-24)
 
 **What it checks.** The engine serves one long prompt in prompt steps of the deployment's size. Its PLE block and its
 first QSA layer's selection are then checked against their float32 oracles, which take the whole prompt in one piece
@@ -3642,7 +3642,7 @@ Panel C: the MTP-vs-plain pair's bar (KL mean ≤ 0.13) could not see a verify-p
 - gate (d) ran drafting off;
 - `exact.py` compares placements of one tree.
 
-**The bars from here** (`spikes/fn7/consistency.py`, `MTP_BARS`), about 5× the clean pairs of 5346d3a (KL mean 0.0020
+**The bars from here** (`judge/consistency.py`, `MTP_BARS`), about 5× the clean pairs of 5346d3a (KL mean 0.0020
 / 0.0044, p99 0.023 / 0.063 on the 5080 / 5090):
 - KL mean ≤ 0.02;
 - KL p99 ≤ 0.3;
@@ -3824,7 +3824,7 @@ warm-up run first in each allocation; Holon / Strata no-approx; per round in bra
 The lead's order: A the VRAM ledger, B the allocator's reserve, C a peak diet, D the PCIe rate, E the draft-quality
 check, F 8 or more prompts per MTP row. Locks and propagation wait for this round.
 
-### 23.1 A: the VRAM ledger (`spikes/fn7/ledger.py`, each card's final deployments, a fresh engine per row)
+### 23.1 A: the VRAM ledger (`bench/ledger.py`, each card's final deployments, a fresh engine per row)
 
 | 5090, MTP deployment (5K steps, 0.985; GiB) | 1 seq | 4 | 8 | 16 |
 |---|---|---|---|---|

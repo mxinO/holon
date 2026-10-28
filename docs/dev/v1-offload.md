@@ -232,7 +232,7 @@ miss path that changes the graph shape (a new node between resolve and combine) 
   can tell them apart in mixed steps: padding rows are masked (no fetch, no CPU job, no counts); prefill rows never
   count or admit (M6 and panel C: counting prompts costs 4–6%); decode and verify rows count every routed entry at
   resolve time, rejected drafts included (acceptance is known only after the step; deterministic either way).
-- **F11's rule, as M6 replayed it** (`spikes/x0_offload/m6/replay.py`), specified in its contract and oracle, in this
+- **F11's rule, as M6 replayed it** (`bench/placement_replay.py`), specified in its contract and oracle, in this
   order per step: decay (×0.915 in f32, on every step with at least one decode / verify row, graphed or eager;
   prefill-only steps do not decay), then increments (+1.0 per counted entry, order-independent), then pairing: per
   layer, the step's distinct misses (candidates, by count

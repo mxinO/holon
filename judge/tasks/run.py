@@ -14,10 +14,10 @@ greedy, on the same GGUF and the same prompt ids (the chat template's rendering,
 The bar, stated before the first run (§18): Holon scores within 5 items (6.9 points) of Strata on the 72, and no
 Holon answer is degenerate where Strata's is not.
 
-    python spikes/fn7/tasks/run.py generate --engine holon --model <...-00001-of-00002.gguf> --out <answers.jsonl>
-    python spikes/fn7/tasks/run.py generate --engine strata --model <...> --strata <engine> --strata-flags '...' \\
+    python judge/tasks/run.py generate --engine holon --model <...-00001-of-00002.gguf> --out <answers.jsonl>
+    python judge/tasks/run.py generate --engine strata --model <...> --strata <engine> --strata-flags '...' \\
         --out <answers.jsonl>
-    python spikes/fn7/tasks/run.py score --answers holon=<a.jsonl> strata=<b.jsonl> --out <json> --samples <md>
+    python judge/tasks/run.py score --answers holon=<a.jsonl> strata=<b.jsonl> --out <json> --samples <md>
 """
 from __future__ import annotations
 
@@ -198,8 +198,8 @@ def score(a) -> None:
     print(json.dumps({"totals": totals, "bar": out.get("bar")}, indent=1))
     if a.samples and "holon" in runs:
         lines = ["# FN task samples: Holon's answers (greedy, thinking on)", "",
-                 "Eight items from `spikes/fn7/tasks/fn_tasks.jsonl` (synthetic), answered by Holon on the IQ2_XS file "
-                 "(`spikes/fn7/tasks/run.py`). Long prompts are cut in the middle; of the reasoning only its last "
+                 "Eight items from `judge/tasks/fn_tasks.jsonl` (synthetic), answered by Holon on the IQ2_XS file "
+                 "(`judge/tasks/run.py`). Long prompts are cut in the middle; of the reasoning only its last "
                  f"{TAIL} characters are shown.", ""]
         for i in SAMPLES:
             r, ans = rows[i], runs["holon"][i]

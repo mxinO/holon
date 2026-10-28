@@ -13,11 +13,23 @@ import contextlib
 import gc
 import json
 import pathlib
-import sys
+import shlex
 
 import torch
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def engine(model: str, flags: str, **base):
+    """An engine from `holon serve`-style flags over `base` (the flags win; `plugin_options` given in `base` merge on
+    top of theirs)."""
+    from holon.core.cli import engine_flags, engine_settings, layered
+    from holon.core.engine import Engine, EngineConfig
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    extra = base.pop("plugin_options", None)
+    cfg = layered(base, engine_settings(parser.parse_args(shlex.split(flags))))
+    return Engine(EngineConfig(model, **(layered(cfg, {"plugin_options": extra}) if extra else cfg)))
 
 
 def options(text: str) -> dict:
@@ -35,8 +47,6 @@ def main() -> None:
     ap.add_argument("--prompts", default=str(ROOT / "judge/prompts/v1-long.jsonl"))
     ap.add_argument("--out")
     a = ap.parse_args()
-    sys.path.insert(0, str(ROOT / "spikes/fn6"))
-    from _engine import engine
     from holon_judge import planted, snapshot
     from holon_judge.recording import PromptSet
 

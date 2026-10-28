@@ -15,7 +15,7 @@ third-party text. Every item is a chat (`messages`) with an `answer` and a `chec
 
 Answers end with a line `Final answer: <value>` (the prompts ask for it); `run.py` scores them.
 
-    python spikes/fn7/tasks/build.py --tokenizer <a Qwen3.8-Flash-Next .gguf> --out spikes/fn7/tasks/fn_tasks.jsonl
+    python judge/tasks/build.py --tokenizer <a Qwen3.8-Flash-Next .gguf> --out judge/tasks/fn_tasks.jsonl
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ import random
 
 SEED = 7
 FINAL = "End your reply with a line of the form `Final answer: <answer>`."
-SOURCE = "synthetic: spikes/fn7/tasks/build.py, seed 7 (Apache-2.0, this repository)"
+SOURCE = "synthetic: judge/tasks/build.py, seed 7 (Apache-2.0, this repository)"
 
 
 def item(cat: str, n: int, messages: list[dict], answer, check: str, **extra) -> dict:

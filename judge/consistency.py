@@ -1,5 +1,5 @@
-"""FN's self-consistency gate (docs/dev/v1-flash-next.md §18 (c)): Holon's paths against each other on the full model, no
-golden. On four `v1-long` prompts (natural text and recall, 6K-20K tokens):
+"""FN's self-consistency gate (docs/dev/v1-flash-next.md §18 (c)): Holon's paths against each other on the full model,
+no golden. On four `v1-long` prompts (natural text and recall, 6K-20K tokens):
 
 - `decode`: the prompts scored teacher-forced in 1-token steps (every quantized matmul on mmvq, GDN's recurrent
   kernel, the GEMV HC mix, QSA's decode kernels) against one prefill step per prompt;
@@ -12,13 +12,13 @@ minus reference, nats) per prompt and per 1,024-position band. Bars, set before 
 noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `v1-long`: KL mean 0.043 / 0.063, p50
 0.0023 / 0.0032, worst band |ΔNLL| 0.50): KL mean ≤ 0.13, KL p50 ≤ 0.007; every band's |ΔNLL| ≤ 0.75 is reported
 (`band_within`), not gated (owner, 2026-10-21). `--plant qsa_decode_select_shift` (decode and verify only) must fail.
-`mtp`'s bars (the lead's call, 2026-10-24, set before the final tree's run, docs/dev/v1-flash-next.md §22.8): about 5× the
-clean pairs' (KL mean 0.0020 / 0.0044, p99 0.023 / 0.063 on the RTX 5080 / 5090, 5346d3a) — KL mean ≤ 0.02 and p99
+`mtp`'s bars (the lead's call, 2026-10-24, set before the final tree's run, docs/dev/v1-flash-next.md §22.8): about 5×
+the clean pairs' (KL mean 0.0020 / 0.0044, p99 0.023 / 0.063 on the RTX 5080 / 5090, 5346d3a) — KL mean ≤ 0.02 and p99
 ≤ 0.3 over at least 100 agreeing positions, on 8 chat prompts (the four's and `MTP_MORE`); `--plant
 linear_rows_swap` (verify passes only) and `shexp_gate_off` must fail. The pair runs at the reference's step
 (`--prefill-step`, the deployment's).
 
-    python spikes/fn7/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
+    python judge/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
         [--holon-flags '<engine flags>'] [--prefill-step N]
 """
 from __future__ import annotations
@@ -32,7 +32,7 @@ import subprocess
 
 import torch
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
 PROMPTS = ("summary-6k", "recall-8k", "recall-16k", "chat-multiturn-20k")
 DRAFTS, K = 3, 20
 BARS = {"kl_mean": 0.13, "kl_p50": 0.007, "band_dnll": 0.75}
@@ -49,6 +49,7 @@ def engine(a, **kw):
     base = layered({"max_model_len": a.max_len, "max_seqs": 8}, flags(a.holon_flags))
     return Engine(EngineConfig(a.model, **layered(base, kw)))
 
+
 def flags(text: str) -> dict:
     """`holon serve`-style engine flags (e.g. an offload deployment's) as EngineConfig settings: only those given."""
     import argparse
@@ -58,7 +59,6 @@ def flags(text: str) -> dict:
     parser = argparse.ArgumentParser()
     engine_flags(parser, given_only=True)
     return engine_settings(parser.parse_args(shlex.split(text)))
-
 
 
 def scored(a, prompts, step: int):

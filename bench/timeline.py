@@ -7,27 +7,37 @@ pairs each layer's `k_signal` (the GPU hands the CPU its share) with the next `c
 work between the signal and the wait, and the wait (its stall, when the CPU is the later). Usage:
 
     nsys profile --capture-range=cudaProfilerApi --capture-range-end=stop --cuda-graph-trace=node \\
-        --trace=cuda,nvtx --sample=none -o <rep> python spikes/fn7/f5b_timeline.py run --model <gguf> \\
+        --trace=cuda,nvtx --sample=none -o <rep> python bench/timeline.py run --model <gguf> \\
         --flags '<holon serve flags>' --out <json>
-    python spikes/fn7/f5b_timeline.py summarize --rep <rep>.nsys-rep --run <json> --out <json>
+    python bench/timeline.py summarize --rep <rep>.nsys-rep --run <json> --out <json>
 """
 from __future__ import annotations
 
 import argparse
 import json
 import pathlib
+import shlex
 import statistics
 import subprocess
-import sys
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parents[2]
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+def engine(model: str, flags: str, **base):
+    """An engine from `holon serve`-style flags over `base` (the flags win; `plugin_options` given in `base` merge on
+    top of theirs)."""
+    from holon.core.cli import engine_flags, engine_settings, layered
+    from holon.core.engine import Engine, EngineConfig
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    extra = base.pop("plugin_options", None)
+    cfg = layered(base, engine_settings(parser.parse_args(shlex.split(flags))))
+    return Engine(EngineConfig(model, **(layered(cfg, {"plugin_options": extra}) if extra else cfg)))
 
 
 def run(a) -> dict:
     import torch
-    sys.path.insert(0, str(ROOT / "spikes/fn6"))
-    from _engine import engine
     from holon.api import SamplingParams
 
     rows = [json.loads(x) for x in (ROOT / "judge/prompts/v1-long.jsonl").read_text().splitlines() if x]
