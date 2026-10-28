@@ -1332,9 +1332,10 @@ def test_a_spare_policys_moves_run_beside_and_fence_the_staging_slots(gpu_moe):
     """GLM step 7: under a policy with spares (F10) and exclusive tiers a call's admitted moves and demotions run on
     the store's moves stream — the admissions first, the next call's staging writes after them (`admitted`), the
     demotions beside the next calls, a later call reusing their table or their victims' slots after them (`moved`,
-    the step's join) — and the store still serves the resident store's bits, one copy an expert; under
-    `moves_unfenced` (no fence, the moves late) it does not."""
-    from holon_judge.planted import moves_unfenced
+    the step's join) — and the store still serves the resident store's bits, one copy an expert, its demotions late
+    (a sleep before each); under `moves_unfenced` (no fence, each call's demotions enqueued after the call two later
+    rewrote their table: a deterministic delay, not a race) it does not."""
+    from holon_judge.planted import _late_demotions, moves_unfenced
 
     file, prompts, _ = gpu_moe
     params = SamplingParams(temperature=0.0, max_tokens=48, ignore_eos=True)     # (long enough to read demoted
@@ -1344,7 +1345,7 @@ def test_a_spare_policys_moves_run_beside_and_fence_the_staging_slots(gpu_moe):
     opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ring_tokens": 512,
             "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     for plant in (False, True):
-        with moves_unfenced() if plant else contextlib.nullcontext() as fired:
+        with moves_unfenced() if plant else _late_demotions(20_000_000) as fired:
             engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
             store = engine.ctx.shared_objects[KEY]
             assert store.moves_async
@@ -1353,7 +1354,7 @@ def test_a_spare_policys_moves_run_beside_and_fence_the_staging_slots(gpu_moe):
             if not plant:
                 _held_once(store)
             engine.close()
-        assert (got == want and not wrong) != plant and (not plant or fired["calls"]), wrong
+        assert (got == want and not wrong) != plant and (not plant or fired["deferred"]), (wrong, fired)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

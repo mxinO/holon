@@ -218,9 +218,11 @@ class Offload(nn.Module):
     def gathers_once(self, tokens: int) -> bool:
         """Docs/dev/v1-glm.md D8h: the layer's misses gathered once for a step of `tokens` rows, not once a pass — an
         eager staging step whose gathers go beside the compute (D8g's stage mode) of more than one pass, every pass
-        pipelined, its staging able to hold the union (`prefill` ≥ min(items, top_k · tokens), A-m1)."""
+        pipelined, its staging able to hold the union (`prefill` ≥ min(items, top_k · tokens), A-m1), no route transform
+        (A's code review m1)."""
         s = self.store
-        return (not self._aux and s._beside and not s._rounds and tokens > self.pass_tokens(tokens)
+        return (not self._aux and self._transform is None and s._beside and not s._rounds
+                and tokens > self.pass_tokens(tokens)
                 and s.prefill >= min(s.items, s.top_k * tokens) and self._cpu is None
                 and all(takes_buffers(x.kernel) for x in self._stacks))
 

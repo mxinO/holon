@@ -1838,19 +1838,56 @@ class _Never(set):
 @contextlib.contextmanager
 def moves_unfenced() -> Iterator[collections.Counter]:
     """GLM step 7: under a policy with spares a call's moves run on the store's moves stream; here no later call of the
-    step waits for them (the fences `admitted`, `moved` never count as recorded) and the demotions run late (a sleep
-    before each), so a later call rewrites a move table, or reuses a slot or unit, before the demotions read them —
-    RAM units end up holding other experts' bytes. Yields its counts (`calls` it unfenced)."""
+    step waits for them (the fences `admitted`, `moved` never count as recorded) and each call's demotions run as
+    late as that allows — after the call two later (the same move table's parity) rewrote the table, enqueued there,
+    then the rest at the step's last layer: a deterministic delay, not a race — so they copy another call's list and
+    the victims' RAM units keep other experts' bytes. Yields its counts (`calls` it unfenced, `deferred`
+    demotions)."""
     from holon_std.tiered import store as tiered
+    from holon_std.tiered.resolver import DeviceResolver
 
-    start, fired = tiered.TieredStore.start_step, collections.Counter()
+    start, done, fired = tiered.TieredStore.start_step, tiered.TieredStore.layer_done, collections.Counter()
+    pending: dict[int, list] = {}
 
     def planted(self, early=False):
         start(self, early)
         if self.exclusive and self.moves_async:
             self.recorded = _Never()
             fired["calls"] += 1
-    with mock.patch.object(tiered.TieredStore, "start_step", planted), _late_demotions(20_000_000):
+
+    def moves(self, ids):                            # `DeviceResolver._moves` with its demotions deferred
+        store, g = self.store, self.group
+        if not (store.exclusive and store.moves_async):
+            return original(self, ids)
+        for demote in pending.pop(g % 2, []):        # the call two before's, over this call's table
+            demote()
+        table, n_moves = store.moves[g % 2], store.n_moves[g % 2]
+        moving = list(zip(self.classes, self._fetch, strict=True))
+        stream = store.moves_stream()
+        stream.wait_stream(torch.cuda.current_stream())
+        beside = [{"beside": True} if getattr(gather, "beside", False) else {} for _, gather in moving]
+        with stream:
+            for r, (c, gather) in enumerate(moving):
+                gather(table[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots(), **beside[r])
+
+        def demote():
+            fired["deferred"] += 1
+            stream.wait_stream(torch.cuda.current_stream())
+            with stream:
+                for r, (c, gather) in enumerate(moving):
+                    gather(table[r, 0:2], n_moves[r, 0:1], c.slots(), c.units(), **beside[r])
+        pending.setdefault(g % 2, []).append(demote)
+
+    def layer_done(self, g):
+        if self.exclusive and self.moves_async and g == len(self._order) - 1:
+            for demote in [d for k in sorted(pending) for d in pending.pop(k)]:
+                demote()
+        return done(self, g)
+
+    original = DeviceResolver._moves
+    with mock.patch.object(tiered.TieredStore, "start_step", planted), \
+            mock.patch.object(DeviceResolver, "_moves", moves), \
+            mock.patch.object(tiered.TieredStore, "layer_done", layer_done):
         yield fired
     print(f"plant moves-unfenced fired: {dict(fired)}", file=sys.stderr)
 

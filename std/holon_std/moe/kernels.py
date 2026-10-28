@@ -156,7 +156,8 @@ then `staging` slots, then cache slots.
   (landing rows). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as they are in `out` (a
   pipelined pass computes each part's entries into one `out`); an instance with `sparse = True` also takes
   `sparse=True`, a call whose live entries are few (one part of a pass, docs/dev/v1-glm.md D8g): the same rows,
-  its cost its live entries' (the activations of the others not quantized).
+  its cost its live entries' where the instance can (kernels.ggml_cuda: q8_1 activations — the activations of the
+  others not quantized; its native FP4 quantize ignores `sparse`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
   src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits

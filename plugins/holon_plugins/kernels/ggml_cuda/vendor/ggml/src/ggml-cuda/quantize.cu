@@ -476,7 +476,7 @@ static __global__ void quantize_mmq_mxfp4(const float * __restrict__ x,
 }
 
 // scatter: grid over tokens, quantize once, write to all the token's compact rows
-template <mmq_q8_1_ds_layout ds_layout, bool scatter>
+template <mmq_q8_1_ds_layout ds_layout, bool scatter, bool sparse = false> // Holon: sparse (D8g), compiled apart
 static __global__ void quantize_mmq_q8_1(
         const void * __restrict__ x, const bool x_bf16, const int32_t * __restrict__ ids, void * __restrict__ vy,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
@@ -494,7 +494,7 @@ static __global__ void quantize_mmq_q8_1(
 
     const int64_t i00 = i0;
     ggml_cuda_pdl_sync();
-    if (live) {                                       // Holon: a sparse call (D8g): its live pairs' rows only
+    if constexpr (sparse) {                           // Holon: a sparse call (D8g): its live pairs' rows only
         if constexpr (scatter) {                      // (block-uniform: every thread of a block has its token)
             bool any = false;
             for (int slot = 0; slot < n_expert_used; ++slot) {
@@ -562,8 +562,10 @@ static __global__ void quantize_mmq_q8_1(
         int64_t ib;
         if constexpr (scatter) {
             const int64_t i = ids[(int64_t) blockIdx.x * n_expert_used + slot];
-            if (live && i >= *live) {                 // Holon: a dead pair's row (D8g)
-                continue;
+            if constexpr (sparse) {                   // Holon: a dead pair's row (D8g)
+                if (i >= *live) {
+                    continue;
+                }
             }
             ib = k_block*ne1 + i;
         } else {
@@ -626,16 +628,31 @@ void quantize_mmq_q8_1_cuda(
     const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE_MMQ, 1, 1);
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, false, true>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, false>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, nullptr);
+            }
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, false, true>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, false>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, nullptr);
+            }
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, false, true>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, false>
+                    <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, nullptr);
+            }
             break;
         default:
             GGML_ABORT("fatal error");
@@ -659,16 +676,31 @@ void quantize_scatter_mmq_q8_1_cuda(
     const dim3 block_size(CUDA_QUANTIZE_BLOCK_SIZE_MMQ, 1, 1);
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, true, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, nullptr);
+            }
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, true, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, nullptr);
+            }
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
-            quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            if (live) { // Holon: the sparse instance (D8g); the dense one as upstream compiles it
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, true, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
+            } else {
+                quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, true><<<num_blocks, block_size, 0, stream>>>(
+                    x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, nullptr);
+            }
             break;
         default:
             GGML_ABORT("fatal error");

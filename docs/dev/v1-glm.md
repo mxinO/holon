@@ -955,8 +955,10 @@ cost as much in per-part passes (each a 16K-row `quantize_mmq_q8_1`, ≈ 0.9 ms;
   (`test_a_union_of_a_steps_rows_resolves_as_its_passes_do`); the profiled reserve over two-pass steps
   (`test_exclusive_tier_steps_fit_the_profiled_reserve[two]`, B's D8h-m1). **A-m3's moves:** no call of a two-pass
   step moved anything under F10 or F11, at one sequence or four (as D8g's F4 note: a lending step leaves no empty slot
-  and lends the coldest), so `victim_scope_pass_one` cannot be shown to occur and was not built; the union's scope —
-  every row of the step — is what the resolve sees by construction. Predicted 32K prefill (C): ≈ 9.5-9.9 s, Holon /
+  and lends the coldest) — an argument per policy: an evicting policy could admit in a two-pass call, and that stays
+  safe, its victims' scope being the whole union (every row of the step, which the one resolve sees), so
+  `victim_scope_pass_one` cannot be shown to occur with these two and was not built. A route transform
+  (`moe.route_transform`) keeps the per-pass path (A's code review m1). Predicted 32K prefill (C): ≈ 9.5-9.9 s, Holon /
   Maya ≈ 1.0-1.04; after it the next 32K lever is the drive's bytes, not copies.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
