@@ -93,7 +93,7 @@ This README describes `main`. The last release, v0.1.1
 and Qwen3.8-Flash-Next: their locks pin `main`'s code, so install `main` for them, or the tag (`--branch v0.1.1`, whose
 README describes it) for the release. Release steps 7–10's locks and records name commits of the release line as
 first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README
-(`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `evidence/history_scrub_commit_map_2026-10-16.txt` maps
+(`docs/dev/evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `docs/dev/evidence/history_scrub_commit_map_2026-10-16.txt` maps
 older SHAs). v0.1.1's locks were carried to its code with byte-identical snapshot traces.
 
 Host requirements: Linux x86-64, an NVIDIA driver supporting CUDA 13, the CUDA 13 toolkit (`nvcc` on `PATH` or under
@@ -236,8 +236,8 @@ The release's agent demo (`bench/demo/`) is a small fix in a three-module Python
 function — chosen to fit a 32K context. It shows the served model completing such a task through Claude Code; it
 is not a claim of general agent capability. **Result** (pre-registered, Claude Code 2.1.300, each card's 27B lock,
 scored by the harness's own copy of the tests): **3 of 3 runs passed on the RTX 5080 (UD-IQ3_S) and 3 of 3 on the
-RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`evidence/agent_demo_rtx-5080_2026-10-16.json`,
-`evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/dev/release.md` §18). Claude Code sends no temperature, so the
+RTX 4090 (UD-Q4_K_M)**, in 13–16 turns and 2–5 minutes each (`docs/dev/evidence/agent_demo_rtx-5080_2026-10-16.json`,
+`docs/dev/evidence/agent_demo_rtx-4090_2026-10-15.json`; `docs/dev/release.md` §18). Claude Code sends no temperature, so the
 server's default (1.0) applies; its `output_config.effort` (`high`) selects the Qwen3.8 template's highest level, which
 was the template's default before v0.1.1. Since v0.1.1 its usage shows the prefix cache's reads as
 `cache_read_input_tokens`, apart from `input_tokens`. The demo ran on the locks as they stood at release step 9, at
@@ -324,7 +324,7 @@ Qwen3.8-Flash-Next locks.
   cache.
 
 The RTX 5080's Qwen3-30B-A3B Q4_K_M lock names `profile_x4_gate.json` (made from held-out chat prompts,
-`spikes/x4_gate/README.md`; any profile serves):
+`docs/dev/spikes/x4_gate/README.md`; any profile serves):
 
 ```bash
 hf download unsloth/Qwen3-30B-A3B-GGUF Qwen3-30B-A3B-Q4_K_M.gguf          # prints the file's path in the HF cache
@@ -395,7 +395,7 @@ lock's start is refused and the server falls back to defaults.
 On an agent trace whose sessions are parked and resumed (`agent_park`; the RTX 5080's Qwen3.8-27B UD-IQ3_S), time to
 first token p50 fell to 0.047× the VRAM-only engine's and throughput rose 2.26×; against `llama-server --cache-ram`
 sized to serve the trace, TTFT p50 was 0.122× and throughput 1.79× (`docs/dev/v1-kv-tiers.md` "Step 4",
-`evidence/k4_agent_park_rtx-5080_2026-10-19.json`; on the tier lock as first written, at 49,152 tokens of context
+`docs/dev/evidence/k4_agent_park_rtx-5080_2026-10-19.json`; on the tier lock as first written, at 49,152 tokens of context
 where the shipped lock serves 40,960). The tier moves state without changing it (tier invariance and run-identity,
 through host and SSD levels); the `branch` and `answer` checkpoints change where a resumed prompt is recomputed from,
 so they were checked within bounds (KL), not bitwise. An SSD level below the host level (`state_tier.levels=ssd`,
@@ -522,7 +522,7 @@ rounds. Holon runs each card's lock deployment in process (prefix cache off, the
 Strata `296b59d` runs without its approximations, with its own calibration, drafting off or with its MTP head.
 Holon's advantage in tokens per second, above 1 when Holon is faster; the bars, set before measuring, are 1.0 for
 decode and 0.9 for prefill, and every row meets its bar ([docs/dev/v1-flash-next.md](docs/dev/v1-flash-next.md)
-§22.10, `evidence/fn_close_final_2026-10-24.json`, key `d11`):
+§22.10, `docs/dev/evidence/fn_close_final_2026-10-24.json`, key `d11`):
 
 | row | RTX 5080, 1K / 4K / 32K | RTX 5090, 1K / 4K / 32K |
 |---|---|---|
@@ -544,9 +544,9 @@ Caveats:
 
 The RTX 5080's Qwen3-30B-A3B Q4_K_M lock (about half the experts cached: 52.7% at the offload milestone's close)
 against FreeToken: decode 1.06 / 1.04 / 1.02× at 1K / 4K / 32K (`docs/dev/v1-offload.md` "Step 8, part 2",
-`evidence/x8_close_rtx-5080_2026-10-18.json`); prefill 1.850 / 1.136 / 1.005× against FreeToken run at the lock's step
+`docs/dev/evidence/x8_close_rtx-5080_2026-10-18.json`); prefill 1.850 / 1.136 / 1.005× against FreeToken run at the lock's step
 budget, and 0.959× against FreeToken's default at 32K, after the MoE prefill work (`docs/dev/v1-moe-prefill.md`,
-`evidence/mp5_close_2026-10-20.json`), which moved the lock's decode by 0.994× (pooled over 18 prompt and context
+`docs/dev/evidence/mp5_close_2026-10-20.json`), which moved the lock's decode by 0.994× (pooled over 18 prompt and context
 pairs).
 
 ## Contributing

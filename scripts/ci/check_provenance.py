@@ -23,7 +23,7 @@ if not license_file.is_file() or hashlib.sha256(license_file.read_bytes()).hexdi
 if not (ROOT / "NOTICE").is_file():
     msgs.append("NOTICE is missing")
 notices = notices_file.read_text() if notices_file.is_file() else ""
-named = set(re.findall(r"`((?:plugins|std|core|judge|tools|testing|bench|spikes)/[^`\s]+)`", notices))
+named = set(re.findall(r"`((?:plugins|std|core|judge|tools|testing|bench|docs)/[^`\s]+)`", notices))
 msgs += [f"THIRD_PARTY_NOTICES.md names {p}, which does not exist" for p in sorted(named) if not (ROOT / p).exists()]
 
 tracked = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()

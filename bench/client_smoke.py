@@ -7,12 +7,12 @@ log must hold no traceback.
 - OpenAI SDK: models, chat, streamed chat with usage, the legacy completions and the Responses API, tool calls
   (plain and streamed, then the tool's result), a strict `json_schema` response format.
 - pi's request shapes (pi itself, `bench/demo/pi_run.py`, needs its pinned npm install; these are the shapes its
-  recorded probes sent, `evidence/agent_test_pi_*`): the developer role, `reasoning_effort`, `chat_template_kwargs`,
-  `max_completion_tokens`, a replayed assistant turn (null content, `reasoning_content`, tool calls) and its tool
-  message, the same request again (a prefix-cache hit in /metrics), `tools: []` with tool history.
-- Claude Code's request shapes (as `bench/capture_proxy.py` recorded them, `evidence/claude_code_session_*`; Claude
-  Code itself: `bench/demo/run.py`): the beta Messages endpoint with its beta flags, a system of three blocks (the
-  per-request billing header, then cached blocks), `$schema` tool schemas without additional properties, adaptive
+  recorded probes sent, `docs/dev/evidence/agent_test_pi_*`): the developer role, `reasoning_effort`,
+  `chat_template_kwargs`, `max_completion_tokens`, a replayed assistant turn (null content, `reasoning_content`, tool
+  calls) and its tool message, the same request again (a prefix-cache hit in /metrics), `tools: []` with tool history.
+- Claude Code's request shapes (as `bench/capture_proxy.py` recorded them, `docs/dev/evidence/claude_code_session_*`;
+  Claude Code itself: `bench/demo/run.py`): the beta Messages endpoint with its beta flags, a system of three blocks
+  (the per-request billing header, then cached blocks), `$schema` tool schemas without additional properties, adaptive
   thinking with `output_config.effort`, `context_management`, `metadata.user_id`, streamed; a Read tool call, its
   result, then a mid-conversation system message; a side call with `stop_sequences`; `count_tokens`.
 

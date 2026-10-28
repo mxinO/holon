@@ -1,7 +1,7 @@
 """placement.profile_decay@1 (F2–F3, Strata X2; docs/dev/v1-offload.md D1, D4): a profile-seeded cache, then adaptive
 swaps
 by decayed routing counts on a fixed cadence — the Strata-parity arm, as the M6 replay's `profile_decay`
-(spikes/x0_offload/m6/replay.py; Strata generate.cpp:8829-8987). A host policy: the cache is the host's, edited
+(bench/placement_replay.py; Strata generate.cpp:8829-8987). A host policy: the cache is the host's, edited
 between steps, and the store applies each swap in two phases (the victim unmapped at launch c + 2, the incoming
 expert copied into its slots after that step, mapped at c + 2 + d).
 

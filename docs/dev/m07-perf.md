@@ -722,7 +722,7 @@ MoE decode path. Neither is an M0.7 candidate (§11.11).
   - `clock_check.py`;
   - `mixed_sim.py`;
   - `step0_report.py`.
-- **Records**, `evidence/` (GPU names only, flags repo-relative):
+- **Records**, `docs/dev/evidence/` (GPU names only, flags repo-relative):
   - `m07-step0_{clock, qmm-sweep, profile-<row set>, prefill-idle-27b[-h16k], sim}_<class>_2026-10-14`;
   - `bench_m07-agent-plain_<class>`;
   - `bars_release-m07-*_rtx-5090`;
@@ -778,7 +778,7 @@ decided at step 5 (§11.6), the cap decided at step 4 with
 - **Rebased onto `main` at 4a44fdc** (M0.6 Gate B: `kernels.triton_fp8`, `std.weights.hf`'s merge order). The rebase
   had no conflicts; `uv sync --group dev` re-synced the venv. Full GPU suite (`pytest core std plugins judge testing
   tools`, two A5000s): 1155 passed, 63 skipped, 18 min 55 s. `scripts/ci/run_all.sh` green.
-- **M0.6's merge-order change propagated on its own** (commit 9b1db33, `evidence/propagate_m06-merge-order_2026-10-14.json`):
+- **M0.6's merge-order change propagated on its own** (commit 9b1db33, `docs/dev/evidence/propagate_m06-merge-order_2026-10-14.json`):
   every development-class lock that pins `std.weights.hf` — rtx-4090 Qwen3-8B bf16 (lock 11), nvidia Qwen3-8B NVFP4
   (2), nvidia Qwen3-30B-A3B NVFP4 (2); rtx-5080 nvidia Qwen3-8B NVFP4 (2). Each passes L2 against its floor (the
   bf16 floor; the W4A8 mmq floor for NVFP4), its propagate trace is byte-identical to the previous lock's, and the
@@ -831,7 +831,7 @@ class's capability (Q4_K: 8 rows on Ada, 5 on Blackwell).
 8, graph-timed, mmvq and both mmq variants: ten sweeps per class, five, then five more about 15 minutes later; and the
 27B lock whole at rows 1 and 4 (D9). `bench/d2_table.py` takes a row as passing when mmq's mean is >= 3% under mmvq's
 and the mean per-sweep difference exceeds 3 sd of the differences; an entry is the smallest limit in {3, 6, 7} whose
-moved graphed rows all pass. No entry moves row 4. Records: `evidence/m07-step1_qmm-sweep-repeats_<class>`,
+moved graphed rows all pass. No entry moves row 4. Records: `docs/dev/evidence/m07-step1_qmm-sweep-repeats_<class>`,
 `m07-step1_d2_<class>` (with the cast), `m07-step1_d2-no-cast_<class>` (D4's re-derivation).
 
 | class | entries shipped (of candidates) | limits | moved rows' margin, min–max | row saving (with the cast) |
@@ -1015,7 +1015,7 @@ gains the two ops). Desktops were clock-screened before their records (`bench/cl
   reference write of the kernel's own model-dtype k.
 - **L0 runs** (`test_ggml_cuda`, `_moe`, `test_attention_kv_quant`): RTX 5080 322 passed / 1 skipped and RTX 4090
   314 / 9 at 74574e0, then `test_ggml_cuda` again at e14b311: 143 passed (5080), 137 / 6 (4090); RTX 5090 322 / 1 at
-  eb9aeaa (`evidence/m07-step2_l0_2026-10-14.json`).
+  eb9aeaa (`docs/dev/evidence/m07-step2_l0_2026-10-14.json`).
 - **memcheck** (`compute-sanitizer`): `memcheck_ggml_cuda` (now also bf16 / f32 outputs at 513 rows, the fused gate,
   prepared inputs) found the fused gate reading past the up half at out 300 (halves of 150 rows: mmvq reads whole
   4-row blocks at small K) — fixed (0308bbc), then 0 errors on sm_86, sm_89 and sm_120a (5080, 5090).
@@ -1057,7 +1057,7 @@ class, in % of the step (− = faster), with its sd:
 
 - Every other cell is within noise of zero, as expected where a fusion has no work (the copy under q8_0 KV, D11
   without NVFP4, glu above one row, shared q8_1 on the 8B whose projections merge). Records
-  `evidence/m07-step2_ab_<class>_2026-10-14.json` (all arms at 74574e0; the NVFP4 deployment again after §13.4's
+  `docs/dev/evidence/m07-step2_ab_<class>_2026-10-14.json` (all arms at 74574e0; the NVFP4 deployment again after §13.4's
   fix at e14b311; glu with `GLU_TYPES` at 1d96857).
 - Against §11.11 (5080 / 4090): the copy saves 3.7 / 2.4% of 8B B1 (step 0's KV-store share 2.2 / 1.5%: the
   index_put pair cost more wall than its kernel time), D3 2.0 / 1.7% of 8B B1 (bound 1.9 / 1.7%), D4 3.5–5.2 /
@@ -1086,7 +1086,7 @@ class, in % of the step (− = faster), with its sd:
   0.4% of the composition at the 27B's shape and faster at the 8B's. With the set, the 27B row is within noise on the
   5080 and the 5090 (−0.14 ± 0.17%), and −0.17% on the 4090. Each sweep is one run without an sd: Q5_K (+0.6 / +1.5 /
   −0.3%) and iq4_nl (+0.5 / +1.3 / +0.6%) are within its noise and could go either way; the set stands on the step-
-  level A/B of the 8B rows. Records `evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
+  level A/B of the 8B rows. Records `docs/dev/evidence/m07-step2_glu-sweep_<class>_2026-10-14.json`.
 - **memcheck caught the fused gate reading past the up half** of a gate/up whose halves are not a multiple of 4 rows
   (§13.2). Real models' intermediate sizes are multiples of 8; such halves now compose.
 - **The CPU reference provider fuses gate/up at every row count** (`testing.ref_kernels`' `qlinear` lists
@@ -1097,19 +1097,19 @@ class, in % of the step (− = faster), with its sd:
 
 ### 13.5 D2 re-derived from the no-cast column
 
-D4 is kept, so `CROSSOVER` is step 1's no-cast table (`evidence/m07-step1_d2-no-cast_<class>`; 83bd092): 25 RTX 5080
+D4 is kept, so `CROSSOVER` is step 1's no-cast table (`docs/dev/evidence/m07-step1_d2-no-cast_<class>`; 83bd092): 25 RTX 5080
 entries (iq2_xs 5120x17408 and iq4_xs 5120x12288 move from 7 to 6: row 7 only) and 11 RTX 5090 entries (iq3_s /
 iq4_xs 5120x17408 from 7 to 6, and iq4_nl 5120x17408 gains 7 — its 8-row path moves to mmq). The 5080's rows-8 floor
 is unchanged (same 8-row paths); the 5090's was re-recorded (`holon_judge golden --q8-1 rows --rows 8 --crossover
 rtx-5090:120`, fe0fbc1). `judge/tests/test_gguf.py::test_a_per_shape_floor_routes_as_the_table_does` (CPU) now ties
 every committed per-shape floor to the table: it failed on the old 5090 floor. The 8-row L2 on the RTX 5080 at
 48ef045 (D3 and D4 in): top-1 97.44% (≥ 97.30%), KL p99 0.592 (floor 0.704), ΔPPL vs floor +0.28% ± 0.40%: PASS
-(`evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). On the RTX 5090 at eb9aeaa, against the re-recorded floor:
+(`docs/dev/evidence/m07-step2_l2-8_rtx-5080_2026-10-14.json`). On the RTX 5090 at eb9aeaa, against the re-recorded floor:
 top-1 97.15% (≥ 96.77%), KL p99 0.714 (floor 0.713), ΔPPL vs floor −1.04% ± 0.80%: PASS
-(`evidence/m07-step2_l2-8_rtx-5090_2026-10-14.json`). The 5090's guard again (ABBA, the entries against
+(`docs/dev/evidence/m07-step2_l2-8_rtx-5090_2026-10-14.json`). The 5090's guard again (ABBA, the entries against
 `--llama-crossover`): tg128 at batch 4 295.6 against 295.6 tok/s (0.0%), at batch 8 513.1 against 496.1 (**+3.4%**),
 DFlash2 verify B1 20.16 against 20.89 ms (**−3.5%**). Step 1 had +3.1% and −3.5%
-(`evidence/m07-step2_guard_rtx-5090_2026-10-14.json`). The 5080's moved entries change row 7 only, which no guard
+(`docs/dev/evidence/m07-step2_guard_rtx-5090_2026-10-14.json`). The 5080's moved entries change row 7 only, which no guard
 row runs.
 
 ### 13.6 The RTX 5090
@@ -1150,14 +1150,14 @@ B4 and prefill), but every verdict rests on rows with sd ≤ 0.35%.
   one decode row. For the lead (§13.12).
 - `bounded` without a plant (§6: at `max_seqs` 8 and 1, the baseline at the same value): every configuration PASS,
   at both (8 / 1: baseline top-1 98.66% / 98.63%; prefix on, depth 1: 98.54% / 98.57%).
-- Records: `evidence/m07-step2_l2_rtx-a5000_2026-10-14.json` (the L2 runs, the plants and the bounded reports).
+- Records: `docs/dev/evidence/m07-step2_l2_rtx-a5000_2026-10-14.json` (the L2 runs, the plants and the bounded reports).
 
 ### 13.8 The FP4 repack holes (M0.6 follow-up): measured, not fixed
 
 - **The fit, RTX 4090** (the nvidia 30B NVFP4 at its rtx-4090 lock 2's flags, 48ef045): 34192 KV tokens (the lock
   records 34128); at the engine's free-memory read the allocator holds **0.355 GiB** reserved but unallocated
   (0.332 GiB right after the weights load; M0.6's 0.63 GiB was read at another point of the build). Record
-  `evidence/m07-step2_fit-30b-nvfp4_rtx-4090_2026-10-14.json`.
+  `docs/dev/evidence/m07-step2_fit-30b-nvfp4_rtx-4090_2026-10-14.json`.
 - **Where the holes come from** (A5000, the allocator's history after load, by the site that freed the block now
   inside a hole): 192 MiB from the bind of the MoE gate/up stacks (`_hold` releasing a merged stack after `prepare`'s
   repack), 108 + 30 MiB from the merges themselves (`ExpertLinear.merge`, `Linear.merge` releasing their sources),
@@ -1215,7 +1215,7 @@ One reviewer (correctness, architecture, numerics / tests) on the aggregate chan
     qlinear's. All fixed.
   - The nits were fixed or are recorded in §13.3 / §13.4.
 - **Round 2:** no blocker or major; one minor (evidence records for the round's new claims: written,
-  `evidence/m07-step2_*`) and four nits: the glu provider checked before its activation-mode check (fixed); the
+  `docs/dev/evidence/m07-step2_*`) and four nits: the glu provider checked before its activation-mode check (fixed); the
   per-type glu sites (recorded in §13.9); `GLU_TYPES` per class (§13.4); the docs (this section).
 - **Round 3** (§13, the evidence, the engine_shapes cache): no blocker or major; three minors.
   - The §13.7 metrics and mechanism, now corrected: mean KL against regret, the one-sided spec-vs-plain check, the
@@ -1295,7 +1295,7 @@ session ran on another 5090 desktop at p50 2647 MHz; each saving is a ratio with
 Per-step graphed wall of the verify step (`bench/step_profile.py`, 32 steps per window, the lock's flags; 27B
 UD-IQ3_S with q8_0 KV on the 5080, UD-Q4_K_M with bf16 KV on the 4090 and the 5090, the 4090's lock borrowed): eight
 rounds per desktop, A B B A B A A B, A = std at the base 1b9d38e (by `PYTHONPATH`), B = 12bb917, four of each. The bar
-is max(0.5%, 3 sd), sd the larger arm's over its four rounds. Records `evidence/m07-step3_d5_<class>_2026-10-14`
+is max(0.5%, 3 sd), sd the larger arm's over its four rounds. Records `docs/dev/evidence/m07-step3_d5_<class>_2026-10-14`
 (with the torch composition's same rounds at 016903f).
 
 | class | row | base ms | D5 ms | saving | 3 sd | torch composition | rewind kernels (eager) | rewind glue ms (eager) |
@@ -1480,7 +1480,7 @@ Core: 4366 code lines (4321 at the step's base; +45). Docs: design §7.1 and §4
 `bench/mixed_step.py` on each class's plain 27B model with its lock's `[engine]` values as flags (no kernel pins): three requests decode while an 8192-token prompt prefills in
 512-token chunks beside them (16 mixed steps), or, "long", decoders at 8K / 16K / 24K beside a 4096-token prompt;
 each mixed step timed synchronously; four rounds per arm, ABBA, the arms flipping the planners' `prefill_mixes`.
-Records `evidence/m07-step4_mixed-step*_<class>_2026-10-15.json`.
+Records `docs/dev/evidence/m07-step4_mixed-step*_<class>_2026-10-15.json`.
 
 | class (KV) | contexts 2K–6K: one call / two calls (ms) | contexts 8K–24K: one call / two calls (ms) | path kept |
 |---|---|---|---|
@@ -1498,7 +1498,7 @@ better than two calls (the 5090's short case, 0.5%, is within its sd). In two ca
 256' --arm m512='--chunk-with-decode 512' --rounds 4 --traces agent long_prompt` (each arm four rounds, ABBA; the
 27B UD-IQ3_S with q8_0 KV on the 5080, the 4090's UD-Q4_K_M with bf16 KV on the 4090 and the 5090), then
 `bench/mixed_bars.py`. The paired TTFT bar is 1 + max(15%, 2 sd of today's per-round TTFT medians) — 1.15, and 1.18
-on the 4090; throughput's max(5%, 2 sd) is 5% everywhere. Records `evidence/bench_m07-step4-plain_<class>_*` and
+on the 4090; throughput's max(5%, 2 sd) is 5% everywhere. Records `docs/dev/evidence/bench_m07-step4-plain_<class>_*` and
 `m07-step4_bars_<class>_2026-10-15.json`.
 
 | class | cap | agent: max gap p99 / max (×) | paired TTFT | agent tok/s | long prompt: gap max (×) | long TTFT p99 | mixed steps | verdict |
@@ -1529,7 +1529,7 @@ on the 4090; throughput's max(5%, 2 sd) is 5% everywhere. Records `evidence/benc
 ### 15.5 Speculative deployments: alternation (recorded)
 
 The same runs with MTP over each plain lock (`--max-draft-tokens 3`, drafter `drafters.mtp`, `fixed_k`, greedy
-verifier, `spec.k=1:3,3:2`), two rounds per arm, ABBA; records `evidence/bench_m07-step4-mtp_<class>_*`. Steps never
+verifier, `spec.k=1:3,3:2`), two rounds per arm, ABBA; records `docs/dev/evidence/bench_m07-step4-mtp_<class>_*`. Steps never
 mix: a prefill step capped at C alternates with a verify step.
 
 | class | C | agent: max gap p99 / max (ms) | paired TTFT | long prompt: gap max | long TTFT p99 | long prompt tok/s |
@@ -1564,7 +1564,7 @@ mix: a prefill step capped at C alternates with a verify step.
   schedulable kind" reads; with a drafter its budget is min(C, `max_step_tokens`) (review round 1's fix).
 - **The A/A, from the records** (§1.3, §7 name one; no separate arm ran): today's arm against itself, round against
   round, per (session, turn), each of the 6 pairs of its 4 rounds once (`bench/mixed_bars.py --aa`;
-  `evidence/m07-close_aa_2026-10-15.json`). The per-pair medians lie within 0.9978–1.0010 on the agent trace (sd 0.0003
+  `docs/dev/evidence/m07-close_aa_2026-10-15.json`). The per-pair medians lie within 0.9978–1.0010 on the agent trace (sd 0.0003
   / 0.0002 / 0.0015 on the 5080 / 4090 / 5090) and 0.9924–1.0073 on the long prompt (sd 0.0004 / 0.0007 / 0.0054) — far
   inside the 1.15 bar. The paired-TTFT and throughput bars' sd is today's arm's over its four rounds (§10's rev-3 C-m2).
 - **The 5090** borrows the 4090's lock (no 5090 GGUF lock yet), as at step 0.
@@ -1634,7 +1634,7 @@ f ≈ 1 − (≈ 3.06 ms of bytes at B) / 3.68 ms ≈ **17% on the 5090 (≈ 1.1
 Each desktop was clock-screened before and after (`bench/clock_check.py`, 27B decode at batch 4): RTX 5090 SM p10 /
 p50 2565 / 2655 MHz before and 2542 / 2595 after, RTX 5080 2737 / 2737 both times; no thermal or hardware slowdown, at
 the power cap in every sample (as in §11.1); steady. Three paired rounds per class (a profile, a sweep and a glu sweep
-each); the table gives their means. Records `evidence/m07-step5_d8_<class>_2026-10-15.json` (the raw records of
+each); the table gives their means. Records `docs/dev/evidence/m07-step5_d8_<class>_2026-10-15.json` (the raw records of
 every round, the screens and `d8_gate.py`'s output).
 
 | class | step ms | GEMV ms (swept − isolated quantize) | B (GB/s) | read-only stream, 2 GiB (GB/s) | f (per round) | projected gain, c = 0.4 / 0.55 | gate |
@@ -1758,7 +1758,7 @@ the plain 27B locks gain `chunk_with_decode = 512` (§15.9); the others record `
 path and KV format, the trace twice), then `holon_judge snapshot --runs 3` at the new lock's settings and pins. M0.6
 Gate B's 8B FP8 locks are new: `tune --new-model` on the RTX 5080, then on the RTX 4090 `tune` from the 5080's lock
 (its first for the class, as M0.6's second-class locks; a first try with `--new-model` was refused because the 5080's
-lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
+lock existed by then). Record `docs/dev/evidence/propagate_m07-close_2026-10-15.json`.
 
 | class | lock | floor | top-1 (floor; budget) | KL p99 (floor; budget) | ΔPPL vs floor (budget) | snapshot ×3 | approved | s |
 |---|---|---|---|---|---|---|---|---|

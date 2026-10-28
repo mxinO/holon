@@ -386,7 +386,7 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Graphs double when a processor is selected (the 27B config: 27 → 54: buckets {1, 2, 4} × widths {1, 3, 4} × 3
   sampler variants × mask on/off). The graph-pool and capture-time deltas and the KV tokens lost are measured at step
   1 and recorded; the profile includes `apply`. With no processor selected, nothing changes (acceptance 6).
-- **Measured (step 1,** `evidence/processor_overhead_qwen3-0.6b_rtx-a5000_2026-10-13.json`, Qwen3-0.6B bf16,
+- **Measured (step 1,** `docs/dev/evidence/processor_overhead_qwen3-0.6b_rtx-a5000_2026-10-13.json`, Qwen3-0.6B bf16,
   rtx-a5000, default settings: max_seqs 64, three interleaved rounds; the toy processor, and the toy with a no-op
   `apply` for the core's own cost): graphs double (27 → 54 plain; 54 → 108 with n-gram k = 3); capture time doubles
   (1.07–1.17 → 2.11–2.20 s plain; 2.53–2.59 → 4.87–5.17 s with k = 3); the graph pool does not grow (526 and
@@ -396,7 +396,7 @@ unread `max_depth` is removed (the gate comes from `open`).
 - Host RAM when the grammar processor is selected: two vetting workers at ≈ 1.1 GB resident each (≈ 2.2 GB, up to
   ≈ 4.4 GB at the watchdog bound) plus the 512 MB compiled-grammar cache — measured at step 2; if it matters on
   consumer hosts, one worker (more queueing) or a worker that never imports torch.
-- **Measured (step 2,** `evidence/grammar_vetting_rtx-a5000_2026-10-13.json`, xgrammar 0.2.8, CPU, Qwen3's 152k
+- **Measured (step 2,** `docs/dev/evidence/grammar_vetting_rtx-a5000_2026-10-13.json`, xgrammar 0.2.8, CPU, Qwen3's 152k
   and Qwen3.5's 248k vocabularies, no whitespace cap): a vetting worker is ready 3.2–3.7 s after its spawn (the
   respawn time) at 768 / 815 MB resident — two take ≈ 1.6 GB, plus ≤ 256 MB each while compiling (the budget, §11);
   a compiled JSON grammar takes 0.2–0.4 MB at the median (≤ 24 MB on the mid-size sample), so the 512 MB cache holds
@@ -665,7 +665,7 @@ Proofs (`plugins/tests/test_grammar.py`, 29 tests, ≈ 45 s of test time; with `
 The cap is dropped; a whitespace runaway ends at `max_tokens` (step 5 counts truncations ending in a whitespace run;
 a cap of 16–32 returns only if they appear).
 
-Measured (D5, `evidence/grammar_vetting_rtx-a5000_2026-10-13.json` at b328173: no whitespace cap; mid-size subsets
+Measured (D5, `docs/dev/evidence/grammar_vetting_rtx-a5000_2026-10-13.json` at b328173: no whitespace cap; mid-size subsets
 only, 40 schemas each of Glaiveai2K, Github_easy, Github_medium and 29 of WashingtonPost; 152k / 248k vocabularies):
 - worker start and respawn 3.2–3.7 s; resident 768 / 815 MB when ready;
 - compile (worker ≈ engine thread): tool schema 15 / 28 ms, `json_object` 14 / 30 ms, a 10-tool structural tag 18 /
@@ -848,8 +848,8 @@ effective `strict: false` in the Responses API's `tools`.
 
 ### Step 4 (2026-10-14): D2's measurement
 
-`bench/gate_cost.py` on the RTX 5080 (`evidence/gate_cost_qwen3-8b-q4km_rtx-5080_2026-10-13.json`,
-`evidence/gate_cost_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`; commit 8c59010). Same greedy requests (natural
+`bench/gate_cost.py` on the RTX 5080 (`docs/dev/evidence/gate_cost_qwen3-8b-q4km_rtx-5080_2026-10-13.json`,
+`docs/dev/evidence/gate_cost_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`; commit 8c59010). Same greedy requests (natural
 text cut from `judge/prompts/v1.jsonl` / `v1-qwen3_5.jsonl`, 256 tokens in, 256 out, `ignore_eos`) on fresh engines
 in interleaved rounds (none / A / A′; four rounds, the first discarded): `none` selects no processor; A and A′
 select the toy (`testing.toy_mask`) with a no-op `apply`, opening the constrained requests with a marker that never
@@ -888,11 +888,11 @@ the same 8B prompt gives three different greedy continuations alone, in a batch 
 f70006ec…, c6920275…, ff3a4ca8…; one-off check through `gate_cost`'s helpers). A's timings are therefore compared on
 equal lengths (`ignore_eos`) rather than identical tokens; A′'s, which decide, are on identical tokens.
 
-What selecting a processor costs a deployment (§6; `evidence/gate_sizing_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`,
+What selecting a processor costs a deployment (§6; `docs/dev/evidence/gate_sizing_qwen3.8-27b-iq3s-mtp_rtx-5080_2026-10-13.json`,
 three interleaved rounds, each engine sized in a fresh process): the 27B + MTP at `--max-model-len 32768` has 37,808
 KV tokens without a processor and **35,616 with one (−5.8%)**: its state budget is 81 MB smaller (2.784 → 2.703 GB),
 and KV is the small remainder after the recurrent state; graphs 27 → 54, capture 2.9 → 5.7 s. The Qwen3-8B Q4_K_M
-(`evidence/gate_sizing_qwen3-8b-q4km_rtx-5080_2026-10-13.json`, `--max-seqs 16 --max-model-len 32768`) loses 0.13%
+(`docs/dev/evidence/gate_sizing_qwen3-8b-q4km_rtx-5080_2026-10-13.json`, `--max-seqs 16 --max-model-len 32768`) loses 0.13%
 (61,168 → 61,088 KV tokens); graphs 15 → 30, capture 0.6 → 1.0 s. Step 1 measured ≤ 1% on Qwen3-0.6B; the 27B's
 5.8% is a shortfall against that expectation. Traced (one engine per process, the sizing's components): the worst
 step's peak (505 MiB) and the graph pool's growth (206 MiB) are the same with and without the processor, and so is
@@ -927,7 +927,7 @@ slot object); the refused-draft share is `grammar.xgrammar.drafts_refused / spec
 vocabularies, padding rows): 0 errors on each. With step 2's sm_86 run, L0-mask holds on the three classes.
 
 **Conformance (D9), the precompile on an idle host** (`bench/conformance.py precompile`, RTX 4090 node's CPU,
-`evidence/conformance_precompile_rtx-4090_2026-10-14.json`): the filtered test split is 2,668 schemas (the eight
+`docs/dev/evidence/conformance_precompile_rtx-4090_2026-10-14.json`): the filtered test split is 2,668 schemas (the eight
 subsets minus Github_trivial / ultra; 3 of the 13 unsatisfiable Glaive schemas are in the test split). Each schema
 goes through the server's own checks — D9's reject list, then the vetting worker with the plugin's defaults (two
 workers, 10 s, 256 MB budget, 64 MB size cap) — with its compile time recorded:
@@ -947,7 +947,7 @@ typed keywords without `type` 131 (+97 for `format`), embedded schema resources 
 `email`, `ipv6`, the ECMA pattern rules, embedded resources), and the 248k tokenizer's timeouts cost 1.5 points more.
 
 **The 27B + MTP, 500 sampled schemas** (RTX 4090, `holon serve` with grammar.xgrammar and MTP as M0.4, `--max-seqs 4
---max-model-len 32768`; `evidence/conformance_qwen3.8-27b-iq3s-mtp-500_rtx-4090_2026-10-14.json`; core and plugins
+--max-model-len 32768`; `docs/dev/evidence/conformance_qwen3.8-27b-iq3s-mtp-500_rtx-4090_2026-10-14.json`; core and plugins
 as 8c59010). Passes: cold (the server's first sight of each schema, `max_tokens` 1, concurrency 2), warm (the same
 again), greedy (`max_tokens` 2048, concurrency 4), free (no `response_format`):
 - accepted 301, rejected 192 (400: the reject list) and 7 (503: compile timeouts, still refused after two retries);
@@ -960,7 +960,7 @@ again), greedy (`max_tokens` 2048, concurrency 4), free (no `response_format`):
   that), 3 number runaways (`"width": 0.0000…` for 2048 tokens: a JSON number has no length bound), 1 repetition
   inside a string, 2 long but legitimate objects (also long unconstrained). Without the whitespace runaways the gap
   is 1.66 points. S2-1's condition for a whitespace cap ("returns only if they appear") is met; the cap's cost,
-  measured (`evidence/whitespace_cap_cost_rtx-a5000_2026-10-14.json`): at 16, compiled grammars 3.4 / 6.7 MB (152k /
+  measured (`docs/dev/evidence/whitespace_cap_cost_rtx-a5000_2026-10-14.json`): at 16, compiled grammars 3.4 / 6.7 MB (152k /
   248k) instead of 0.2, mask fill p50 41–63 µs instead of 4–16, compile +3–9 ms; at 32, 6.8 / 13.2 MB. Not
   applied: a decision for the panel (it trades every constrained step's fill time and the cache's capacity for two
   runaways in 301), and number runaways need a bound of their own.
@@ -971,7 +971,7 @@ again), greedy (`max_tokens` 2048, concurrency 4), free (no `response_format`):
 - frontend CPU per token at concurrency 4: 109 µs (greedy, chat with `response_format`), 74 µs (free).
 
 **The constrained bounded check (§5) on the 27B + MTP** (RTX A5000; `python -m holon_judge constrained`, new:
-`judge/holon_judge/constrained.py`; `evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`).
+`judge/holon_judge/constrained.py`; `docs/dev/evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`).
 64 JSON-schema prompts (strict-accepted Glaiveai2K and Github_easy schemas under 4000 characters, alternating, chat
 rendered with thinking off), greedy, no `ignore_eos`, `max_tokens` 512, on a plain and a speculating engine (both
 with grammar.xgrammar), each free and constrained, on the production path and again with logprobs; a reference (the
@@ -997,14 +997,14 @@ masked by a fresh matcher replay. Results:
   should stop at the stop token).
 - The plants: `mask-column-shift` and `no-rollback-after-probe` FAIL it (63 of 64 constrained speculating requests
   end with `error`, first divergences at masked gaps up to 15 nats, KL p99 10.4 / 0.16), as §5 requires
-  (`evidence/constrained_bounded_plant-*_rtx-a5000_2026-10-14.json`).
+  (`docs/dev/evidence/constrained_bounded_plant-*_rtx-a5000_2026-10-14.json`).
 - Found on the way: the first run (a reference that scored all sequences in one batch) failed with gaps 0.14–0.39 —
   the GGUF kernels are not batch-invariant, so the reference's rows depended on which other sequences a run asked it
   to score (the same divergence scored 0.045 in one run and 0.175 in another); the reference now scores one
   sequence at a time. And the KL needed `p = 0` terms dropped (`compare.kl_topk`: a masked distribution's −∞
   logprobs gave NaN; the bucketed-KL test gained a masked case that fails without it).
 
-**Round trips per dialect** (`bench/round_trips.py`, new; RTX 5080; `evidence/round_trips_qwen3-8b-q4km_rtx-5080_…`,
+**Round trips per dialect** (`bench/round_trips.py`, new; RTX 5080; `docs/dev/evidence/round_trips_qwen3-8b-q4km_rtx-5080_…`,
 `…_qwen3.8-27b-iq3s-mtp_rtx-5080_…`, at 425e167): OpenAI chat, Anthropic Messages and OpenAI Responses × tool choice
 named / required / auto (a strict `get_weather` beside a second tool), the call, its result, the answer; each
 request sent cold (streamed), then streamed and whole on the cached prefix. On **both models all 9 calls are
@@ -1016,7 +1016,7 @@ words — not a parse difference). TTFT, cold (a new constraint: vetting and com
 and 0.62 ms (27B) per request, the same in each dialect. The 27B's counters: 0 refused drafts of 3015 (`auto` with a
 strict tool is constrained; its JSON was drafted right).
 
-**The Claude Code session** (`evidence/claude_code_session_rtx-5080_2026-10-14.json`): `holon serve` the 27B
+**The Claude Code session** (`docs/dev/evidence/claude_code_session_rtx-5080_2026-10-14.json`): `holon serve` the 27B
 (UD-IQ3_S + MTP + grammar.xgrammar, §11's flags, `--host 0.0.0.0`) on an RTX 5080 node of the consumer cluster;
 Claude Code 2.1.296 (`claude -p … --allowedTools Read,Write,Edit,Bash,Glob,Grep --output-format json`) on the
 development host, reaching it through `bench/capture_proxy.py` (new: records each request's shape, never its text,
@@ -1037,7 +1037,7 @@ items are settled by this capture.
   (fails before). Recorded as a deviation from step 3's Anthropic subset.
 
 **The 8B, the full filtered split** (RTX 5080, `holon serve` with grammar.xgrammar, `--max-seqs 16 --max-model-len
-32768`; `evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`; core and plugins as 8c59010). Passes:
+32768`; `docs/dev/evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`; core and plugins as 8c59010). Passes:
 cold and warm (`max_tokens` 1, concurrency 2), greedy, free, and sampled at T = 1 with seeds 0 and 1 (`max_tokens`
 2048, concurrency 16):
 - cold: accepted 1625 of 2668 (60.9%), rejected 1040 (400: the reject list) and 3 (503: compile timeouts); at
@@ -1057,7 +1057,7 @@ cold and warm (`max_tokens` 1, concurrency 2), greedy, free, and sampled at T = 
   s, max 36 s (a 30k-token prompt prefilling: FCFS, no mixed steps); frontend CPU 101 µs per token (greedy, 16
   streams), 66 µs (free).
 
-**Frontend measurements at the agent concurrency** (`evidence/bench_m05-8b-agent-frontend_rtx-5080_2026-10-13.json`:
+**Frontend measurements at the agent concurrency** (`docs/dev/evidence/bench_m05-8b-agent-frontend_rtx-5080_2026-10-13.json`:
 `bench/run.py` on the agent trace, 4 streams, two rounds; `holon_http_chat`, new — the chat endpoint with six tools
 offered, so the reasoning and hermes parsers read every stream — beside `holon_http`, completions): the frontend
 process's CPU is **231 µs per generated token through chat, 209 µs through completions** (TPOT p50 7.0 / 7.4 ms; the
@@ -1119,11 +1119,11 @@ three more:
    step 2's measurement); the graph key loses its boolean and the capture set its doubling (`Engine._masks` always
    returns rows, `Executor._graph_variants` / `_graph_step` / `_graph_key`; design §7.4). The profile's temporary
    graphs are dropped before the free memory is read (they were already: the only reference goes when `self.graphs`
-   is restored; now commented). Re-measured on an RTX 5080 (`evidence/gate_sizing_qwen3.8-27b-iq3s-mtp-r2_…`,
+   is restored; now commented). Re-measured on an RTX 5080 (`docs/dev/evidence/gate_sizing_qwen3.8-27b-iq3s-mtp-r2_…`,
    `…qwen3-8b-q4km-r2_…`, fresh processes, three rounds): **27B + MTP: graphs 27 and 27, capture 3.0 s and 3.0 s,
    KV tokens 39,632 without and 39,584 with the processor (−0.12%; was −5.8%)**; the sizing's free memory differs by
    2 MiB (3811.9 vs 3809.9 MiB: the mask staging) and capture's extra device memory is equal (376 MiB both). 8B:
-   graphs 15 and 15, KV 61,712 both. **Acceptance 6** (`evidence/gate_cost_*-r2_rtx-5080_2026-10-14.json`, a third
+   graphs 15 and 15, KV 61,712 both. **Acceptance 6** (`docs/dev/evidence/gate_cost_*-r2_rtx-5080_2026-10-14.json`, a third
    configuration `selected`: the processor selected, nothing constrained): tokens and verify rows byte-identical to
    no processor in every round, on both models; its TPOT 1.0007× (27B) and 1.0002× (8B) of none with the toy's
    no-op apply (the real kernel over padding adds ≤ 3 µs a step: ≤ 0.05%). D2's numbers hold: single-stream penalty
@@ -1133,13 +1133,13 @@ three more:
    `test_logits_processor.py`'s matrix runs depth 0 and depth 1 (every decode step holds every running
    constrained sequence) instead of three gates; `gate_cost` runs none / selected / A′.
 3. **The constrained check's calibration ends at the stop token (C5-2):** re-run on the A5000
-   (`evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`, replacing the record above):
+   (`docs/dev/evidence/constrained_bounded_qwen3.8-27b-iq3s-mtp_rtx-a5000_2026-10-14.json`, replacing the record above):
    **threshold 0.229 nats** (free pair ≤ 0.106; calibration's 4 divergences in 24 natural-text prompts 0.018–0.229),
    **constrained first divergences ≤ 0.124 (0.006, 0.042, 0.093, 0.100, 0.111, 0.124), PASS**; errors 0; masked
    agreement plain 99.712%, spec 99.692%, both 99.938% at confident positions; KL p99 2.8e-3 vs 2.6e-3. (a) The
    recorded first PASS used 7.931 (the post-stop artefact); recomputed from its recorded gaps without the two
    post-`<|im_end|>` divergences, the threshold is 0.229 and the verdict PASS — both recorded here, the re-run agrees.
-4. **The 7.93-nat gap, localized (C5-2 numerics; `evidence/post_eot_decode_vs_prefill_rtx-a5000_2026-10-14.json`):
+4. **The 7.93-nat gap, localized (C5-2 numerics; `docs/dev/evidence/post_eot_decode_vs_prefill_rtx-a5000_2026-10-14.json`):
    benign, not a bug in a shared path.** Before the first `<|im_end|>` every path agrees (decode vs teacher-forced
    KL ≤ 0.05, alone vs batched KL ≤ 0.006, argmax equal everywhere). Past it, under `ignore_eos`, the model loops on
    special tokens (`<|im_end|>`, `\n`, `<|im_start|>` …) and the same small path differences grow: decode vs
@@ -1182,4 +1182,4 @@ The correctness reviewer's items:
   schemas (3 more are compile timeouts, rejections): **greedy 1591 valid, 1 invalid (`vars`, refused since
   b77d45c), 33 truncated, 0 unjudged → 100% under the fixed reject list; sampled 1596 and 1594 valid of 1596 and
   1594 judged, 0 unjudged**; truncated share −1.72 / −1.97 / −1.85 points vs unconstrained
-  (`evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`, regenerated).
+  (`docs/dev/evidence/conformance_qwen3-8b-q4km-full_rtx-5080_2026-10-14.json`, regenerated).

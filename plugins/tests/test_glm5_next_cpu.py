@@ -99,7 +99,7 @@ def test_the_engine_matches_hf(tiny, chunk):
 
 
 # Each plant's pre-registered detector and floor (C-m2): the check that must catch it, and by how much at least.
-# Measured at step 3's close (chunk 13): evidence/glm_step3_close_2026-10-25.json, `plants`.
+# Measured at step 3's close (chunk 13): docs/dev/evidence/glm_step3_close_2026-10-25.json, `plants`.
 PLANT_FLOORS = {"mhc_comb_transposed": ("logprob", 0.1), "router_bias_in_weights": ("logprob", 0.1),
                 "kda_state_not_carried": ("logprob", 0.1), "dsa_pool_ape_off": ("sets", 50),
                 "mhc_sinkhorn_short": ("comb", 1e-3)}

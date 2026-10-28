@@ -96,7 +96,7 @@ Where Holon loses:
 - M0.6's low-precision files run with borrowed, unverified locks on the RTX 5090 and RTX 3090.
 - Grammar runaways (2.66% of constrained outputs truncated at `max_tokens` on the 27B with MTP) are a recorded
   shortfall; DFlash2 speculation is an opt-in in no lock.
-- Steps 7–10's locks and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README (`evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `evidence/history_scrub_commit_map_2026-10-16.txt` maps
+- Steps 7–10's locks and records name commits of the release line as first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README (`docs/dev/evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `docs/dev/evidence/history_scrub_commit_map_2026-10-16.txt` maps
 older SHAs).
 
 ## Install

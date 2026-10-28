@@ -7,16 +7,16 @@ __pycache__/
 build/
 dist/
 workspace/
-spikes/*/build/
-spikes/*/third_party/
-spikes/*/out/
+docs/dev/spikes/*/third_party/
+docs/dev/spikes/*/out/
+# Untracked leftovers (checkouts, builds, outputs) of the former top-level spikes/.
+/spikes/
 *.so
 
 # Local only, never published: private machine notes and helpers, internal design discussions.
 AGENTS.local.md
 .private-patterns
 local/
-spikes/*/.phase*.sh
 docs/brainstorm/
 docs/design-brainstorm.md
 

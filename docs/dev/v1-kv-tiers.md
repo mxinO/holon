@@ -421,7 +421,7 @@ write-through as `std.state_tier`'s default, with write-back as an option (T1b):
   ≈ 12 ms at 47.5 GB/s, that the reusing step may wait for.
 - **Swap-on-preemption is free** (P2).
 - **The PCIe cost is small.** The 27B prefills ≈ 2.2–2.5K tokens/s on the RTX 5080
-  (`evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json`). That is ≈ 85 MB/s of KV, ≈ 0.2% of the link,
+  (`docs/dev/evidence/bars_release-qwen3.8-27b-ud-iq3_s_rtx-5080_2026-10-16.json`). That is ≈ 85 MB/s of KV, ≈ 0.2% of the link,
   on the tier's own D2H stream. A checkpoint store is 154 MB, ≈ 3.2 ms.
 - **Inclusion is no longer a startup rule.** Rev 1 needed host ≥ device units so that host eviction always found a
   victim. With the core's two-level view, a tier that drops a copy of a resident entry just clears its flag; that
@@ -1073,7 +1073,7 @@ Notes:
 
 ## 8. Step 0 — measure before freezing, and the predictions
 
-On the RTX 5080 and 5090 desktops, one heavy job at a time under `MemoryMax`, with results in `evidence/`. K-M1's
+On the RTX 5080 and 5090 desktops, one heavy job at a time under `MemoryMax`, with results in `docs/dev/evidence/`. K-M1's
 analysis and K-M5 are CPU-only.
 
 | # | Measure | Decides |
@@ -1109,7 +1109,7 @@ not the single-row tg128 step (15.7 / 11.4 ms) rev 8 used; "one decode step" in 
 | 3e | sessions 1–2 recompute 16K (≈ 7 s); sessions 3–16 hit 16,384 → first-turn TTFT ≈ 0.1–0.2 s → p50 ratio ≈ 0.03× (bar 0.2×) |
 | 3f | 16K resume as 3a's SSD cell; restore verification inside `attach`, startup time ≈ 0.38 s per persisted GB (≈ 6 s for 16 GB) |
 | 3g | 44% (27,646 / 62,682) of uncached input → ≤ 10% if K-M1 finds the answers re-rendered verbatim up to their tool calls |
-| 3h | RTX 5090 decode step 14.7 ms (rev 8.2: K-M3's 4-row step; tg128's single-row step is 11.4 ms, `evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json`); ≈ 300 MB of KV ≈ 6 ms plus the host adopt ≈ 3.2 ms per hit, against roomy's ≈ 0.3 ms D2D → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
+| 3h | RTX 5090 decode step 14.7 ms (rev 8.2: K-M3's 4-row step; tg128's single-row step is 11.4 ms, `docs/dev/evidence/bars_release-qwen3.8-27b-ud-q4_k_m_rtx-5090_2026-10-15.json`); ≈ 300 MB of KV ≈ 6 ms plus the host adopt ≈ 3.2 ms per hit, against roomy's ≈ 0.3 ms D2D → ≤ 1.05× roomy + one step (bar 1.1× + one step) |
 
 **Decision rules** (fixed now):
 - A predicted row that step 4 measures below its bar goes to the owner, with the measured cause, before any
@@ -1222,9 +1222,9 @@ Newest first.
 | B2: old SHAs after `main`'s rewrite | the old → new maps kept with the development archive; the tag (`ec8c487`), the cap base (`d659b2b`) and the two core follow-ups (`a77a1a2`, `5739f8c`) given new-first here and in `docs/plan.md` §10 | "Close (2026-10-20)" |
 | B3: the record's tidiness | the status line says closed; the "pending the owner" rows record the owner's approval; "Close (prepared …)" and its duplicate table dropped (the close's table is "Close (2026-10-20)"'s); §13 newest first | this section |
 | B4: GitHub CI runs the commit-message check without `.private-patterns` | one docstring line: GitHub CI checks the tracked patterns only | `scripts/ci/check_commit_messages.py` |
-| A: "lock 11 / lock 6" in the step-4, 3g, owner-decision and step-5 panel records | a note at the head of each (K's pre-merge tier locks, superseded by `rtx-5080/13.lock` / `rtx-5090/7.lock`, their texts in `evidence/k4_locks_2026-10-19.json`); the two committed-path sentences rewritten | those sections |
+| A: "lock 11 / lock 6" in the step-4, 3g, owner-decision and step-5 panel records | a note at the head of each (K's pre-merge tier locks, superseded by `rtx-5080/13.lock` / `rtx-5090/7.lock`, their texts in `docs/dev/evidence/k4_locks_2026-10-19.json`); the two committed-path sentences rewritten | those sections |
 
-**The RTX 5080 tier lock at 40,960** (`evidence/k6_close_propagation_2026-10-20.json`, `close_review`):
+**The RTX 5080 tier lock at 40,960** (`docs/dev/evidence/k6_close_propagation_2026-10-20.json`, `close_review`):
 `holon_tools propagate --approve` from `12.lock` with `--max-model-len 40960 --host-memory 21474836480` on one RTX 5080
 desktop: verdict approve, L2 PASS (top-1 97.519% against the 97.290% budget, KL p99 0.591 ≤ 1.42, ΔPPL vs the floor
 +0.111% ± 0.331% ≤ 1.078%, the same as `12.lock`'s), the snapshot trace byte-identical to `12.lock`'s, `13.lock`
@@ -1260,7 +1260,7 @@ this document is the old one, to be read through the maps. K was replanted onto 
 conflicts: MoE prefill's propagation wrote the 27B histories' `rtx-5080/11.lock` and `rtx-5090/6.lock`, the numbers
 K's step-4 tier locks had taken. `main`'s were kept; K's tier locks are written again by the propagation below as
 `rtx-5080/12.lock` (`13.lock` since the close review) and `rtx-5090/7.lock` (their step-4 texts and checks stay in
-`evidence/k4_locks_2026-10-19.json`).
+`docs/dev/evidence/k4_locks_2026-10-19.json`).
 No core file differs between the two sides' bases and `main`: core stays +337 over `d659b2b` (was `b5b1e7f`). The full
 suite after the merge: 1713 passed, 66 skipped.
 
@@ -1269,7 +1269,7 @@ suite after the merge: 1713 passed, 66 skipped.
 branch prefix (the prefix itself stays out of tracked files, so the script reads it from there). It passes on K's
 branch; on a commit whose message carried the prefix it fails.
 
-**The single propagation (D14)** (`evidence/k6_close_propagation_2026-10-20.json`). `python -m holon_tools impact
+**The single propagation (D14)** (`docs/dev/evidence/k6_close_propagation_2026-10-20.json`). `python -m holon_tools impact
 main..HEAD` lists all 23 lock histories (every lock pins the core). Class by class on its desktop, `holon_tools
 propagate --approve` at each lock's own `[engine]` (L2 against its floor, the trace, the lock written only on a
 passing verdict), then snapshots ×3 at the new lock; approval delegated as at X's and MoE prefill's closes. The 27B
@@ -1335,13 +1335,13 @@ contracts 8 kept.
 
 *Lock 11 / lock 6 here are K's pre-merge tier locks (deploy `32d5945`), superseded by `rtx-5080/13.lock` /
 `rtx-5090/7.lock` (the RTX 5080's re-propagated at `max_model_len` 40,960 at the close review); their texts are in
-`evidence/k4_locks_2026-10-19.json`.*
+`docs/dev/evidence/k4_locks_2026-10-19.json`.*
 
 The pi agent test re-run on an RTX 5090 desktop as K-M1 ran it: demo ×3 and workloads ×2, pi 0.73.1 with the
 counted runs' provider config, a raw capture proxy (local only). Qwen3.8-27B UD-Q4_K_M served from K's pre-merge rtx-5090 tier lock (lock 6 then, its text in
-`evidence/k4_locks_2026-10-19.json`; now `rtx-5090/7.lock`) (the tier: `host.bytes` 16 GiB, staging 5, `prompt_end,branch,answer:1`) **at the code it pins** (`32d5945`): every
+`docs/dev/evidence/k4_locks_2026-10-19.json`; now `rtx-5090/7.lock`) (the tier: `host.bytes` 16 GiB, staging 5, `prompt_end,branch,answer:1`) **at the code it pins** (`32d5945`): every
 lock is outdated by K's later core and std follow-ups until the close's propagation, and the harness requires a served
-lock of the class; `--host-memory 21474836480` (`evidence/k5_3g_pi_rtx-5090_2026-10-20.json`). All 5 sessions passed
+lock of the class; `--host-memory 21474836480` (`docs/dev/evidence/k5_3g_pi_rtx-5090_2026-10-20.json`). All 5 sessions passed
 (7, 8, 9, 7 and 26 turns), 57 of 57 requests clean; every rendered prompt and generated list had the server's token
 counts. The before clock screen failed (an aborted attempt's engine still held the GPU); the after-screen was steady
 (2,535 / 2,595 MHz p10 / p50).
@@ -1363,7 +1363,7 @@ it is pi's rendering of its history, not the tier's. Report only: 3g is not gate
 
 *Lock 11 / lock 6 here are K's pre-merge tier locks (deploy `32d5945`), superseded by `rtx-5080/13.lock` /
 `rtx-5090/7.lock` (the RTX 5080's re-propagated at `max_model_len` 40,960 at the close review); their texts are in
-`evidence/k4_locks_2026-10-19.json`.*
+`docs/dev/evidence/k4_locks_2026-10-19.json`.*
 
 On the lead's recommendations:
 1. **Core cap raised to +337** code lines over `d659b2b` (was `b5b1e7f`): `a77a1a2` (was `39abbcb`; `branch_at` kept, +5) and `5739f8c` (was `e1ae0f7`
@@ -1380,7 +1380,7 @@ rebases `main`, resolves, and runs the single propagation of every lock history 
 known). Lock 11 (its tuned clock) with the RTX 5080 desktop's rates from `tune --ssd-rates`' sustained run: read 2.197
 GB/s, write 2.262 GB/s, mixed 0.857, `read_beside` 0.872 (as `state_tier.ssd.*` options); the bench as changed after
 the miss (the loop steps the decoders while parking); clock screen before it 2,715 / 2,722 MHz, steady
-(`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `owner_option_2_post_hoc`):
+(`docs/dev/evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `owner_option_2_post_hoc`):
 
 | 3a, SSD arm | post-hoc (bar) | gated steps | the miss it follows (default rates) |
 |---|---|---|---|
@@ -1400,7 +1400,7 @@ as recorded above; that is the clock's designed conservatism on an untuned host,
 
 *Lock 11 / lock 6 here are K's pre-merge tier locks (deploy `32d5945`), superseded by `rtx-5080/13.lock` /
 `rtx-5090/7.lock` (the RTX 5080's re-propagated at `max_model_len` 40,960 at the close review); their texts are in
-`evidence/k4_locks_2026-10-19.json`.*
+`docs/dev/evidence/k4_locks_2026-10-19.json`.*
 
 | Finding | Disposition | Where |
 |---|---|---|
@@ -1411,7 +1411,7 @@ as recorded above; that is the clock's designed conservatism on an untuned host,
 
 **C.** Engine-loop CPU per decode step with tiers off, b5b1e7f (`main`'s checkout and venv) against K (`e1ae0f7`), interleaved
 base, K, K, base in one session, `--blocking-sync`, Qwen3-8B Q4_K_M at the rtx-3090 class's lock 4 (the same
-`[engine]` in both trees), on the RTX A5000 (`evidence/k5_host_time_rtx-a5000_2026-10-19.json`):
+`[engine]` in both trees), on the RTX A5000 (`docs/dev/evidence/k5_host_time_rtx-a5000_2026-10-19.json`):
 
 | trace | base (p50, ms) | K (p50, ms) | K / base (geomean of the ABBA pairs) |
 |---|---|---|---|
@@ -1504,7 +1504,7 @@ pin changed std units. Not run: the single propagation round is the close's, by 
 
 *Lock 11 / lock 6 here are K's pre-merge tier locks (deploy `32d5945`), superseded by `rtx-5080/13.lock` /
 `rtx-5090/7.lock` (the RTX 5080's re-propagated at `max_model_len` 40,960 at the close review); their texts are in
-`evidence/k4_locks_2026-10-19.json`.*
+`docs/dev/evidence/k4_locks_2026-10-19.json`.*
 
 | Finding | Disposition | Where |
 |---|---|---|
@@ -1517,7 +1517,7 @@ pin changed std units. Not run: the single propagation round is the close's, by 
 | C-4: the bounded KL p99 by wave | done; noise established | below; lock 11 stands |
 
 **C-1.** 3a beside three decoders on lock 11 (its tuned clock, the SSD level's read rate now 2.24 GB/s), with each resume's
-tier counts (`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `panel_review`):
+tier counts (`docs/dev/evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `panel_review`):
 
 | length | VRAM | RAM (bar) | SSD (bar) | SSD gated steps | write-backs during the resume | `load_enqueue_wait_s` |
 |---|---|---|---|---|---|---|
@@ -1546,7 +1546,7 @@ seeing the miss above** (1,050.2 ms against 1,030.2 at 32K): `Bench.down()` now 
 write-backs run, as serving keeps launching, and drains only when no decoder runs (idle is unchanged). A unit test
 pins the clock's charge as it is (`test_the_clock_lanes_move_with_launches_never_with_wall_time`: after the writes
 finish in wall time, a read is still charged beside them until launches carry the clock past the write lane). Rerun
-on lock 11, same counters (`evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `lead_decision`; clock screen before
+on lock 11, same counters (`docs/dev/evidence/k4_tier_resume_rtx-5080_2026-10-19.json`, `lead_decision`; clock screen before
 it 2,715 / 2,722 MHz, steady):
 
 | 3a beside decoders | SSD (bar) | gated steps | before the change |
@@ -1596,7 +1596,7 @@ change and its test: 1644 passed, 66 skipped.
 
 *Lock 11 / lock 6 here are K's pre-merge tier locks (deploy `32d5945`), superseded by `rtx-5080/13.lock` /
 `rtx-5090/7.lock` (the RTX 5080's re-propagated at `max_model_len` 40,960 at the close review); their texts are in
-`evidence/k4_locks_2026-10-19.json`.*
+`docs/dev/evidence/k4_locks_2026-10-19.json`.*
 
 Same-session interleaved runs (the MoE prefill track's §5.2 method): 3a and 3b interleave their arms per rep in one
 engine; the served rows (3c–3e, 3h, 3i) are `bench/run.py` ABBA rounds of fresh worker processes, each round's
@@ -1611,11 +1611,11 @@ follow-up): `bench/tier_resume.py` (3a, 3b, 3b-SSD, 3f); the `claude_code_2turns
 backend records `dropped_publishes` and the tier's counts; `tune --clock` and `tune --ssd-rates` (below); `tier_resume.py --blocking-sync` (3b's engine-loop time) and 3f's
 restart timed in parts; the HTTP bench backend fails a request the server errors; `holon_judge tiers --io-sleep`
 (level I/O jobs sleep 0 or the given seconds, even odds) and the `store_no_after` plant; run-identity compares the
-tier's counts (below). Evidence: `evidence/k4_tier_resume_rtx-5080_2026-10-19.json` (3a, 3b, 3f, the clock),
-`evidence/k4_agent_park_rtx-5080_2026-10-19.json` (3c, 3d), `evidence/bench_k4-3e-claude-code_rtx-5080_2026-10-19.json`,
-`evidence/bench_k4-3h-agent-park_rtx-5090_2026-10-19.json`, `evidence/bench_k4-3i-offload-agent-park_rtx-5080_2026-10-19.json`,
-`evidence/bench_k4-3d-agent-park_rtx-5080_2026-10-19.json` (3d sized), `evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json` (plants), `evidence/k4_judge_tiers_rtx-5090_2026-10-19.json` (the
-27B pair), `evidence/k4_locks_2026-10-19.json` (the held locks and their checks).
+tier's counts (below). Evidence: `docs/dev/evidence/k4_tier_resume_rtx-5080_2026-10-19.json` (3a, 3b, 3f, the clock),
+`docs/dev/evidence/k4_agent_park_rtx-5080_2026-10-19.json` (3c, 3d), `docs/dev/evidence/bench_k4-3e-claude-code_rtx-5080_2026-10-19.json`,
+`docs/dev/evidence/bench_k4-3h-agent-park_rtx-5090_2026-10-19.json`, `docs/dev/evidence/bench_k4-3i-offload-agent-park_rtx-5080_2026-10-19.json`,
+`docs/dev/evidence/bench_k4-3d-agent-park_rtx-5080_2026-10-19.json` (3d sized), `docs/dev/evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json` (plants), `docs/dev/evidence/k4_judge_tiers_rtx-5090_2026-10-19.json` (the
+27B pair), `docs/dev/evidence/k4_locks_2026-10-19.json` (the held locks and their checks).
 
 **The bar table** (Qwen3.8-27B UD-IQ3_S on the RTX 5080 at lock 10's settings plus the tier: `host.bytes` 16 GiB,
 staging 5, `prompt_end,branch,answer:1`, the tuned clock; UD-Q4_K_M on the RTX 5090; medians):
@@ -1700,7 +1700,7 @@ The 27B locks bind no SSD level, so no lock takes these.
   `branch` + tier 0.0226 (± 0.0047), `answer:1` + tier 0.0310 (± 0.0092). The 8-session failure was the p99's
   noise at 6,144 positions; the fired-row analysis the lead asked for if it still failed was not needed.
 - Both locks were committed on K's branch as `rtx-5080/…/11.lock` and `rtx-5090/…/6.lock` (their texts in
-  `evidence/k4_locks_2026-10-19.json`); at the merge of `main` they became `rtx-5080/…/12.lock` (then `13.lock`, at
+  `docs/dev/evidence/k4_locks_2026-10-19.json`); at the merge of `main` they became `rtx-5080/…/12.lock` (then `13.lock`, at
   `max_model_len` 40,960) and `rtx-5090/…/7.lock`.
   They pin the std sources they were tuned on (before the post-tag follow-ups below, which change neither
   configuration's behaviour: staging 5 meets the demand, and checkpoints are asked for); the close's propagation
@@ -1710,12 +1710,12 @@ The 27B locks bind no SSD level, so no lock takes these.
   README says so.
 
 **The 27B tier-invariance pair** (RTX 5090, UD-Q4_K_M, host + SSD level, payload host pools at their floor, I/O
-sleeps 0 or 0.1 s; `evidence/k4_judge_tiers_rtx-5090_2026-10-19.json`): with a tight device pool (2.008 GB)
+sleeps 0 or 0.1 s; `docs/dev/evidence/k4_judge_tiers_rtx-5090_2026-10-19.json`): with a tight device pool (2.008 GB)
 invariance, run-identity (56 loads, 92 level reads per run) and the restart check (106 blocks restored) pass; the
 tiers-off null test (4 vs 16 checkpoint units) passes on a roomy pool (4.6 GB), where invariance is refused by its
 own rule (the larger pool keeps other checkpoints in the reference, so `cached_tokens` differ).
 
-**The GPU timing plants** (RTX A5000, `evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json`):
+**The GPU timing plants** (RTX A5000, `docs/dev/evidence/k4_judge_tiers_rtx-a5000_2026-10-19.json`):
 - `store_no_after` (new: a D2H store without its `after`): caught (fired 498, changed 194; Qwen3-8B through the SSD
   level).
 - `free_on_ticket` with I/O jobs sleeping 0 or 0.1 s (≥ 4 steps): on Qwen3-8B the first run fired 1,184 times with
@@ -1793,7 +1793,7 @@ Step 3 closed panel-clean (A, B and C, 2026-10-19). The full CI suite at its clo
 
 Core is unchanged (+326 over b5b1e7f). On the A5000, Qwen3-8B through the SSD level on rev 8.5's tier: invariance and
 the restart check pass as before (7,402 level reads; 338 blocks restored, none after a crash), and `read_unwaited`,
-`stale_slot` and `torn_manifest` with the crc check off are caught (`evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`,
+`stale_slot` and `torn_manifest` with the crc check off are caught (`docs/dev/evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`,
 `gpu_qwen3-8b_ssd_rev85`). The full CI suite: 1638 passed, 66 skipped, 1 failed (the crc-off plant's patch missed
 the verification's new argument; fixed, the level's judge cells re-run: 5 passed).
 
@@ -1833,7 +1833,7 @@ the verification's new argument; fixed, the level's judge cells re-run: 5 passed
   transitively), with a failing-without test (`test_a_read_reusing_units_a_queued_write_frees_takes_that_write_ahead`).
 - **`evict.root_pin`** (`plugins/holon_plugins/evict/root_pin/`, slot `eviction_policy`), options `root_pin.depth`
   and `root_pin.hits`; its test binds it through an engine.
-- **The mixed factor under exactly this dispatch** (`spikes/k3_tiers/`, `evidence/k3_mixed_nvme_rtx-5080_2026-10-19.json`;
+- **The mixed factor under exactly this dispatch** (`spikes/k3_tiers/`, `docs/dev/evidence/k3_mixed_nvme_rtx-5080_2026-10-19.json`;
   the RTX 5080 desktop's NVMe, outside the container: its `/tmp` is tmpfs, so a first run there was void and is not
   recorded). Predicted 0.85–0.95, measured **0.79–0.82 with 2 threads and 0.73–0.74 with 3**: no better than step 2's
   0.77–0.80. Reads beside background writes ran at 0.79–0.92 of the pure read rate for their share (predicted within
@@ -1862,7 +1862,7 @@ the verification's new argument; fixed, the level's judge cells re-run: 5 passed
   SSD load: the core does not tell a level load from a host one; the tier-side part (an abandoned level load is never
   enqueued and never waited for) is `test_an_abandoned_load_is_never_enqueued_and_never_waited_for`.
 - **GPU (RTX A5000, Qwen3-8B; the level on the dev host's network filesystem, buffered: functional, not a rate;
-  `evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`):** invariance through the level passes (7,402 level reads,
+  `docs/dev/evidence/k3_judge_tiers_ssd_rtx-a5000_2026-10-19.json`):** invariance through the level passes (7,402 level reads,
   44 blocks promoted into place); run-identity passes with 640 level reads per run once 16 sessions overflow device
   and host (with 8, the closed loop fits them and reads nothing from the level); the restart check passes (338 and 434
   blocks restored, nothing after a crash); `read_unwaited` (fired 133, changed 47), `torn_manifest` and its crc-off
@@ -1902,7 +1902,7 @@ decisions):
 | A (minor 3): plants | accepted | see below |
 | C (major 1): read priority | carried into step 3 | D4, D11: while any read is queued no write starts but one that frees units a queued read needs; reads at the pure read rate, the mixed factor only on dependent writes; step 3 re-measures exactly that dispatch |
 
-**The plants (A, minor 3)** (`evidence/k2_review_plants_rtx-a5000_2026-10-19.json`, the CPU cells in
+**The plants (A, minor 3)** (`docs/dev/evidence/k2_review_plants_rtx-a5000_2026-10-19.json`, the CPU cells in
 `judge/tests/test_judge_tiers.py` and `plugins/tests/test_state_tier.py`):
 - `load_before_store`: a redundant guard for the host level. End to end the core's ordering (D4's free rule, a load's
   `after`) already puts the read after the store: on the A5000 it never fired, on the CPU it fired without a change.
@@ -1950,8 +1950,8 @@ scheduler's two counters (2) and their `stats()` entry (1), all item 6's. Rev 8.
   overrides either. L0 bitwise against the oracle on sm_86 and sm_120 (16 cells), memcheck clean. First built in
   `kernels.expert_io` (the step-2 measurements below ran there); rev 8.3 moved them, unchanged, to a plugin of their
   own, so `expert_io` is byte-identical to step 1's and no expert lock needs a propagation.
-- **Measured on the RTX 5080** (`evidence/k2_state_copy_rtx-5080_2026-10-18.json`,
-  `evidence/k2_mixed_nvme_rtx-5080_2026-10-18.json`, `spikes/k2_tiers/`):
+- **Measured on the RTX 5080** (`docs/dev/evidence/k2_state_copy_rtx-5080_2026-10-18.json`,
+  `docs/dev/evidence/k2_mixed_nvme_rtx-5080_2026-10-18.json`, `spikes/k2_tiers/`):
   - the gather beside compute-bound prefill (27B, 512-token chunks): a 0.57 or 1.29 GB load per step costs nothing
     measurable; loads back to back cost 1.175× (predicted 1.03–1.08×: the gather holds 8 of 84 SMs, likely an extra
     wave of the step's kernels; not profiled). The cost tracks copy time, ≈ 5 ms per 1.29 GB load;
@@ -1963,7 +1963,7 @@ scheduler's two counters (2) and their `stats()` entry (1), all item 6's. Rev 8.
   level's split of `host.bytes` between pages and payloads is the option `host.pages` (a share, default 0.25: K-M5's
   page peak was ≤ 4.8 of 16 GiB).
 
-- **`holon_judge tiers`** (`judge/holon_judge/tiers.py`; `evidence/k2_judge_tiers_rtx-a5000_2026-10-19.json`):
+- **`holon_judge tiers`** (`judge/holon_judge/tiers.py`; `docs/dev/evidence/k2_judge_tiers_rtx-a5000_2026-10-19.json`):
   invariance with a back-to-back reference, the null test (hybrids), run-identity ×3, and an audit after every step
   (resident prefix closure and `kids`, unit references, refused admissions only without a free slot, the tier's
   leaf-first drops). Clean on Qwen3-8B bf16 on the RTX A5000 through the `state_copy@1` provider (58 requests, 140 page
@@ -2005,7 +2005,7 @@ The core was found correct, with no blocker. Dispositions:
 |---|---|---|
 | A1: the engine tier test never reached promote-into-place, abandonment or the waiterless notice | accepted | `test_steps_and_outputs_never_depend_on_when_copies_land`: 8 conversations over 4 sequences in 20 pages, longer contexts, 3 aborts of load-gated requests; it asserts promote-into-place, abandoned and waiterless counts > 0 (8 / 7 / 3 at delay 2). The `swap_onto_lower` plant now fails it |
 | A2: the unguarded-policy plant hung its test | accepted | the test's policy raises on a second `victim` call: the unguarded core fails at once |
-| A3: the 27 plants could not be re-run | accepted | `spikes/k1_core/plants.py` pairs each of 28 core plants with the test it must fail; `evidence/k1_core_plants_cpu_2026-10-18.json` records 28 / 28. `store_no_after` stays a GPU plant for step 2 |
+| A3: the 27 plants could not be re-run | accepted | `spikes/k1_core/plants.py` pairs each of 28 core plants with the test it must fail; `docs/dev/evidence/k1_core_plants_cpu_2026-10-18.json` records 28 / 28. `store_no_after` stays a GPU plant for step 2 |
 | A (re-review): `swap_onto_lower` failed only by crashing; its semantic form (promote with no load) passed every engine test | accepted | The plant is now that semantic form, paired with the state-level promote-into-place test and the engine tier-invariance test. That test now reaches promote-into-place serially: each turn first re-sends the previous prompt cut to whole blocks (a regenerate), whose last block is recomputed while only the tier holds it. A tight pool alone cannot do it serially: with one request at a time, every index-only block is a pure free. The runner checks the unplanted baseline passes first, and counts a plant as caught only when its tests fail by assertions (a crash or a collection error does not count) |
 | B1: freeze the two slot factories | accepted, at +326 | `hooks.StateTierPlugin.build(ctx) -> StateTier` and `hooks.EvictionPolicyPlugin.build(ctx) -> EvictionPolicy` in the ABI listing (in `holon.api.hooks`, beside `BuildsPolicy`: exporting them from `holon.api` would have cost 11 lines of import block). Core is +326 over b5b1e7f, the lead's raised cap for them |
 | B2: tidy-ups | accepted | load tracks unpacked where read; `plans.frontend_options` → `unplanned_options`; the engine's `evicting` → `victims`; restore's `if p:` |
@@ -2031,8 +2031,8 @@ at ≈ +180 lines against the itemized 154 (+17%, under the +20% stop line). Add
 - an entry's payloads in the tier are adopted through one load (a tier may evict only within `store`, `load` and its
   step hooks, which the core polls after);
 - tiers-off snapshots are byte-identical to b5b1e7f on the RTX A5000 (Qwen3-8B, the 27B hybrid, the 30B with
-  offload; `evidence/k1_tiers_off_snapshots_rtx-a5000_2026-10-18.json`); every core plant fails its test
-  (`evidence/k1_core_plants_cpu_2026-10-18.json`);
+  offload; `docs/dev/evidence/k1_tiers_off_snapshots_rtx-a5000_2026-10-18.json`); every core plant fails its test
+  (`docs/dev/evidence/k1_core_plants_cpu_2026-10-18.json`);
 - found on the way, not K's: publishing after `flush_prefix` while a request runs raises a KeyError in
   `PrefixIndex.insert` (the request's chain names a parent that is gone), as at b5b1e7f. It is a follow-up (§10).
 
@@ -2051,7 +2051,7 @@ the step-1 core). K-M4's mixed-I/O check fired one of step 0's stop rules; the l
 | K-M1: 38 of 38 answers re-rendered verbatim | `answer` on by default (k = 1 suffices; 2 kept for templates that re-serialize) |
 | K-M5 finding 1 (= the step-1 review's B2): the core could load a copy the tier had dropped in a hook or during another load | the core polls `dropped()` at each commit, after each store and after each load, and re-runs the hit's fixed point after its loads (KS2) |
 
-Results against the predictions are in the evidence records (`evidence/k0_m1_rerender_rtx-5090_2026-10-18.json`,
+Results against the predictions are in the evidence records (`docs/dev/evidence/k0_m1_rerender_rtx-5090_2026-10-18.json`,
 `k0_m2_copy_*`, `k0_m4_nvme_*`, `k0_m5_replay_cpu_2026-10-18.json`) and the spikes' READMEs (`spikes/k0_tiers/`). The
 RTX 5090's K-M2/K-M4 runs, after step 1, match the RTX 5080's (mixed I/O 0.79× / 0.76×, the other rules pass), and its
 shorter step makes an unpaced batch-DMA load costlier still: decode 2.07× median beside it, 1.04× beside the SM gather.

@@ -67,9 +67,9 @@ LOAN_MARGIN, LOAN_SLACK = 1.6, 20 << 20      # a lent activation peak's room for
 # step's segments are 1.6-1.75x its allocated peak (FN §23.4; 2.35-2.74x before 168562e, §21.12). Against the profile's
 # peak (since GLM step 6 what the allocator maps where that is more, ≈ 8-10% above the allocated peak at a full step)
 # a lent step needed at most 1.50x its share (FN's 5080 lock, 2K-4K steps; GLM's 5090 deployment 1.07-1.12x at 24K-32K,
-# `spikes/glm5/frag.py --loan-margin 1.0`); lent in proportion to the step's prompt tokens, its fixed costs (a prompt
-# logprob step's head chunk, the mixers' sub-batch temporaries) in `moe.loan_fixed_mib`. A step past its loan takes
-# the rest from the device (the loan's overflow)
+# `docs/dev/spikes/glm5/frag.py --loan-margin 1.0`); lent in proportion to the step's prompt tokens, its fixed costs (a
+# prompt logprob step's head chunk, the mixers' sub-batch temporaries) in `moe.loan_fixed_mib`. A step past its loan
+# takes the rest from the device (the loan's overflow)
 
 
 @dataclasses.dataclass(eq=False)

@@ -153,3 +153,16 @@ prompt plus 128 tokens; give the host payload level its floor in `--pressure-arg
 (`branch-off-by-one`, `tentative-shift`) are judged by `bounded --policies`, which adds sessions starting in the second
 and third waves so `branch` checkpoints are taken and adopted; `tentative-shift` is also a tier plant, which the audit
 catches (a payload filed away from its position) when the policy is `answer:1` alone.
+
+## Accuracy scripts beside the package
+
+Full-model checks run from the repository root, each documented in its docstring (`--help`):
+
+| script | check |
+|---|---|
+| `consistency.py` | the GPU self-consistency gate: decode, chunked and (where the model has one) MTP paths against one prefill, on a prompt set tokenized for the model (docs/dev/v1-flash-next.md §18 (c), docs/dev/v1-glm.md §6.2) |
+| `cover.py` | FN's PLE block and QSA selection against their float32 oracles on the engine's own inputs (v1-flash-next §22.6) |
+| `glm_cover.py` | GLM's DSA selection, pooling and attend, router, KDA state and mHC mix against their oracles on the engine's own inputs (v1-glm §6.2): other parts and oracles than `cover.py`'s |
+| `exact.py` | the snapshot trace under named configurations of one deployment: run-identity, placements, offload vs all-resident, plants (v1-flash-next §22, v1-glm §6.2) |
+| `tasks/` | the task-accuracy set (`build.py`: `fn_tasks.jsonl`, `glm_tasks.jsonl`, the filler sized by each model's tokenizer) and its Holon / reference-engine runs and scoring (`run.py`; v1-flash-next §18 (d), (e)) |
+| `f5b_l2.py` | F5b's bounded L2 candidate and its split for the path-aware floor (docs/dev/v1-offload.md §6) |

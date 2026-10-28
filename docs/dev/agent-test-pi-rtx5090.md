@@ -3,7 +3,7 @@
 Report-only, not a release gate. The pi coding agent drove `holon serve` (Qwen3.8-27B UD-Q4_K_M) through
 Holon's OpenAI-compatible endpoint. The test had three goals: measure decode and prefill speed under a real agent's
 traffic, check the endpoint (streaming, tool calls, reasoning, multi-turn sessions), and report anything broken.
-Record: [`evidence/agent_test_pi_rtx-5090_2026-10-16.json`](../../evidence/agent_test_pi_rtx-5090_2026-10-16.json)
+Record: [`docs/dev/evidence/agent_test_pi_rtx-5090_2026-10-16.json`](evidence/agent_test_pi_rtx-5090_2026-10-16.json)
 (smoke, probes, counted series and their summary). Harness: `bench/demo/pi_run.py` and `bench/capture_proxy.py`
 (bench code only; nothing in the engine changed).
 
@@ -287,7 +287,7 @@ The three findings are fixed in v0.1.1 (`docs/releases/RELEASE_NOTES_v0.1.1.md`)
    `usage.prompt_tokens_details.cached_tokens` here (and the other routes' equivalents). This needed a core field
    (`TokenDelta.cached_tokens`, plugin ABI 1.1) and a propagation of every lock, with byte-identical traces.
 
-**Re-run** ([`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`](../../evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json)):
+**Re-run** ([`docs/dev/evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`](evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json)):
 the same RTX 5090 desktop, clock-screened (before p10 / p50 2550 / 2640 MHz, steady; after 2047 / 2505, not steady
 under the power cap, no thermal slowdown), serving v0.1.1's propagated lock 4, and pi 0.73.1 with the docs' minimal
 provider (no `compat`: it sends `developer` and `reasoning_effort`). One demo run per thinking level:
@@ -323,10 +323,10 @@ writes the summary.
 ```bash
 holon serve unsloth/Qwen3.8-27B-GGUF          # or the file's path in the HF cache, offline
 python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 \
-    --pi <prefix>/node_modules/.bin/pi --task demo --runs 3 --out evidence/agent_test_pi_rtx-5090_<date>.json
+    --pi <prefix>/node_modules/.bin/pi --task demo --runs 3 --out docs/dev/evidence/agent_test_pi_rtx-5090_<date>.json
 python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 \
-    --pi <prefix>/node_modules/.bin/pi --task workloads --runs 2 --out evidence/agent_test_pi_rtx-5090_<date>.json
-python bench/demo/pi_run.py --report evidence/agent_test_pi_rtx-5090_<date>.json
+    --pi <prefix>/node_modules/.bin/pi --task workloads --runs 2 --out docs/dev/evidence/agent_test_pi_rtx-5090_<date>.json
+python bench/demo/pi_run.py --report docs/dev/evidence/agent_test_pi_rtx-5090_<date>.json
 ```
 
 The smoke series used `--runs 1 --series smoke_compat_none --compat none` and `--series smoke_compat_documented`.

@@ -27,6 +27,25 @@ class EngineLike(Protocol):
     def has_work(self) -> bool: ...
 
 
+def flag_settings(text: str) -> dict:
+    """`holon serve`-style engine flags (e.g. a deployment's) as EngineConfig settings: only those given."""
+    import argparse
+    import shlex
+
+    from holon.core.cli import engine_flags, engine_settings
+    parser = argparse.ArgumentParser()
+    engine_flags(parser, given_only=True)
+    return engine_settings(parser.parse_args(shlex.split(text)))
+
+
+def from_flags(model: str, flags: str = "", base: dict | None = None, over: dict | None = None):
+    """An engine from `holon serve`-style `flags` over `base` settings, `over` on top of both (dict settings merge per
+    key, `key=` deleting one)."""
+    from holon.core.cli import layered
+    from holon.core.engine import Engine, EngineConfig
+    return Engine(EngineConfig(model, **layered(layered(base or {}, flag_settings(flags)), over or {})))
+
+
 def score(engine: EngineLike, prompts: PromptSet, k: int = 20, meta: dict | None = None) -> Recording:
     """Run every prompt with `prompt_logprobs=k` and pack the answers as a recording comparable to the golden; with
     quantized kernels that count their calls per path and activation mode (keys `path/mode`: `kernels.ggml_cuda`'s

@@ -252,7 +252,8 @@ def main() -> None:
                                   for n, a in r["call"]["summary"]["calls"]) for r in calls),
                           "answered": sum(bool(r.get("answer") and r["answer"]["summary"]["text"]) for r in calls)},
               "metrics": {k: v for k, v in metrics.items() if isinstance(v, int)}, "results": results}
-    out = ROOT / "evidence" / f"round_trips_{args.name}_{record['gpu_class']}_{record['date']}.json"
+    out = ROOT / "local" / "evidence" / f"round_trips_{args.name}_{record['gpu_class']}_{record['date']}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     print(json.dumps(record["summary"]), out)
 

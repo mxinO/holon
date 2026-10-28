@@ -1,0 +1,137 @@
+{
+ "fingerprint": {
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "sm": "120",
+  "num_sms": 188,
+  "host": "rtx-pro-6000-workstation",
+  "torch": "2.11.0+cu130",
+  "cuda": "13.0",
+  "triton": "3.6.0",
+  "flashinfer": "0.6.12"
+ },
+ "per_module": [
+  {
+   "module": "decode_cudacore_bf16_hd128",
+   "cold_s": 7.489498365670443,
+   "warm_s": 0.020101752132177353,
+   "cache_bytes": 1227816
+  },
+  {
+   "module": "decode_cudacore_bf16_hd256",
+   "cold_s": 7.293868135660887,
+   "warm_s": 0.02255580946803093,
+   "cache_bytes": 1226008
+  },
+  {
+   "module": "decode_cudacore_fp8_hd128",
+   "cold_s": 8.063079752027988,
+   "warm_s": 0.022428344935178757,
+   "cache_bytes": 1333143
+  },
+  {
+   "module": "decode_cudacore_fp8_hd256",
+   "cold_s": 7.922542750835419,
+   "warm_s": 0.02208266407251358,
+   "cache_bytes": 1316839
+  },
+  {
+   "module": "prefill_fa2_bf16_hd128",
+   "cold_s": 12.613221604377031,
+   "warm_s": 0.024054571986198425,
+   "cache_bytes": 5948870
+  },
+  {
+   "module": "prefill_fa2_bf16_hd256",
+   "cold_s": 13.651726555079222,
+   "warm_s": 0.023748528212308884,
+   "cache_bytes": 5768592
+  },
+  {
+   "module": "prefill_fa2_fp8_hd128",
+   "cold_s": 14.396587170660496,
+   "warm_s": 0.025217417627573013,
+   "cache_bytes": 7093919
+  },
+  {
+   "module": "prefill_fa2_fp8_hd256",
+   "cold_s": 17.014028131961823,
+   "warm_s": 0.024410899728536606,
+   "cache_bytes": 7994051
+  },
+  {
+   "module": "xqa_bf16_p16_hd128_g4_q1",
+   "cold_s": 5.661100905388594,
+   "warm_s": 0.24028480052947998,
+   "cache_bytes": 663571
+  },
+  {
+   "module": "xqa_bf16_p16_hd128_g4_q3",
+   "cold_s": 5.65761286392808,
+   "warm_s": 0.21901750937104225,
+   "cache_bytes": 687860
+  },
+  {
+   "module": "xqa_bf16_p16_hd256_g6_q1",
+   "cold_s": 5.640516970306635,
+   "warm_s": 0.24849844351410866,
+   "cache_bytes": 679315
+  },
+  {
+   "module": "xqa_bf16_p16_hd256_g6_q3",
+   "cold_s": 5.6453640684485435,
+   "warm_s": 0.24436795338988304,
+   "cache_bytes": 707124
+  },
+  {
+   "module": "xqa_fp8_p16_hd128_g4_q1",
+   "cold_s": 5.597001489251852,
+   "warm_s": 0.2124098800122738,
+   "cache_bytes": 648415
+  },
+  {
+   "module": "xqa_fp8_p16_hd128_g4_q3",
+   "cold_s": 5.732764944434166,
+   "warm_s": 0.20721660926938057,
+   "cache_bytes": 673824
+  },
+  {
+   "module": "xqa_fp8_p16_hd256_g6_q1",
+   "cold_s": 5.667435262352228,
+   "warm_s": 0.22793999686837196,
+   "cache_bytes": 663103
+  },
+  {
+   "module": "xqa_fp8_p16_hd256_g6_q3",
+   "cold_s": 5.743126042187214,
+   "warm_s": 0.20190780982375145,
+   "cache_bytes": 683616
+  }
+ ],
+ "prebuild": {
+  "modules": 16,
+  "build_jit_specs_s": 21.215518686920404,
+  "wall_s": 24.787486664950848,
+  "cache_bytes": 36532184,
+  "layout": [
+   ".cache/flashinfer/0.6.12/120f/cached_ops/.ninja_deps",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/.ninja_log",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_decode_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_bf16_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_128_head_dim_vo_128_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/tmp",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_bf16_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_128_head_group_ratio_4_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
+   ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3"
+  ]
+ }
+}

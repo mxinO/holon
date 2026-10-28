@@ -145,7 +145,8 @@ def main() -> None:
               "command": f"python bench/grammar_vetting.py {models} --jsb <JSONSchemaBench> "
                          f"--per-subset {args.per_subset}",
               "commit": git("rev-parse", "HEAD"), "xgrammar": version("xgrammar"), "results": results}
-    out = ROOT / "evidence" / f"grammar_vetting_{gpu}_{date}.json"
+    out = ROOT / "local" / "evidence" / f"grammar_vetting_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     print(out)
 

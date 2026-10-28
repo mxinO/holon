@@ -107,7 +107,7 @@ def main() -> None:
     ap.add_argument("--class", dest="cls", required=True)
     ap.add_argument("--repeats", nargs="+", required=True)
     ap.add_argument("--full", nargs="*", default=[])
-    ap.add_argument("--dir", default="evidence")
+    ap.add_argument("--dir", default="docs/dev/evidence")
     ap.add_argument("--variant", choices=("mmq_cast", "mmq_f32"), default="mmq_cast")
     ap.add_argument("--json")
     args = ap.parse_args()

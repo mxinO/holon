@@ -1,5 +1,5 @@
 """Oracles of placement.lru (F4, docs/dev/v1-offload.md D1: FreeToken's and llama.cpp's cache, as the M6 replay's `lru`,
-spikes/x0_offload/m6/replay.py): the contract `moe_resolve.lru@1`, call by call, and its `lend`.
+bench/placement_replay.py): the contract `moe_resolve.lru@1`, call by call, and its `lend`.
 
 `moe_resolve.lru@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's logical clock `clock [1] int32` and the step
 each expert was last routed `last [E] int32` (state, zero at a seed). A call with a routed (not dropped) entry of a

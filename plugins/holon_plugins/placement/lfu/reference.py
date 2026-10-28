@@ -1,6 +1,6 @@
 """Oracles of placement.lfu (F11, docs/dev/v1-offload.md D4): the contract `moe_resolve.lfu@1`, call by call, and its
 `lend`; and `replay`, the L1 policy-parity oracle over a whole trace, the M6 replay's `lfu`
-(spikes/x0_offload/m6/replay.py) extended to the device's terms — f32, decay on steps with decode rows, the device's
+(bench/placement_replay.py) extended to the device's terms — f32, decay on steps with decode rows, the device's
 tie-breaks, row kinds, lending and the lent slots' return.
 
 `moe_resolve.lfu@1` is `moe_resolve@1` (std.moe.kernels) plus the layer's decayed counts `score [E] f32` (state, zero

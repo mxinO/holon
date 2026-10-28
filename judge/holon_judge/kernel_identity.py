@@ -2,7 +2,7 @@
 called with its default facts, against the same kernel at an earlier revision — bitwise, on decode rows, verify rows
 and blocks of 8 up to 3000 tokens, model-dtype and q8_0 KV, every head_dim, one split and several.
 
-    python -m holon_judge.kernel_identity --rev 71e6fd3 --out evidence/<record>.json
+    python -m holon_judge.kernel_identity --rev 71e6fd3 --out local/evidence/<record>.json
 
 The earlier kernel is read with `git show` into a module of its own; both run on the same inputs.
 """

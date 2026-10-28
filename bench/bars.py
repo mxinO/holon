@@ -60,7 +60,7 @@ def main() -> None:
                                                   "class's)")
     ap.add_argument("--rounds", type=int, default=3)
     ap.add_argument("--llama", nargs="+", default=["gate", "upstream"], help="llama.cpp builds (bench/.envs)")
-    ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
+    ap.add_argument("--evidence-dir", default=str(ROOT / "local" / "evidence"))
     args = ap.parse_args()
     if "gate" not in args.llama:
         ap.error("the gate's build must run (--llama gate ...)")
@@ -115,7 +115,7 @@ def main() -> None:
                                                if h is not None and b is not None]
         results[metric] = res
 
-    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!evidence").splitlines()
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!docs/dev/evidence").splitlines()
     date = datetime.date.today().isoformat()
     record = {
         "cell": args.name, "date": date, "gpu_class": gpu, "gpu": holon_record.get("gpu"),
@@ -135,6 +135,7 @@ def main() -> None:
         "rounds": rounds,
     }
     out = pathlib.Path(args.evidence_dir) / f"bars_release-{args.name}_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     text = re.sub(r"\[\s+([^\[\]{}]*?)\s+\]", lambda m: "[" + re.sub(r"\s+", " ", m[1]) + "]",
                   json.dumps(record, indent=1))                    # number lists on one line, as run.py's records
     out.write_text(text + "\n")

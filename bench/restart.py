@@ -69,7 +69,8 @@ def main() -> None:
                          f" --every {args.every}",
               "commit": git("rev-parse", "HEAD"), **result}
     name = model_id(args.model).split("@")[0].split("/")[-1].lower()
-    out = ROOT / "evidence" / f"restart_{name}_{gpu}_{date}.json"
+    out = ROOT / "local" / "evidence" / f"restart_{name}_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     print(json.dumps(record, indent=1))
 
