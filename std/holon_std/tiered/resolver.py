@@ -11,6 +11,7 @@ import functools
 import numpy as np
 import torch
 
+from . import ring
 from .ring import PSEUDO, SHORT
 
 RESOLVE, FETCH, EXPERT_PREFETCH = "moe_resolve@1", "expert_fetch@1", "expert_prefetch@1"
@@ -261,7 +262,7 @@ class DeviceResolver:
         fixed = store.lent.fixed
         for r in range(roles):
             own = fixed[int(store.class_table[g, r])]
-            for table, count, first, size, at in lists:
+            for table, count, first, size, at, *_ in lists:
                 pos = torch.arange(table.shape[-1], device=dev)
                 listed = pos < count[r]
                 index = torch.where(listed, PSEUDO - table[r, 1].long(), width).clamp(0, width)
@@ -287,10 +288,10 @@ class DeviceResolver:
         part = torch.full(slots.shape[1:], -1, dtype=torch.int64, device=slots.device)
         for r, c in enumerate(self.classes):
             of = torch.full((c.size + 1,), -1, dtype=torch.int64, device=slots.device)
-            for table, count, first, size, _ in lists:
+            for table, count, first, size, _, off in lists:
                 pos = torch.arange(table.shape[-1], device=slots.device)
                 at = torch.where(pos < count[r], table[r, 1].long(), c.size).clamp(0, c.size)
-                of.scatter_(0, at, self._round_part(r, first, pos, size))
+                of.scatter_(0, at, self._round_part(r, first, pos + off, size))
             of[c.size] = -1
             part = torch.maximum(part, of[slots[r].long().clamp(0, c.size)])
         self._whole(lists)
@@ -300,21 +301,26 @@ class DeviceResolver:
                 n: torch.Tensor):
         """D8g (docs/dev/v1-glm.md): an eager staging call's gathers by copy engines beside the compute. After the tier
         op round 0's reads are signalled (landing half 0), each miss gets its part — the read-ahead hits' and the RAM
-        misses' by `rounds_q` (in rounds: through the fixed set; else each miss in its own staging slot), then the SSD
-        rounds' (by the landing rows) —, the read-ahead set waited for (A G3-m1: before `tiered`, so every
-        stream after it follows the read), and the lists read back (`tiered`). Returns (slots, part [T, k], landed):
-        `landed` a `_Beside`, its length known once the lists are back — taken after part −1 is enqueued."""
+        misses' (in rounds: by `rounds_q`, through the fixed set; else STAGE_PARTS of them, at least `rounds_q` each,
+        each miss in its own staging slot), then the SSD rounds' (by the landing rows) —, the read-ahead set waited
+        for (A G3-m1: before `tiered`, so every stream after it follows the read), and the lists read back (`tiered`).
+        Returns (slots, part [T, k], landed): `landed` a `_Beside`, its length known once the lists are back — taken
+        after part −1 is enqueued."""
         store, g = self.store, self.group
         main = torch.accelerator.current_stream(ids.device)
         self._tier_op(ids, kinds, fetch, n)
         store.round_rows(0)                      # round 0's reads first, on main before `tiered` (half 0)
         store.io.signal(self.io_slots[0])
-        rounds, a, size = store.lent.rounds, store.landing_rows, store.rounds_q
+        rounds, a, q = store.lent.rounds, store.landing_rows, store.rounds_q
         c_hit, c_ram = store.n_hit.max().long(), store.n_ram.max().long()
-        first_ram = -(-c_hit // size)
-        first_ssd = first_ram + -(-c_ram // size)
-        lists = [(store.hit, store.n_hit, 0, size, 0)] if store._ahead else []
-        lists += [(fetch, store.n_ram, first_ram, size, 0), (store.ssd, store.n_ssd, first_ssd, a, size)]
+        if rounds:                               # the fixed set's front parts: hits, then RAM misses, by rounds_q
+            size, first_ram, off_ram = q, -(-c_hit // q), 0
+            first_ssd = first_ram + -(-c_ram // q)
+        else:                                    # STAGE_PARTS front parts over the hits, then the RAM misses
+            size = (-(-(c_hit + c_ram) // ring.STAGE_PARTS)).clamp(min=q)
+            first_ram, off_ram, first_ssd = 0, c_hit, -(-(c_hit + c_ram) // size)
+        lists = [(store.hit, store.n_hit, 0, size, 0, 0)] if store._ahead else []
+        lists += [(fetch, store.n_ram, first_ram, size, 0, off_ram), (store.ssd, store.n_ssd, first_ssd, a, q, 0)]
         if rounds:
             slots, part = self._place_rounds(lists, slots)
         else:
@@ -445,8 +451,13 @@ class _Beside:
         q, a = s.rounds_q, s.landing_rows
         n_hit, n_ram, n_ssd = (int(self.lists[k].max()) for k in ("n_hit", "n_ram", "n_ssd"))
         n_hit = n_hit if s._ahead else 0          # (kind, first entry, past its last) per front part
-        self.front = [[("hit", p, p + q)] for p in range(0, n_hit, q)] + \
-            [[("ram", p, p + q)] for p in range(0, n_ram, q)]
+        if self.rounds:
+            self.front = [[("hit", p, p + q)] for p in range(0, n_hit, q)] + \
+                [[("ram", p, p + q)] for p in range(0, n_ram, q)]
+        else:                                    # (`_beside`'s numbering: STAGE_PARTS over the hits, then RAM)
+            size = max(q, -(-(n_hit + n_ram) // ring.STAGE_PARTS))
+            self.front = [[(k, max(p - o, 0), p + size - o) for k, o, n in (("hit", 0, n_hit), ("ram", n_hit, n_ram))
+                           if p + size > o and p < o + n] for p in range(0, n_hit + n_ram, size)]
         self.n_rounds = -(-n_ssd // a)
         self.keys = [[] for _ in self.front]
         self.events, self.computed, self.signalled, self.waited = {}, {}, {0}, set()

@@ -863,8 +863,8 @@ it).
   is enqueued (`moe.units`' pipelined pass takes it then), the host waits `tiered` there (`TieredStore.read_lists`) and
   issues the call's copies part by part. G3-m1 is its first fix: the read-ahead set's `k_wait` sits on main before
   `tiered` (every stream after `tiered` follows the read). Where it differs from the text above:
-  - **Stage mode's parts:** front parts of `rounds_q` (read-ahead hits, then RAM misses, each in its own staging slot),
-    all started under the control stream after `tiered`, then the SSD rounds through the same control-stream machinery
+  - **Stage mode's parts:** `STAGE_PARTS` front parts (at least `rounds_q` each) over the read-ahead hits, then the
+    RAM misses, each in its own staging slot, all started under the control stream after `tiered`, then the SSD rounds through the same control-stream machinery
     as rounds mode (two halves, their own tables, F5), minus F3b (slots used once). (A first build gave stage one
     front part: at 32K main then waited the whole call's copies after part −1, ≈ 2.5 s of the step — the timeline
     below.) Rounds mode: front parts of `rounds_q`, part 0 under control, the others with main current (asserted),
