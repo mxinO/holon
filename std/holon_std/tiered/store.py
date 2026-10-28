@@ -1024,7 +1024,7 @@ class TieredStore:
         try:
             tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
         except ValueError:                             # its class cannot hold it beside a pass's staging
-            self._loan_bytes = 0
+            self._loan_bytes, self._peak_per_token = 0, 0.0      # (no loan: no range for its largest allocation)
             self._no_loan("the tail's class cannot hold the step-peak loan beside a prefill pass's staging")
             print(f"holon: {self.name}: the tail's class cannot hold the step-peak loan (moe.lend_peak) beside a "
                   "prefill pass's staging: the activations stay reserved")

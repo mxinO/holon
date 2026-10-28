@@ -1240,7 +1240,7 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
     bits."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on",
-            "moe.cache": cache}
+            "moe.cache": cache, "moe.loan_largest": 0.9}
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
     store = engine.ctx.shared_objects[KEY]
     ranges = []
@@ -1256,6 +1256,7 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
         assert all(a + nbytes == end for a, nbytes in ranges)
     else:
         assert store._loan is None and store._loan_bytes == 0 and "stay reserved" in said
+        assert store._largest(256) == 0             # no loan, so no step asks its tail for a range (A's D8k m1)
     engine.close()
 
 
