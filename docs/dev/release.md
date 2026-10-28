@@ -3429,7 +3429,7 @@ the first record had left its Anthropic answer null because its parser matched o
 - **Acceptance 4 holds after §19.2's fix:** the first start added Triton cache files and FlashInfer's empty file locks,
   nothing under FlashInfer's modules or the GGUF kernels. The CuTe DSL norms compile in memory (README, First start).
 - **Timings are this network's:** `uv sync` fetched ≈ 5.6 GB of wheels and the hub download ran at several hundred
-  MB/s; a home connection takes longer. `holon prebuild` is a desktop's 16 threads.
+  MB/s; a home connection takes longer. `holon prebuild` ran on each desktop's own CPU.
 - **The first run of this procedure** (before the fix) served and answered on the RTX 5080, 4090 and 5090. On the RTX
   3090 the hub listing failed once with an HTTP error (`the hub is unreachable (HfHubHTTPError …)`), four desktops having
   listed the hub within a few minutes without a token; this run started the classes three minutes apart, allowed one

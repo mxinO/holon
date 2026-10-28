@@ -289,7 +289,7 @@ FlashInfer batch-invariant but is documented as not CUDA-graph safe.
 
 ### Q6 — JIT
 
-Cold compile + load per module in a fresh cache (`jit_time.py`, 96-core hosts, sequential), warm load:
+Cold compile + load per module in a fresh cache (`jit_time.py`, the server hosts, sequential), warm load:
 
 | module | a5000 cold | rtx-pro-6000 cold | warm load | cache size |
 |---|---|---|---|---|
@@ -466,7 +466,7 @@ short context, and on the 5080 FlashInfer's split-KV paged-prefill verify path i
 | 8 | 105 / 152 / 79 | 57–60 / 76 / 39 | 50–52 / 71–74 / 39 |
 | 64 | 253 / 439 / 90 | 123 / 209–235 / 44 | 126–128 / 214–216 / 45 |
 
-- JIT, cold compile per module (16 threads; `jit_time.py`), warm load 0.03–0.5 s:
+- JIT, cold compile per module (a desktop; `jit_time.py`), warm load 0.03–0.5 s:
 
 | module | rtx-4090 | rtx-5080 | rtx-5090 |
 |---|---|---|---|

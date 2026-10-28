@@ -10,7 +10,7 @@ Layout of a recording (all positions of all sequences concatenated; position t o
 Metadata (safetensors header, key "meta"): JSON with model, revision, weight blob hashes, dtype, device, versions,
 prompt-set hash, k, wall time.
 
-    python golden.py --model Qwen/Qwen3-0.6B --device cpu --dtype float32 --threads 48 --out out/0.6b-fp32.st
+    python golden.py --model Qwen/Qwen3-0.6B --device cpu --dtype float32 --threads <n> --out out/0.6b-fp32.st
     CUDA_VISIBLE_DEVICES=0 python golden.py --model Qwen/Qwen3-8B --device cuda --dtype bfloat16 --out ...
 """
 

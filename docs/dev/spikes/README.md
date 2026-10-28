@@ -1,9 +1,8 @@
 # Spikes
 
 Experiments kept because a document cites them as how its numbers were produced: the M0 spikes behind the adopted
-kernels and the judge's prompt sets (`s1_attention`, `s2_gguf`, `s3_gdn`, `s5_golden`, `s6_cpu_handshake`; design
-§5.6, plan "Spike outcomes", `judge/README.md`) and `x4_gate`, which made the placement profile the README's offload
-lock names. One folder per question, named after the milestone step that asked it. They are records, not part of the
+kernels and the judge's prompt sets (`s1_attention`, `s2_gguf`, `s3_gdn`, `s5_golden`; design §5.6, plan "Spike
+outcomes", `judge/README.md`) and `x4_gate`, which made the placement profile the README's offload lock names. One folder per question, named after the milestone step that asked it. They are records, not part of the
 engine or its tests: they ran from `spikes/<name>/` at the commits they name and may not run against today's code.
 
 Other spikes the development records cite (`spikes/<name>/…`) are not kept in the repository; the tools that outlived

@@ -133,6 +133,5 @@
    ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_False_spec_q_seq_len_1",
    ".cache/flashinfer/0.6.12/120f/cached_ops/xqa_input_bf16_kv_cache_e4m3_output_bf16_page_size_16_head_dim_256_head_group_ratio_6_use_sliding_window_False_use_spec_dec_True_spec_q_seq_len_3"
   ]
- },
- "nproc": 96
+ }
 }

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Record the fp32 CPU golden and all GPU candidates for one model, then compute its noise-floor table.
 #   ./run_all.sh Qwen/Qwen3-0.6B qwen3-0.6b
-# GPUs 4,5 only; ≤ 48 CPU threads in total (44 for the fp32 recorder, 2 per GPU process).
+# GPUs 4,5 only; a fixed CPU thread count for the fp32 recorder, 2 per GPU process.
 set -euo pipefail
 cd "$(dirname "$0")"
 PY=../../.venv/bin/python

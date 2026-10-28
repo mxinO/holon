@@ -77,6 +77,5 @@
    ".cache/flashinfer/0.6.12/89/cached_ops/batch_prefill_with_kv_cache_dtype_q_bf16_dtype_kv_e4m3_dtype_o_bf16_dtype_idx_i32_head_dim_qk_256_head_dim_vo_256_posenc_0_use_swa_False_use_logits_cap_False_f16qk_False",
    ".cache/flashinfer/0.6.12/89/cached_ops/tmp"
   ]
- },
- "nproc": 16
+ }
 }

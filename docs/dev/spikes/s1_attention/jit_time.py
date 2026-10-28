@@ -67,7 +67,7 @@ def du(path) -> int:
 def main():
     root = OUT / f"jit_cold_{class_name()}"   # per class: several hosts may share this directory
     shutil.rmtree(root, ignore_errors=True)
-    res = {"per_module": [], "prebuild": {}, "nproc": os.cpu_count()}
+    res = {"per_module": [], "prebuild": {}}
     for name, expr in SPECS.items():
         base = root / name
         cold = child(str(base), "load", [expr])          # compile + load, sequential, in a fresh cache

@@ -16,4 +16,4 @@ git -C "$SRC" diff --quiet && git -C "$SRC" apply "$HERE/patches/llama.cpp-s2-pe
 cmake -S "$SRC" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
   -DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=$SM -DCMAKE_CUDA_COMPILER=$(which nvcc) \
   -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=ON -DLLAMA_BUILD_SERVER=OFF
-cmake --build "$BUILD" -j "${S2_JOBS:-48}" --target test-backend-ops llama-bench
+cmake --build "$BUILD" -j "${S2_JOBS:-$(nproc)}" --target test-backend-ops llama-bench
