@@ -1272,7 +1272,7 @@ struct LoanRange {
 };
 struct Loan {
     std::vector<LoanRange> ranges;
-    int64_t live = 0, outside = 0, most = 0;
+    int64_t live = 0, live_bytes = 0, outside = 0, most = 0;   // segments out; their bytes
 };
 Loan loan;
 
@@ -1301,6 +1301,8 @@ void loan_set(int64_t ptr, int64_t nbytes) { loan_set_ranges({ptr}, {nbytes}); }
 
 int64_t loan_live() { return loan.live; }
 
+int64_t loan_live_bytes() { return loan.live_bytes; }
+
 int64_t loan_overflow() { return loan.most; }
 
 }  // namespace
@@ -1317,6 +1319,7 @@ void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
                     r.free[at + n] = left;
                 }
                 ++loan.live;
+                loan.live_bytes += int64_t(n);
                 return r.base + at;
             }
         }
@@ -1327,6 +1330,7 @@ void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
         return nullptr;
     }
     ++loan.live;
+    loan.live_bytes += int64_t(n);
     loan.outside += int64_t(n);
     loan.most = std::max(loan.most, loan.outside);
     return out;
@@ -1334,6 +1338,7 @@ void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
 
 void holon_loan_free(void * ptr, ssize_t size, int, cudaStream_t) {
     char * p = static_cast<char *>(ptr);
+    loan.live_bytes -= int64_t(loan_round(size));
     LoanRange * r = nullptr;
     for (auto & o : loan.ranges) {
         if (p >= o.base && p < o.base + o.cap) {
@@ -1370,6 +1375,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_set_ranges", &loan_set_ranges, "activation_loan@1: the ranges the loan's segments are cut from, in "
           "order (none out; none overlapping)");
     m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
+    m.def("loan_live_bytes", &loan_live_bytes, "activation_loan@1: the bytes of the loan's segments out");
     m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once, "
           "since the last loan_set");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "

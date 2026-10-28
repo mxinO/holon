@@ -810,13 +810,13 @@ class TieredStore:
             self.large_passes(at) and not self.exclusive else 1
         self._rounds = self._mode == "stage" and self._parts == 1 and at < ROUNDS_BELOW and self.rounds_able
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
-        if self._loaned and (held := self._loan.held()):
-            raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan outlive "
-                               "it (a buffer kept across steps, made in a lending step: the tail's experts overwrite "
-                               "it)")
         if self._loaned:
             self._loan_overflowed()
             self._loan.release()
+            if held := self._loan.held():
+                raise RuntimeError(f"{self.name}: {held} bytes the last tail step allocated in its activation loan "
+                                   "outlive it (a buffer kept across steps, made in a lending step: the tail's experts "
+                                   "overwrite it)")
         self._loaned = False
         self._step_loan = 0
         if self._mode is not None and self.large_passes(at) and self.tail:   # what its own passes take, not the most
