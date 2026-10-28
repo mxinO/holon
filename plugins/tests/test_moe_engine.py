@@ -1260,6 +1260,34 @@ def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, ke
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_layout_whose_down_tails_leave_no_staging_does_not_lend(gpu_moe_wide, tmp_path):
+    """D8w's whole-expert tail lends each down class's last slots too: a layout lends only where every class with a
+    tail still stages a prompt pass's misses outside it — decided at build, not flagged by a step's kernels (errors 4:
+    a 24 GB card at mode (ii)'s flags, its IQ3_XXS down class 377 slots, a tail of 227, a pass's 288 misses). Here a
+    200 MiB budget caches ≈ 160 of each down class's 256 pieces, a tail of 77 in each and a pass of 128 misses: the
+    layout stages (its own tail), and serves the resident store's bits."""
+    file, prompts, want = gpu_moe_wide              # GLM's shape: gate/up Q4_0, down Q8_0 and Q5_0
+    write(file.parent / "hf", tmp_path / "moe.gguf", Q.Q4_0,
+          types={"0.ffn_down_exps": Q.Q8_0, "1.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q5_0})
+    one = {"max_seqs": 1, "prefix_cache": False}    # (its KV holds one sequence: the reference schedules alike)
+    reference = _gpu_engine(tmp_path / "moe.gguf", **one)
+    want = _served(reference, prompts)
+    reference.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on",
+            "moe.ram": "*=0.25", "moe.loan_fixed_mib": 64, "moe.placement": "placement.promote@1",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    engine = _gpu_engine(tmp_path / "moe.gguf", host_memory=1 << 29, plugin_options=opts, **one,
+                         memory_fraction=(200 << 20) / torch.cuda.mem_get_info()[0])
+    store = engine.ctx.shared_objects[KEY]
+    names = list(store.classes)
+    short = [c for c, m in store.tail_down.items() if store._lend_room[names[c]] - m < store.prefill]
+    assert store.whole_tail and store.tail_down and short, (store._lend_room, store.tail_down, store.prefill)
+    assert not store.lending
+    assert _served(engine, prompts) == want and _bytes_exact(store) == 0
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_required_loan_without_the_startup_profile_is_refused(gpu_moe):
     """`moe.lend_peak = require` with an explicit state budget (`state_memory`: no startup profile, so nothing is
     measured to lend): refused at the first launch, naming why (it once served on, lending nothing, until a large step

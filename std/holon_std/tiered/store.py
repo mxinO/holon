@@ -615,10 +615,11 @@ class TieredStore:
                                             if c in lenders)
             # D8s: each lending class's cache slots a step can lend (a rounds step lends a fixed set of them)
             self._lend_room = {c: n - held[c] for c, n in budget.taken.items() if c in lenders}
-            if self.lending and self.tail:          # the tail's class must still stage a pass outside the tail: a
-                cls, n = self.tail                  # small pool (the startup profile's minimum) stages instead
-                c = classes[cls]
-                self.lending = budget.taken[c.name] - n >= self.prefill      # (a tail step releases the spares)
+            if self.lending and self.tail:          # each class with a tail must still stage a pass outside it (the
+                cls, n = self.tail                  # tail's class and D8w's down classes): a small pool (the startup
+                tails = {cls: n} | self.tail_down   # profile's minimum, a card whose budget caches less) stages instead
+                self.lending = all(budget.taken[classes[c].name] - m >= self.prefill for c, m in tails.items())
+                #                                     (a tail step releases the spares)
             if self.lending or staging == self.prefill:
                 break
             floors = dict(pinned)
