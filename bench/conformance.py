@@ -37,6 +37,8 @@ import re
 import statistics
 import time
 
+from run import SUPERVISOR  # beside max_gap_ms: a restart's gap is in it, these say it was one
+
 SUBSETS = ("Github_easy", "Github_medium", "Github_hard", "Glaiveai2K", "JsonSchemaStore", "Kubernetes", "Snowplow",
            "WashingtonPost")
 UNSATISFIABLE = {   # Glaive schemas no document satisfies (JSONSchemaBench issue 16: a oneOf over required names)
@@ -273,6 +275,7 @@ def summarize_pass(rows: list[dict], meta: dict) -> dict:
     before, after = meta["metrics_before"], meta["metrics_after"]
     out["engine_counters"] = {k: after[k] - before.get(k, 0) for k in after
                               if isinstance(after[k], int) and (k.startswith("spec_") or "." in k)}
+    out["supervisor"] = {k: after.get(k, 0) - before.get(k, 0) for k in SUPERVISOR}
     if out["engine_counters"].get("spec_drafted"):
         refused = out["engine_counters"].get("grammar.xgrammar.drafts_refused", 0)
         out["refused_draft_share"] = round(refused / out["engine_counters"]["spec_drafted"], 4)

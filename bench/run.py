@@ -38,6 +38,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 BENCH = ROOT / "bench"
 ENVS = BENCH / ".envs"                                   # baseline venvs and sources (setup_baselines.sh)
 SOURCES = {"minisgl": "mini-sglang", "nanovllm": "nano-vllm", "freetoken_http": "FreeToken"}
+# `holon serve`'s supervisor counters (/metrics): every record over a server keeps them beside its max gap, so an
+# engine restart never hides in a gap figure (GLM step 7: a heap-corruption crash read as a 98 s gap)
+SUPERVISOR = ("crashes", "restarts", "resubmitted", "quarantined", "rollbacks")
 SERVERS = ("llamaserver", "freetoken_http", "sglang_http")   # a server binary or venv of its own, and our client
 SET_BY_WORKER = ("max_seqs", "max_step_tokens", "max_model_len")   # from --max-batch, --max-step-tokens, the traces
 ARGS_ENV = {"llamaserver": "LLAMA_SERVER_ARGS", "sglang_http": "SGLANG_ARGS", "freetoken_http": "FREETOKEN_ARGS"}
