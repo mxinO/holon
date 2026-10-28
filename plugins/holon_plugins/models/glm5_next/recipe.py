@@ -1,5 +1,5 @@
 """GLM-5.3-Flash (`glm5_next`; llama.cpp's `glm5-next` GGUF): a pure recipe (imports only holon.api), written fresh
-(docs/v1-glm.md §5: it shares no names, hyper-connections or rules with `qwen4_exp`).
+(docs/dev/v1-glm.md §5: it shares no names, hyper-connections or rules with `qwen4_exp`).
 
 The trunk carries R, four float32 streams of the hidden size (`ModelSpec.residual`, D3): `std.hyper.expand@1` around
 the embedding (the token table on the host, `std.tiered.rows@1`), a `std.hyper.mhc_block@1` per layer, the stream mean

@@ -1,4 +1,5 @@
-"""F5b, the CPU's share of a layer's misses (docs/v1-offload.md D4–D7): the engine's one `CpuShare` (a shared object of
+"""F5b, the CPU's share of a layer's misses (docs/dev/v1-offload.md D4–D7): the engine's one `CpuShare` (a shared object
+of
 the offload store's layers), present when the deployment gives a split table.
 
 Per expert pass of at most `tokens` tokens — a graphed step's most (its decode and verify rows), so a decode step of

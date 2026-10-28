@@ -16,12 +16,12 @@ LLAMA_GATE=cbe28bb3cb0758f0c566a9a3561766821aeb0748
 LLAMA_UPSTREAM=f12aaa344c971556ec35be054d7aac1d901fd510   # upstream HEAD, 2026-10-16 (release step 8)
 LLAMA_ARCHS=${LLAMA_ARCHS:-"86;89;120a"}                   # the release classes: sm_86, sm_89, sm_120 (fp4 needs 120a)
 FREETOKEN_COMMIT=74a387777708b9650a027494bcb37d2ab9cf2443  # 2026-10-10 (torch 2.14.1, sglang-kernel 0.4.9)
-# v1 offload's references (docs/v1-offload.md D14): llama.cpp with --moe-cache-mib (PR #29887, merged 2026-10-07) and
+# v1 offload's references (docs/dev/v1-offload.md D14): llama.cpp with --moe-cache-mib (PR #29887, merged 2026-10-07) and
 # the FreeToken commit the research note was verified against.
 LLAMA_OFFLOAD=f74e2fa6a31cc33ab4ee4ae516641cfe62df3924     # upstream HEAD, 2026-10-16
 FREETOKEN_OFFLOAD=21d9578bde22840798b6063824416264fbdcdc25 # 2026-10-16
 OFFLOAD_RESOLVED_BEFORE=2026-10-17
-# FN's references (docs/v1-flash-next.md D11): llama.cpp at the commit FN cites (qwen4exp), Strata, and the ggml
+# FN's references (docs/dev/v1-flash-next.md D11): llama.cpp at the commit FN cites (qwen4exp), Strata, and the ggml
 # commit Strata pins (its setup.py LLAMA_CPP_COMMIT). Both build -march=native: run `fn` on the bar cards' host class.
 LLAMA_FN=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd   # 2026-10-17
 STRATA_COMMIT=296b59d2f73c8f04a805df29c2fa97655adace78   # 2026-10-14

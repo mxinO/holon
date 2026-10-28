@@ -1,4 +1,4 @@
-"""A group's in-graph resolve and fetch (docs/v1-offload.md D5): its routed ids to arena slots per role through the
+"""A group's in-graph resolve and fetch (docs/dev/v1-offload.md D5): its routed ids to arena slots per role through the
 residency map (`moe_resolve@1`, or the policy's variant contract with the policy's device state), every miss gathered
 from the host tier into its slot — a staging slot, or the slot a device-owned policy admitted it into
 (`expert_fetch@1`, F5a). Under exclusive tiers (D10) `moe_tiers@2` then places the call's victims and SSD misses, the
@@ -85,7 +85,7 @@ class DeviceResolver:
             self.group < store.borrowing_groups
         if rounds and (parts <= 1 or before_fetch is not None or split):
             raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step that stages in "
-                               "rounds (docs/v1-glm.md D8s: its fixed slots hold one part at a time)")
+                               "rounds (docs/dev/v1-glm.md D8s: its fixed slots hold one part at a time)")
         parts = parts if self.fetches_parts and not store.exclusive and before_fetch is None else 1
         if store.parts > 1 and parts <= 1 and self.group < store.borrowing_groups:
             raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step whose staging "
@@ -100,7 +100,7 @@ class DeviceResolver:
         self._prepared = False
         if rounds:
             return self._rounds(ids, kinds, slots, fetch, n)
-        if store.exclusive:                      # exclusive tiers: RAM misses, then SSD rounds (docs/v1-glm.md D8f)
+        if store.exclusive:                      # exclusive tiers: RAM misses, then SSD rounds (docs/dev/v1-glm.md D8f)
             if before_fetch is not None:
                 before_fetch(cpu)
             finish = self._tiers(ids, kinds, fetch, n, split)
@@ -125,12 +125,12 @@ class DeviceResolver:
         return slots, cpu
 
     def _tiers(self, ids: torch.Tensor, kinds: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor, split: bool):
-        """Exclusive tiers' call after its resolve (docs/v1-glm.md D8f, D8c): `moe_tiers@2` places; round 0 of the SSD
-        reads signalled at once; the RAM misses' gather beside those reads — on the high-priority side stream when the
-        call splits, so a RAM miss never waits behind an SSD read. Returns `finish`, on the main stream: the read-ahead
-        hits, the rounds (each waited, gathered, then the next signalled: rounds of A_od landing rows, as many as the
-        call could need — no host sync; a round past the misses is empty; a graphed step's fit one), then the demotions
-        and the admitted moves (after the side stream's gather)."""
+        """Exclusive tiers' call after its resolve (docs/dev/v1-glm.md D8f, D8c): `moe_tiers@2` places; round 0 of the
+        SSD reads signalled at once; the RAM misses' gather beside those reads — on the high-priority side stream when
+        the call splits, so a RAM miss never waits behind an SSD read. Returns `finish`, on the main stream: the
+        read-ahead hits, the rounds (each waited, gathered, then the next signalled: rounds of A_od landing rows, as
+        many as the call could need — no host sync; a round past the misses is empty; a graphed step's fit one), then
+        the demotions and the admitted moves (after the side stream's gather)."""
         store, g = self.store, self.group
         self._tier_op(ids, kinds, fetch, n)
         # rounds of A landing rows for the most SSD misses a call can have: its distinct routed experts
@@ -204,7 +204,7 @@ class DeviceResolver:
 
     def _rounds(self, ids: torch.Tensor, kinds: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor,
                 n: torch.Tensor):
-        """D8s (docs/v1-glm.md): a staging call under exclusive tiers in rounds through its classes' fixed slots
+        """D8s (docs/dev/v1-glm.md): a staging call under exclusive tiers in rounds through its classes' fixed slots
         (`Lent.fixed`: `rounds_q` for RAM misses and read-ahead hits, the landing rows' for SSD reads). After the tier
         op, each miss gets its part — read-ahead hits by `rounds_q`, then RAM misses by `rounds_q`, then SSD rounds
         by the landing rows; an expert's pieces share their lists' places (RAM and the SSD hold whole experts) — and

@@ -131,7 +131,8 @@ class StateManager:
     MemOps after a step that ends there, or filled by the forward of a step that contains it on the spec's `in_step`
     grid), registered at the step's commit once committed tokens cover them.
 
-    With a tier (docs/v1-kv-tiers.md D7) a hit may reach blocks only the tier holds: they get device units (free ones,
+    With a tier (docs/dev/v1-kv-tiers.md D7) a hit may reach blocks only the tier holds: they get device units (free
+    ones,
     or ones that evicting blocks the tier holds frees), the tier loads them, and the request waits for its loads — on
     the device at its first step's launch, and before that until the tier's clock reaches their due time (`due`, the
     scheduler's gate). A payload in the tier is loaded to a host unit and adopted from there. A block a request

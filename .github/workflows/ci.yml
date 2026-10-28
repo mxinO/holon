@@ -25,6 +25,8 @@ jobs:
           version: "0.11.1"
       - name: environment (uv.lock, dev group)
         run: uv sync --frozen --group dev
+      - name: warm uv's cache for the demo harness's offline venvs (pytest at the locked version)
+        run: uv venv -q /tmp/warm && uv pip install -q --python /tmp/warm/bin/python "pytest==$(.venv/bin/python -c 'import importlib.metadata as m; print(m.version("pytest"))')"
       - name: static checks
         run: . .venv/bin/activate && bash scripts/ci/run_all.sh origin/main
       - name: tests (CPU)

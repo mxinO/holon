@@ -1,4 +1,4 @@
-"""L0 for the offload store's in-graph contracts (docs/v1-offload.md §5, D3, D4): `moe_resolve@1`, the placement
+"""L0 for the offload store's in-graph contracts (docs/dev/v1-offload.md §5, D3, D4): `moe_resolve@1`, the placement
 plugins' variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) with their `lend`, and `expert_fetch@1` —
 from kernels.expert_io (CUDA) and the CPU providers (testing.ref_kernels; each placement plugin's own) against their
 oracles, exactly.
@@ -391,7 +391,7 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_fetch_reads_landing_rows_by_their_runs(plugins, device):
-    """docs/v1-glm.md D8f: from landing rows (each piece's extents at their offsets in an aligned superset, `runs`),
+    """docs/dev/v1-glm.md D8f: from landing rows (each piece's extents at their offsets in an aligned superset, `runs`),
     a slot gets the extents back to back, as the oracle does — 16-byte-aligned runs and unaligned ones — through the
     instance's call and, both roles at once, `gather_roles`; landing rows wider than the slots."""
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
@@ -515,10 +515,10 @@ def _tiered(seed: int, groups: int = 3, experts: int = 32, free: int = 3) -> dic
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("free", [0, 2])
 def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
-    """docs/v1-glm.md D8a: a policy with spares (F10) under exclusive tiers — a spare refilled, its owner still mapped
-    (`(g, SPARE, b)`): b placed as a victim is (free units, else over RAM's coldest by the int32 heat, else the SSD),
-    its slots demoted; an owner back in its spare (`(g, OWN, b)`): its RAM units free; a promotion into a spare whose
-    owner left VRAM before: as into empty slots (no staging, no placement) — the oracle's, exactly."""
+    """docs/dev/v1-glm.md D8a: a policy with spares (F10) under exclusive tiers — a spare refilled, its owner still
+    mapped (`(g, SPARE, b)`): b placed as a victim is (free units, else over RAM's coldest by the int32 heat, else the
+    SSD), its slots demoted; an owner back in its spare (`(g, OWN, b)`): its RAM units free; a promotion into a spare
+    whose owner left VRAM before: as into empty slots (no staging, no placement) — the oracle's, exactly."""
     experts, layer = 32, 2
     t = _tiered(5, free=free)
     heat = (t["heat"] * 2).int()                                # an int32 heat (placement.promote's `last`)
@@ -572,12 +572,12 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
     the SSD) or sent to the SSD; decode SSD misses kept the same way; every SSD read listed with its unit; the map, RAM
     units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is
-    displaced. SSD reads land in landing rows (docs/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
+    displaced. SSD reads land in landing rows (docs/dev/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
     its io row (piece, row, keep unit), its own fetch list; the RAM entries stay in the fetch list, in order. A miss
     the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, never kept — with
-    decode rows and free RAM units beside it (docs/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3). With heat, units
-    stamped by the previous call (a third of them) are never displaced, the call's demotions stamp theirs and the
-    clock advances (docs/v1-glm.md §13 step 7: moves beside the next calls)."""
+    decode rows and free RAM units beside it (docs/dev/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3). With heat,
+    units stamped by the previous call (a third of them) are never displaced, the call's demotions stamp theirs and the
+    clock advances (docs/dev/v1-glm.md §13 step 7: moves beside the next calls)."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -667,10 +667,10 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_loan_over_several_ranges_fills_them_in_order(plugins):
-    """`activation_loan@1`'s `use_ranges` (docs/v1-glm.md D8w): the caching allocator's segments cut from the ranges in
-    the given order (the smallest first: a segment the first range holds goes there; one only a later range holds goes
-    there), none outside them while they hold it, a returned segment coalesced within its range, a range set refused
-    while segments are out or where two ranges overlap; past every range, the device's own memory, counted."""
+    """`activation_loan@1`'s `use_ranges` (docs/dev/v1-glm.md D8w): the caching allocator's segments cut from the ranges
+    in the given order (the smallest first: a segment the first range holds goes there; one only a later range holds
+    goes there), none outside them while they hold it, a returned segment coalesced within its range, a range set
+    refused while segments are out or where two ranges overlap; past every range, the device's own memory, counted."""
     loan = kernel(plugins, "cuda", "activation_loan@1", "kernels.expert_io")
     whole = torch.empty(64 << 20, dtype=torch.uint8, device="cuda")
     # 8 MiB, then 48 MiB, a gap between; neither starting where `whole` does (torch's allocator keys its blocks by

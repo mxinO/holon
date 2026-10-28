@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md §9 step 5, acceptance 1(b)-(f) and 2, §6.2, §13 (step 5)",
+ "doc": "docs/dev/v1-glm.md §9 step 5, acceptance 1(b)-(f) and 2, §6.2, §13 (step 5)",
  "model": "Maya-S v2 IQ2_XXS (3 shards; sha256 verified at step 0)",
  "gate_c": {
   "bars": {
@@ -444,7 +444,7 @@
   }
  },
  "gate_d_e": {
-  "gate": "docs/v1-glm.md acceptance 1(d), (e); §6.2",
+  "gate": "docs/dev/v1-glm.md acceptance 1(d), (e); §6.2",
   "tool": "spikes/glm5/tasks/{build.py,run.py}; spikes/glm5/tasks/glm_tasks.jsonl (72 items: FN's set, the recall filler at GLM's 8K / 31K tokens)",
   "setup": {
    "card": "RTX 5090",

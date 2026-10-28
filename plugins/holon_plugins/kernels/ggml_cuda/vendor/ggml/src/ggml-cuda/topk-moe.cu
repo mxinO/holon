@@ -446,7 +446,7 @@ bool ggml_cuda_should_use_topk_moe(const ggml_tensor * gating_op,
     return true;
 }
 
-// Holon: the MoE router in one launch (docs/v1-offload.md §14, step 3c), for decode and verify steps: logits =
+// Holon: the MoE router in one launch (docs/dev/v1-offload.md §14, step 3c), for decode and verify steps: logits =
 // x · Wᵀ in f32, x [n_rows, hidden] (bf16 or f32) read as its exact f32 values and W [n_experts, hidden] f32, then
 // topk_moe_cuda's selection on them (holon_topk_select). Block (e, t) computes expert e for the t-th tile of
 // HOLON_ROUTER_ROWS rows: warp q of HOLON_ROUTER_WARPS sums the q-th of equal slices of hidden — lane l the products

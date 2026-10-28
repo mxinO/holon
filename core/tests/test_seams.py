@@ -1,4 +1,5 @@
-"""The core seams of v1 expert offload (docs/v1-offload.md §4), proven with toys before a plugin uses them: S0 shared
+"""The core seams of v1 expert offload (docs/dev/v1-offload.md §4), proven with toys before a plugin uses them: S0
+shared
 objects and their lifecycle, S1 step hooks, S2 host pools and asynchronous MemOps, S3 fill pools, S5 CPU tiers.
 
 The engine's toy is a kernel provider for `rmsnorm` (the reference norm) whose instances share one object

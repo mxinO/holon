@@ -1,5 +1,5 @@
 """Snapshot traces (judge `snapshot.trace` over judge/prompts/v1.jsonl) of the vehicle on fresh engines: `std.moe@1`
-all-resident, and the offload store at given cache fits (docs/v1-offload.md §6, step 2):
+all-resident, and the offload store at given cache fits (docs/dev/v1-offload.md §6, step 2):
 
     python spikes/x2_store/exact.py <model.gguf> <out dir> "resident@16384;*=1.0@16384;@16384;*=0.25@16384" [runs]
 

@@ -91,7 +91,7 @@ def test_nearest_class_prefers_own_then_same_gpu_then_same_sm(tmp_path):
 
 
 def test_nearest_class_prefers_the_cpu_tier_then_no_tier_then_another_tier(tmp_path):
-    """A lock running CPU kernels has the CPU's tier in its class (docs/v1-offload.md S5): a host of tier t takes
+    """A lock running CPU kernels has the CPU's tier in its class (docs/dev/v1-offload.md S5): a host of tier t takes
     `gpu+t/…`, then `gpu/…` (both verified), then another tier's lock, unverified."""
     fp = Fingerprint(gpu="rtx-5080", sm=120, vram_gib=16, toolchain="cu130-torch2.11", cpu_isa="x86-avx2")
     assert plans.lock_class(fp, cpu_kernels=True) == "rtx-5080+x86-avx2/cu130-torch2.11"

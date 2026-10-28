@@ -1,4 +1,4 @@
-"""The op contract std.state_tier owns (docs/v1-kv-tiers.md D10). Its oracle is in `reference.py`; kernels come from
+"""The op contract std.state_tier owns (docs/dev/v1-kv-tiers.md D10). Its oracle is in `reference.py`; kernels come from
 kernel plugins (`kernels.state_copy`); without one the tier runs the oracle, which is correct on every device, only
 slower.
 

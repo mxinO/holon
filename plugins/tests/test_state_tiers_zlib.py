@@ -1,4 +1,4 @@
-"""state_tiers.zlib, the held-out `Level` (docs/v1-kv-tiers.md §1): blobs round-trip bitwise and its capacity is
+"""state_tiers.zlib, the held-out `Level` (docs/dev/v1-kv-tiers.md §1): blobs round-trip bitwise and its capacity is
 counted in uncompressed units; through std.state_tier on the tiny hybrid it passes tier invariance as the SSD level
 does, its pages coming back from the level."""
 import random

@@ -7,7 +7,7 @@ Without torch's caching allocator every tensor is its own cudaMalloc of exactly 
 unit's q8_0 scales (the end of the cache's byte segments), the block table or q is outside any allocation. Every
 head_dim, q8_0 and fp8 (Triton's bit decode), kv_write, prefill, decode with and without splits, and verify — also
 with its `causal` / `window` facts on blocks of 8 rows (M0.4 D4: the walk starts at the window's first key); and
-the model-dtype kv_write and the fused q/k norm + rope + KV write (docs/m07-perf.md D3) through their L0 cases.
+the model-dtype kv_write and the fused q/k norm + rope + KV write (docs/dev/m07-perf.md D3) through their L0 cases.
 """
 import torch
 from holon.core.build import BuildContext

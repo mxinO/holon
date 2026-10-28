@@ -1,4 +1,4 @@
-"""Milestone K's resume bars (docs/v1-kv-tiers.md §1 acceptance 3, §8): 3a, 3b and 3b-SSD, in process.
+"""Milestone K's resume bars (docs/dev/v1-kv-tiers.md §1 acceptance 3, §8): 3a, 3b and 3b-SSD, in process.
 
 One engine at a lock's settings with std.state_tier and its SSD level. A parked conversation is a prompt of L tokens
 run once (its blocks and its `prompt_end` checkpoint published); it is then left resident (VRAM), demoted to the host

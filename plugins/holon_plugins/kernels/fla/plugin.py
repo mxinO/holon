@@ -17,7 +17,7 @@ chunks), each from the state the one before left — the same chunks in the same
 a quarter of the temporaries, the largest part of a prompt step's activation peak (FN §23.3), whatever the step's rows
 (the startup profile measures a one-row step; two prompts' chunks in one step must not need more, §22.9).
 
-`kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/v1-glm.md D4) is the same rule with a per-channel gate: the same
+`kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/dev/v1-glm.md D4) is the same rule with a per-channel gate: the same
 plans, rows, state units, snapshots and calls; its recurrent rows through the fused kernel's `IS_KDA` branch (patched:
 the bounded gate `lower_bound · σ(exp(A_log) · (f + dt_bias))`), its chunks through vLLM's `chunk_kda` with the fused
 gate and chunk-local cumsum (vendored `kda.py`; FLA's 16-row sub-chunks keep the in-chunk decay exponents finite at

@@ -1,5 +1,5 @@
 {
- "what": "docs/v1-offload.md step 7: held-out plugins (acceptance 1)",
+ "what": "docs/dev/v1-offload.md step 7: held-out plugins (acceptance 1)",
  "gpu": "RTX A5000",
  "gpu_class": "rtx-a5000",
  "model": "Qwen3-30B-A3B Q4_K_M (unsloth GGUF)",

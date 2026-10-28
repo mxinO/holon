@@ -1,4 +1,4 @@
-// `cpu_task@1` (docs/v1-offload.md D6, spike S6): a persistent native worker that CUDA graphs hand CPU work to, one
+// `cpu_task@1` (docs/dev/v1-offload.md D6, spike S6): a persistent native worker that CUDA graphs hand CPU work to, one
 // 32-bit word per slot on its own 64-byte line of mapped pinned memory:
 //
 //   GPU (in the graph):  word := REQ          … independent GPU work …          wait until word >= DONE
@@ -280,7 +280,7 @@ struct State {
     std::atomic<int64_t> served{0};
     std::shared_ptr<IoEngine> io;                     // the `io` pool's reads (completion-driven), or none
     std::unique_ptr<std::atomic<uint32_t>[]> abandons;   // per slot: requests the watchdog abandoned (memop)
-    // The I/O worker's counters (docs/v1-glm.md D8f; step 1's review C S1-M3): bytes read, time with reads in flight,
+    // The I/O worker's counters (docs/dev/v1-glm.md D8f; step 1's review C S1-M3): bytes read, time with reads in flight,
     // and per request (signal seen → answered) its latency by its experts (rows): none (an empty round, answered at
     // once), 1, 2–3, 4 or more (step 1's fix review C: k = 1 then means what N3's does).
     std::atomic<int64_t> bytes{0}, busy_ns{0}, lat_ns[4]{}, requests[4]{};
@@ -291,7 +291,7 @@ struct State {
     uint32_t flag() const { return cpu_flag().load(__ATOMIC_ACQUIRE) | gpu_flag().load(__ATOMIC_ACQUIRE); }
 };
 
-// The generic copy task (F9, docs/v1-offload.md D3, D6; docs/v1-glm.md D8f): the pieces a request table names, read
+// The generic copy task (F9, docs/dev/v1-offload.md D3, D6; docs/dev/v1-glm.md D8f): the pieces a request table names, read
 // from their descriptors' extents into host rows. A descriptor row is (fd, direct, offset, nbytes) — nbytes 0 past a
 // piece's extents. A role's rows are either canonical units (each piece's extents back to back: an O_DIRECT extent
 // read as its aligned superset into a bounce buffer, then copied, unless offset, length and destination are all
@@ -479,7 +479,7 @@ class Copy {
     Plan plan_;
 };
 
-// ---- the I/O worker's asynchronous reads (docs/v1-glm.md D8f): io_uring (raw syscalls, no SQPOLL), else Linux
+// ---- the I/O worker's asynchronous reads (docs/dev/v1-glm.md D8f): io_uring (raw syscalls, no SQPOLL), else Linux
 // native AIO; one submitting thread keeps up to `depth` chunks in flight and reaps completions without blocking.
 class Backend {
   public:

@@ -1,6 +1,6 @@
-"""GLM-5.3-Flash's quantized tiny model on the GPU (docs/v1-glm.md acceptance 1(a′), §6.1's GPU row): the Q8_0 fixture
-(H = I = 512, `llama-quantize`'s Q8_0, the head scaled to a logit std ≥ 2) through the GPU providers in bfloat16 —
-mmvq / mmq, the fused router, the clamp, KDA, mHC, DSA — against the CPU engine on the same file in float32 (the
+"""GLM-5.3-Flash's quantized tiny model on the GPU (docs/dev/v1-glm.md acceptance 1(a′), §6.1's GPU row): the Q8_0
+fixture (H = I = 512, `llama-quantize`'s Q8_0, the head scaled to a logit std ≥ 2) through the GPU providers in bfloat16
+— mmvq / mmq, the fused router, the clamp, KDA, mHC, DSA — against the CPU engine on the same file in float32 (the
 testing CPU providers), judged by KL over the top-20 (`holon_judge.compare.kl_topk`).
 
 Each of the 3 prompts of 300 tokens runs on the GPU with prompt logprobs, chunked at 100 and at 250 tokens, then 32
@@ -32,7 +32,7 @@ from holon_testing import glm5next_files as g
 
 GGUF = os.environ.get("GLM_TINY_Q8_GGUF")
 SKIP = ("GLM's GPU tiny-model check (§6.1, acceptance 1(a′)) did not run: set GLM_TINY_Q8_GGUF to the Q8_0 fixture "
-        "that `python -m holon_testing.glm5next_files --kind gpu` builds in the golden venv (docs/release.md §22)")
+        "that `python -m holon_testing.glm5next_files --kind gpu` builds in the golden venv (docs/dev/release.md §22)")
 if GGUF is None:
     warnings.warn(SKIP, stacklevel=1)
 pytestmark = [pytest.mark.skipif(GGUF is None, reason=SKIP),

@@ -1,4 +1,4 @@
-"""L2's reference form (docs/v1-glm.md D15a): a lock judged against a bf16 GPU reference, for a model with no fp32
+"""L2's reference form (docs/dev/v1-glm.md D15a): a lock judged against a bf16 GPU reference, for a model with no fp32
 golden and no HF floor (the owner's rule: no fp32 goldens, no big-model CPU runs).
 
 - **The reference** is Holon's own engine running the model all-resident on a card that holds it, scored by `score`

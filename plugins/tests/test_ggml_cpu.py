@@ -1,11 +1,12 @@
-"""kernels.ggml_cpu's `cpu_experts@1` (L0, docs/v1-offload.md D7) on this host's CPU tier: every job's rows within the
+"""kernels.ggml_cpu's `cpu_experts@1` (L0, docs/dev/v1-offload.md D7) on this host's CPU tier: every job's rows within
+the
 oracle's budget (std.moe.reference: gguf-py's weights, ggml-cpu's activation quantization emulated, float64 sums: a
 row may differ by a requantized SwiGLU value that sits at a rounding tie, which the oracle's sums put a hair to the
 other side, so the budget is tight for nine rows in ten and one such flip's size for the rest),
 and a token's row bitwise the same alone (one job, one thread) as grouped with other tokens and jobs at 1 and 7
 threads — the batch-invariance check, which catches a kernel that splits K for grouped tokens (L0's own mutation
 test); a malformed job table fails the task instead of reading past a buffer. Synthetic Q8_0 / Q4_0 experts always,
-and Q8_0 / Q2_0 (FN's down type), and Q8_0 / Q4_0 with GLM's clamp (docs/v1-glm.md D6: `glu_limit`, binding on a
+and Q8_0 / Q2_0 (FN's down type), and Q8_0 / Q4_0 with GLM's clamp (docs/dev/v1-glm.md D6: `glu_limit`, binding on a
 sizeable share of the gate and up values; ggml's SWIGLU_CLAMP form); the development vehicle's own classes (Q4_K with
 Q6_K or Q4_K down, UD-IQ3_XXS's) and FN IQ2_XS's three (inter 640) when their files are cached. Prebuild links each tier
 in its own process."""
@@ -141,7 +142,7 @@ def test_prebuild_links_each_tier_in_its_own_process(monkeypatch, tmp_path):
 
 
 def test_the_cpu_share_binds_the_clamp():
-    """docs/v1-glm.md D6: std.moe's CPU share binds `cpu_experts@1` with the gate/up stack's `glu_limit` where it is
+    """docs/dev/v1-glm.md D6: std.moe's CPU share binds `cpu_experts@1` with the gate/up stack's `glu_limit` where it is
     set (GLM's experts), and without the fact where it is not (every other site's facts as they were)."""
     import types
 

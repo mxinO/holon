@@ -1,4 +1,4 @@
-"""Oracles of placement.lfu (F11, docs/v1-offload.md D4): the contract `moe_resolve.lfu@1`, call by call, and its
+"""Oracles of placement.lfu (F11, docs/dev/v1-offload.md D4): the contract `moe_resolve.lfu@1`, call by call, and its
 `lend`; and `replay`, the L1 policy-parity oracle over a whole trace, the M6 replay's `lfu`
 (spikes/x0_offload/m6/replay.py) extended to the device's terms — f32, decay on steps with decode rows, the device's
 tie-breaks, row kinds, lending and the lent slots' return.
@@ -19,7 +19,8 @@ does.
 `lend(need, residency, classes, score)` picks whole resident experts in their order — coldest by score first, ties by
 expert id, then layer —: for each class c the first `need[c]` of them holding a slot of c (an expert's role slots go
 together, so one picked for a class lends its slots of the others too). `lend_tail(cls, n, residency, classes,
-limits)` picks the experts holding any of class `cls`'s last n slots (docs/v1-moe-prefill.md D11; F11 keeps no spares
+limits)` picks the experts holding any of class `cls`'s last n slots (docs/dev/v1-moe-prefill.md D11; F11 keeps no
+spares
 to release there)."""
 from __future__ import annotations
 

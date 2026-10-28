@@ -10,7 +10,7 @@ LINEAR = "std.ops.linear@1"
 
 
 class SwiGLU(nn.Module):
-    """down(silu(gate(x)) · up(x)). `limit` L > 0 (docs/v1-glm.md D6): silu(min(gate, L)) · clamp(up, −L, L), by
+    """down(silu(gate(x)) · up(x)). `limit` L > 0 (docs/dev/v1-glm.md D6): silu(min(gate, L)) · clamp(up, −L, L), by
     `silu_mul@1`'s `glu_limit` (no fused GLU: its kernels compute the plain form). `rows` > 0 (D9; 0, the default,
     runs the whole step as one): the step's rows in sub-batches of `rows`, each its own calls, so a step's activations
     peak at a sub-batch's — deterministic at a given step size, not the unsplit call's bits (a matmul's may depend on
@@ -51,7 +51,7 @@ class SwiGLU(nn.Module):
 
 
 class GatedSwiGLU(SwiGLU):
-    """A shared expert gated per token (docs/v1-flash-next.md D7): `swiglu(x) · σ(gate · x)`, `gate` [1, hidden]."""
+    """A shared expert gated per token (docs/dev/v1-flash-next.md D7): `swiglu(x) · σ(gate · x)`, `gate` [1, hidden]."""
 
     def __init__(self, ctx, *, hidden: int, inter: int, layer: int = 0) -> None:
         super().__init__(ctx, hidden=hidden, inter=inter, layer=layer)

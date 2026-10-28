@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md \u00a77.4, \u00a78 (N1), D11",
+ "doc": "docs/dev/v1-glm.md \u00a77.4, \u00a78 (N1), D11",
  "gpu": "rtx-5090",
  "model": "peasantsmith/GLM-5.3-Flash-Maya-GGUF@f16ee4ba (Maya-S v2 IQ2_XXS)",
  "engine": "Project Maya v1.1.27 (4615f34), --serve raw ids, its calibrated defaults (--calibrate kept them)",

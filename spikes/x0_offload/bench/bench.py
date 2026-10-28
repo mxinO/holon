@@ -1,4 +1,4 @@
-"""Milestone X step 0 (docs/v1-offload.md §8): M1, M2, M3, M5, M7 and per-layer prefill expert GEMMs.
+"""Milestone X step 0 (docs/dev/v1-offload.md §8): M1, M2, M3, M5, M7 and per-layer prefill expert GEMMs.
 
     CUDA_VISIBLE_DEVICES=0 python bench.py --tag rtx-5080 --out ../../../evidence/x0_bench_rtx-5080_<date>.json \
         --nvme-dir <node-local dir> [--only m1,m3,m2,m5,m7,prefill]

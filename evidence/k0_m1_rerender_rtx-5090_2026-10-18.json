@@ -1,5 +1,5 @@
 {
- "measurement": "K-M1 re-render divergence (docs/v1-kv-tiers.md \u00a78)",
+ "measurement": "K-M1 re-render divergence (docs/dev/v1-kv-tiers.md \u00a78)",
  "date": "2026-10-18",
  "gpu_class": "rtx-5090",
  "predictions_fixed_before_measuring": {

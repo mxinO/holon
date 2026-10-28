@@ -1,5 +1,5 @@
-"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/v1-flash-next.md D3, D10), `hc_mhc_mix@1` and
-`hc_mhc_writeback@1` (docs/v1-glm.md D3, D12) in Triton, float32 products with IEEE sums."""
+"""`hc_gr_mix@1` and `hc_gr_combine@1` (op contracts: std.hyper; docs/dev/v1-flash-next.md D3, D10), `hc_mhc_mix@1` and
+`hc_mhc_writeback@1` (docs/dev/v1-glm.md D3, D12) in Triton, float32 products with IEEE sums."""
 from __future__ import annotations
 
 import torch

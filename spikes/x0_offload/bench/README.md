@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-offload.md` §8 fixes what step 0 measures before the offload design is frozen. This directory answers, on
+`docs/dev/v1-offload.md` §8 fixes what step 0 measures before the offload design is frozen. This directory answers, on
 the two bar cards (RTX 5080 and RTX 5090 desktops):
 
 | # | Measure | Decides (§8) |

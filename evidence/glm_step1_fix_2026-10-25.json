@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md \u00a713 (step 1's code review), \u00a711 call 4",
+ "doc": "docs/dev/v1-glm.md \u00a713 (step 1's code review), \u00a711 call 4",
  "range": "145a80df..HEAD (the fix round: d5b2fa20..HEAD on top of the step-1 close 6dc24b90)",
  "run_all": {
   "how": "scripts/ci/run_all.sh 145a80df with the dev venv active",

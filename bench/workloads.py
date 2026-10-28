@@ -111,7 +111,7 @@ def agent(sessions: int, rate: float, seed: int, system: int = 1536, later: tupl
 
 
 def agent_park(clients: int, per_client: int, seed: int, system: int = 4096) -> list[dict]:
-    """Parked agent conversations (docs/v1-kv-tiers.md §8): `clients` closed-loop clients each serve `per_client`
+    """Parked agent conversations (docs/dev/v1-kv-tiers.md §8): `clients` closed-loop clients each serve `per_client`
     sessions round-robin, so a session waits while its client's other sessions take a turn and its state is parked.
     The sessions share a `system`-token prompt and open with a 512-token task; then 10–14 turns each add a tool result
     (log-normal, median 384, σ 0.6, at most 2K) to an output of reasoning plus a tool call (median 300, σ 0.6, at most
@@ -171,7 +171,7 @@ def main() -> None:
     traces["claude_code_2turns"] = [s | {"turns": s["turns"][:2]} for s in traces["claude_code"]]
     # Three streams fit every lock (max_seqs >= 4); 30k tokens fit a 32k context (M0.5's 36 s stall, M0.7 D1).
     traces["long_prompt"] = long_prompt(3, 256, 1024, 30000, 2.0)
-    # Milestone K's gate trace: 12 parked conversations over 4 clients (docs/v1-kv-tiers.md §8).
+    # Milestone K's gate trace: 12 parked conversations over 4 clients (docs/dev/v1-kv-tiers.md §8).
     traces["agent_park"] = agent_park(4, 3, args.seed)
     for name, sessions in traces.items():
         write(out / f"{name}.jsonl", sessions)

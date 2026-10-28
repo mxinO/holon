@@ -1,4 +1,4 @@
-"""The HTTP frontend (docs/m05-grammar.md D7): its three dialects over a scripted fake engine and a byte-level toy
+"""The HTTP frontend (docs/dev/m05-grammar.md D7): its three dialects over a scripted fake engine and a byte-level toy
 tokenizer (CPU only, no model); the format parsers and constraint builders model-free (constraints checked and
 compiled by grammar.xgrammar); the Qwen bundles' formats with the real templates; round trips on a tiny Qwen3 (CPU)
 and on Qwen3-0.6B (GPU)."""
@@ -514,7 +514,7 @@ XML_TYPED = "<tool_call>\n<function=f>\n" + "".join(f"<parameter={k}>\n{v}\n</pa
 TYPED_ARGS = {"s": "007", "n": 3, "t": True, "l": [1, 2], "m": "line 1\nline 2", "o": "5"}   # o: Optional[str]
 MARKED = {"city": "Paris", "note": "a </tool_call> and a <tool_call> in a string"}
 START, OPEN, CLOSED = "<|im_start|>assistant\n", "<|im_start|>assistant\n<think>\n", "<think>\n\n</think>\n\n"
-GLM_OPEN = "<|assistant|><think>"                    # GLM-5.3-Flash's template (docs/v1-glm.md D13)
+GLM_OPEN = "<|assistant|><think>"                    # GLM-5.3-Flash's template (docs/dev/v1-glm.md D13)
 GLM_CALL = "<tool_call>get_weather<arg_key>city</arg_key><arg_value>Paris</arg_value><arg_key>days</arg_key>" \
            "<arg_value>3</arg_value></tool_call>"
 GLM_TYPED = "<tool_call>f" + "".join(f"<arg_key>{k}</arg_key><arg_value>{v}</arg_value>" for k, v in [

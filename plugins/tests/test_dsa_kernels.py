@@ -1,4 +1,4 @@
-"""L0 for GLM-5.3-Flash's DSA kernels in `kernels.qsa_triton` (docs/v1-glm.md D5, D12, acceptance 3) against
+"""L0 for GLM-5.3-Flash's DSA kernels in `kernels.qsa_triton` (docs/dev/v1-glm.md D5, D12, acceptance 3) against
 std.mixers.qsa's oracles, on GLM's shapes (indexer 32 heads × 128 with signed head weights; MLA 64 heads over the
 512-wide latent, scale 1/16; ratio 4, budget 512) and the tiny GPU fixture's (indexer 4 × 64; MLA 2 heads over 128),
 through the build context.
@@ -12,7 +12,7 @@ through the build context.
   gates, pooled keys per unit).
 - `mla_attend@1` for prefill, decode and verify rows (sparse past 515 tokens, every block below), padding, q in f32
   and bf16: relative L2 per row ≤ 1.5e-3 (q̃ as one bfloat16 part: ≈ 9e-4 measured; step 7 judges it on the real
-  model, docs/v1-glm.md §13) against the oracle on the same stored latent; a plant (the open block reading one token
+  model, docs/dev/v1-glm.md §13) against the oracle on the same stored latent; a plant (the open block reading one token
   more) fails it. A row's output is the same bits alone (a program a chunk, then the merge), beside a long row (one
   program over its chunks) and split across calls (the dense path is the sparse kernel, sub-batching changes no bit).
 - Decode (index, select, attend) captured in a CUDA graph replays to the eager bits.

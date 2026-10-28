@@ -1,4 +1,4 @@
-"""Holon behind its chat endpoint (`frontends.http`), for the frontend's own cost (docs/m05-grammar.md §11, step 5):
+"""Holon behind its chat endpoint (`frontends.http`), for the frontend's own cost (docs/dev/m05-grammar.md §11, step 5):
 each trace prompt decoded to text (`backends.text`) as one user message offered tools, so the reasoning and tool
 parsers read every stream (`tool_choice` auto: unconstrained, D8); greedy, `ignore_eos`. Its counters add the
 frontend process's CPU time (`frontend_cpu_ms`; the engine runs in a child process) and its info each stream's

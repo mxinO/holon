@@ -1,4 +1,4 @@
-"""llama.cpp's native W4A4 activations (docs/m06-lowp.md §4.8): the FP4 codes and scales its quantizer
+"""llama.cpp's native W4A4 activations (docs/dev/m06-lowp.md §4.8): the FP4 codes and scales its quantizer
 (cbe28bb3 quantize.cu, CUDA ≥ 12.8) gives each f32 activation row, emulated, their values, and the tie classes
 `-use_fast_math` may round the other way.
 

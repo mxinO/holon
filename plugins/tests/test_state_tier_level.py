@@ -1,4 +1,4 @@
-"""std.state_tier's level below host (docs/v1-kv-tiers.md D11): the SSD level alone (slot files, flock, bytes, the
+"""std.state_tier's level below host (docs/dev/v1-kv-tiers.md D11): the SSD level alone (slot files, flock, bytes, the
 manifest's snapshot, restore with crc, geometry and identity, and the plants on it: a torn manifest, a stale slot),
 then the tier over it on CPU pools (write-back at host eviction and the watermark, read-back bitwise, what is never
 written back, the level's own eviction order, read priority and dependent writes, abandonment before the enqueue, one

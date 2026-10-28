@@ -2,7 +2,7 @@
 
 Status: **revision 5, implemented; acceptance met** (2026-10-09, plan §5.1; user additions: a basic bf16 HF path, §3 D1, D7, D8). Revisions 1 and 2 were challenged by three reviewers
 (architecture/API, kernels/performance, numerics/judge); §8 maps every finding to its resolution. Scope: plan §5. Builds on M0.1
-(`docs/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
+(`docs/dev/m01-gguf.md`: the GGUF source, `kernels.ggml_cuda`, the judge's tiers) and spike S2 (MoE sections).
 
 ## 1. Goal and acceptance
 
@@ -301,7 +301,7 @@ kernels (with the wait rule of §4.3), finer graph buckets for MoE (core).
     padded bucket — fail where it is mmq (batches 12 and 20 everywhere; batch 5, bucket 8, for UD-IQ3_XXS on sm_86),
     pass where it is mmvq (batch 3 everywhere); a pass on mmq is recorded with its cause (the stale entries are not
     controlled there).
-  - *Retired 2026-10-17 (docs/v1-offload.md D4, the X vendor patches):* the patched expert-id helper keeps one compact
+  - *Retired 2026-10-17 (docs/dev/v1-offload.md D4, the X vendor patches):* the patched expert-id helper keeps one compact
     entry per (token, slot) pair, so a duplicate id inside a row no longer leaves stale entries that overwrite a real
     row: the plant's graphs-vs-eager run passes on mmq (Q4_K_M, batch 12, RTX A5000: graphs on top-1 98.31% vs 98.42%
     eager; 86.20% before). Both plants (L0 and `moe-padding-duplicate-ids`) are removed. Ids must still be unique

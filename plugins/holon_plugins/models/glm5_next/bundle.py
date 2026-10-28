@@ -1,4 +1,4 @@
-"""GLM-5.3-Flash's frontend bundle (docs/v1-glm.md D13): the GGUF's tokenizer and chat template, its reasoning in
+"""GLM-5.3-Flash's frontend bundle (docs/dev/v1-glm.md D13): the GGUF's tokenizer and chat template, its reasoning in
 `<think>` (the template opens it: `think@1`) and its tool calls as `glm_xml@1` (`<tool_call>NAME<arg_key>K</arg_key>
 <arg_value>V</arg_value>…</tool_call>`). The GGUF's stop tokens (`<|endoftext|>`, `<|user|>` as eot, `<|observation|>`
 as eom) come from the weight source.

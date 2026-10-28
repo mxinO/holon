@@ -1,4 +1,4 @@
-"""`cpu_experts@1` (std.moe.kernels; docs/v1-offload.md D7, F5b): the CPU's share of a layer's missed experts, over
+"""`cpu_experts@1` (std.moe.kernels; docs/dev/v1-offload.md D7, F5b): the CPU's share of a layer's missed experts, over
 their GGUF blocks in the offload store's host pools, with ggml-cpu's own quantizers and dot products (vendored at
 kernels.ggml_cuda's llama.cpp pin, MIT; csrc/cpu_experts.cpp). A token's output is bitwise the same alone or grouped
 and at any thread count (rows split across threads, never K): D7, checked by L0.
@@ -7,7 +7,7 @@ One binary per CPU tier (`Constraint.cpu_isa`; `holon.core.platform.CPU_TIERS`):
 ISA, so a lock that runs these kernels names its tier in its class. An AVX-512 host takes the AVX-512 binary (M3 found
 it bitwise the AVX2 one's for every class it measured, and equally fast). The modules are built ahead of time
 (`python -m holon_plugins.kernels.ggml_cpu.prebuild`); without one an instance cannot be created and the error names
-that command. The fact `glu_limit` clamps the SwiGLU as ggml's SWIGLU_CLAMP does (docs/v1-glm.md D6: `fminf` /
+that command. The fact `glu_limit` clamps the SwiGLU as ggml's SWIGLU_CLAMP does (docs/dev/v1-glm.md D6: `fminf` /
 `fmaxf`, which drop a NaN). `CpuExperts.plant` is judge-only: the calibration plants set its bits; production never
 does."""
 from __future__ import annotations

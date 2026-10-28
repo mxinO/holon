@@ -1,4 +1,4 @@
-"""Tier checks (docs/v1-kv-tiers.md acceptance 2, §6): `holon_judge tiers`.
+"""Tier checks (docs/dev/v1-kv-tiers.md acceptance 2, §6): `holon_judge tiers`.
 
 - **Invariance** (C2's reference). A serial trace (`bounded.Trace`: sessions sharing a system prompt, each turn
   resending its history plus a user chunk; two warm-up requests first make the system prompt's end a branch point);
@@ -308,7 +308,7 @@ class Probe:
 
 
 def audit(engine) -> list[str]:
-    """The index's invariants (docs/v1-kv-tiers.md D6) between steps: what is wrong, by kind."""
+    """The index's invariants (docs/dev/v1-kv-tiers.md D6) between steps: what is wrong, by kind."""
     state, index, out = engine.state, engine.state.index, []
     if index is None:
         return out
@@ -335,7 +335,7 @@ def audit(engine) -> list[str]:
 
 def tiers_off(options: dict) -> dict:
     """Plugin options for the same configuration without a tier: no `answer:<k>` checkpoint policy (tentative
-    checkpoints need a tier, docs/v1-kv-tiers.md D8)."""
+    checkpoints need a tier, docs/dev/v1-kv-tiers.md D8)."""
     if "recurrent.policy" not in options:
         return options
     kept = [p for p in str(options["recurrent.policy"]).split(",") if not p.strip().startswith("answer:")]

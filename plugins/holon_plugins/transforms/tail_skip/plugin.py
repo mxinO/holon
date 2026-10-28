@@ -1,4 +1,4 @@
-"""transforms.tail_skip (A1, docs/v1-offload.md D1, D3, §6): Strata's route tail skip as a route transform, the
+"""transforms.tail_skip (A1, docs/dev/v1-offload.md D1, D3, §6): Strata's route tail skip as a route transform, the
 contract `moe_route_transform.tail_skip@1` this plugin owns (reference.py). A step's missed expert whose best routing
 rank is at least `tail_skip.rank` (a plugin option; default 7) is dropped, its weight not renormalized. `approx`:
 bound only by the explicit option `moe.route_transform = tail_skip`, human-gated (L2 KL, top-1, a task check), never in

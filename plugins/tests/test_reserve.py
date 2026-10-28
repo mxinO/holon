@@ -12,9 +12,9 @@ One term grows with a step's rows and is bounded, so it is the stated margin: GD
 checkpoint takes each checkpointed row's last `kernel − 1` inputs (`(kernel − 1) × channels` elements) — one row's in
 the profiled step, at most `max_seqs` rows' in any step, one layer's at a time. Test-only: serving pays nothing for it.
 
-GLM (docs/v1-glm.md acceptance 3, D9) from its first kernel: the tiny Q8_0 fixture (`GLM_TINY_Q8_GGUF`) over the same
-step shapes with KDA past `SUB_TOKENS` and the mixers' sub-batching on (`rows` patched to 256); and the real model's
-first 4 blocks (`GLM_SLICE_GGUF`: KDA ×3 with the dense FFN, DSA with the routed experts at their real types,
+GLM (docs/dev/v1-glm.md acceptance 3, D9) from its first kernel: the tiny Q8_0 fixture (`GLM_TINY_Q8_GGUF`) over the
+same step shapes with KDA past `SUB_TOKENS` and the mixers' sub-batching on (`rows` patched to 256); and the real
+model's first 4 blocks (`GLM_SLICE_GGUF`: KDA ×3 with the dense FFN, DSA with the routed experts at their real types,
 `holon_testing.gguf_files.slice_blocks` of Maya-S) at a 16K and a 32K prompt step with the recipe's `rows`: at most
 150 KiB of live activations a token, R included, outside the routed experts' lent passes. Each skips with a warning
 when its file is not given."""

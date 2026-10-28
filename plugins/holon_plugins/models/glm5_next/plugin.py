@@ -1,4 +1,4 @@
-"""models.glm5_next: GLM-5.3-Flash (docs/v1-glm.md): its recipe over llama.cpp's `glm5-next` GGUF (`recipe.py`) and
+"""models.glm5_next: GLM-5.3-Flash (docs/dev/v1-glm.md): its recipe over llama.cpp's `glm5-next` GGUF (`recipe.py`) and
 the frontend bundle (`bundle.py`: the GGUF's tokenizer and chat template, `glm_xml@1` tool calls, `think@1`)."""
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""std.tiered's host-side pieces (docs/v1-offload.md D4, D10): extents read back into host memory exactly, through
+"""std.tiered's host-side pieces (docs/dev/v1-offload.md D4, D10): extents read back into host memory exactly, through
 aligned windows (O_DIRECT where the filesystem has it), and residency-map edits applied at launch c + 2, entry by
 entry."""
 import os

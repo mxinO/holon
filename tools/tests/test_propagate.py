@@ -195,7 +195,7 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     assert closed == [1]               # the first engine closed before the second was built (its host pools gone)
     propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
     assert built[-1] == 990
-    # a check engine whose steps overflowed an activation loan is refused (docs/v1-glm.md D8w)
+    # a check engine whose steps overflowed an activation loan is refused (docs/dev/v1-glm.md D8w)
     class Overflowing(Measuring):
         def __init__(self, config):
             super().__init__(config)

@@ -7,11 +7,11 @@ The judge runs outside the engine and drives it only as a client (design §10.3)
 | `golden` | L2 | HF recorder: teacher-forced top-20 logprobs, the target token's logprob and the tail mass, one forward per sequence |
 | `compare` | L2 | candidate vs golden: KL p50/p99, top-1 agreement, ΔPPL, per category; pass/fail against the floor |
 | `engine` | L2 | the candidate side: scores the prompt set through a Holon engine (`prompt_logprobs=20`) |
-| `reference` | L2 | the reference form for a model with no fp32 golden (`docs/v1-glm.md` D15a): a bf16 GPU reference (Holon all-resident), absolute budgets from pairs that should agree, the candidate judged by them |
+| `reference` | L2 | the reference form for a model with no fp32 golden (`docs/dev/v1-glm.md` D15a): a bf16 GPU reference (Holon all-resident), absolute budgets from pairs that should agree, the candidate judged by them |
 | `l0` | L0 | `budget(dtype, reduction_len)` and `check(candidate, reference, dtype, reduction_len)` for op oracles |
 | `q8_1` | L0, L2 | llama.cpp's int8-dot matmuls emulated per path (`mmvq`, `mmq`): q8_1 activations and the stored-sum offsets; the reference of the GGUF kernels' L0 and of Tier B's floor |
 | `snapshot` | snapshot | records a fixed trace's token streams and a sha256 per delta (request, sequence, step); compares runs for byte identity; `trace(prompts)` is the snapshot trace of design §7.10 (long context, a prefix hit, the decode batch shrinking through every graph bucket up to 64, seeded n > 1, logprobs, prompt logprobs) |
-| `tiers` | exact | state tiers (docs/v1-kv-tiers.md acceptance 2, §6): tier invariance against C2's reference, the tiers-off null test, run-identity with the tier's copies delayed, an audit of the prefix index after every step, and the tier plants (`planted.TIER_PLANTS`) with fired and changed counts |
+| `tiers` | exact | state tiers (docs/dev/v1-kv-tiers.md acceptance 2, §6): tier invariance against C2's reference, the tiers-off null test, run-identity with the tier's copies delayed, an audit of the prefix index after every step, and the tier plants (`planted.TIER_PLANTS`) with fired and changed counts |
 | `recording` | | prompt sets and the recording format (safetensors + JSON provenance) |
 
 The prompt set is `prompts/v1.jsonl` (24 sequences, 32,807 tokens; chat, code, recall, agent; built in spike S5), frozen
@@ -37,7 +37,7 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_judge l2 --model Qwen/Qwen3-0.6B --pr
 # any two recordings (e.g. a saved candidate)
 python -m holon_judge compare --golden <golden> --candidate <recording> [--floor <floor>...] [--json <file>]
 # (several floors: one per kernel path the candidate's calls take, e.g. mmq and mmvq; every floor's budgets apply)
-# L2's reference form (a model with no fp32 golden, docs/v1-glm.md D15a): the reference, its budgets, a candidate
+# L2's reference form (a model with no fp32 golden, docs/dev/v1-glm.md D15a): the reference, its budgets, a candidate
 python -m holon_judge reference --model <.gguf> --prompts <set> --out <ref> --oracle <its tiny-model HF test> \
     --engine-args "<flags of an all-resident run>"
 python -m holon_judge budgets --reference <ref> --pair cross-card <a> <b> [--check chunked <a> <b>]
@@ -127,7 +127,7 @@ On matmul (K = 1 … 14336), softmax, silu·mul and rmsnorm, on CPU and sm_86, l
 
 ## State tiers (milestone K)
 
-`python -m holon_judge tiers` judges a tier configuration (docs/v1-kv-tiers.md acceptance 2, §6; the checks are in
+`python -m holon_judge tiers` judges a tier configuration (docs/dev/v1-kv-tiers.md acceptance 2, §6; the checks are in
 `tiers.py`'s docstring). `--engine-args` is the tested configuration: a device pool (`--state-memory`) that holds about
 one session, so the filler before every interleaved return takes it all, host memory and the tier's options;
 `--pressure-args` overrides it for run-identity and the plants (loads due a step or more out, write-back admission,

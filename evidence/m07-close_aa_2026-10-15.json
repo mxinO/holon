@@ -3,7 +3,7 @@
  "date": "2026-10-15",
  "commit": "f0b9100",
  "command": "python bench/mixed_bars.py evidence/bench_m07-step4-plain_<class>_2026-10-14.json --aa",
- "claim": "docs/m07-perf.md \u00a715.6: the A/A of \u00a71.3's paired TTFT from the step-4 records \u2014 today's arm against itself, each unordered pair of its 4 rounds, per (session, turn)",
+ "claim": "docs/dev/m07-perf.md \u00a715.6: the A/A of \u00a71.3's paired TTFT from the step-4 records \u2014 today's arm against itself, each unordered pair of its 4 rounds, per (session, turn)",
  "classes": {
   "rtx-5080": {
    "source": "bench_m07-step4-plain_rtx-5080_2026-10-14.json",

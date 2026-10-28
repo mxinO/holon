@@ -2,7 +2,7 @@
 
 ## Question
 
-Step 2 builds std.state_tier's copier on `state_copy@1` (`docs/v1-kv-tiers.md` D10). This directory answers:
+Step 2 builds std.state_tier's copier on `state_copy@1` (`docs/dev/v1-kv-tiers.md` D10). This directory answers:
 - whether the `state_copy@1` providers meet the contract (L0);
 - three numbers the rev 8.2 design leaves to step 2, on the RTX 5080 desktop:
 
@@ -15,7 +15,7 @@ Step 2 builds std.state_tier's copier on `state_copy@1` (`docs/v1-kv-tiers.md` D
 ## The providers (`plugins/holon_plugins/kernels/state_copy`)
 
 Measured while they lived in `kernels.expert_io`; they moved unchanged to `kernels.state_copy` afterwards
-(docs/v1-kv-tiers.md rev 8.3). The commands below name the new plugin.
+(docs/dev/v1-kv-tiers.md rev 8.3). The commands below name the new plugin.
 
 The provider is `state_copy@1` with facts `direction`, `chunk` and an optional `copy`. It is supported when
 `chunk % 16 == 0`.

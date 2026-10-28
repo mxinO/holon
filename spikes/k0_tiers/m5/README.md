@@ -1,4 +1,4 @@
-# K-M5: CPU replay of the core index with a simulated tier (milestone K step 0, `docs/v1-kv-tiers.md` §8)
+# K-M5: CPU replay of the core index with a simulated tier (milestone K step 0, `docs/dev/v1-kv-tiers.md` §8)
 
 **Question.** With the step-1 core seams (KS1–KS5) driving a tier, what do the gate traces gain on the RTX 5080's
 27B deployment, before any GPU run? The replay measures hit tokens per level, load bytes, demotions and drops, the

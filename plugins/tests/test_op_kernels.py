@@ -73,7 +73,7 @@ def test_silu_mul(dtype):
 
 @pytest.mark.parametrize("dtype", DTYPES)
 def test_silu_mul_clamped(dtype):
-    """docs/v1-glm.md D6's clamp (`glu_limit` 10, GLM's): silu(min(gate, 10)) · clamp(up, −10, 10) within the plain
+    """docs/dev/v1-glm.md D6's clamp (`glu_limit` 10, GLM's): silu(min(gate, 10)) · clamp(up, −10, 10) within the plain
     form's budget of the oracle, binding on a sizeable share of both halves (the unclamped kernel misses it); the input
     unmodified; NaN kept, as the oracle's clamp; a limit the dtype does not hold exactly is not served."""
     facts = {"inter": 1536, "dtype": str(dtype).removeprefix("torch."), "glu_limit": 10.0}

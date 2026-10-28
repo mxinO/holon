@@ -1,8 +1,8 @@
-"""`cpu_task@1` (std.moe.kernels; docs/v1-offload.md D6, spike S6): CUDA graphs hand CPU work to a persistent native
+"""`cpu_task@1` (std.moe.kernels; docs/dev/v1-offload.md D6, spike S6): CUDA graphs hand CPU work to a persistent native
 worker — a signal op, a wait op, a word per slot in mapped pinned memory, fail-open by contract (csrc/cpu_task.cu).
 
 Each kind of work has its own worker (the fact `pool`): `compute` (CPU experts, F5b) and `io` (F9's SSD reads), so a
-read never stalls a layer's CPU experts. The `io` worker is one completion-driven thread (docs/v1-glm.md D8f): its
+read never stalls a layer's CPU experts. The `io` worker is one completion-driven thread (docs/dev/v1-glm.md D8f): its
 copy tasks' reads go out asynchronously — io_uring, else Linux native AIO, chosen at start and logged — up to
 `io_depth` chunks in flight, an urgent slot's request (`bind(task, urgent=True)`, a hint) ahead of every chunk not yet
 submitted; its counters (`io_stats()`: bytes read, time with reads in flight, latency per request size) are the

@@ -8,7 +8,7 @@
   "freetoken": "FreeToken 21d9578bde22 (bench/setup_baselines.sh offload: torch 2.14.1+cu130, [accel]); --moe-strategy fused (all experts resident) or --moe-cache-rate (offload); the gated arm adds --max-extend-length 4096, its default chunk is 8,192",
   "model": "Qwen3-30B-A3B Q4_K_M (unsloth/Qwen3-30B-A3B-GGUF); the 16 GB lock's: UD-IQ3_XXS"
  },
- "method": "spikes/moe_prefill/README.md; docs/v1-moe-prefill.md \u00a72.1",
+ "method": "spikes/moe_prefill/README.md; docs/dev/v1-moe-prefill.md \u00a72.1",
  "commands": [
   "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>.json --model <gguf> --out <dir>/timed --rounds 2 --reps 5 5 3 --holon-python <holon venv python> --freetoken-python <freetoken venv python>",
   "python spikes/moe_prefill/prefill.py run --arms spikes/moe_prefill/arms_<card>_nsys.json --model <gguf> --out <dir>/nsys --rounds 1 --reps 1 ...",

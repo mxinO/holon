@@ -1,4 +1,4 @@
-"""Quantized HF checkpoints on the CPU (docs/m06-lowp.md step A2): tiny checkpoints in every dialect
+"""Quantized HF checkpoints on the CPU (docs/dev/m06-lowp.md step A2): tiny checkpoints in every dialect
 (`holon_testing.hf_quant_files`) load through std.weights.hf's dialects and serve, on the test-only reference kernels,
 what transformers computes on the weights as each file means them; the reference dequantization is each format
 owner's; the dialects refuse what the engine cannot honour; the Tier A and structural plants fail. On a GPU the FP4
@@ -119,7 +119,8 @@ def test_a_quantized_checkpoint_serves_what_transformers_computes(files, dialect
     if moe:                                  # a 30B's stacks: decoded per call, only the routed experts
         with mock.patch.object(ref_kernels, "CACHE_BYTES", 0):
             assert _error(_engine(quantized), _oracle(dense)) <= 1e-4
-    # The judge's golden: the file through its own map and the reference, one layer at a time (docs/m06-lowp.md §4.8);
+    # The judge's golden: the file through its own map and the reference, one layer at a time (docs/dev/m06-lowp.md
+    # §4.8);
     # compressed-tensors' NVFP4 decoding is within 2 ulp of the reference's (D10)
     r = compare(golden.record(str(dense), _prompt_set()), golden.record(str(quantized), _prompt_set())).overall
     assert r.top1 == 1 and r.kl_max < 1e-6
@@ -257,7 +258,7 @@ GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
     ("ct-mxfp4", ["hf-gate-up-swapped"], "cpu"),
     ("modelopt", ["hf-scale-stack-off-by-one", "hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"], "cpu"),
     ("quark", ["hf-stack-off-by-one"], "cpu"),                                                # M2
-    # prepared by kernels.ggml_cuda (docs/m06-lowp.md D8)
+    # prepared by kernels.ggml_cuda (docs/dev/m06-lowp.md D8)
     pytest.param("modelopt", ["hf-scale2-stack-off-by-one", "hf-gate-up-scale2-swapped"], "cuda", marks=GPU),
     pytest.param("ct-mxfp4", ["mxfp4-repack-scale-off-by-one"], "cuda", marks=GPU),            # M1
     pytest.param("quark", ["hf-stack-off-by-one"], "cuda", marks=GPU)])
@@ -332,7 +333,7 @@ def test_what_the_engine_cannot_honour_is_a_load_error(files, tmp_path, dialect,
 @pytest.mark.parametrize("which", ["quantized", "dense"])
 def test_merge_partners_load_together(files, which):
     """The source yields each layer's q/k/v and gate/up next to each other, so a merge frees one run the next merge
-    reuses, not holes split by o_proj (docs/m06-lowp.md §8, B3)."""
+    reuses, not holes split by o_proj (docs/dev/m06-lowp.md §8, B3)."""
     path = files("fp8", False)[which == "dense"]
     modules = list(dict.fromkeys(n.rsplit(".", 1)[0] for n, _ in HFSafetensors(path).tensors()))
     for partners in (("q_proj", "k_proj", "v_proj"), ("gate_proj", "up_proj")):

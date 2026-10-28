@@ -159,7 +159,7 @@ GPU = Fingerprint("rtx-4090", 89, 24, "cu130-torch2.11")
 def test_model_references_resolve_through_one_weight_source(tmp_path, monkeypatch, ref, kind, fp, want):
     """`holon serve <ref>` (release design §14.3): a path is itself; else the weight sources' `resolve` hooks claim it
     (a ValueError is a hint shown when none does), exactly one must, and its fetch runs once, unless the claim is larger
-    than the GPU and the deployment gives plugins no host memory (docs/v1-offload.md, the CLI row)."""
+    than the GPU and the deployment gives plugins no host memory (docs/dev/v1-offload.md, the CLI row)."""
     from holon.core import cli
 
     monkeypatch.syspath_prepend(str(tmp_path))

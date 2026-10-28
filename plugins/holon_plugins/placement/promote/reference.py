@@ -1,4 +1,4 @@
-"""Oracles of placement.promote (F10, docs/v1-offload.md D1, §13: Project Maya's promote-on-fetch): the contract
+"""Oracles of placement.promote (F10, docs/dev/v1-offload.md D1, §13: Project Maya's promote-on-fetch): the contract
 `moe_resolve.promote@1`, call by call, and its `lend`; and `replay`, the L1 policy-parity oracle over a whole trace, the
 M6 replay's `promote_on_fetch` (spikes/x0_offload/m6/replay.py) in the device's terms.
 
@@ -30,11 +30,11 @@ A call without a `DECODE` entry does what @1 does and nothing else. The host mir
 slots until a record moves them (the delta log has no record for a slot the device keeps in its own region); `lend`
 never picks an owner (it is not resident).
 
-Under exclusive tiers (its device state `exclusive` = 1, the store's; docs/v1-glm.md D8a) a piece lives in one tier, so
-the call logs what `moe_tiers@2` must place: an owner taking its spare back `(group, OWN = −5, a)` (its RAM units free),
-and each refilled spare's owner, left mapped, `(group, SPARE = −4, v)` (placed as a victim is, its slots demoted into
-its units before the spare is next taken); `heat` is `last`, compared exactly. `lend_tail` releases the spares with a
-slot in the tail's range, then picks the experts holding the range, as placement.lfu's.
+Under exclusive tiers (its device state `exclusive` = 1, the store's; docs/dev/v1-glm.md D8a) a piece lives in one tier,
+so the call logs what `moe_tiers@2` must place: an owner taking its spare back `(group, OWN = −5, a)` (its RAM units
+free), and each refilled spare's owner, left mapped, `(group, SPARE = −4, v)` (placed as a victim is, its slots demoted
+into its units before the spare is next taken); `heat` is `last`, compared exactly. `lend_tail` releases the spares with
+a slot in the tail's range, then picks the experts holding the range, as placement.lfu's.
 
 `lend(need, residency, classes, last, clock, spare)` picks whole resident experts least recently routed first,
 ties by expert id, then layer: for each class c the first `need[c]` of them holding a slot of c (an expert's role
@@ -191,8 +191,8 @@ def cpu_share(ids: torch.Tensor, kinds: torch.Tensor, residency: torch.Tensor, r
 
 def release_tail(cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                  spare: torch.Tensor) -> torch.Tensor:
-    """`lend_tail` (std.moe.kernels, docs/v1-glm.md D8a): every spare of a layer with a role of class `cls` released —
-    absent, its owner mapped back to its slots, so the caller lends it with the range's holders and returns its slots
+    """`lend_tail` (std.moe.kernels, docs/dev/v1-glm.md D8a): every spare of a layer with a role of class `cls` released
+    — absent, its owner mapped back to its slots, so the caller lends it with the range's holders and returns its slots
     to the layer at the step's end (step 1's review S1-M1: no slot leaks; a spare outside the range would hold slots
     the step's staging cannot borrow, and the next decode boundary refills it) —; then `picked [G, E] bool`: the
     experts holding a slot of class `cls` among its last n, as placement.lfu's, and the released spares' owners."""

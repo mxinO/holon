@@ -1,4 +1,4 @@
-"""M0.7 step 5 (docs/m07-perf.md D8, §16): the megakernel gate's f on one class, profile-free, from paired rounds of
+"""M0.7 step 5 (docs/dev/m07-perf.md D8, §16): the megakernel gate's f on one class, profile-free, from paired rounds of
 records — `step_profile.py` (8B Q4_K_M, decode B1, graphed), `qmm_sweep.py` (its locks' shapes, with the isolated q8_1
 quantize per `in`) and `glu_sweep.py` (the fused gate/up call).
 

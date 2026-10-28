@@ -1,4 +1,4 @@
-"""The tiny Qwen3.8-Flash-Next (`qwen4_exp`) for CPU tests (docs/v1-flash-next.md D2, §6.1): random weights in
+"""The tiny Qwen3.8-Flash-Next (`qwen4_exp`) for CPU tests (docs/dev/v1-flash-next.md D2, §6.1): random weights in
 transformers' `Qwen4ExpForCausalLM` (5.19.0; run in the golden venv, `local/envs/golden-qwen4`), saved as
 `Qwen4ExpForConditionalGeneration` stores them (the n-gram table in `split_ngram_parts` shards, a random MTP block
 under `mtp.`); its GGUF as llama.cpp's own converter writes it (an oracle for the conversion's conventions that does

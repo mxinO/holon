@@ -1,4 +1,4 @@
-"""What the host-token gate costs a constrained request (docs/m05-grammar.md D2; evidence record).
+"""What the host-token gate costs a constrained request (docs/dev/m05-grammar.md D2; evidence record).
 
 Identical tokens: every engine serves the same greedy requests (natural-text prompts cut from `--corpus`, 256 tokens
 out, `ignore_eos`); configuration `none` selects no logits processor, `A′` selects the test-only toy

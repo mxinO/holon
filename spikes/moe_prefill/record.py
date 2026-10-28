@@ -72,7 +72,7 @@ def main() -> None:
     ap.add_argument("--commit", required=True)
     a = ap.parse_args()
     record = {"name": a.name, "gpu": a.gpu, "date": a.date, "commit": a.commit, "engines": ENGINES,
-              "method": "spikes/moe_prefill/README.md; docs/v1-moe-prefill.md §2.1", "commands": COMMANDS}
+              "method": "spikes/moe_prefill/README.md; docs/dev/v1-moe-prefill.md §2.1", "commands": COMMANDS}
     if a.timed:
         raw = rows(pathlib.Path(a.timed, "raw.jsonl"))
         record |= {"timed": timed([r for r in raw if "error" not in r]), "timed_raw": raw,

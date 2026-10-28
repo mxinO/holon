@@ -1,4 +1,4 @@
-"""The gated-residual hyper-connection units (docs/v1-flash-next.md D3, D4; op contracts in `kernels.py`).
+"""The gated-residual hyper-connection units (docs/dev/v1-flash-next.md D3, D4; op contracts in `kernels.py`).
 
 The trunk's residual R is [T, n·H] float32 (`ModelSpec.residual`): `expand` repeats the inner embedding n times,
 every block (`gr_block`) takes and returns it complete, and the model's `norm` is the output mixer (`gr_mix`), which
@@ -137,7 +137,7 @@ class _MHC(nn.Module):
 
 
 class MHCBlock(nn.Module):
-    """One GLM-5.3-Flash layer (docs/v1-glm.md D3): the attention half — mHC mix, RMSNorm (`norms`), mixer — and the
+    """One GLM-5.3-Flash layer (docs/dev/v1-glm.md D3): the attention half — mHC mix, RMSNorm (`norms`), mixer — and the
     FFN half, whose mix applies the attention half's write-back as it reads R (`hc_mhc_mix@1`'s pending write-back),
     then RMSNorm, the FFN and its own write-back, applied before the block returns: R is complete at every block
     boundary. Declares no state (the core binds the mixer's). Ignores the `norm` site parameter (the core passes the
@@ -169,7 +169,7 @@ class MHCBlock(nn.Module):
 
 
 class Mean(nn.Module):
-    """The collapse, as the model's `norm` (docs/v1-glm.md D3): R [T, n·H] → the streams' plain mean in float32,
+    """The collapse, as the model's `norm` (docs/dev/v1-glm.md D3): R [T, n·H] → the streams' plain mean in float32,
     rounded once to the model dtype, then `inner` (the model's RMSNorm)."""
 
     def __init__(self, ctx: Any, *, dim: int, inner: Ref, n: int) -> None:

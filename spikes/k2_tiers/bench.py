@@ -1,4 +1,4 @@
-"""Milestone K step 2 (docs/v1-kv-tiers.md, rev 8.2): `state_copy@1` beside prefill (a), its host cost per load (b),
+"""Milestone K step 2 (docs/dev/v1-kv-tiers.md, rev 8.2): `state_copy@1` beside prefill (a), its host cost per load (b),
 and the mixed NVMe factor under "reads go first" (c).
 
     CUDA_VISIBLE_DEVICES=0 python bench.py --tag rtx-5080 --only a,b,c --model <27B gguf> --lock <lock> \

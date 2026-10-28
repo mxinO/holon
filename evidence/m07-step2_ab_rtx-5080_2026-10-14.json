@@ -1,5 +1,5 @@
 {
- "workload": "m07-step2 keep-or-revert (docs/m07-perf.md \u00a71.1)",
+ "workload": "m07-step2 keep-or-revert (docs/dev/m07-perf.md \u00a71.1)",
  "class": "rtx-5080",
  "date": "2026-10-14",
  "command": "python bench/fusion_ab.py --rounds 6 --name <name> --model <model> --lock <lock> [--engine-args ...] [--prefill ...] [--batches ...] [--arms ...]",

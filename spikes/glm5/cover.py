@@ -1,4 +1,4 @@
-"""GLM's cover (docs/v1-glm.md acceptance 1(f), §6.2): the real model's own inputs, recorded as the engine serves one
+"""GLM's cover (docs/dev/v1-glm.md acceptance 1(f), §6.2): the real model's own inputs, recorded as the engine serves one
 long prompt in 2,000-token steps (≥ 4 step boundaries, none a multiple of 64) and then ≥ 256 decode rows, checked
 against the float32 / float64 oracles (`reference.py`) of each part:
 

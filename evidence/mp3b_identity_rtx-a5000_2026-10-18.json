@@ -1,5 +1,5 @@
 {
- "what": "docs/v1-moe-prefill.md step 3b: the prompt-logprob identity (spikes/moe_prefill/identity.py) of the natural-fit offload configuration, main against the branch, with and without moe.ring_lend=tail, and the branch with tail under the plant tail-unmap-undone (fired 695: experts lent and left mapped)",
+ "what": "docs/dev/v1-moe-prefill.md step 3b: the prompt-logprob identity (spikes/moe_prefill/identity.py) of the natural-fit offload configuration, main against the branch, with and without moe.ring_lend=tail, and the branch with tail under the plant tail-unmap-undone (fired 695: experts lent and left mapped)",
  "command": "python spikes/moe_prefill/identity.py run --model Qwen3-30B-A3B-Q4_K_M.gguf --config natural [--flags '<natural, plus moe.ring_lend=tail>'] --json <out> (the plant: the same run inside holon_judge.planted.tail_unmap_undone(), --runs 1)",
  "trees": "branch and branch_tail at 78a6cca (its `+`: the doc record, uncommitted); branch_tail_planted at 588d3ea's code, before its commit (`7cd24de+`); the same hashes at 588d3ea for branch and branch_tail",
  "records": {

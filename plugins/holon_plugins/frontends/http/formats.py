@@ -1,5 +1,5 @@
 """The reasoning and tool-call formats bundles name (`FrontendBundle.reasoning_format` / `tool_format`,
-docs/m05-grammar.md §3.8, D6, D7), each implemented once: its streaming parser and the constraint of its output.
+docs/dev/m05-grammar.md §3.8, D6, D7), each implemented once: its streaming parser and the constraint of its output.
 
 Parsers turn text into typed events. Each is a state machine over a buffer that holds back only what may still turn
 out to be a marker (or a call not yet closed), so the events do not depend on how the text is cut: a streamed answer
@@ -337,7 +337,7 @@ ARG_KEY, END_ARG_KEY, ARG_VALUE, END_ARG_VALUE = "<arg_key>", "</arg_key>", "<ar
 
 
 class GlmXML(QwenXML):
-    """glm_xml@1 (GLM-5.3-Flash, docs/v1-glm.md D13): `<tool_call>NAME<arg_key>KEY</arg_key><arg_value>VALUE
+    """glm_xml@1 (GLM-5.3-Flash, docs/dev/v1-glm.md D13): `<tool_call>NAME<arg_key>KEY</arg_key><arg_value>VALUE
     </arg_value>…</tool_call>`, no newlines. The arguments stream as JSON a pair at a time, as qwen_xml@2's: the
     template writes strings raw and other values as JSON (`tojson`); a value that does not read as one of its
     schema's types stays a string. Without a schema type, a raw string that parses as JSON (`123`, `true`) reads as

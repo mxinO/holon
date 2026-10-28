@@ -1,5 +1,5 @@
 """Our kernels for GLM-5.3-Flash's manifold-constrained hyper-connections (`hc_mhc_mix@1`, `hc_mhc_writeback@1`;
-std.hyper; docs/v1-glm.md D3, D12), written for Holon. Every operation in float32 with IEEE products and sums.
+std.hyper; docs/dev/v1-glm.md D3, D12), written for Holon. Every operation in float32 with IEEE products and sums.
 
 A row's bits depend on neither T nor its neighbours (the contract): every step size takes the same arithmetic.
 - `_dots`: per (tile of rows, chunk of KPP · BK columns h): all four streams' columns h of those rows, so a pending

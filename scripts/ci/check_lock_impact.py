@@ -1,7 +1,7 @@
 """Warns, never fails: the committed newest locks a range outdates (base..HEAD changes the `src` of a unit they pin;
 `holon_tools impact`). Merged, they read as outdated, and `holon serve` falls back to another class's current lock or
 the defaults until the next propagation round, so such a branch merges at a release or a milestone's close, with that
-round (docs/release.md §22). A change to `core/holon` outdates every lock. Usage: check_lock_impact.py [base]"""
+round (docs/dev/release.md §22). A change to `core/holon` outdates every lock. Usage: check_lock_impact.py [base]"""
 from __future__ import annotations
 
 import sys
@@ -19,6 +19,6 @@ except ValueError as e:
 if hit := impact.impact(locks.heads(ROOT / "plans"), units):
     pinned = sorted({u for _, us in hit for u in us})
     print(f"WARN {base}..HEAD outdates {len(hit)} committed locks (through {', '.join(pinned)}): merge it at a release "
-          "or a milestone's close, with the propagation round (docs/release.md §22)")
+          "or a milestone's close, with the propagation round (docs/dev/release.md §22)")
 else:
     print(f"ok   {base}..HEAD outdates no committed lock")

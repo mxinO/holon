@@ -1,4 +1,4 @@
-"""Milestone X's close (docs/v1-offload.md §14, "Step 8, part 2"): the record evidence/x8_close_rtx-5080_<date>.json —
+"""Milestone X's close (docs/dev/v1-offload.md §14, "Step 8, part 2"): the record evidence/x8_close_rtx-5080_<date>.json —
 F5b's tune at the capped fit, the capped-fit and F1 rows (interleaved rounds, spikes/x4_gap/ctx.py), the new offload
 locks with their verdicts and snapshots, F5b's bounded L2 against the path-aware floor, and the one propagation
 (D15) of every lock in plans/, class by class. Prints the README's tables.

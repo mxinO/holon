@@ -1,6 +1,6 @@
 {
  "workload": "release7-mtp-decision",
- "rule": "docs/release.md \u00a716.1 (release design D3)",
+ "rule": "docs/dev/release.md \u00a716.1 (release design D3)",
  "command": "python bench/mtp_decision.py bench_release7-mtp-rtx-5080_rtx-5080_2026-10-15.json",
  "sources": [
   "bench_release7-mtp-rtx-5080_rtx-5080_2026-10-15.json"

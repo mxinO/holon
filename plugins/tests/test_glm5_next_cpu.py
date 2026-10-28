@@ -1,8 +1,8 @@
-"""GLM-5.3-Flash's model plugin on the CPU against HF's fixtures (docs/v1-glm.md §6.1): the tiny model (8 layers, DSA
-at 3 and 7, the dense FFN at 0, n = 4, the real vocabulary) from its GGUF as llama.cpp's converter writes it, run by the
-engine in float32 with the testing CPU providers; the fixtures are HF's one-shot forward under D2's tie rule over the
-GGUF's own weights (`holon_testing.glm5next_files`). Each prompt (100 tokens with an EOS) runs as its 124 fixture ids
-with prompt logprobs, one-shot and in chunks of 7 and 13 tokens, and as its 100-token prompt decoded greedily.
+"""GLM-5.3-Flash's model plugin on the CPU against HF's fixtures (docs/dev/v1-glm.md §6.1): the tiny model (8 layers,
+DSA at 3 and 7, the dense FFN at 0, n = 4, the real vocabulary) from its GGUF as llama.cpp's converter writes it, run by
+the engine in float32 with the testing CPU providers; the fixtures are HF's one-shot forward under D2's tie rule over
+the GGUF's own weights (`holon_testing.glm5next_files`). Each prompt (100 tokens with an EOS) runs as its 124 fixture
+ids with prompt logprobs, one-shot and in chunks of 7 and 13 tokens, and as its 100-token prompt decoded greedily.
 
 - Logits: each position's prompt logprob within 1e-4 of the fixture's (its head input x through the GGUF's head),
   the top-1 token identical; the greedy tokens are HF's.
@@ -38,7 +38,7 @@ from holon_testing import glm5next_files as g
 GGUF = os.environ.get("GLM_TINY_GGUF")
 SKIP = ("GLM's tiny-model proof (§6.1) did not run: set GLM_TINY_GGUF to the tiny CPU GGUF that `python -m "
         "holon_testing.glm5next_files --out <dir> --llama <llama.cpp 27c7a76>` builds in the golden venv "
-        "(docs/release.md §22)")
+        "(docs/dev/release.md §22)")
 if GGUF is None:
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
 pytestmark = pytest.mark.skipif(GGUF is None, reason=SKIP)

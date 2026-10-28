@@ -1,4 +1,4 @@
-// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker; no signature plumbing beyond
+// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker; no signature plumbing beyond
 // the marked hunks.
 
 #include "moe-weighted-reduction.cuh"

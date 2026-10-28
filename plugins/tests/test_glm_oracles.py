@@ -1,4 +1,4 @@
-"""GLM-5.3-Flash's oracles outside the golden venv (docs/v1-glm.md §6.1): the tokenizer a GGUF file makes
+"""GLM-5.3-Flash's oracles outside the golden venv (docs/dev/v1-glm.md §6.1): the tokenizer a GGUF file makes
 (`std.weights.gguf`, `tokenizer.ggml.pre` `glm4`) against llama.cpp's own (`llama-tokenize` at 27c7a76) and the
 model's `tokenizer.json`, on a multilingual round-trip corpus. The file is the tiny CPU fixture
 (`holon_testing.glm5next_files`, built in the golden venv): `GLM_TINY_GGUF` names it, `GLM_LLAMA_TOKENIZE` the tool."""
@@ -12,7 +12,7 @@ import pytest
 
 SKIP = ("GLM's tokenizer check (§6.1) did not run: it needs GLM_TINY_GGUF (the tiny CPU fixture, "
         "`python -m holon_testing.glm5next_files` in the golden venv) and GLM_LLAMA_TOKENIZE (llama.cpp 27c7a76's "
-        "llama-tokenize): docs/release.md §22")
+        "llama-tokenize): docs/dev/release.md §22")
 READY = bool(os.environ.get("GLM_TINY_GGUF")) and bool(os.environ.get("GLM_LLAMA_TOKENIZE"))
 if not READY:
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one

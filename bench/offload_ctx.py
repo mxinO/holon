@@ -1,11 +1,12 @@
-"""Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/v1-offload.md acceptance 3,
-D14; docs/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each
+"""Batch-1 decode and prefill at fixed contexts, for the expert-offload comparisons (docs/dev/v1-offload.md acceptance
+3,
+D14; docs/dev/v1-flash-next.md D11): every arm loads in a fresh process, runs one untimed warm-up request, then for each
 context C its requests of a C-token prompt generating 256 tokens, greedy, ignore_eos. Prefill tok/s = C / prompt
 time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are spans of natural text, the same ids for
 every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another:
 - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),
   one request per context;
-- `--corpus fn` (FN, D11) / `glm` (GLM, docs/v1-glm.md D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in
+- `--corpus fn` (FN, D11) / `glm` (GLM, docs/dev/v1-glm.md D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in
   that order and tokenized with Qwen3.8-Flash-Next's / GLM-5.3-Flash's tokenizer (N tokens); context C (index c in
   `--contexts`) has the candidate starts (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up
   span (the corpus's last 2,048 tokens) moved past it, and `--spans` picks the candidates timed (default the first 3).
@@ -61,7 +62,7 @@ CORPUS = ROOT / "judge" / "prompts" / "v1.jsonl"
 WARMUP = (0, 512, 64)                                   # offset, prompt tokens, output tokens
 OFFSETS = {1024: 4096, 4096: 8192, 32768: 20000}         # distinct starts: no prompt is a prefix of another
 OUTPUT = 256
-# D11's corpus (docs/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
+# D11's corpus (docs/dev/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
 FN_SETS = ("v1-long.jsonl", "v1-qwen3_5.jsonl", "v1.jsonl")
 FN_TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
 TOKENIZERS = {"fn": FN_TOKENIZER, "glm": ("zai-org/GLM-5.3-Flash", "46a050bec13002ad29ee795c16e61cf4fa3c4a9c")}
@@ -302,7 +303,7 @@ def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     stdin; `T <id>` per token, then `DONE <produced> <prompt_n> <prompt_ms> <decode_ms> <finish> <draft_hits>
     <draft_steps> <reused> <hits> <lookups>` (My generate.cpp:2063, 2213-2222, 3893-3894, 7005-7041). Its pack is in
     the arm's flags (`--glm-pack <dir>`); `--kv-resident` equal to the context keeps a 32K configuration unstreamed
-    (docs/v1-glm.md D11). The engine's `glm stat:` stderr lines (decode hit rate, RAM fetches, disk reads, CPU lane,
+    (docs/dev/v1-glm.md D11). The engine's `glm stat:` stderr lines (decode hit rate, RAM fetches, disk reads, CPU lane,
     pool and RAM tier use) go to the server log, one after each request (the warm-up's first); each timed request's
     is kept in its row (`stat`: per decode token, as the engine counts them)."""
     cmd = [*shlex.split(a.wrap), a.server, "--serve", "--max-context", str(a.ctx), "--kv-resident", str(a.ctx),

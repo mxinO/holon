@@ -189,7 +189,7 @@ MASK = "toy.even_after@1"
 
 @pytest.mark.parametrize("memory", [8 << 20, 300 << 10], ids=["roomy", "preempting"])
 def test_mixed_steps_compute_what_todays_steps_do(tiny, memory):
-    """docs/m07-perf.md §3.1: with `chunk_with_decode` the same requests — chunked prompts beside decoding ones, two
+    """docs/dev/m07-perf.md §3.1: with `chunk_with_decode` the same requests — chunked prompts beside decoding ones, two
     constrained by the toy processor, one sampled, a second pass hitting the prefix cache's checkpoints (roomy), or
     preempted — give today's tokens, and logprobs within batching's ulps. Mixed steps run GQA's decode rows
     through the decode kernel (the reference prefill does not declare `serves_decode_rows`) or, flipped, through the

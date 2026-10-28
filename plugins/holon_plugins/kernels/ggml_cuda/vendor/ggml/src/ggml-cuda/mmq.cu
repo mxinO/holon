@@ -1,4 +1,4 @@
-// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 // src1's type to the q8_1 quantizers (bf16 activations); x_scale and the bf16 dst in mmq_args; glu, gate_scale,
 // up_scale, ids_j_tokens and glu_limit through ggml_cuda_mul_mat_q to the launch.
 
@@ -144,7 +144,7 @@ void ggml_cuda_mul_mat_q(
         const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
         const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
         const int64_t ids_j_tokens, // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
-        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6)
+        const float glu_limit) { // Holon: glu's clamp (docs/dev/v1-glm.md D6)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -209,7 +209,7 @@ void ggml_cuda_mul_mat_q(
         int64_t ncols_opt = ne11;
         if (ids) {
             // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
-            // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
+            // tiles that hold rows (launch_mul_mat_q, docs/dev/v1-moe-prefill.md D2), so J is chosen against that mean on
             // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
             // ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the weights of the
             // experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)

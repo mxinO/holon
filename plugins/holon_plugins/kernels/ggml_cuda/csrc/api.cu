@@ -116,7 +116,7 @@ ggml_tensor with_prec(ggml_tensor dst, const int prec) {
 // A per-tensor (dense) or per-expert scale for mmvq's fused epilogue: `n` f32 values, or none.
 ggml_tensor scale_vector(const float * scale, const int64_t n) { return matrix(GGML_TYPE_F32, scale, n, 1); }
 
-// moe_router@1's logits on prompt chunks (docs/v1-moe-prefill.md D3): logits[t, e] = sum over h of x[t, h] *
+// moe_router@1's logits on prompt chunks (docs/dev/v1-moe-prefill.md D3): logits[t, e] = sum over h of x[t, h] *
 // router[e, h] from x's exact values (bf16 or f32), in an order fixed per logit: ks chains of f32 fma, chain g over
 // hidden values [g, g + 1) * hidden / ks ascending, then the chains' sums added in g order, ks =
 // router_chains(experts, hidden) (more chains for fewer experts, to fill the GPU without moving more partial sums than
@@ -124,12 +124,12 @@ ggml_tensor scale_vector(const float * scale, const int64_t n) { return matrix(G
 // the chains, a block of 64 threads per (64 rows, BN experts, chain): each thread stages one row of x and (the first
 // BN threads) one of the router, ROUTER_BK hidden values at a time (the next stage's loads in flight meanwhile), and
 // computes an 8 x BN/8 corner of the tile from shared memory; router_sum adds the chains. BN is 64, or 32 for an
-// expert count of 32s but not 64s (docs/v1-glm.md D6: 288): a logit's chains are the same at either width.
+// expert count of 32s but not 64s (docs/dev/v1-glm.md D6: 288): a logit's chains are the same at either width.
 constexpr int ROUTER_BM = 64, ROUTER_BK = 32, ROUTER_THREADS = 64;
 
 static int router_bn(const int64_t experts) { return experts % 64 == 0 ? 64 : 32; }
 
-// The chains per logit: the largest divisor of hidden / ROUTER_BK at most 2048 / experts (docs/v1-glm.md D6): 2048 /
+// The chains per logit: the largest divisor of hidden / ROUTER_BK at most 2048 / experts (docs/dev/v1-glm.md D6): 2048 /
 // experts itself wherever it divides (the only case served before: 16 at 128 experts, 8 at 256), 4 at 288 of 4096
 static int router_chains(const int64_t experts, const int64_t hidden) {
     const int64_t steps = hidden / ROUTER_BK;
@@ -239,7 +239,7 @@ __global__ void router_sum(const float * __restrict__ partials, float * __restri
 }
 
 // SwiGLU after mmq, computed as llama.cpp's fused mmvq gate computes it: up * silu(gate), ggml_cuda_op_silu_single, or
-// with `limit` > 0 its GGML_GLU_OP_SWIGLU_CLAMP (docs/v1-glm.md D6: silu(min(gate, L)) * clamp(up, -L, L), fminf / fmaxf,
+// with `limit` > 0 its GGML_GLU_OP_SWIGLU_CLAMP (docs/dev/v1-glm.md D6: silu(min(gate, L)) * clamp(up, -L, L), fminf / fmaxf,
 // which drop a NaN); with `ids`, each half first scaled by its row's expert scale (NVFP4's scale2, as mmvq's x_scale and
 // gate_scale).
 __global__ void swiglu_f32(const float * __restrict__ x, const float * __restrict__ gate_scale,

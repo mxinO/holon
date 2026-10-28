@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md D2, §6.1, §9 step 2",
+ "doc": "docs/dev/v1-glm.md D2, §6.1, §9 step 2",
  "golden_venv": "transformers 5.19.0, CPU torch, no flash-linear-attention; core, judge, std, testing editable without dependencies; pytest",
  "fixtures": {
   "tool": "testing/holon_testing/glm5next_files.py",

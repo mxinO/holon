@@ -1,5 +1,5 @@
 {
- "measurement": "K step 4 (docs/v1-kv-tiers.md acceptance 3): 3a (resume from VRAM, RAM and SSD at 4K/16K/32K, idle and beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain decode steps), 3f (the two-engine restart), Qwen3.8-27B UD-IQ3_S at lock 10's settings plus the tier (host.bytes 16 GiB, pages 0.85, staging 5, prompt_end,branch,answer:1, the SSD level)",
+ "measurement": "K step 4 (docs/dev/v1-kv-tiers.md acceptance 3): 3a (resume from VRAM, RAM and SSD at 4K/16K/32K, idle and beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain decode steps), 3f (the two-engine restart), Qwen3.8-27B UD-IQ3_S at lock 10's settings plus the tier (host.bytes 16 GiB, pages 0.85, staging 5, prompt_end,branch,answer:1, the SSD level)",
  "date": "2026-10-19",
  "hardware": "NVIDIA GeForce RTX 5080 desktop",
  "storage": "the desktop's local NVMe (ext4) mounted into the container from a node-local directory, O_DIRECT",

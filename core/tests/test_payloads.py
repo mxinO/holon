@@ -1,4 +1,4 @@
-"""The core's generic seams for state that is not paged (docs/m03-qwen38.md §4.3), proven with a toy kind before any
+"""The core's generic seams for state that is not paged (docs/dev/m03-qwen38.md §4.3), proven with a toy kind before any
 model uses them: Slot units addressed by the request slot, prefill cuts, payloads published where a step ends and
 registered at its commit only when committed tokens cover them, the fixed-point hit with adopt MemOps pinned until
 launched, payload eviction that never costs paged units, and unit copies between pools.
@@ -7,7 +7,7 @@ The toy kind keeps one Slot unit per request (think: a running sum of the tokens
 EVERY tokens into its own plugin pool — where a step ends (a MemOp copy), or, when its spec declares an `in_step` grid,
 inside a step: then the forward fills it (`BatchPlan.publishes`; the tests play the toy mixer).
 
-With the toy tier (docs/v1-kv-tiers.md §4: KS1–KS3, KS5) the tests also play the forward (`_launch`: each token's id
+With the toy tier (docs/dev/v1-kv-tiers.md §4: KS1–KS3, KS5) the tests also play the forward (`_launch`: each token's id
 into its KV slot, the toy state adding it up) and the tier's copies wait on a deferred stream until something waits for
 them, so a missing wait shows as wrong bytes: a unit freed under a store, a staging unit under its payload's store, the
 units of an abandoned load; blocks only the tier holds promoted into a hit or into place; payloads adopted from the

@@ -17,7 +17,8 @@ records one.
 A plan with uncovered sites (kernels that are not run-to-run deterministic) may have no run-identical snapshot; its
 lock then records none, and every change to it goes through L2 and approval (design §7.10).
 
-A plan that binds an `approx` plugin (its manifest's `numerics`, e.g. A1's route tail skip, docs/v1-offload.md §6) is
+A plan that binds an `approx` plugin (its manifest's `numerics`, e.g. A1's route tail skip, docs/dev/v1-offload.md §6)
+is
 a human gate, never a default lock: `write` refuses it unless the caller passes `allow_approx` (the CLI's
 `--allow-approx`), whatever the verdict.
 
@@ -259,7 +260,7 @@ class EngineChecks:
 
 def _no_overflow(engine: Engine) -> None:
     """A deployment whose check steps overflowed an activation loan into the device's own memory (a store's
-    `loan_overflows`, docs/v1-glm.md D8w) is refused: the reserve does not hold those bytes."""
+    `loan_overflows`, docs/dev/v1-glm.md D8w) is refused: the reserve does not hold those bytes."""
     for name, o in getattr(getattr(engine, "ctx", None), "shared_objects", {}).items():
         if getattr(o, "loan_overflows", 0):
             raise RuntimeError(f"{name}: {o.loan_overflows} check steps overflowed their activation loan, by up to "
@@ -288,7 +289,7 @@ def write(plans_dir: str | pathlib.Path, outcome: Outcome, allow_approx: bool = 
         raise ValueError(f"nothing to write for outcome {outcome.verdict!r}")
     if (found := approx(lock.plan)) and not allow_approx:
         raise ValueError(f"the plan binds approx plugins {found}: a human gate, never a default lock "
-                         "(docs/v1-offload.md §6); write it only with --allow-approx")
+                         "(docs/dev/v1-offload.md §6); write it only with --allow-approx")
     if snap is not None and lock.snapshot is not None:
         path = snapshot_path(plans_dir, lock.plan, lock.snapshot)
         if not path.exists():

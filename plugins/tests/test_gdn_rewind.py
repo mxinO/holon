@@ -1,12 +1,13 @@
-"""GDN rollback by masked replay (docs/m04-spec.md D6), on CPU with the reference kernels, end to end and per unit.
+"""GDN rollback by masked replay (docs/dev/m04-spec.md D6), on CPU with the reference kernels, end to end and per unit.
 
 - Speculative greedy decoding of a tiny Qwen3.5 with GDN layers emits exactly what plain greedy decoding does, for
   right, wrong and mixed drafts, at overlap depth 0 and 1, with prefix hits and preemption (the `test_spec` matrix).
 - The GDN units, bitwise: a verify step over every GDN layer followed by the model's rewind (n accepted of k, n < k
   and n = k) leaves each layer's conv window and delta-rule state exactly as 1 + n one-token calls of the same kernels
   over the same inputs would, and rows outside the step untouched — the step's glue runs once for every layer
-  (docs/m07-perf.md D5). On a GPU (`kernels.fla`, `kernels.gdn_triton`) the delta rule is held to one per-token call
-  over the accepted tokens (its decode specialization rounds differently, docs/m04-spec.md §1.3), and the verify step
+  (docs/dev/m07-perf.md D5). On a GPU (`kernels.fla`, `kernels.gdn_triton`) the delta rule is held to one per-token call
+  over the accepted tokens (its decode specialization rounds differently, docs/dev/m04-spec.md §1.3), and the verify
+  step
   and rewind replayed from a CUDA graph captured at another acceptance equal the eager run.
 """
 import pathlib

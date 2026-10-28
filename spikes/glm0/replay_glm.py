@@ -1,4 +1,4 @@
-"""GLM step 0, N2 (docs/v1-glm.md §8, D7, D8): X's exclusive-tier replay (`spikes/x0_offload/m6/exclusive.py`) on
+"""GLM step 0, N2 (docs/dev/v1-glm.md §8, D7, D8): X's exclusive-tier replay (`spikes/x0_offload/m6/exclusive.py`) on
 GLM-5.3-Flash Maya-S traces (`maya_routes.py`), at the RTX 5090's and the RTX 5080's fits.
 
 Only the model and the rates change; the policies, lags and the time model are exclusive.py's:

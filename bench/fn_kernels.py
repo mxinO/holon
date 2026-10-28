@@ -1,4 +1,5 @@
-"""Per-call latency of FN's QSA decode kernels (docs/v1-flash-next.md acceptance 3: `qsa_select` <= 20 us per layer at
+"""Per-call latency of FN's QSA decode kernels (docs/dev/v1-flash-next.md acceptance 3: `qsa_select` <= 20 us per layer
+at
 4 rows of one sequence, 32K context, on the RTX 5080; 8 rows reported), replayed from a CUDA graph as the decode step
 runs them, on real indexer inputs, with the caches out of L2.
 

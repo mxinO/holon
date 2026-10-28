@@ -21,7 +21,7 @@ L3-4); T6 (FN's 640-wide rows) landed at no cost to existing widths (§10).
 All are applied with the lead's decisions (§10). Rev 6 is the design that was built; the panel reviewed the code at
 step 3 and at the close (§10).
 
-This is the follow-up that plan §10 opened when milestone X closed (`docs/v1-offload.md` §13, "Owner decision on the
+This is the follow-up that plan §10 opened when milestone X closed (`docs/dev/v1-offload.md` §13, "Owner decision on the
 gate").
 
 **The shortfall.** Holon's prefill trails FreeToken 0.92× / 0.88× at 4K / 32K on the RTX 5080's natural-fit offload
@@ -1352,7 +1352,7 @@ Records: the sm_89 rows in `evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
 
 | # | For | Item |
 |---|---|---|
-| FN-7a | FN's step 7 (`docs/v1-flash-next.md`) | **IQ2_S's mmq with ids on sm_89 at T = 16–32: 1.25–1.37× main's time per call** (C5's sweep as shipped, L3-4; gate/up and down alike; from T = 48 on 1.00×). No lock uses IQ2_S today, and nothing else in the sweep is past 1.025×. The instances' registers and stack equal main's, so the cause is not isolated. FN's step 7 measures it on an RTX 4090 lock that uses IQ2_S, at its batched decode, and isolates it there if that decode needs it |
+| FN-7a | FN's step 7 (`docs/dev/v1-flash-next.md`) | **IQ2_S's mmq with ids on sm_89 at T = 16–32: 1.25–1.37× main's time per call** (C5's sweep as shipped, L3-4; gate/up and down alike; from T = 48 on 1.00×). No lock uses IQ2_S today, and nothing else in the sweep is past 1.025×. The instances' registers and stack equal main's, so the cause is not isolated. FN's step 7 measures it on an RTX 4090 lock that uses IQ2_S, at its batched decode, and isolates it there if that decode needs it |
 
 ### Building: the step-3 panel's code review (2026-10-19; A, B, C) and step 3d
 

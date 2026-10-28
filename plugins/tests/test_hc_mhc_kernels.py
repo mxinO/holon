@@ -1,4 +1,4 @@
-"""L0 for GLM-5.3-Flash's mHC kernels (`kernels.hc_triton`: `hc_mhc_mix@1`, `hc_mhc_writeback@1`; docs/v1-glm.md D3,
+"""L0 for GLM-5.3-Flash's mHC kernels (`kernels.hc_triton`: `hc_mhc_mix@1`, `hc_mhc_writeback@1`; docs/dev/v1-glm.md D3,
 acceptance 3) against their oracles, through the build context, at GLM's n = 4 streams on H = 4,096 and the tiny GPU
 fixture's 512.
 

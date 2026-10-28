@@ -1,5 +1,5 @@
 {
- "measurement": "K step 2: holon_judge tiers (tier invariance, null test, run-identity, audit) and the tier plants; bounded --policies for branch and answer:1 (docs/v1-kv-tiers.md acceptance 2, \u00a76)",
+ "measurement": "K step 2: holon_judge tiers (tier invariance, null test, run-identity, audit) and the tier plants; bounded --policies for branch and answer:1 (docs/dev/v1-kv-tiers.md acceptance 2, \u00a76)",
  "date": "2026-10-19",
  "hardware": "RTX A5000 (GPU runs); CPU (tiny-model runs)",
  "commit": "1af8cf86409624ea1c49298f4c9008323dd02cce",

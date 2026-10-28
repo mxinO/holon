@@ -1,4 +1,4 @@
-"""A toy logits processor that proves the core's processor seams (docs/m05-grammar.md §3) without a grammar: once a
+"""A toy logits processor that proves the core's processor seams (docs/dev/m05-grammar.md §3) without a grammar: once a
 request's marker token has been seen (in its prompt or output), only even tokens. Its masks depend on the committed
 tokens and, along a verify row, on the drafts before each column, so a mask built from a stale or shifted state lets
 a wrong token through; and it checks what the core promises it — every row's tokens committed before the row is

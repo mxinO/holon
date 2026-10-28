@@ -1,5 +1,5 @@
 """PrefixIndex: chain keys, verified matches, leaf-first LRU eviction that never touches units still in use, and an
-eviction policy choosing among the eligible entries (docs/v1-kv-tiers.md KS5)."""
+eviction policy choosing among the eligible entries (docs/dev/v1-kv-tiers.md KS5)."""
 import numpy as np
 import pytest
 import torch

@@ -3,7 +3,7 @@
 Status: implemented (bbfeeb1, review fixes 66085f5; design rev 3, reviewed; code reviewed clean). Measured on the
 RTX 5080 agent trace at the deployment (`evidence/bench_agent-27b-iq3s-prefix-*_rtx-5080_2026-10-12.json` vs
 `…_2026-10-09.json`): TTFT p50 8.42 s vs 8.92 s with the cut (−5.6%), p99 16.0 vs 16.5 s, throughput and tokens saved
-unchanged; the 27B bounded checks pass, prefix resume tighter (KL p99 0.022 vs 0.039). Builds on docs/m03-qwen38.md (§4.3 seams, D4 checkpoints) and its §7 deferred
+unchanged; the 27B bounded checks pass, prefix resume tighter (KL p99 0.022 vs 0.039). Builds on docs/dev/m03-qwen38.md (§4.3 seams, D4 checkpoints) and its §7 deferred
 item "an in-step snapshot (fla writing the fp32 state at one chunk index), which would remove the extra step a cut
 causes".
 

@@ -1,7 +1,7 @@
 {
  "gpu": "NVIDIA GeForce RTX 4090",
  "date": "2026-10-19",
- "what": "The sm_89 gate (docs/v1-moe-prefill.md \u00a710 L3-4) and T6 on sm_89; batched decode on the 4090 Q4_K_M lock's flags (holon_tg, tg128 at depth 1,024, B16 / 32 / 64, tokens/s over main's; per round).",
+ "what": "The sm_89 gate (docs/dev/v1-moe-prefill.md \u00a710 L3-4) and T6 on sm_89; batched decode on the 4090 Q4_K_M lock's flags (holon_tg, tg128 at depth 1,024, B16 / 32 / 64, tokens/s over main's; per round).",
  "trees": {
   "main": "b5b1e7f",
   "s1": "1026875 (step 1; its CUDA is main's)",

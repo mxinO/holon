@@ -1,5 +1,5 @@
 """`grammar.xgrammar`: the logits processor that constrains requests carrying `ext["grammar.constraint@1"]`
-(`constraint.py`) with xgrammar (docs/m05-grammar.md D3–D6).
+(`constraint.py`) with xgrammar (docs/dev/m05-grammar.md D3–D6).
 
 A request's constraint is checked at `open` (malformed, a strict schema's unsupported feature: `client`), vetted in a
 worker process (`vetting.py`), then compiled for use by one of two helper threads (xgrammar releases the GIL), never

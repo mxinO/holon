@@ -5168,7 +5168,7 @@
    "command": "python bench/run.py --name ht-k-2 --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --lock plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/4.lock --backends holon --traces bench/traces/decode_b64.jsonl bench/traces/agent.jsonl --rounds 1 --blocking-sync --evidence-dir ht",
    "commit": "e1ae0f73f30f216bab7af602bd8aa51b0fb48aef-dirty",
    "dirty": [
-    "M docs/v1-kv-tiers.md"
+    "M docs/dev/v1-kv-tiers.md"
    ],
    "gpu_class": "rtx-a5000",
    "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",
@@ -7742,7 +7742,7 @@
    "command": "python bench/run.py --name ht-k-3 --gpu 0 --model unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf --lock plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/4.lock --backends holon --traces bench/traces/decode_b64.jsonl bench/traces/agent.jsonl --rounds 1 --blocking-sync --evidence-dir ht",
    "commit": "e1ae0f73f30f216bab7af602bd8aa51b0fb48aef-dirty",
    "dirty": [
-    "M docs/v1-kv-tiers.md"
+    "M docs/dev/v1-kv-tiers.md"
    ],
    "gpu_class": "rtx-a5000",
    "model": "unsloth/Qwen3-8B-GGUF@a6adef130ffb/Qwen3-8B-Q4_K_M.gguf",

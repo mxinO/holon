@@ -1,4 +1,4 @@
-"""std.state_tier's I/O threads (docs/v1-kv-tiers.md D7's I/O order, D11's read priority).
+"""std.state_tier's I/O threads (docs/dev/v1-kv-tiers.md D7's I/O order, D11's read priority).
 
 Jobs run in the order the tier decides them, on `n` threads, with one exception: while a read is queued, no write
 starts except one a queued read depends on. A job submitted to the read queue takes the queued writes it depends on

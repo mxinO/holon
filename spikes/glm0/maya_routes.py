@@ -1,4 +1,4 @@
-"""GLM step 0, N2 (docs/v1-glm.md §8): Project Maya's decode route log as an M6 trace.
+"""GLM step 0, N2 (docs/dev/v1-glm.md §8): Project Maya's decode route log as an M6 trace.
 
 Maya writes one line per decode route with `STRATA_GLM_ROUTE_LOG=<prefix>` (My src/core/glm_fast_path.cu:4148-4161):
 `<layer> e0 .. e7 <fetch> <miss> <cpu> | n0 .. n15` — the route's experts in selection order, then bit masks over

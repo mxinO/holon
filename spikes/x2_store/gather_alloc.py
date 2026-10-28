@@ -1,5 +1,5 @@
 """The in-graph gather (`expert_fetch@1`, kernels.expert_io: 8 CTAs x 256 threads, 16-byte loads, unroll 8) from host
-memory allocated four ways (docs/v1-offload.md §13, panel C-r4.5-5): `cudaHostAlloc` (torch's pinned allocator; mapped
+memory allocated four ways (docs/dev/v1-offload.md §13, panel C-r4.5-5): `cudaHostAlloc` (torch's pinned allocator; mapped
 under unified addressing), and an anonymous map registered with `cudaHostRegister(portable | mapped)` — shared or
 private, with and without MADV_HUGEPAGE. Expert-sized blobs (2.65 and 3.06 MB: Qwen3-30B-A3B Q4_K_M experts) are
 gathered 64 at a time from a 2 GiB arena, in a CUDA graph; GB/s per allocation, and its ratio to `cudaHostAlloc`.

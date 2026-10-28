@@ -3,7 +3,7 @@
  "date": "2026-10-08",
  "command": "python bench/run.py --name serve-30b-a3b-ud-iq3-xxs-agent --gpu 0 --model unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5 --backends holon_http llamaserver --rounds 2 --max-batch 32 --max-step-tokens 2048 --traces bench/traces/agent.jsonl",
  "commit": "63941b4a70217a9f76b3e20e30e54a5f98dd08e9-dirty",
- "dirty": ["M core/holon/core/build.py", " M core/tests/test_stacking.py", " M docs/m02-moe.md", " M docs/plan.md", " M judge/holon_judge/compare.py", " M judge/holon_judge/gguf.py", " M judge/holon_judge/golden.py", " M judge/tests/test_compare.py", " M judge/tests/test_gguf.py", " M plugins/holon_plugins/kernels/flashinfer/plugin.py", " M plugins/holon_plugins/kernels/triton_experts/kernel.py", " M plugins/tests/test_ggml_cuda_moe.py", " M plugins/tests/test_triton_experts.py", " M std/holon_std/moe/units.py"],
+ "dirty": ["M core/holon/core/build.py", " M core/tests/test_stacking.py", " M docs/dev/m02-moe.md", " M docs/plan.md", " M judge/holon_judge/compare.py", " M judge/holon_judge/gguf.py", " M judge/holon_judge/golden.py", " M judge/tests/test_compare.py", " M judge/tests/test_gguf.py", " M plugins/holon_plugins/kernels/flashinfer/plugin.py", " M plugins/holon_plugins/kernels/triton_experts/kernel.py", " M plugins/tests/test_ggml_cuda_moe.py", " M plugins/tests/test_triton_experts.py", " M std/holon_std/moe/units.py"],
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5",
  "rounds": 2,

@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md \u00a79 step 1 (D8 (b)+(e), (a), (c); D8f), the lead's deferrals in \u00a711",
+ "doc": "docs/dev/v1-glm.md \u00a79 step 1 (D8 (b)+(e), (a), (c); D8f), the lead's deferrals in \u00a711",
  "l0": {
   "rtx-a5000 (sm_86)": "affected suites green (test_cpu_task, test_expert_io, test_placement_promote, test_moe_engine, test_tiered, test_tier_pagecache)",
   "rtx-5090 (sm_120)": "253 passed, 1 skipped",

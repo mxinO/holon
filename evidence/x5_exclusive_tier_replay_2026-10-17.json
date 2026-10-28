@@ -5,7 +5,7 @@
  "gpu": "none: a CPU replay; the rates are the RTX 5080 desktop's from x0_bench_rtx-5080_2026-10-17",
  "commit": "ef6c1bd4ffef1884c36e237346c3e42613f21c0a",
  "code": "spikes/x0_offload/m6/exclusive.py (with replay.py's loader, quotas and F11 pairing) as committed with this record",
- "question": "docs/v1-offload.md D10: with an exclusive RAM tier (RAM short), which placement is the default by least modelled time on M6's held-out traces: (a) F11 with SSD-only victims and host promotion, (b) F11 with deferred admission, (c) F10 promote-on-fetch with 3 spares; (d) lfu with RAM holding every expert as the reference",
+ "question": "docs/dev/v1-offload.md D10: with an exclusive RAM tier (RAM short), which placement is the default by least modelled time on M6's held-out traces: (a) F11 with SSD-only victims and host promotion, (b) F11 with deferred admission, (c) F10 promote-on-fetch with 3 spares; (d) lfu with RAM holding every expert as the reference",
  "traces": {
   "source": "M6's captures of Qwen3-30B-A3B Q4_K_M (x0_m6_routing_qwen3-30b-a3b_rtx-a5000_2026-10-17), uint8 ids, not committed",
   "decode_steps_tokens": {

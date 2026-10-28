@@ -1,5 +1,5 @@
 """Snapshot traces (judge `snapshot.trace` over judge/prompts/v1.jsonl) of the vehicle on fresh engines, with adaptive
-placement on (docs/v1-offload.md §6, §9 step 3): `std.moe@1` all-resident, and the offload store at a fit under a
+placement on (docs/dev/v1-offload.md §6, §9 step 3): `std.moe@1` all-resident, and the offload store at a fit under a
 placement policy, optionally with a planted bug or the n-gram drafter:
 
     python spikes/x3_policies/run.py <model.gguf> <out dir> <runs> "<name>|<cache>|<policy>|<plant>|<spec>[|<t>[|<o>]]"

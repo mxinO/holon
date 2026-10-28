@@ -1,6 +1,6 @@
 {
  "date": "2026-10-26",
- "doc": "docs/v1-glm.md §9 step 6, §7.4, §13 (step 6)",
+ "doc": "docs/dev/v1-glm.md §9 step 6, §7.4, §13 (step 6)",
  "card": "RTX 5090 (bench and IMA), RTX 5080 and 5090 (FN A/B, locks), RTX PRO 6000 (clamp)",
  "ima": {
   "cause": "std.ffn.sum's side-stream sum `acc` read by the main stream's combine with no event: the expandable-segments allocator's release unmapped its block after syncing only the side stream",

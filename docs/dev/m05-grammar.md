@@ -18,8 +18,8 @@ Scope: plan §8, amended (D1; plan §2 / §8 updated with this revision):
 - `tool_choice: "auto"` stays unconstrained unless a tool is `strict` (D8);
 - "100% schema conformance" is defined for strict requests against a published reject list (D9).
 
-Facts about xgrammar 0.2.3, vLLM, SGLang, llama.cpp and the Qwen templates are cited in the local research note
-`docs/brainstorm/m05-grammar-research.md` (not published) ("R §n"). Builds on M0.4 Gate A (verify rows, `std.spec.greedy` and
+Facts about xgrammar 0.2.3, vLLM, SGLang, llama.cpp and the Qwen templates come from their public sources, cited by
+`file:line` in an unpublished study of them ("R §n"). Builds on M0.4 Gate A (verify rows, `std.spec.greedy` and
 `std.spec.rejection`, verify graphs, overlap depth 1).
 
 ## 1. Goal and acceptance

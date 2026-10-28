@@ -1,4 +1,5 @@
-"""Per-change perf smoke (docs/release.md §22): batch-1 decode of this tree against a base tree (main's build) on one
+"""Per-change perf smoke (docs/dev/release.md §22): batch-1 decode of this tree against a base tree (main's build) on
+one
 GPU, in a few minutes (2.3 min on an RTX A5000 with Qwen3-8B Q4_K_M). Each round runs both arms, in ABBA order, each
 as a fresh `holon_tg.py` process from its own tree with that tree first on PYTHONPATH; an arm that imported Holon from
 anywhere else is an error. nvidia-smi samples the GPU through every arm: the clock screen (`clock_check.py`'s rule,

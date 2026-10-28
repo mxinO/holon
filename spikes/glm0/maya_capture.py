@@ -1,4 +1,4 @@
-"""GLM step 0, N2 (docs/v1-glm.md §8): drive Project Maya's `--serve` engine over a request set so that its decode
+"""GLM step 0, N2 (docs/dev/v1-glm.md §8): drive Project Maya's `--serve` engine over a request set so that its decode
 route log (`STRATA_GLM_ROUTE_LOG=<prefix>`, in the environment) records a trace for `maya_routes.py`. Greedy, a
 fixed number of new tokens per request (`--eos-ids 2147483647`), one conversation; Maya's own flags follow `--`.
 

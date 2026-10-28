@@ -1,4 +1,4 @@
-"""FN step 7, item 0 (docs/v1-flash-next.md §9): where a step's GPU time goes, by component, on the full model.
+"""FN step 7, item 0 (docs/dev/v1-flash-next.md §9): where a step's GPU time goes, by component, on the full model.
 
 `run` builds one eager engine (graphs and overlap off, so every kernel sits under the host's NVTX ranges) and runs one
 phase on a `v1-long` prompt cut to `--ctx` tokens: `decode` (one-token steps), `verify` (MTP on: each step is a verify

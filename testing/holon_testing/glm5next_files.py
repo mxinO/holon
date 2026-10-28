@@ -1,9 +1,9 @@
-"""The tiny GLM-5.3-Flash (`glm5_next`) models (docs/v1-glm.md D2, §6.1): random weights in transformers 5.19.0's text
-model (`holon_judge.glm5next`'s causal LM over `Glm5NextTextModel`; run in the golden venv, `local/envs/golden-glm`),
-saved as the released checkpoint stores them (its config and names, no vision tower, no MTP layer: D7 defers MTP);
-its GGUF as llama.cpp's own converter writes it (an oracle for the conversion's conventions that shares neither the
-engine's nor the judge's beliefs: `ssm_a`, the MLA split, the conv layouts, the mHC names), and for the GPU fixture
-its Q8_0 copy by `llama-quantize`.
+"""The tiny GLM-5.3-Flash (`glm5_next`) models (docs/dev/v1-glm.md D2, §6.1): random weights in transformers 5.19.0's
+text model (`holon_judge.glm5next`'s causal LM over `Glm5NextTextModel`; run in the golden venv,
+`local/envs/golden-glm`), saved as the released checkpoint stores them (its config and names, no vision tower, no MTP
+layer: D7 defers MTP); its GGUF as llama.cpp's own converter writes it (an oracle for the conversion's conventions that
+shares neither the engine's nor the judge's beliefs: `ssm_a`, the MLA split, the conv layouts, the mHC names), and for
+the GPU fixture its Q8_0 copy by `llama-quantize`.
 
 Two fixtures (D2, lead call 3): `cpu` (f32, H = 64, MLA dims distinct powers of two: q_lora 32, kv_lora 64, nope 32,
 v 16) and `gpu` (H = I = 512, kv_lora 128, nope 64, v 32, KDA 2 x 128, indexer 4 x 64, the head scaled to a logit

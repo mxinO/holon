@@ -1,5 +1,5 @@
 """Qwen3's frontend bundle: the checkpoint's tokenizer and chat template, from whichever source holds the weights
-(HF directory or GGUF file), and the formats the template writes reasoning and tool calls in (docs/m05-grammar.md
+(HF directory or GGUF file), and the formats the template writes reasoning and tool calls in (docs/dev/m05-grammar.md
 §3.8; the frontend parses and constrains each format)."""
 from __future__ import annotations
 

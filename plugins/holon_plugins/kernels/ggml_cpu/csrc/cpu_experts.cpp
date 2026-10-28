@@ -1,11 +1,11 @@
-// `cpu_experts@1` (std.moe.kernels; docs/v1-offload.md D7): a layer's CPU jobs — whole experts, down(SwiGLU(gate·x,
+// `cpu_experts@1` (std.moe.kernels; docs/dev/v1-offload.md D7): a layer's CPU jobs — whole experts, down(SwiGLU(gate·x,
 // up·x)) — over GGUF blocks in place, with ggml-cpu's own activation quantization (`from_float` of the weights'
 // `vec_dot_type`) and dot products (`vec_dot`, one per weight row and token), as spike x0's M3 measured them.
 //
 // A run is a `cpu_task@1` task: every thread of the worker's pool runs it, meeting at the pool's barrier between
 //   phase 1  each (job, token) item's input row quantized to gate/up's vec_dot type      (items split across threads)
 //   phase 2  gate and up rows (jobs × 2·inter), each row read once for all its job's tokens  (rows stolen, below)
-//   phase 3  f32 SwiGLU per item (clamped at `limit` > 0, docs/v1-glm.md D6), quantized to down's vec_dot type (split)
+//   phase 3  f32 SwiGLU per item (clamped at `limit` > 0, docs/dev/v1-glm.md D6), quantized to down's vec_dot type (split)
 //   phase 4  down rows (jobs × hidden) into the items' output rows                           (rows stolen)
 // Rows, never K, are split across threads, and each (row, token) is one vec_dot call whatever the grouping, the batch
 // or the thread that ran it: a token's output is bitwise the same alone or grouped and at any thread count (D7). Each

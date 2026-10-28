@@ -4,7 +4,7 @@
  "commit": "aa153e3",
  "hardware": "cpu",
  "command": "python -m holon_judge gate --model <file> --original <bf16 original> [--plant <bug>]",
- "claim": "docs/m06-lowp.md \u00a74.8: per tensor (per expert) NMSE vs the bf16 original, FP8 <= 1e-2, FP4 <= 0.1 (HF and the GGUF's MXFP4 experts), GGUF Q8_0 1e-3, other ggml types 0.5, dense HF tensors exact (bit-equal after the cast); HF files through the engine's weight source (dialects) and reference.py, a norm that differs from the original's (SmoothQuant) folded into the linears reading it (a folded dense one within 1e-10); the GGUF through gguf-py and the judge's map, routers exact. Predicted FP8 ~1e-3, NVFP4 ~1e-2, MXFP4 ~2e-2; plants M5 (sim 0.271) and M3 fail",
+ "claim": "docs/dev/m06-lowp.md \u00a74.8: per tensor (per expert) NMSE vs the bf16 original, FP8 <= 1e-2, FP4 <= 0.1 (HF and the GGUF's MXFP4 experts), GGUF Q8_0 1e-3, other ggml types 0.5, dense HF tensors exact (bit-equal after the cast); HF files through the engine's weight source (dialects) and reference.py, a norm that differs from the original's (SmoothQuant) folded into the linears reading it (a folded dense one within 1e-10); the GGUF through gguf-py and the judge's map, routers exact. Predicted FP8 ~1e-3, NVFP4 ~1e-2, MXFP4 ~2e-2; plants M5 (sim 0.271) and M3 fail",
  "results": {
   "qwen3-8b-nvfp4": {
    "model": "nvidia/Qwen3-8B-NVFP4",

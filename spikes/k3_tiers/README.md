@@ -1,7 +1,7 @@
 # K step 3: the mixed factor under std.state_tier's dispatch
 
 `bench.py` drives std.state_tier's own I/O path (`iothreads.IoThreads` over `ssd.SsdLevel`, 557,056 B unit-major
-units, O_DIRECT) with the tier's dispatch (docs/v1-kv-tiers.md D4 / D11 rev 8.3): while a read is queued, no write
+units, O_DIRECT) with the tier's dispatch (docs/dev/v1-kv-tiers.md D4 / D11 rev 8.3): while a read is queued, no write
 starts except one a queued read depends on. Per cell the driver keeps reads (and, for a share of them, an urgent
 dependent write) and background writes `threads` deep, at a target read share of bytes, and compares the bytes moved
 with D4's serial lane at the share reached, from pure rates measured just before. A comparison arm (`strict`, not the

@@ -1,4 +1,4 @@
-"""The constrained bounded check (docs/m05-grammar.md §5, acceptance 3): grammar with speculation emits what grammar
+"""The constrained bounded check (docs/dev/m05-grammar.md §5, acceptance 3): grammar with speculation emits what grammar
 without speculation emits, up to near-ties, on a real model.
 
 JSON-schema prompts (chat-rendered, thinking off; strict schemas from JSONSchemaBench's Glaiveai2K and Github_easy

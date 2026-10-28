@@ -1,4 +1,4 @@
-"""GLM step 5 (docs/v1-glm.md §9): Holon's own routes on the full model, through the offload store's taps
+"""GLM step 5 (docs/dev/v1-glm.md §9): Holon's own routes on the full model, through the offload store's taps
 (`holon_judge.placement.route_dump`), on held-out prompts — FN's 72-item task set's first 60 items (D8's seed: not
 the bench corpus), rendered with GLM's chat template, greedy, `--tokens` each, one request at a time.
 

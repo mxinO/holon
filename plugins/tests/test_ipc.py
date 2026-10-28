@@ -36,7 +36,7 @@ def _closing_engine(config, endpoints, lock=None):
 @pytest.mark.slow
 def test_engine_process_serves_concurrent_streams(tiny_checkpoint, tiny_case, tmp_path):  # noqa: F811
     """Concurrent streams, n > 1, a rejection, an abort, stats and a processor ready late; at shutdown the engine is
-    closed, so the logits processor and shared objects stop their helpers (docs/v1-offload.md S0)."""
+    closed, so the logits processor and shared objects stop their helpers (docs/dev/v1-offload.md S0)."""
     prompts, expected = tiny_case
     marker = tmp_path / "closed"
     config = dataclasses.replace(_config(tiny_checkpoint), slots={"logits_processor": "testing.toy_mask"},

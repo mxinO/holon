@@ -1,5 +1,5 @@
 {
- "what": "B-dec (docs/v1-moe-prefill.md \u00a710): D2's batched-decode rule at 16 tokens against main's build. Per call: mmq with ids, every lock and FN type, gate/up and down at the 30B's shapes, T = 16-64, interleaved rounds (branch/main time, median). End to end: holon_tg at depth 1,024, batch 16 / 32 / 64, paired rounds (branch/main tokens/s).",
+ "what": "B-dec (docs/dev/v1-moe-prefill.md \u00a710): D2's batched-decode rule at 16 tokens against main's build. Per call: mmq with ids, every lock and FN type, gate/up and down at the 30B's shapes, T = 16-64, interleaved rounds (branch/main time, median). End to end: holon_tg at depth 1,024, batch 16 / 32 / 64, paired rounds (branch/main tokens/s).",
  "tree": "e9048de (step 3's tree with the rule at 16; 64 on sm_89)",
  "date": "2026-10-19",
  "cards": {

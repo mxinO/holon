@@ -1,4 +1,4 @@
-"""`kernels.triton_fp8`'s launch configurations and M0.6 acceptance 11, the FP8 decode gate (docs/m06-lowp.md §1,
+"""`kernels.triton_fp8`'s launch configurations and M0.6 acceptance 11, the FP8 decode gate (docs/dev/m06-lowp.md §1,
 B1). `gate`: the W8A16 split-K decode kernel timed per projection shape of a dense FP8 checkpoint (as the engine
 binds them: q/k/v and gate/up merged), M = 1 … 16, turned into an end-to-end tg prediction at batch 1:
 

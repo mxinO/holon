@@ -838,6 +838,6 @@
  },
  "approvals": 23,
  "notes": [
-  "rtx-3090 27B lock 1 was written at chunk_with_decode 0 from an invalid cap run (an A/A: the source lock already set 512); the run against an explicit 0 passed, and lock 2 sets 512 (docs/release.md \u00a716.4)."
+  "rtx-3090 27B lock 1 was written at chunk_with_decode 0 from an invalid cap run (an A/A: the source lock already set 512); the run against an explicit 0 passed, and lock 2 sets 512 (docs/dev/release.md \u00a716.4)."
  ]
 }

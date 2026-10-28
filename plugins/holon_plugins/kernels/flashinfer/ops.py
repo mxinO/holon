@@ -5,7 +5,7 @@ Op contracts are documented next to their references (std.ops.kernels, std.ffn.k
 2-D input, so leading dimensions are flattened. RoPE uses a cos/sin cache computed with the reference's formula, so
 the angles match the oracle; it is a named static buffer, so every layer with the same rope shares one copy and it
 is allocated (and accounted) at build time. The rope instance names it (`cos_sin`, std.ops' rope@1 contract), so a
-fused kernel rotates with the same table (docs/m07-perf.md D3).
+fused kernel rotates with the same table (docs/dev/m07-perf.md D3).
 """
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ class Rope:
 
 
 class SiluMul:
-    """`silu_mul@1`; with `glu_limit` L (docs/v1-glm.md D6) gate and up first clamped, in one torch clamp against
+    """`silu_mul@1`; with `glu_limit` L (docs/dev/v1-glm.md D6) gate and up first clamped, in one torch clamp against
     per-column bounds (gate's at L, up's at ±L: a named static, L exact in the dtype, `supports_glu_limit`), so
     FlashInfer's silu_and_mul then computes silu(min(gate, L)) · clamp(up, −L, L) from the clamped values exactly (a
     NaN kept, as the reference's clamp)."""

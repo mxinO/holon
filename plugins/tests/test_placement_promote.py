@@ -1,4 +1,5 @@
-"""placement.promote (F10, docs/v1-offload.md D1, D3, §13: promote-on-fetch into 3 device-owned spare slots per layer):
+"""placement.promote (F10, docs/dev/v1-offload.md D1, D3, §13: promote-on-fetch into 3 device-owned spare slots per
+layer):
 its resolve contract `moe_resolve.promote@1` from both providers — the plugin's CPU provider and its own kernel plugin's
 CUDA provider (kernels.promote, around kernels.expert_io's `moe_resolve@1`) — against the oracle, exactly, and its
 `lend`; then end to end on the CPU and the GPU: bitwise the resident store, the residency the replay oracle's at every
@@ -56,7 +57,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     entries (all counted, only the first 16 written). A promoted owner takes its spare back unlogged, the others
     take the empty slots (with a ring), then the spares, logged; each absent spare (all of them at a seed) is refilled
     from the least recently routed resident; a prefill chunk changes nothing but @1's; the CPU's share (F5b) comes from
-    the misses left after promoting. Under exclusive tiers (the policy's `exclusive` flag, docs/v1-glm.md D8a) a
+    the misses left after promoting. Under exclusive tiers (the policy's `exclusive` flag, docs/dev/v1-glm.md D8a) a
     refilled spare's owner stays mapped and is logged `(group, SPARE, b)`, an owner taking its spare back
     `(group, OWN, b)`: `moe_tiers@2` places them."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
@@ -154,10 +155,10 @@ def test_lend_matches_the_oracle(plugins, need):  # noqa: F811
 
 @pytest.mark.parametrize("device", DEVICES)
 def test_lend_tail_releases_the_lending_layers_spares(plugins, device):  # noqa: F811
-    """`lend_tail` (docs/v1-glm.md D8a; step 1's review S1-M1): every spare of a layer with a role of the tail's class
-    is released — absent, its owner mapped back to its slots and picked with the range's holders, so the caller lends
-    it and returns its slots at the step's end (none leaks, none held from the step's staging) —, the other layers'
-    kept; each provider as the oracle (kernels.promote's own device ops, no host sync)."""
+    """`lend_tail` (docs/dev/v1-glm.md D8a; step 1's review S1-M1): every spare of a layer with a role of the tail's
+    class is released — absent, its owner mapped back to its slots and picked with the range's holders, so the caller
+    lends it and returns its slots at the step's end (none leaks, none held from the step's staging) —, the other
+    layers' kept; each provider as the oracle (kernels.promote's own device ops, no host sync)."""
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
     g = torch.Generator().manual_seed(4)
     limits = torch.full((6, ROLES), K + E + 200, dtype=torch.int32)

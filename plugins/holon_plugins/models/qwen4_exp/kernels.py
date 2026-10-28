@@ -1,4 +1,4 @@
-"""Qwen3.8-Flash-Next's PLE op contracts (docs/v1-flash-next.md D4, D13′: in the model plugin until a second user
+"""Qwen3.8-Flash-Next's PLE op contracts (docs/dev/v1-flash-next.md D4, D13′: in the model plugin until a second user
 appears, prefixed like the unit). Oracles in `reference.py`; kernels come from kernel plugins (`kernels.ple_triton`).
 Kernel instances are stateless across steps and safe to call inside CUDA graphs. Per-request state lives in units
 addressed by `slots` (one per batch row); `has_init[r]` False: row r starts its sequence and reads no state. Rows are

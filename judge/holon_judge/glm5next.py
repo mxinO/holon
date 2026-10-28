@@ -1,5 +1,5 @@
-"""GLM-5.3-Flash (`glm5_next`) in the golden recorder (docs/v1-glm.md D2): what transformers' own model needs beyond its
-forward, through `archs`' hooks, and its GGUF's names (`archs.GGUF_ARCHS`).
+"""GLM-5.3-Flash (`glm5_next`) in the golden recorder (docs/dev/v1-glm.md D2): what transformers' own model needs beyond
+its forward, through `archs`' hooks, and its GGUF's names (`archs.GGUF_ARCHS`).
 
 - **A causal LM over the text model**: transformers 5.19.0 ships only the multimodal `Glm5NextForConditionalGeneration`;
   `Glm5NextForCausalLM` is its text model and head, the same modules (`register` makes it the text config's

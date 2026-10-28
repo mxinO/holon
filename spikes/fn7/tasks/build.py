@@ -1,4 +1,4 @@
-"""FN's task-accuracy set (docs/v1-flash-next.md §18 (d)): 72 items with checkable answers, all synthetic — written
+"""FN's task-accuracy set (docs/dev/v1-flash-next.md §18 (d)): 72 items with checkable answers, all synthetic — written
 for this repository or generated here from a fixed seed, so they carry the repository's license (Apache-2.0) and no
 third-party text. Every item is a chat (`messages`) with an `answer` and a `check`:
 

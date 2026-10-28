@@ -21,11 +21,11 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `qmm_sweep.py` | M0.7 step 0: the ggml matmul's time per call against rows (mmvq, mmq with and without the f32 → bf16 cast) for every qlinear shape and activation mode of the given locks, graph-timed on real weights; a read-only stream |
 | `d8_gate.py` | M0.7 step 5: D8's megakernel gate (f and its projection) from paired `step_profile.py`, `qmm_sweep.py` and `glu_sweep.py` records, profile-free (the GEMVs priced per call, less their isolated q8_1 quantize) |
 | `mtp_decision.py` | release design D3's MTP default rule from `run.py` records of a plain lock against MTP over it (`holon@mtp`): per-round TPOT, p95 gap and p95 TTFT ratios, the power estimate after 4 rounds, the verdict |
-| `offload_ctx.py` | v1 offload's reference rows (docs/v1-offload.md acceptance 3, D14; docs/v1-flash-next.md D11): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts (`--corpus fn`: D11's corpus and span offsets), llama-server, FreeToken, Strata (`--serve`, raw ids) and Holon arms interleaved over rounds, peak VRAM; `spikes/x4_refs/`, `spikes/fn0/` |
-| `tier_resume.py` | milestone K's resume rows on a 27B lock with the state tier (`docs/v1-kv-tiers.md` acceptance 3): 3a (a parked conversation resumed from VRAM, RAM and SSD, idle or beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain steps), 3f (the two-engine restart); same-session interleaved arms, clocks sampled per row |
+| `offload_ctx.py` | v1 offload's reference rows (docs/dev/v1-offload.md acceptance 3, D14; docs/dev/v1-flash-next.md D11): batch-1 decode and prefill at 1K / 4K / 32K on natural-text prompts (`--corpus fn`: D11's corpus and span offsets), llama-server, FreeToken, Strata (`--serve`, raw ids) and Holon arms interleaved over rounds, peak VRAM; `spikes/x4_refs/`, `spikes/fn0/` |
+| `tier_resume.py` | milestone K's resume rows on a 27B lock with the state tier (`docs/dev/v1-kv-tiers.md` acceptance 3): 3a (a parked conversation resumed from VRAM, RAM and SSD, idle or beside three decoders, units scattered), 3b and 3b-SSD (the decoders' gated-step gaps against plain steps), 3f (the two-engine restart); same-session interleaved arms, clocks sampled per row |
 | `clock_check.py` | the clock screen of a desktop before its evidence is recorded: SM clock percentiles and slowdown share under sustained decode |
-| `perf_smoke.py` | the per-change perf smoke (docs/release.md §22): `holon_tg.py` batch-1 decode of this tree against main's checkout, ABBA rounds of fresh processes, each asserted to import its own tree, clock-screened |
-| `client_smoke.py` | the real-client smoke at each merge (docs/release.md §22): `holon serve` driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes |
+| `perf_smoke.py` | the per-change perf smoke (docs/dev/release.md §22): `holon_tg.py` batch-1 decode of this tree against main's checkout, ABBA rounds of fresh processes, each asserted to import its own tree, clock-screened |
+| `client_smoke.py` | the real-client smoke at each merge (docs/dev/release.md §22): `holon serve` driven by the OpenAI and Anthropic SDKs in pi's and Claude Code's request shapes |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.
@@ -41,7 +41,7 @@ HTTP backends fit the same protocol: `add` posts a streaming request, `step` ret
 | [SGLang](https://github.com/sgl-project/sglang) | release 0.5.21 (2026-10-01) | own venv: torch 2.13.0+cu130 and its pinned kernels; HF checkpoints only |
 | [FreeToken](https://github.com/FlashML-org/FreeToken) | `74a387777708` (2026-10-10) | own venv: torch 2.14.1+cu130, `[accel]` (FlashInfer, sglang-kernel); its extension built against that torch |
 | llama.cpp and FreeToken, offload (`setup_baselines.sh offload`) | `f74e2fa6a31c` / `21d9578bde22` (2026-10-16) | `llama.cpp-offload` (with `--moe-cache-mib`) and `freetoken-offload`: v1 offload's references (`spikes/x4_refs/`) |
-| llama.cpp and [Strata](https://github.com/Niko1221/Strata), FN (`setup_baselines.sh fn`) | `27c7a769da16` (2026-10-17) / `296b59d2f73c` (2026-10-14), Strata's ggml at llama.cpp `3cf03257f219` | `llama.cpp-fn` (`qwen4exp`) and Strata's engine (`.envs/strata/strata`, sm_120, CPU code `-march=native`, so built on the bar cards' host class): FN's references (docs/v1-flash-next.md D11, `spikes/fn0/`) |
+| llama.cpp and [Strata](https://github.com/Niko1221/Strata), FN (`setup_baselines.sh fn`) | `27c7a769da16` (2026-10-17) / `296b59d2f73c` (2026-10-14), Strata's ggml at llama.cpp `3cf03257f219` | `llama.cpp-fn` (`qwen4exp`) and Strata's engine (`.envs/strata/strata`, sm_120, CPU code `-march=native`, so built on the bar cards' host class): FN's references (docs/dev/v1-flash-next.md D11, `spikes/fn0/`) |
 
 Both use their defaults otherwise (mini-sglang: overlap scheduling, CUDA graphs, radix cache; nano-vllm: CUDA
 graphs, prefix cache, 256-token KV blocks). Every backend gets the same `--max-batch` (max running sequences) and
@@ -66,7 +66,7 @@ rejects temperature 0, so it samples at 1e-5 (argmax in practice); the others ar
 - **claude_code_2turns**: claude_code with each session cut to its first two turns (milestone K's 3e: the first request's TTFT with and without the `branch` checkpoint at the shared system prompt).
 - **long_prompt**: three streams decoding from t=0 (prompt 256, output 1024), then a 30,000-token prompt (output 32)
   at t = 2 s: how long the streams stall behind its prefill (their max inter-token gap), and its TTFT behind them.
-- **agent_park**: parked agent conversations, milestone K's gate trace (`docs/v1-kv-tiers.md` §8): four closed-loop
+- **agent_park**: parked agent conversations, milestone K's gate trace (`docs/dev/v1-kv-tiers.md` §8): four closed-loop
   clients each serve three sessions round-robin (`client`), one request at a time, so a session's state is parked
   while its client's other sessions take a turn. The 12 sessions share a 4,096-token system prompt and open with a
   512-token task; then 10–14 turns each add a tool result (log-normal, median 384, σ 0.6, ≤ 2K) to an output of
@@ -105,7 +105,7 @@ taken before release step 7 drew each turn at its own offset, so their corpus pr
   commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
   timings and worker logs stay in `bench/.out/` (gitignored).
 
-## Smokes per change and per merge (docs/release.md §22)
+## Smokes per change and per merge (docs/dev/release.md §22)
 
 ```bash
 git worktree add --detach local/worktrees/main-build main          # main's build, once (and `holon prebuild` if its kernels differ)
@@ -172,7 +172,7 @@ python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --r
 `capture_proxy.py --metrics`, which adds each request's prefix tokens saved): D7's task scored as D7, and a
 `workloads` task on a copy of this directory's `workloads.py` and `driver.py` with a seeded suite and the harness's
 own tests (`demo/workloads_task/`). `--report` adds the speed and endpoint summary to the record
-(`docs/agent-test-pi-rtx5090.md`).
+(`docs/dev/agent-test-pi-rtx5090.md`).
 
 ```bash
 python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 --pi <prefix>/node_modules/.bin/pi \

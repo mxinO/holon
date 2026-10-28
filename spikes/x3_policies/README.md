@@ -2,7 +2,7 @@
 
 ## Question
 
-`docs/v1-offload.md` §9 step 3 (without the ring, step 3b): with adaptive placement on — `placement.lfu@1` (F11, the
+`docs/dev/v1-offload.md` §9 step 3 (without the ring, step 3b): with adaptive placement on — `placement.lfu@1` (F11, the
 default), `placement.lru@1` (F4), `placement.profile_decay@1` (F2–F3, two-phase swaps) — is the offload store still
 bitwise `std.moe@1` all-resident and run-identical, with verify rows too? Does F11's residency, step by step, equal
 the oracle extended from M6's replay (the L1 policy-parity check)? Do §6's plants fire as predicted, and only where

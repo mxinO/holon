@@ -1,6 +1,6 @@
 {
  "date": "2026-10-24",
- "doc": "docs/v1-flash-next.md \u00a722.3-\u00a723.2",
+ "doc": "docs/dev/v1-flash-next.md \u00a722.3-\u00a723.2",
  "exact": {
   "rtx-pro-6000_resident_vs_offload": {
    "steps": 41,

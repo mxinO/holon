@@ -1,4 +1,4 @@
-"""L0 for kernels.triton_fp8 (docs/m06-lowp.md D12, §4.6, §4.8): FP8 block-scaled `qlinear` against its modes'
+"""L0 for kernels.triton_fp8 (docs/dev/m06-lowp.md D12, §4.6, §4.8): FP8 block-scaled `qlinear` against its modes'
 emulations, on random e4m3 bytes (every finite code, subnormals and ±448 included) with distinct random block scales.
 
 - The bit decode: all 254 finite e4m3 codes read back through the decode kernel (one row and two) equal torch's

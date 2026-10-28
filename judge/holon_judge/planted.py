@@ -7,31 +7,31 @@
   rollback broken; the speculating configurations fail.
 - Logits processors' masks inside graphs (`mask-rows-not-reset`): the toy processor's graphs-vs-eager proof
   (plugins/tests/test_ngram.py) fails.
-- grammar.xgrammar (docs/m05-grammar.md §5; plugins/tests/test_grammar.py): a verify row's probe shifted by one
+- grammar.xgrammar (docs/dev/m05-grammar.md §5; plugins/tests/test_grammar.py): a verify row's probe shifted by one
   column or never rolled back (the masked L0-dist and the CPU spec identity fail), the apply kernel's bit order
   reversed (L0-mask fails), a completed constraint's stop tokens or every closing bracket masked (the finish reasons
   of constrained generation change).
 - GGUF Tier B (`l2 --plant`): bugs in the quantized kernels' use (`kernels.ggml_cuda`); L2 fails, except the rare
   stale workspace, which measures Tier B's sensitivity (predicted before running: fails the decode run, likely passes
   the looser prefill run).
-- The router on prompt chunks (docs/v1-moe-prefill.md D3): its logits rounded to bf16 before the selection (near
+- The router on prompt chunks (docs/dev/v1-moe-prefill.md D3): its logits rounded to bf16 before the selection (near
   the bound), or summed over hidden less its last 256 values (far); each counts the chunks it changed.
-- Dense mmq calls past one 512-row chunk (docs/v1-moe-prefill.md D5): the stream-k partials rounded to bf16 before
+- Dense mmq calls past one 512-row chunk (docs/dev/v1-moe-prefill.md D5): the stream-k partials rounded to bf16 before
   the fixup (near the bound), or the fixup skipped (far); each counts the fixups it saw and planted.
-- FP4 in `kernels.ggml_cuda` (docs/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
+- FP4 in `kernels.ggml_cuda` (docs/dev/m06-lowp.md §4.8: N2–N6, N8, N8b, M1, M4): its repack, `scale2` paths, mmq
   precision and zeroed tail broken, and a checkpoint's `scale2` misread; each also fails L0 where L0 reaches it
   (plugins/tests/test_ggml_cuda*.py), N6 as the pre-launch precision check's error on sm_120.
 - FP8 in `kernels.triton_fp8` (§4.8: P1–P4, P7): its block scales, activation scales and weight decode misread, and a
   checkpoint's block scales misread; P1–P4 also fail its L0 (plugins/tests/test_triton_fp8.py).
-- The fused q/k norm + rope + KV write (docs/m07-perf.md D3, §6): a token that opens a page written one slot late
+- The fused q/k norm + rope + KV write (docs/dev/m07-perf.md D3, §6): a token that opens a page written one slot late
   (L2 fails; so would its L0), and decode rows rotated one position late (`bounded`: the configurations' decode
   rows against the reference's teacher-forced prefill rows).
-- Expert offload (docs/v1-offload.md §6, the snapshots with adaptive placement on: spikes/x3_policies): a staged
+- Expert offload (docs/dev/v1-offload.md §6, the snapshots with adaptive placement on: spikes/x3_policies): a staged
   miss read from the neighbouring slot; a two-phase swap's copy unordered and unwaited (with an unseeded delay on
   the copy stream), or its map to another swap's slot; a host edit in F11's device-owned cache (with the
   precondition check, and without it); F11's victims chosen without the step's needs, or two admissions into one
   victim's slot (the kernel's plant bits); a lent slot returned while still mapped to its expert, and a tail's
-  (docs/v1-moe-prefill.md D11: parity and the prompt-logprob identity fail). Each reports how often it fired. F5b
+  (docs/dev/v1-moe-prefill.md D11: parity and the prompt-logprob identity fail). Each reports how often it fired. F5b
   (bounded L2 with frozen placement, run-identical ×3 with adaptive placement): the CPU's rows read without waiting
   for the CPU in one layer; the CPU experts' gate / up halves swapped.
 
@@ -107,7 +107,8 @@ def replay_off_by_one() -> Iterator[None]:
 
 @contextlib.contextmanager
 def qsa_select_shift(decode_only: bool) -> Iterator[None]:
-    """QSA (docs/v1-flash-next.md §6.3): every selected complete block b read as its successor b + 1 (still complete;
+    """QSA (docs/dev/v1-flash-next.md §6.3): every selected complete block b read as its successor b + 1 (still
+    complete;
     the open block kept), in every sparse step, or with `decode_only` in decode and verify steps only (prefill rows
     right: L2's teacher-forced prompts never see it, the decode-divergence gate must). Reports how often it fired,
     eagerly and in graph captures (a captured shift fires on every replay)."""
@@ -139,7 +140,8 @@ def qsa_select_shift(decode_only: bool) -> Iterator[None]:
 
 @contextlib.contextmanager
 def qsa_pool_rope_last() -> Iterator[None]:
-    """QSA (docs/v1-flash-next.md §6.3): every pooled key rotated at its block's last position ratio·b + ratio − 1, not
+    """QSA (docs/dev/v1-flash-next.md §6.3): every pooled key rotated at its block's last position ratio·b + ratio − 1,
+    not
     its first (`qsa_index@1` handed the rope table from row ratio − 1 on). Reports how often it fired."""
     from holon_std.mixers.qsa import units
 
@@ -239,7 +241,7 @@ def shexp_gate_off() -> Iterator[None]:
 
 @contextlib.contextmanager
 def mhc_comb_transposed() -> Iterator[None]:
-    """GLM's mHC (docs/v1-glm.md §6.3): the comb applied as C, not Cᵀ, in every write-back (the pending one in the
+    """GLM's mHC (docs/dev/v1-glm.md §6.3): the comb applied as C, not Cᵀ, in every write-back (the pending one in the
     FFN half's mix and the block's last), handed to the kernels transposed. Reports how often it fired."""
     from holon_std.hyper import units
 
@@ -552,7 +554,7 @@ GLM_PLANTS = {"mhc_comb_transposed": mhc_comb_transposed, "mhc_sinkhorn_short": 
 # (a′)'s plants (the GPU tiny run, L0): kernel paths the CPU providers do not take
 GLM_GPU_PLANTS = {"dsa_decode_select_shift": dsa_decode_select_shift, "kda_gate_softplus": kda_gate_softplus,
                   "router_prompt_softmax": router_prompt_softmax, "glu_clamp_off": glu_clamp_off}
-# L2's reference form (docs/v1-glm.md D15a): must fail / must pass / reported, against a reference's budgets
+# L2's reference form (docs/dev/v1-glm.md D15a): must fail / must pass / reported, against a reference's budgets
 REFERENCE_PLANTS = {"streamk_fixup_dropped": streamk_fixup_dropped, "streamk_fixup_reordered": streamk_fixup_reordered,
                     "experts_swapped_one_layer": experts_swapped_one_layer}
 
@@ -669,7 +671,7 @@ def verify_writes_state() -> Iterator[None]:
 @contextlib.contextmanager
 def unmasked_padding() -> Iterator[None]:
     """Speculative verification ignores `n_draft`: every column of a verify row counts as a real draft, so padding
-    and a drafter's stale rows past its real drafts (tokens and laws) can be accepted (docs/m04-spec.md §5)."""
+    and a drafter's stale rows past its real drafts (tokens and laws) can be accepted (docs/dev/m04-spec.md §5)."""
     from holon_std.spec.greedy import verifier as greedy
     from holon_std.spec.rejection import verifier as rejection
 
@@ -892,7 +894,8 @@ def _swap_gate_up_experts(name: str) -> str:
 
 @contextlib.contextmanager
 def qlinear_fixup(bits: int, name: str) -> Iterator[None]:
-    """docs/v1-moe-prefill.md D5 (dense `qlinear` mmq calls of up to `call_rows` rows): kernels.ggml_cuda's mmq plant
+    """docs/dev/v1-moe-prefill.md D5 (dense `qlinear` mmq calls of up to `call_rows` rows): kernels.ggml_cuda's mmq
+    plant
     `bits` on every stream-k fixup of a dense call past one 512-row chunk — 1, `qlinear-partials-bf16`, rounds the
     blocks' partials to bf16 before the fixup adds them (near the bound); 2, `qlinear-large-no-fixup`, skips the fixup
     (far). Reports how many such fixups launched and how many it planted: zero means the plant never fired on that
@@ -914,7 +917,8 @@ def qlinear_fixup(bits: int, name: str) -> Iterator[None]:
 
 @contextlib.contextmanager
 def router_prefill(name: str) -> Iterator[None]:
-    """docs/v1-moe-prefill.md D3 (`moe_router@1` on prompt chunks, kernels.ggml_cuda's router GEMM): `router-prefill-
+    """docs/dev/v1-moe-prefill.md D3 (`moe_router@1` on prompt chunks, kernels.ggml_cuda's router GEMM):
+    `router-prefill-
     bf16-logits` rounds a chunk's f32 logits to bf16 before the selection (near the bound: ties and near-ties move);
     `router-prefill-short-k` sums them over hidden less its last 256 values (far). Reports the chunks it changed."""
     from holon_plugins.kernels.ggml_cuda import plugin
@@ -1019,7 +1023,7 @@ def scale2_by_slot() -> Iterator[None]:
 def scale2_after_swiglu() -> Iterator[None]:
     """N5: mmq's gate/up SwiGLU takes `scale2` after the product (silu(g)·u·s_g·s_u), not on each half before it — on
     the unfused path (mmq's f32 output, then our SwiGLU), which the plant forces where mmq's store would fuse it
-    (docs/v1-moe-prefill.md D4: the fused store's scales are held by the same bitwise check against our SwiGLU)."""
+    (docs/dev/v1-moe-prefill.md D4: the fused store's scales are held by the same bitwise check against our SwiGLU)."""
     from holon_plugins.kernels.ggml_cuda import plugin
 
     init = plugin.LinearExperts.__init__
@@ -1083,7 +1087,7 @@ def _part_scaled(module: str, role: str, factor: float) -> Iterator[None]:
 
 
 def fp4_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
-    """kernels.ggml_cuda's FP4 plants (docs/m06-lowp.md §4.8), the scale2 ones at `layer`'s o_proj."""
+    """kernels.ggml_cuda's FP4 plants (docs/dev/m06-lowp.md §4.8), the scale2 ones at `layer`'s o_proj."""
     o_proj = f"model.layers.{layer}.self_attn.o_proj"
     return {
         "nvfp4-repack-nibbles-swapped": lambda: _fp4_blocks_edited("nvfp4", _nibbles_swapped),            # N2
@@ -1135,7 +1139,7 @@ def _act_scale_per_token(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
 
 
 def fp8_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
-    """kernels.triton_fp8's plants (docs/m06-lowp.md §4.8, P1–P4) and a checkpoint's FP8 scales misread at
+    """kernels.triton_fp8's plants (docs/dev/m06-lowp.md §4.8, P1–P4) and a checkpoint's FP8 scales misread at
     `layer`'s o_proj (P7). The kernel ones wrap its calls in Python: eager steps only (module docstring)."""
     return {
         "fp8-scale-transposed": lambda: _fp8_kernel(scale=_column_major),                                  # P1
@@ -1161,7 +1165,7 @@ def _hf_experts(layer: int, edit: Callable[[int, str], tuple[int, str]]) -> Call
 
 
 def hf_moe_plants(layer: int, experts: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
-    """The bf16 HF path's plants (docs/m02-moe.md §4.6), in `layer` of a model with `experts` experts."""
+    """The bf16 HF path's plants (docs/dev/m02-moe.md §4.6), in `layer` of a model with `experts` experts."""
     swap = {"gate": "up", "up": "gate"}
     return {
         "hf-stack-off-by-one": lambda: _loaded(rename=_hf_experts(layer, lambda e, p: ((e + 1) % experts, p))),
@@ -1258,7 +1262,7 @@ def _mxfp4_scales_edited(edit: Callable[[torch.Tensor], torch.Tensor]) -> Iterat
 
 
 def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
-    """Quantized HF checkpoints' Tier A and structural plants (docs/m06-lowp.md §4.8: N1, T1, M3, M5, P5, P6; M2 is
+    """Quantized HF checkpoints' Tier A and structural plants (docs/dev/m06-lowp.md §4.8: N1, T1, M3, M5, P5, P6; M2 is
     `hf-stack-off-by-one`; and the per-tensor `scale2` stack off by one or its gate/up rows swapped in the merge), the
     one-layer ones in `layer`."""
     attn = f"model.layers.{layer}.self_attn"
@@ -1277,7 +1281,7 @@ def hf_quant_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractCon
 
 
 def moe_plants(layer: int) -> dict[str, Callable[[], contextlib.AbstractContextManager[None]]]:
-    """Tier A's MoE plants (docs/m02-moe.md §4.6), the one-layer ones at `layer`."""
+    """Tier A's MoE plants (docs/dev/m02-moe.md §4.6), the one-layer ones at `layer`."""
     return {
         "moe-renormalize-off": lambda: _moe(init=lambda kw: kw | {"renormalize": False}),
         "moe-renormalize-off-one-layer": lambda: _moe(layer, init=lambda kw: kw | {"renormalize": False}),
@@ -1400,7 +1404,8 @@ def mask_rows_not_reset() -> Iterator[None]:
     """A step with constrained rows stages their logits rows without the padding (an index past the step's rows) up
     to its count of logits rows. An eager step reads only the staged ones, but a graph replay reads as many as it was
     captured with, so it masks the rows past them by indices earlier steps left: a free request on a row a
-    constrained one held is masked as that one (docs/m05-grammar.md §3.6). Signal: the graphed run's tokens differ from
+    constrained one held is masked as that one (docs/dev/m05-grammar.md §3.6). Signal: the graphed run's tokens differ
+    from
     the eager run's on the same padded plans (plugins/tests/test_ngram.py)."""
     from holon.core.inputs import Uploader
 
@@ -1674,7 +1679,7 @@ def lent_slot_still_mapped() -> Iterator[None]:
 
 @contextlib.contextmanager
 def exclusive_lent_not_demoted() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8b): under exclusive tiers a lent expert parks in RAM without its copy — its RAM unit
+    """docs/dev/v1-glm.md §6.3 (D8b): under exclusive tiers a lent expert parks in RAM without its copy — its RAM unit
     keeps whatever it held, its map says RAM. A later fetch of it reads stale bytes. Reports how often it fired."""
     from holon_std.tiered import store as tiered
 
@@ -1699,8 +1704,8 @@ def _call_spares(store, g: int) -> torch.Tensor:
 
 @contextlib.contextmanager
 def promote_spare_unlogged() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8a): F10's refill records dropped under exclusive tiers — the call's SPARE records turned
-    into no-ops before `moe_tiers@2` reads them, so a refilled spare's old owner is never placed in RAM and keeps
+    """docs/dev/v1-glm.md §6.3 (D8a): F10's refill records dropped under exclusive tiers — the call's SPARE records
+    turned into no-ops before `moe_tiers@2` reads them, so a refilled spare's old owner is never placed in RAM and keeps
     naming the slots the spare now holds. Reports how often it fired."""
     from holon_std.tiered import resolver
 
@@ -1718,8 +1723,9 @@ def promote_spare_unlogged() -> Iterator[None]:
 
 @contextlib.contextmanager
 def promote_victim_code() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8a): a refill victim's tier code not moved — `moe_tiers@2` demotes F10's refilled spare's
-    old owner into RAM, but its map entry is put back to the slots the spare now holds. Reports how often it fired."""
+    """docs/dev/v1-glm.md §6.3 (D8a): a refill victim's tier code not moved — `moe_tiers@2` demotes F10's refilled
+    spare's old owner into RAM, but its map entry is put back to the slots the spare now holds. Reports how often it
+    fired."""
     from holon_std.tiered import resolver
 
     tiers, fired = resolver.DeviceResolver._tiers, collections.Counter()
@@ -1743,7 +1749,7 @@ def promote_victim_code() -> Iterator[None]:
 
 @contextlib.contextmanager
 def landing_reuse_unfenced() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8f): the read-ahead of layer g + 2 signalled at layer g's first pass, before layer g's
+    """docs/dev/v1-glm.md §6.3 (D8f): the read-ahead of layer g + 2 signalled at layer g's first pass, before layer g's
     gather of its own set from the same rows (made to land first), instead of after its last pass. Reports how often
     it fired."""
     from holon_std.tiered import store as tiered
@@ -1771,8 +1777,8 @@ def landing_reuse_unfenced() -> Iterator[None]:
 
 @contextlib.contextmanager
 def ondemand_round_unjoined() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8f): round r + 1 of a call's on-demand SSD reads signalled before round r's gather on main
-    (made to land first: its rows are round r's). Reports how often it fired."""
+    """docs/dev/v1-glm.md §6.3 (D8f): round r + 1 of a call's on-demand SSD reads signalled before round r's gather on
+    main (made to land first: its rows are round r's). Reports how often it fired."""
     from holon_std.tiered import resolver
 
     tiers, fired = resolver.DeviceResolver._tiers, collections.Counter()
@@ -1825,7 +1831,6 @@ def _late_demotions(ns: int) -> Iterator[None]:
 
 class _Never(set):
     """A store's `recorded` fences that never hold one: no call waits for an earlier call's moves."""
-
     def add(self, key) -> None:
         pass
 
@@ -1932,8 +1937,8 @@ def keep_into_pending_demotion() -> Iterator[collections.Counter]:
 
 @contextlib.contextmanager
 def _relocation(skip: str, ns: int = 0) -> Iterator[collections.Counter]:
-    """D8w's compaction (`TieredStore._relocate`, docs/v1-glm.md) with one of its parts dropped (`skip`): "copies" (no
-    piece leaves the loan's ranges: `tail_down_not_compacted`), "map" (the pieces copied, the map not moved:
+    """D8w's compaction (`TieredStore._relocate`, docs/dev/v1-glm.md) with one of its parts dropped (`skip`): "copies"
+    (no piece leaves the loan's ranges: `tail_down_not_compacted`), "map" (the pieces copied, the map not moved:
     `compaction_map_stale`), "swap" (the lent experts' layers get their old slots back: `compaction_return_wrong_layer`)
     or "fences" (the copies after a sleep, nothing waiting for them or waited by them, and the loan's down ranges
     written at once as the forward's first allocations may: `compaction_beside_moves`).
@@ -2015,8 +2020,8 @@ def loan_range_overlap() -> Iterator[collections.Counter]:
 
 @contextlib.contextmanager
 def round_slots_reused_early() -> Iterator[collections.Counter]:
-    """D8s (docs/v1-glm.md): a rounds call's parts all gathered before its first part computes — later parts reuse the
-    fixed slots under the earlier parts' pieces."""
+    """D8s (docs/dev/v1-glm.md): a rounds call's parts all gathered before its first part computes — later parts reuse
+    the fixed slots under the earlier parts' pieces."""
     from holon_std.tiered.resolver import DeviceResolver
 
     rounds, fired = DeviceResolver._rounds, collections.Counter()
@@ -2085,7 +2090,7 @@ def spare_lent_outside_tail() -> Iterator[collections.Counter]:
 
 @contextlib.contextmanager
 def keep_copy_skipped() -> Iterator[None]:
-    """docs/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
+    """docs/dev/v1-glm.md §6.3 (D8f): a kept SSD miss's copy into its RAM unit dropped — the request rows' keep unit
     cleared before the I/O worker reads them, so the unit `moe_tiers@2` gave it keeps its old bytes. Reports how
     often it fired."""
     from holon_std.tiered import store as tiered
@@ -2103,7 +2108,7 @@ def keep_copy_skipped() -> Iterator[None]:
 
 @contextlib.contextmanager
 def tail_unmap_undone() -> Iterator[None]:
-    """A tail step's lending (docs/v1-moe-prefill.md D11) logs the range's experts unmapped but leaves them mapped:
+    """A tail step's lending (docs/dev/v1-moe-prefill.md D11) logs the range's experts unmapped but leaves them mapped:
     they keep naming slots the step's expert passes write their buffers into (D10), and the slots come back as empty
     slots while the experts still name them. `lent-slot-still-mapped` cannot stand in: the tail never calls `lend`.
     Reports the experts lent."""
@@ -2652,7 +2657,8 @@ def _stale_slot(fired):
     return [mock.patch.object(SsdLevel, "bind", planted)]
 
 
-# Tier plants (docs/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail; `reuse`
+# Tier plants (docs/dev/v1-kv-tiers.md §6, `holon_judge tiers --plant`): name -> (plant, the checks it must fail;
+# `reuse`
 # and `fork` are run-identity's closed-loop variants, `tiers.LOOPS`). Each yields its counter (`fired`).
 # tentative-shift is also a policy plant: here the audit (a payload filed away from its position) catches it. The SSD
 # level's (read-unwaited, free-on-ticket, torn-manifest, stale-slot) need `state_tier.levels = ssd`; `restart` is
@@ -2714,7 +2720,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "rare-ggml-stale-q8_1": lambda: ggml_stale_q8_1(every=9973),      # ~ one linear in 55 forwards
     # MoE Tier A and the bf16 HF path (Qwen3-30B-A3B: the one-layer plants at layer 24)
     **moe_plants(24), **hf_moe_plants(24, 128),
-    # Quantized HF checkpoints (docs/m06-lowp.md §4.8)
+    # Quantized HF checkpoints (docs/dev/m06-lowp.md §4.8)
     **hf_quant_plants(18), **fp4_plants(18), **fp8_plants(18),
     # MoE Tier B
     "ggml-experts-wrong-type": ggml_experts_wrong_type, "ggml-experts-stale-q8_1": ggml_experts_stale_q8_1,
@@ -2724,9 +2730,9 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "qlinear-large-no-fixup": lambda: qlinear_fixup(2, "qlinear-large-no-fixup"),
     "rare-ggml-experts-stale-q8_1": lambda: ggml_experts_stale_q8_1(every=9973),
     **QWEN35_PLANTS,
-    # The fused q/k norm + rope + KV write (docs/m07-perf.md D3)
+    # The fused q/k norm + rope + KV write (docs/dev/m07-perf.md D3)
     "qk-rope-kv-page-slot": qk_rope_kv_page_slot, "qk-rope-kv-decode-position": qk_rope_kv_decode_position,
-    # Expert offload with adaptive placement (docs/v1-offload.md §6; spikes/x3_policies)
+    # Expert offload with adaptive placement (docs/dev/v1-offload.md §6; spikes/x3_policies)
     "resolve-off-by-one": resolve_off_by_one, "map-before-landing": map_before_landing,
     "map-stale-slot": map_stale_slot, "owner-race": owner_race,
     "owner-race-unchecked": lambda: owner_race(checked=False),
@@ -2738,7 +2744,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "promote_victim_code": promote_victim_code, "landing_reuse_unfenced": landing_reuse_unfenced,
     "ondemand_round_unjoined": ondemand_round_unjoined, "keep_copy_skipped": keep_copy_skipped,
     "moves_unfenced": moves_unfenced,
-    # D8w (docs/v1-glm.md): the whole-expert tail's compaction and its loan ranges
+    # D8w (docs/dev/v1-glm.md): the whole-expert tail's compaction and its loan ranges
     "tail_down_not_compacted": tail_down_not_compacted, "compaction_map_stale": compaction_map_stale,
     "compaction_return_wrong_layer": compaction_return_wrong_layer, "compaction_beside_moves": compaction_beside_moves,
     "loan_range_overlap": loan_range_overlap,
@@ -2747,24 +2753,24 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "part_one_role": part_one_role, "spare_lent_outside_tail": spare_lent_outside_tail,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
-    # QSA's selection (docs/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
+    # QSA's selection (docs/dev/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate
     "qsa_select_shift": lambda: qsa_select_shift(False), "qsa_decode_select_shift": lambda: qsa_select_shift(True),
     "qsa_pool_rope_last": qsa_pool_rope_last, "hc_inject_unscaled": hc_inject_unscaled,
     "ple_gate_no_sqrt": ple_gate_no_sqrt, "rows_off_by_one": rows_off_by_one, "aux_row_padding": aux_row_padding,
     "ple_state_not_carried": ple_state_not_carried, "ple_state_bf16": ple_state_bf16, "shexp_gate_off": shexp_gate_off,
     "mtp_stream0": mtp_stream0, "linear_rows_swap": linear_rows_swap,
-    # GLM-5.3-Flash (docs/v1-glm.md §6.3): the tiny CPU model's
+    # GLM-5.3-Flash (docs/dev/v1-glm.md §6.3): the tiny CPU model's
     **GLM_PLANTS, **GLM_GPU_PLANTS, **REFERENCE_PLANTS,
-    # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/m04-spec.md §5)
+    # Speculative decoding on a recurrent mixer (bounded --spec-vs-plain; docs/dev/m04-spec.md §5)
     "replay-off-by-one": replay_off_by_one, "verify-writes-state": verify_writes_state,
     # Speculative verification (L0-dist, plugins/tests/test_rejection.py; the n_draft cap, test_spec.py)
     "unmasked-padding": unmasked_padding,
     # Draft heads (L0-drafter, `holon_judge drafter`)
     "dflash-tap-offset": dflash_tap_offset,
-    # Logits processors (docs/m05-grammar.md §5): the graphs-vs-eager toy proof (plugins/tests/test_ngram.py), and
+    # Logits processors (docs/dev/m05-grammar.md §5): the graphs-vs-eager toy proof (plugins/tests/test_ngram.py), and
     # grammar.xgrammar's (plugins/tests/test_grammar.py)
     "mask-rows-not-reset": mask_rows_not_reset, "mask-column-shift": mask_column_shift,
     "no-rollback-after-probe": no_rollback_after_probe, "mask-bit-order": mask_bit_order,
     "stop-tokens-masked": stop_tokens_masked, "closing-tokens-masked": closing_tokens_masked,
-    # State tiers (docs/v1-kv-tiers.md §6): `holon_judge tiers --plant`, and the policies' `bounded --policies`
+    # State tiers (docs/dev/v1-kv-tiers.md §6): `holon_judge tiers --plant`, and the policies' `bounded --policies`
     **{name: plant for name, (plant, _) in TIER_PLANTS.items()}, **POLICY_PLANTS}

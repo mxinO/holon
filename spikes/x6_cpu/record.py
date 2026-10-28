@@ -1,4 +1,4 @@
-"""The evidence record of steps 6 and 5 (docs/v1-offload.md §14) from the runs' outputs:
+"""The evidence record of steps 6 and 5 (docs/dev/v1-offload.md §14) from the runs' outputs:
 
     python spikes/x6_cpu/record.py <runs dir> <out.json> <commit>
 

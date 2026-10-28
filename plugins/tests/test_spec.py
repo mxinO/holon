@@ -90,7 +90,7 @@ def test_drafts_past_n_draft_are_never_accepted(tiny_checkpoint, tiny_case, orac
 
 
 def test_the_unmasked_padding_plant_is_caught(tiny_checkpoint, tiny_case, oracle):  # noqa: F811
-    # docs/m04-spec.md §5: a verifier reading every column as a real draft accepts the right drafts of the row whose
+    # docs/dev/m04-spec.md §5: a verifier reading every column as a real draft accepts the right drafts of the row whose
     # drafter declared none (n_draft 0); the drafter's exact check after each verify (n_accept ≤ n_draft) fails.
     from holon_judge.planted import unmasked_padding
 

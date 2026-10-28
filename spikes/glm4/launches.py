@@ -1,4 +1,4 @@
-"""GLM step 4's launch inventory (docs/v1-glm.md acceptance 3, FN's method): kernel launches per decode token on a
+"""GLM step 4's launch inventory (docs/dev/v1-glm.md acceptance 3, FN's method): kernel launches per decode token on a
 4-block slice of the real file (`holon_testing.gguf_files.slice_blocks`: KDA with the dense FFN at blocks 0–2, DSA with
 the routed experts and the shared expert at block 3), eager, after a prompt long enough that DSA selects sparsely
 (> 2,051 tokens). Counted by the profiler as kernel-launch API calls inside each block's mixer, FFN and the rest of

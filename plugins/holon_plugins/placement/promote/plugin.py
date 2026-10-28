@@ -1,4 +1,4 @@
-"""placement.promote@1 (F10, docs/v1-offload.md D1, §13): Project Maya's promote-on-fetch — each layer keeps 3 spare
+"""placement.promote@1 (F10, docs/dev/v1-offload.md D1, §13): Project Maya's promote-on-fetch — each layer keeps 3 spare
 slots the device owns; in the graph a decode miss is promoted into a spare (in route order) and becomes resident, and
 at the step boundary each spare taken is refilled by evicting the layer's least recently routed expert. The host seeds
 the cache (F2's warm start) and never edits it. The policy's own resolve contract `moe_resolve.promote@1`

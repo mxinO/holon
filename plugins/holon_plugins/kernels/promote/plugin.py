@@ -1,5 +1,6 @@
 """placement.promote's resolve contract `moe_resolve.promote@1` (F10) on CUDA: the policy's own kernel plugin, as
-docs/v1-offload.md D3 has a resolve variant after the std offload API's tag ship its CUDA provider (kernels.expert_io
+docs/dev/v1-offload.md D3 has a resolve variant after the std offload API's tag ship its CUDA provider
+(kernels.expert_io
 takes no new policy codes). A call is three launches on the current stream: the promotion CTA (stamp, promotions
 into empty slots and spares: the map, the spares and the delta log), the store's own `moe_resolve@1` — whichever
 provider serves it here — over the map as promoted, and the settling CTA (the promoted pieces' fetches after the staged
@@ -52,9 +53,9 @@ class Resolve:
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
                   spare: torch.Tensor, **state) -> torch.Tensor:
-        """The experts holding class `cls`'s last n slots (docs/v1-glm.md D8a), and the owners of the spares of every
-        layer with a role of class `cls`, released: absent, the owners mapped back to their slots so the caller lends
-        them with the range's holders and returns the slots at the step's end. Device ops, no host sync."""
+        """The experts holding class `cls`'s last n slots (docs/dev/v1-glm.md D8a), and the owners of the spares of
+        every layer with a role of class `cls`, released: absent, the owners mapped back to their slots so the caller
+        lends them with the range's holders and returns the slots at the step's end. Device ops, no host sync."""
         groups, experts, roles = residency.shape
         slots = spare[..., 1:]                                                # [G, S, R]
         freed = (classes == cls).any(1)[:, None] & (spare[..., 0] > 0)       # [G, S]

@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md §9 step 3, §6.1, §13 (step 3)",
+ "doc": "docs/dev/v1-glm.md §9 step 3, §6.1, §13 (step 3)",
  "commits": [
   "1bb7fb15 std units, contracts, references",
   "8cd4eaf3 models.glm5_next, bundle, CPU proof"
@@ -50,7 +50,7 @@
   "check_lock_impact": "warns: the branch outdates committed locks (merge with the propagation round)"
  },
  "review_folds": {
-  "note": "step 3's review minors folded at step 4's start (docs/v1-glm.md §13, step 3's code review); CPU, the pinned tiny f32 GGUF",
+  "note": "step 3's review minors folded at step 4's start (docs/dev/v1-glm.md §13, step 3's code review); CPU, the pinned tiny f32 GGUF",
   "clean (prompt and decode logprobs, top-1, DSA sets incl. decode rows, greedy tokens)": {
    "chunk 128": {
     "logprob": 1.9e-06,

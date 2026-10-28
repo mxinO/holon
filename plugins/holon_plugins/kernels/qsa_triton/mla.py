@@ -1,4 +1,4 @@
-"""Triton kernels for GLM-5.3-Flash's DSA (`dsa_index@1`, `mla_attend@1`; std.mixers.qsa; docs/v1-glm.md D5, D12).
+"""Triton kernels for GLM-5.3-Flash's DSA (`dsa_index@1`, `mla_attend@1`; std.mixers.qsa; docs/dev/v1-glm.md D5, D12).
 Ours, written for this plugin (not adapted).
 
 - `_index`: one program per token. It stores the token's key and gate, and when the token completes a block it pools
@@ -12,7 +12,7 @@ Ours, written for this plugin (not adapted).
   call's other rows, their number or the path (the dense path is this kernel over every block). A tile's latent
   rows are loaded once through the page table for both products, on tensor cores against the bfloat16 latent: q̃
   as one bfloat16 part, the softmax weights as two (hi + lo: exact products, f32 sums); relative L2 ≈ 1e-3 against
-  the float32 oracle (two parts of q̃: 3e-6, at 4 dots a tile; docs/v1-glm.md §13, step 7: the real model's KL).
+  the float32 oracle (two parts of q̃: 3e-6, at 4 dots a tile; docs/dev/v1-glm.md §13, step 7: the real model's KL).
 """
 from __future__ import annotations
 

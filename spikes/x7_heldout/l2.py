@@ -1,4 +1,4 @@
-"""A1's L2 (docs/v1-offload.md §6: `approx`, human-gated): the vehicle under the given options — a frozen placement
+"""A1's L2 (docs/dev/v1-offload.md §6: `approx`, human-gated): the vehicle under the given options — a frozen placement
 (`std.tiered.static@1`, with or without `moe.route_transform = tail_skip`) — scored through the judge at one token per
 step (Tier B's decode path, every expert matmul mmvq), so the plain mmvq floor is its floor:
 

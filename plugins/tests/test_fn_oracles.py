@@ -1,7 +1,7 @@
 """FN's op oracles against HF's modules (transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py`), in the golden
 venv (`local/envs/golden-qwen4`, with the plugins installed), on the CPU in float32 with the tiny model's shapes
 (`holon_testing.qwen4exp_files.tiny_config`) and random weights. The oracles keep float32 where HF rounds to the
-model dtype (the contracts' choice, docs/v1-flash-next.md D4, D6), so in float32 the two compute the same function:
+model dtype (the contracts' choice, docs/dev/v1-flash-next.md D4, D6), so in float32 the two compute the same function:
 
 - `hc_gr_mix@1` / `hc_gr_combine@1`: `Qwen4ExpTextGatedResidual` (a block's and the output mixer's) and the decoder
   layer's `hyper_input + injection`.
@@ -25,7 +25,7 @@ import transformers
 from holon_judge import l0
 
 SKIP = ("FN's op oracles against HF (acceptance 1(a)) did not run: they need transformers with qwen4_exp (5.19.0, "
-        "the golden venv): run `pytest plugins/tests/test_fn_oracles.py` there (docs/release.md §22)")
+        "the golden venv): run `pytest plugins/tests/test_fn_oracles.py` there (docs/dev/release.md §22)")
 if not hasattr(transformers, "Qwen4ExpTextConfig"):
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
 pytestmark = pytest.mark.skipif(not hasattr(transformers, "Qwen4ExpTextConfig"), reason=SKIP)

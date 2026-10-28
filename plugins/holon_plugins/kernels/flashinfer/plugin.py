@@ -2,7 +2,8 @@
 (op contract: std.mixers.gqa; adoption per design §5.6 and spike S1).
 
 Prefill uses the FA2 paged-prefill wrapper (bottom-right causal, so a chunk attends to the context before it; its
-plan splits a long row's KV, so it also serves a mixed step's decode rows: `serves_decode_rows`, docs/m07-perf.md §3.1);
+plan splits a long row's KV, so it also serves a mixed step's decode rows: `serves_decode_rows`, docs/dev/m07-perf.md
+§3.1);
 decode uses the tensor-core decode wrapper. Both plan on the host every step from the block table's host mirror.
 Both read KV in the model dtype (`kv.hnd`) or in e4m3 (`kv.hnd.fp8`, with a bf16/fp16 q, from sm_89 on).
 Each instance alternates two wrappers: a wrapper stages its plan through one pinned buffer with an asynchronous
@@ -112,7 +113,7 @@ def _half(f: dict) -> bool:
 
 
 def _silu(f: dict) -> bool:
-    return _half(f) and ops.supports_glu_limit(f)     # (the clamp: docs/v1-glm.md D6's silu_mul@1 fact)
+    return _half(f) and ops.supports_glu_limit(f)     # (the clamp: docs/dev/v1-glm.md D6's silu_mul@1 fact)
 
 
 def _rope(f: dict) -> bool:

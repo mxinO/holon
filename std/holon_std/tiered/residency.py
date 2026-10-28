@@ -1,6 +1,6 @@
 """The residency map: [groups, items, roles] -> the arena slot of each piece, or −1 − tier when it is not in VRAM
 (the tier holding it). One device buffer the resolvers read, its host mirror, and host edits applied at a fixed
-launch (docs/v1-offload.md D4: decided at commit c, applied at launch c + 2 — or later, a two-phase edit's second
+launch (docs/dev/v1-offload.md D4: decided at commit c, applied at launch c + 2 — or later, a two-phase edit's second
 half —, each with a precondition: the value the host expects the entry to hold; one that fails is not applied and
 raises the device error word the commit checks, so a host edit never lands where a device resolver changed the map).
 
@@ -76,7 +76,7 @@ class ResidencyMap:
         `returned` its lent slots without a marker — every lent item's slots on top of its group's empty stack, in the
         order of their records; given the step's `device` map (as it stood after the step), the mirror is that; given
         its `empty` stacks ([groups, roles, items] slots, [groups] counts: exclusive tiers, whose whole-expert tail
-        swaps lent slots between layers, docs/v1-glm.md D8w), the mirror's stacks are those."""
+        swaps lent slots between layers, docs/dev/v1-glm.md D8w), the mirror's stacks are those."""
         flat = self.host.reshape(-1)
         for launch in sorted(x for x in self._launched if x <= step):
             index, _, value = self._launched.pop(launch)

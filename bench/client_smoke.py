@@ -1,4 +1,5 @@
-"""Real-client smoke at each merge (docs/release.md §22): `holon serve` on a small locked model, driven by the OpenAI
+"""Real-client smoke at each merge (docs/dev/release.md §22): `holon serve` on a small locked model, driven by the
+OpenAI
 and Anthropic SDKs in the request shapes real clients send, a few minutes on one GPU. Every request must succeed and its
 answer be sane (the right number, a parsable tool call, JSON that meets its schema, a tool result used); the server's
 log must hold no traceback.

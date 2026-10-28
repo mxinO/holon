@@ -1,4 +1,4 @@
-"""`holon_tools profile`: a routing profile for the offload store's warm start (docs/v1-offload.md F2, §14) — the
+"""`holon_tools profile`: a routing profile for the offload store's warm start (docs/dev/v1-offload.md F2, §14) — the
 routes of a prompt set's decode rows per (layer, expert), counted through the offload store's route taps (its
 `after_commit` counts), as `{"checkpoint": [[file, bytes], …], "layers": {"<layer>": [count per expert]}}` (the store
 refuses it on other files). It lies beside the checkpoint, under a name relative to its directory (default: the

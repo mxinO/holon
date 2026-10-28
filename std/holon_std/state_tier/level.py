@@ -1,4 +1,5 @@
-"""The `Level` protocol: a storage level below std.state_tier's host level (docs/v1-kv-tiers.md D3). `state_tier.levels`
+"""The `Level` protocol: a storage level below std.state_tier's host level (docs/dev/v1-kv-tiers.md D3).
+`state_tier.levels`
 binds one: the built-in `ssd`, or a `Ref` to a level unit. Plugins implement it structurally (they cannot import std),
 with `holon.api` types and builtins only.
 

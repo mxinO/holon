@@ -1,4 +1,4 @@
-"""Milestone K step 0 (docs/v1-kv-tiers.md §8): K-M2 copy paths (K-M3 folded in) and K-M4 NVMe.
+"""Milestone K step 0 (docs/dev/v1-kv-tiers.md §8): K-M2 copy paths (K-M3 folded in) and K-M4 NVMe.
 
     CUDA_VISIBLE_DEVICES=0 python bench.py --tag rtx-5080 [--only m2,m3,m4] [--quick] [--merge] \
         --model <27B gguf> --lock <lock> --nvme-dir <dir> --storage "local NVMe"
@@ -43,7 +43,7 @@ FRAGS = {"random": 1, "runs4": 4, "runs16": 16}
 TILE = 64 << 10                                      # the SM copy's largest work item
 CTAS, UNROLLS = (2, 4, 8, 16, 32, 64, 128), (2, 4, 8)
 
-PREDICTIONS = {  # fixed before measuring (docs/v1-kv-tiers.md §8, the step-0 brief)
+PREDICTIONS = {  # fixed before measuring (docs/dev/v1-kv-tiers.md §8, the step-0 brief)
     "m2": {
         "blob_h2d_gbps": {"rtx-5080": [46.6, 48.4], "rtx-5090": [46.6, 48.4], "rtx-a5000": [22.0, 26.0],
                           "note": "one big copy from S2 host memory; X's M1 46.6-48.4 (47.5 nominal)"},

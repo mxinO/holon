@@ -1,4 +1,4 @@
-"""holon_judge tiers on the CPU (docs/v1-kv-tiers.md acceptance 2, §6): the clean checks pass on a tiny dense and a
+"""holon_judge tiers on the CPU (docs/dev/v1-kv-tiers.md acceptance 2, §6): the clean checks pass on a tiny dense and a
 tiny hybrid model with std.state_tier, each tier plant gets its calibrated verdict, the checkpoint policies' plants
 fail `bounded --policies`, and a `branch` checkpoint resumes bitwise as the state recomputed with equal chunks."""
 import json
@@ -171,7 +171,7 @@ def test_the_level_passes_run_identity_without_a_watermark_and_with_late_io(tiny
 
 
 # free-on-ticket is not here: at the host pools' floors the tier's internal check catches it (a RuntimeError from
-# _read_back); above them the window did not open on this trace (docs/v1-kv-tiers.md §13, "After the tag").
+# _read_back); above them the window did not open on this trace (docs/dev/v1-kv-tiers.md §13, "After the tag").
 @pytest.mark.slow
 @pytest.mark.parametrize("plant", ["read-unwaited", "torn-manifest", "torn-manifest-unchecked", "stale-slot"])
 def test_a_level_plant_is_caught(plant, dense_ssd):

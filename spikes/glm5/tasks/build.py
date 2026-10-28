@@ -1,4 +1,4 @@
-"""GLM's task-accuracy set (docs/v1-glm.md acceptance 1(d)): FN's 72 synthetic items (`spikes/fn7/tasks/build.py`,
+"""GLM's task-accuracy set (docs/dev/v1-glm.md acceptance 1(d)): FN's 72 synthetic items (`spikes/fn7/tasks/build.py`,
 seed 7: math, code and reasoning as FN's, the same draws), the recall filler sized with GLM-5.3-Flash's tokenizer to
 about 8K and 32K tokens (so the items after it draw on: the multi-turn ones are GLM's own). Synthetic, as FN's
 (Apache-2.0, this repository). `run.py` renders each chat with GLM's template.

@@ -1,4 +1,5 @@
-"""`state_tiers.zlib`: a `Level` below std.state_tier's host level (docs/v1-kv-tiers.md §1's held-out proof, D3) that
+"""`state_tiers.zlib`: a `Level` below std.state_tier's host level (docs/dev/v1-kv-tiers.md §1's held-out proof, D3)
+that
 the protocol was not shaped around. It keeps lossless zlib blobs of variable size in plain memory instead of fixed
 slots, compressing and decompressing on the tier's I/O threads (CPU threads) between its blobs and the host units.
 It takes pages and payloads alike when the host level evicts them, and reports CPU rates for the tier's clock. Its

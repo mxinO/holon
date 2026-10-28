@@ -1,4 +1,4 @@
-"""M0.7 step 2's keep-or-revert measurement (docs/m07-perf.md §1.1): each fusion's saving, measured incrementally on
+"""M0.7 step 2's keep-or-revert measurement (docs/dev/m07-perf.md §1.1): each fusion's saving, measured incrementally on
 one engine, per release row — graphed decode B1/B4/B8 (or verify steps when the deployment drafts) by per-step wall,
 eager prefill by wall.
 

@@ -1,4 +1,5 @@
-"""std.state_tier's `state_copy@1` (op contract: std.state_tier.kernels; docs/v1-kv-tiers.md D10): row copies between
+"""std.state_tier's `state_copy@1` (op contract: std.state_tier.kernels; docs/dev/v1-kv-tiers.md D10): row copies
+between
 device pools and mapped host pools. Loads by the SM gather (8 CTAs × 256 threads of 16-byte loads, no copy engine, so
 an engine step's own copies never queue behind a load: K step 0's K-M2 and K-M3), stores by one
 `cudaMemcpyBatchAsync` (copy-engine DMA, faster into host memory); the fact `copy` overrides either.

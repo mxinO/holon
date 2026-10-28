@@ -14,7 +14,7 @@ import torch
 import transformers
 
 SKIP = ("FN's golden against HF on the tiny model (acceptance 1(a)) did not run: it needs transformers with qwen4_exp "
-        "(the golden venv) and FN_LLAMA_CPP (llama.cpp at 27c7a76): docs/release.md §22")
+        "(the golden venv) and FN_LLAMA_CPP (llama.cpp at 27c7a76): docs/dev/release.md §22")
 if not hasattr(transformers, "Qwen4ExpTextConfig") or not os.environ.get("FN_LLAMA_CPP"):
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
 pytestmark = pytest.mark.skipif(not hasattr(transformers, "Qwen4ExpTextConfig") or not os.environ.get("FN_LLAMA_CPP"),

@@ -1,6 +1,6 @@
 {
  "date": "2026-10-25",
- "doc": "docs/v1-glm.md §9 step 4, D3-D6, D9, D12, §13 (step 4)",
+ "doc": "docs/dev/v1-glm.md §9 step 4, D3-D6, D9, D12, §13 (step 4)",
  "commits": {
   "mhc": "0655d672 kernels.hc_triton: hc_mhc_mix@1, hc_mhc_writeback@1",
   "kda": "9bb4556d kernels.fla: kda@1, the rewind's gate width; kernels.gdn_triton's KDA cases",

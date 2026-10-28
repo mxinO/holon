@@ -1,6 +1,6 @@
 """Qwen3.8-Flash-Next's frontend bundle, carried over from `models.qwen3_5`'s (`derived_from`): the checkpoint's
 tokenizer and chat template, from whichever source holds the weights (a GGUF file), and the formats the template
-writes reasoning and tool calls in (docs/m05-grammar.md §3.8; the frontend parses and constrains each format); the
+writes reasoning and tool calls in (docs/dev/m05-grammar.md §3.8; the frontend parses and constrains each format); the
 tool format is read off the template."""
 from __future__ import annotations
 

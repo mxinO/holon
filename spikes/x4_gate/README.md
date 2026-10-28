@@ -1,6 +1,6 @@
 # x4_gate — milestone X step 4: the development gate's natural-fit rows (RTX 5080)
 
-`docs/v1-offload.md` §1 acceptance 3, D4, D9, D14, §13. Qwen3-30B-A3B Q4_K_M (`unsloth/Qwen3-30B-A3B-GGUF`) on one
+`docs/dev/v1-offload.md` §1 acceptance 3, D4, D9, D14, §13. Qwen3-30B-A3B Q4_K_M (`unsloth/Qwen3-30B-A3B-GGUF`) on one
 RTX 5080 desktop, batch 1, greedy, no drafting, contexts ≤ 32K. Record: `evidence/x4_gate_rtx-5080_2026-10-17.json`
 (every round, the lock's text and verdict, the tables below). Holon at `63c6e4b` (the v1-offload branch after step 3d,
 plus the two fixes below); llama.cpp `f74e2fa6a31c` and FreeToken `21d9578bde22`, x4_refs' builds.

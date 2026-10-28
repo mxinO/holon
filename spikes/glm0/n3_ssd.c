@@ -1,4 +1,4 @@
-// GLM step 0, N3 (docs/v1-glm.md §8, D8f): the SSD read path's rate on the bar node's NVMe, before the store is built.
+// GLM step 0, N3 (docs/dev/v1-glm.md §8, D8f): the SSD read path's rate on the bar node's NVMe, before the store is built.
 //
 // Reads "experts" from the model's GGUF shards with O_DIRECT: an expert is three extents (Maya-S: gate 2,162,688 B,
 // up 2,162,688 B, down 2,686,976 B = 7,012,352 B), each at a random 4 KiB-aligned offset, split into `chunk`-byte

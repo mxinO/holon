@@ -1,4 +1,5 @@
-"""std.state_tier (docs/v1-kv-tiers.md D3–D11): copies of prefix-index blocks in pinned host memory below the device,
+"""std.state_tier (docs/dev/v1-kv-tiers.md D3–D11): copies of prefix-index blocks in pinned host memory below the
+device,
 and optionally on one `Level` below that (`state_tier.levels`: the built-in `ssd`, or a `Ref` to a level unit), the
 slot `tier`'s plugin.
 

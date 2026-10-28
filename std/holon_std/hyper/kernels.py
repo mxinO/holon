@@ -1,4 +1,5 @@
-"""The op contracts of the gated-residual hyper-connections (docs/v1-flash-next.md D3, D13′: named for this form; GLM's
+"""The op contracts of the gated-residual hyper-connections (docs/dev/v1-flash-next.md D3, D13′: named for this form;
+GLM's
 mHC, with a stream-mixing matrix, will add siblings). Their oracles are in `reference.py`; kernels come from kernel
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs.
 
@@ -22,7 +23,7 @@ each read in float32.
 - `hc_gr_combine@1`: instance `(r [T, n·H] f32, y [T, H], w [T, n] f32) -> None`: in place, `R_s += w_s · y` (y read in
   float32). Facts: streams, hidden, dtype (y's).
 
-GLM-5.3-Flash's manifold-constrained hyper-connections (mHC; docs/v1-glm.md D3, HF's `Glm5NextTextHyperConnection`),
+GLM-5.3-Flash's manifold-constrained hyper-connections (mHC; docs/dev/v1-glm.md D3, HF's `Glm5NextTextHyperConnection`),
 siblings of the above on the same residual, every operation in float32 with IEEE products and sums:
 
 - `hc_mhc_mix@1`: instance `(r [T, n·H] f32, fn [(2 + n)·n, n·H], base [(2 + n)·n] f32, scale [3] f32, y_prev [T, H]

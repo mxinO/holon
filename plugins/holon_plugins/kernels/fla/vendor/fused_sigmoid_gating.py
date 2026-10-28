@@ -33,7 +33,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     dt_bias,
     beta,
     threshold,
-    lower_bound,  # Holon: KDA's bounded gate (docs/v1-glm.md D4), with USE_LOWER_BOUND
+    lower_bound,  # Holon: KDA's bounded gate (docs/dev/v1-glm.md D4), with USE_LOWER_BOUND
     q,
     k,
     v,

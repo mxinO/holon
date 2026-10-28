@@ -1,4 +1,4 @@
-"""The Gated DeltaNet mixer (docs/m03-qwen38.md §4.2): `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a` →
+"""The Gated DeltaNet mixer (docs/dev/m03-qwen38.md §4.2): `in_proj_qkv`, `in_proj_z`, `in_proj_b`, `in_proj_a` →
 `causal_conv1d` → `gated_delta_rule` → `gated_rmsnorm` → `out_proj`.
 
 Per-request state is two `Slot` specs of one planner group (`recurrent`): the conv state ([C, K-1] per layer, in the
@@ -15,7 +15,7 @@ past its first 1 + n tokens — g = −exp(A)·softplus(−1e4) = 0 and β = sig
 writing the state after the accepted tokens; its convolution is recomputed from the saved window. Both delta-rule
 calls are planned `per_token`, so the result is bitwise what 1 + n one-token decode steps would leave.
 
-The glue runs once per step for every layer (docs/m07-perf.md D5): the replay buffers have a layer axis (one buffer
+The glue runs once per step for every layer (docs/dev/m07-perf.md D5): the replay buffers have a layer axis (one buffer
 per name, each layer's slice at its index in the group), and the group's first layer — `rewind_modules` visits a
 model's layers in order; no counter, so graph warm-up and capture behave alike — calls `gdn_rewind`, one launch that
 masks every layer's saved gates and writes every layer's conv window at the accepted end into the pool, from window ‖
@@ -62,7 +62,7 @@ class GDNMeta:
 
 
 class Planner:
-    """The group's delta-rule plans per step. A mixed step (`BatchPlan.n_decode` n > 0, docs/m07-perf.md §3.1) is
+    """The group's delta-rule plans per step. A mixed step (`BatchPlan.n_decode` n > 0, docs/dev/m07-perf.md §3.1) is
     planned per row kind: its n decode rows as a decode step's (the recurrent kernel), the prefill chunks after them
     as a prefill step's (chunked, their in-step checkpoints' rows re-based), so each row computes as in its own
     unmixed step."""
@@ -303,7 +303,7 @@ class GDN(nn.Module):
 
 @dataclasses.dataclass(eq=False)
 class SubBatch:
-    """A KDA step's sub-batch (docs/v1-glm.md D4, D9): tokens [lo, hi) of the step, its row pieces (`rows`: the step
+    """A KDA step's sub-batch (docs/dev/v1-glm.md D4, D9): tokens [lo, hi) of the step, its row pieces (`rows`: the step
     rows they belong to; `cont`: pieces after a row's first, which continue its state), their plan, the snapshots
     falling at a piece's end (the piece's final state, copied) and the conv payloads inside it."""
 
@@ -381,8 +381,8 @@ class KDAPlanner(Planner):
 
 
 class KDA(nn.Module):
-    """GLM-5.3-Flash's Kimi delta attention mixer (docs/v1-glm.md D4; HF's `Glm5NextTextLinearAttention`): q, k and v
-    projections → their causal convs (f32 weights, one conv over q ‖ k ‖ v) → `kda@1` with the per-channel forget gate
+    """GLM-5.3-Flash's Kimi delta attention mixer (docs/dev/v1-glm.md D4; HF's `Glm5NextTextLinearAttention`): q, k and
+    v projections → their causal convs (f32 weights, one conv over q ‖ k ‖ v) → `kda@1` with the per-channel forget gate
     `f_b(f_a(x))` and β = σ(b(x)) → `gated_rmsnorm@1` (sigmoid of `g_b(g_a(x))`, f32 through the weight: `round =
     "none"`) → `o_proj`. Its state is GDN's two `Slot` specs (the conv windows of q, k, v in the model dtype; the
     recurrent [H, Dv, Dk] f32), GDN's planner and in-step checkpoints. With `rows` > 0 a prompt step runs as sub-batches
@@ -406,7 +406,7 @@ class KDA(nn.Module):
     def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Planner:
         if ctx.options.get("max_draft_tokens"):
             raise ValueError("std.mixers.kda@1: speculative verify rows are not served (MTP is deferred, "
-                             "docs/v1-glm.md D7)")
+                             "docs/dev/v1-glm.md D7)")
         facts = cls._facts(params, str(ctx.dtype).removeprefix("torch."))
         rule = ctx.select_kernel(kernels.KDA, site=GROUP, **facts).impl(ctx, **facts)
         return KDAPlanner(rule, params.get("conv_kernel", 4), params.get("rows", 0))

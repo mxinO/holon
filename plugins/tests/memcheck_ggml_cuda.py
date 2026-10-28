@@ -5,7 +5,7 @@
 Without torch's caching allocator every tensor is its own cudaMalloc of exactly its size, so a read past the weight
 blocks (or the activations, or the workspace) is outside any allocation. Every type, `in` 768 and 2304 (not
 multiples of 512), mmvq at 1, 2 and the type's threshold, mmq above it and at 513 rows (bf16 out: the stream-k
-fixup's staged tiles, docs/m07-perf.md D4), and get_rows; the fused SwiGLU at one row and inputs prepared once for
+fixup's staged tiles, docs/dev/m07-perf.md D4), and get_rows; the fused SwiGLU at one row and inputs prepared once for
 mmvq (D6); the HF FP4 layouts through `prepare` (NVFP4's scale2 on every path) at `act_quant` a8 and a4 — native
 W4A4 on sm_120, which reads the zeroed tail `prepare` appends and nothing past it.
 """

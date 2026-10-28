@@ -11,7 +11,7 @@ minors; rev 5 drew A 2 + 1 + nit, B 3 minors, C 1 + 1; rev 4 drew A 1 major + 2 
 traces, N3 and N4's A5000 probes done; §8). In the engine only step 1's (b)+(e) is built. Parameters marked "est."
 freeze when step 0's evidence lands.
 
-**Scope.** Plan §10 ("Expert caching/offload", milestone GLM) and `docs/v1-offload.md`:
+**Scope.** Plan §10 ("Expert caching/offload", milestone GLM) and `docs/dev/v1-offload.md`:
 - D2: the target (45 layers: 11 MLA + DSA indexer, 34 KDA; 288 experts top-8 + 1 shared; mHC; sigmoid `noaux_tc`
   routing with a SwiGLU clamp of 10; MTP);
 - §1 acceptance 4: the program bar against Project Maya on the RTX 5090 with Maya-S;
@@ -129,7 +129,7 @@ placement; then meet the program bars against Project Maya on the RTX 5090, with
    first kernel, including a multi-row step past `SUB_TOKENS` with KDA, and asserts **≤ 150 KiB of live activations
    per token** (R included) on a sub-batched step at 16K and at 32K (C-R2-M3; N4 measured ≈ 119 / ≈ 113 KiB on the
    A5000).
-4. **Program bars** (`docs/v1-offload.md` §1.4; protocol and statistics D11), RTX 5090, Maya-S, each engine's
+4. **Program bars** (`docs/dev/v1-offload.md` §1.4; protocol and statistics D11), RTX 5090, Maya-S, each engine's
    drafting as deployed (Maya: none on one NVIDIA GPU, G-B §5; Holon: none unless D7 builds and ships MTP), 1K / 4K /
    32K:
 
@@ -1562,7 +1562,7 @@ busy after a prompt).
 | Q4 | The 16 GB row: RTX 5080, Maya-S, mode (i), reported (not gated), with a lock because it is the development lock class? | **Yes** |
 | Q5 | Maya's 32K cells: gated against the faster of its default and `CKPT_EVERY=0`? | **Yes** |
 | Q6 | The prefill bar stays 0.9× (v1-offload §1.4; FN closed with it), decode 1.0× in tok/s? | **Yes** |
-| Q7 | Holon stays exact (GPU-only) by default; a CPU split only by `docs/v1-offload.md` D4's rule, reported; R3's lever decided at step 0's end? | **Yes** |
+| Q7 | Holon stays exact (GPU-only) by default; a CPU split only by `docs/dev/v1-offload.md` D4's rule, reported; R3's lever decided at step 0's end? | **Yes** |
 | Q8 | Core: 0 planned, a hard cap of +5 lines against the merge-base, each line escalated to the owner? | **Yes** (step 6: +1 line and 2 changed in `platform.peak_memory`, owner, 2026-10-26) |
 | Q9 | Disk: Maya-S only (done, 96.5 GB); no HF FP8 checkpoint (328 GB); keep FN's GGUFs (≈ 115 GB) for FN's propagations? | **Yes** |
 | Q10 | Mode (ii) = the 5090 lock + one pre-registered override set (file tier, `moe.ram` in experts, `--host-memory`, placement, `moe.read_ahead`, `io_depth`; D10), not a lock keyed on host RAM? | **Yes** |

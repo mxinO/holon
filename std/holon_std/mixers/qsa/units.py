@@ -1,4 +1,4 @@
-"""`std.mixers.qsa@1`: Qwen3.8-Flash-Next's indexed sparse attention (docs/v1-flash-next.md D6; op contracts in
+"""`std.mixers.qsa@1`: Qwen3.8-Flash-Next's indexed sparse attention (docs/dev/v1-flash-next.md D6; op contracts in
 `kernels.py`).
 
 The attention is gqa's, composed by Ref (`attn`: `std.mixers.gqa@1` with the same parameters, so its projections,
@@ -237,7 +237,7 @@ class LatentPlanner:
 
 
 class DSAMLA(nn.Module):
-    """`std.mixers.dsa_mla@1`: GLM-5.3-Flash's DSA attention (docs/v1-glm.md D5; HF's `Glm5NextTextAttention` and
+    """`std.mixers.dsa_mla@1`: GLM-5.3-Flash's DSA attention (docs/dev/v1-glm.md D5; HF's `Glm5NextTextAttention` and
     `Glm5NextTextIndexer`), NoPE MLA absorbed over its latent, the indexer reading MLA's query residual `q_r`.
 
     Per step: `q_r = norm(q_a(x))`, the latent `c = norm(kv_a(x))` written at the tokens' positions (spec `"kv"`); the

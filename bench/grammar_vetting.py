@@ -1,4 +1,5 @@
-"""What grammar.xgrammar's vetting, compiling and masks cost (docs/m05-grammar.md D5, §6; evidence record): a vetting
+"""What grammar.xgrammar's vetting, compiling and masks cost (docs/dev/m05-grammar.md D5, §6; evidence record): a
+vetting
 worker's start — spawn to ready, which is also the respawn time after a kill — and its resident set; per constraint,
 the worker's compile time, compiled size and peak resident growth, beside the engine process's own compile on a
 thread, and the time to fill one mask row (at every token of a sample output for the fixed constraints, at the start

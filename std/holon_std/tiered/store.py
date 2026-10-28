@@ -1,4 +1,4 @@
-"""std.tiered.store@1: the engine's one tiered store of offloaded pieces (docs/v1-offload.md D5) — slot classes with
+"""std.tiered.store@1: the engine's one tiered store of offloaded pieces (docs/dev/v1-offload.md D5) — slot classes with
 VRAM arenas and host tiers, the residency map, the placement policy and its device state, the per-step row kinds,
 counts and delta log.
 
@@ -9,7 +9,7 @@ binds kernels. Then, through the engine's hooks:
 - `before_materialize`: one VRAM pool for every class's arena — a fill pool growing to every piece, or the size
   `cache` pins — and per class a mapped host pool of the tier, filled from the extents; both pools' unit is the
   classes' common divisor, so a between-step copy of a piece is a MemOp of whole units; with `ring_lend = "tail"`
-  the tail (docs/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
+  the tail (docs/dev/v1-moe-prefill.md D11): its class and its slots, from the bytes the clients' passes take
   (`tail_bytes`);
 - `after_materialize` (after every materialize): the policy seeds whole items within the pool's bytes (and each
   class's pinned slots: beside fill classes, a pinned class's hottest items first, so it gets them); then each
@@ -55,7 +55,7 @@ PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
 ROUNDS_BELOW = 8192                          # D8s: steps of fewer prompt tokens stage in rounds (a 32K step's
 #                                              rounds serialize its gathers, ≈ 3% of its wall time, for ≈ 0 bytes)
-ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (docs/v1-glm.md D8f)
+ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (v1-glm.md D8f)
 DEPTH = 2                                    # layers read ahead (D8f): layer g + DEPTH's set at layer g's end
 READ_AHEAD_TOKENS = 2048                     # a prompt step reads ahead from this many prompt tokens (D8f)
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
@@ -140,7 +140,7 @@ class TieredStore:
         self._loan_fixed = max(loan_fixed, LOAN_SLACK)
         self.loan_overflows, self.loan_overflow_most = 0, 0        # lent steps that overflowed; the most bytes
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
-        # `ram_heat` (`moe.ram_heat`, docs/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
+        # `ram_heat` (`moe.ram_heat`, docs/dev/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
         # for parking, keeps and demotions — by a long-memory heat of its own, decaying by this factor a decode token
         # (each routed expert of a token +1; seeded from the profile), not the policy's ≈ 12-token one: the decode after
         # a lending prompt then reads fewer long-term-warm experts back from the SSD (0: the policy's heat)
@@ -173,7 +173,7 @@ class TieredStore:
             raise ValueError(f"{name}: ring_copy {ring_copy!r}: sm or dma")
         # `ring_lend`: what a streaming step lends — the policy's coldest whole experts ("coldest", D4), or first the
         # experts holding the last slots of the largest class arena, a contiguous range its clients' passes take their
-        # buffers from (`tail`), then the coldest ("tail", docs/v1-moe-prefill.md D11)
+        # buffers from (`tail`), then the coldest ("tail", docs/dev/v1-moe-prefill.md D11)
         if ring_lend not in ("coldest", "tail"):
             raise ValueError(f"{name}: ring_lend {ring_lend!r}: coldest or tail")
         self.ring_copy, self.ring_lend = ring_copy, ring_lend
@@ -182,14 +182,14 @@ class TieredStore:
         self._step_tail: tuple[int, int] | None = None       # a ring step's tail: the tail's last n it lends
         # `lend_peak` (FN step 7): a tail step's activations from the tail's last bytes (`lend_activations`, the core's
         # ActivationLender), so the engine reserves only the worst step that streams nothing
-        # (`require`: as `on`, and the store raises where it would lend nothing: docs/v1-glm.md D9)
+        # (`require`: as `on`, and the store raises where it would lend nothing: docs/dev/v1-glm.md D9)
         if lend_peak not in ("off", "on", "require"):
             raise ValueError(f"{name}: moe.lend_peak is off, on or require, not {lend_peak!r}")
         self.lend_peak, self._require_loan, self._asked = lend_peak != "off", lend_peak == "require", False
         self._loan, self._loan_bytes, self._loaned = None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
-        # D8w (docs/v1-glm.md), exclusive tiers: the whole-expert tail's other classes, {class index: its last m
+        # D8w (docs/dev/v1-glm.md), exclusive tiers: the whole-expert tail's other classes, {class index: its last m
         # slots}, beside the tail's class; a tail step's own share of them; its loan's bytes in the tail's class
         self.tail_down: dict[int, int] = {}
         self._step_down: dict[int, int] = {}
@@ -287,9 +287,9 @@ class TieredStore:
                 self.staging = self.prefill
                 for c in self.classes.values():
                     c.staging = self.prefill
-            # Exclusive tiers lend a prompt step its staging (docs/v1-glm.md D8b+e): a lent expert leaves VRAM, parked
-            # in RAM (its slots copied into its units first) or for the SSD (the file always holds it: `_park`). Its
-            # large steps stage (`before_launch`): the ring copies RAM units only, and an SSD-only piece has none.
+            # Exclusive tiers lend a prompt step its staging (docs/dev/v1-glm.md D8b+e): a lent expert leaves VRAM,
+            # parked in RAM (its slots copied into its units first) or for the SSD (the file always holds it: `_park`).
+            # Its large steps stage (`before_launch`): the ring copies RAM units only, and an SSD-only piece has none.
             self._order = {g: n for n, g in enumerate(sorted(self.groups))}
             shape = (len(self._order), self.items, self.roles)
             self.residency = ResidencyMap(self.ctx, self.name, shape)
@@ -399,8 +399,8 @@ class TieredStore:
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
                                                                                                        pool="io")
-        # SSD reads' landing (docs/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's j-th
-        # SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
+        # SSD reads' landing (docs/dev/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's
+        # j-th SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
         # into the I/O worker's view before its signal
         self.landing_rows = min(max(ON_DEMAND, self.staging), self.prefill)
         # read-ahead sets (prompt steps of READ_AHEAD_TOKENS and no decode rows): DEPTH sets of A_ra rows after the
@@ -513,7 +513,7 @@ class TieredStore:
                 shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
                 self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
                                              min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
-            # landing rows (docs/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
+            # landing rows (docs/dev/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
             # (the class's runs, above); one pool a role — a layer's role is of one class, so its classes share it
             # (step 1's review C S1-m2) —, its rows as wide as its classes' widest piece's supersets: every class
             # reads row j at the same bytes (a narrower class's pieces in its first bytes)
@@ -631,7 +631,7 @@ class TieredStore:
             self.ram_heat.copy_(prof / max(float(prof.sum()), 1.0) * prof.numel() * 0.5)
             self._ram_decay_t.fill_(self._ram_decay)
         flag = getattr(self.policy, "exclusive_flag", None)  # a policy's own flag: its resolve logs what exclusive
-        if self.exclusive and flag:                          # tiers must place (F10's refills: docs/v1-glm.md D8a)
+        if self.exclusive and flag:                          # tiers must place (F10's refills: docs/dev/v1-glm.md D8a)
             self.state[flag].fill_(1)
         self._written, self.peak_misses = 0, 0
         self._sized = False                     # the arena's size is checked at the first launch after a materialize
@@ -662,7 +662,7 @@ class TieredStore:
         return self.ahead_pool.device_view(torch.int32, shape) if device else self.ahead_pool.view(torch.int32, shape)
 
     def read_ahead(self, g: int) -> None:
-        """Layer g's read-ahead (docs/v1-glm.md D8f), on the current stream: the first A_ra of its SSD-only set,
+        """Layer g's read-ahead (docs/dev/v1-glm.md D8f), on the current stream: the first A_ra of its SSD-only set,
         lowest ids first, into its set's rows (its map `ahead_map[g]`), requested, signalled."""
         a, base = self.ahead_rows, self.landing_rows + (g % DEPTH) * self.ahead_rows
         only = (self.residency.device[g] == -2).all(-1)                            # [E]
@@ -873,7 +873,8 @@ class TieredStore:
 
     # -- a step's forward ---------------------------------------------------------------------------------------------
     def large_passes(self, tokens: int) -> bool:
-        """A step of `tokens` takes large expert passes (D8; its stacks' kernels' `pass_rows`, docs/v1-moe-prefill.md
+        """A step of `tokens` takes large expert passes (D8; its stacks' kernels' `pass_rows`,
+        docs/dev/v1-moe-prefill.md
         D1): when its prompt could stream through the ring — by its size and the store's terms, never the layout's, so
         that the startup profile's worst step (on minimum pools, where a fill cache holds nothing to lend) runs such
         passes too. A pass's misses fit a prefill pass's staging (`prefill` = every item), lent or not."""
@@ -882,7 +883,7 @@ class TieredStore:
 
     def begin(self) -> None:
         """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any; then
-        a read-ahead step's first DEPTH layers' sets (docs/v1-glm.md D8f)."""
+        a read-ahead step's first DEPTH layers' sets (docs/dev/v1-glm.md D8f)."""
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
@@ -1054,8 +1055,8 @@ class TieredStore:
         return self._unmap(picked, call)
 
     def lend_tail(self, cls: int, n: int) -> torch.Tensor:
-        """A tail step's call 0 (docs/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last `n`
-        slots, as the resolve contract's `lend_tail` picks them (with the policy's released spares'), unmapped and
+        """A tail step's call 0 (docs/dev/v1-moe-prefill.md D11): the whole experts holding any of class `cls`'s last
+        `n` slots, as the resolve contract's `lend_tail` picks them (with the policy's released spares'), unmapped and
         logged as `lend`'s. Returns the picks [groups, items]."""
         picked = self.resolvers[0].resolve.lend_tail(cls, n, self.residency.device, self._class_index, self.limits,
                                                      **self.state)
@@ -1067,7 +1068,7 @@ class TieredStore:
         return picked
 
     def _compaction(self, picked: torch.Tensor) -> tuple[torch.Tensor, list]:
-        """D8w (docs/v1-glm.md): a whole-expert tail's other classes freed for the loan. Per class with a tail of m
+        """D8w (docs/dev/v1-glm.md): a whole-expert tail's other classes freed for the loan. Per class with a tail of m
         slots: its residents there (not lent) are paired, k-th to k-th, with the slots the tail's lent experts free
         outside it; a resident left without one is lent too (whole). Returns the lent experts and, per class, the
         relocations' table — on the device, no host sync."""
@@ -1145,7 +1146,7 @@ class TieredStore:
         call's number."""
         self.lent_slots.copy_(torch.where(picked[..., None], self.residency.device, self.lent_slots))
         self.lent_call.masked_fill_(picked, call)
-        if self.exclusive:                       # out of VRAM into RAM or onto the SSD (docs/v1-glm.md D8b)
+        if self.exclusive:                       # out of VRAM into RAM or onto the SSD (docs/dev/v1-glm.md D8b)
             self._park(picked)
         else:
             self.residency.device.masked_fill_(picked[..., None], -1)
@@ -1163,7 +1164,7 @@ class TieredStore:
         return picked
 
     def _park(self, picked: torch.Tensor) -> None:
-        """Exclusive tiers (docs/v1-glm.md D8b, Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups, items],
+        """Exclusive tiers (docs/dev/v1-glm.md D8b, Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups, items],
         still mapped to their slots, leave VRAM hottest first (ties by group, then id): into free RAM units of their
         classes, else into the units of RAM's coldest expert of the same classes when strictly hotter (that one goes to
         the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit now,
@@ -1178,7 +1179,7 @@ class TieredStore:
         picked = picked.reshape(-1)
         # a lent expert already in RAM (a policy's released spare's owner, mapped back to its spare's slots by its
         # `lend_tail`) stays there; one holding a slot of this step's activation loan goes to the SSD (the forward
-        # writes the loan before these copies may run: docs/v1-glm.md D8b, step 1's review S1-B1)
+        # writes the loan before these copies may run: docs/dev/v1-glm.md D8b, step 1's review S1-B1)
         already = picked & (units >= 0).all(1)
         lent = picked & ~already & ~self._in_loan(cls, slots)
         # 1. free units: the k-th lent expert (hottest first) needing class c takes c's k-th free unit, if each of its
@@ -1359,8 +1360,8 @@ class TieredStore:
 
     @property
     def rounds_able(self) -> bool:
-        """D8s (docs/v1-glm.md): a staging step under exclusive tiers may stage its misses in rounds through a fixed set
-        of slots — every pass pipelines (its clients compute part by part) and the policy admits no prompt row's
+        """D8s (docs/dev/v1-glm.md): a staging step under exclusive tiers may stage its misses in rounds through a fixed
+        set of slots — every pass pipelines (its clients compute part by part) and the policy admits no prompt row's
         misses (no staged piece must outlive its round)."""
         if not (self.exclusive and self._pipelining and getattr(self.policy, "prompt_admissions", True) is False):
             return False
@@ -1372,8 +1373,8 @@ class TieredStore:
 
     @property
     def whole_tail(self) -> bool:
-        """D8w (docs/v1-glm.md): under exclusive tiers a tail lends its experts whole — the tail's class's last n slots
-        and each other role's class's last m — so no lent expert's piece is displaced unused."""
+        """D8w (docs/dev/v1-glm.md): under exclusive tiers a tail lends its experts whole — the tail's class's last n
+        slots and each other role's class's last m — so no lent expert's piece is displaced unused."""
         return self.exclusive and self.roles > 1
 
     def _shares(self) -> dict[int, float]:

@@ -1,6 +1,6 @@
 # x4_gap at 32K: acceptance 3's decode rows predicted at 1K / 4K / 32K
 
-Record: `evidence/x4_32k_rtx-5080_2026-10-17.json`. This answers the open item in `docs/v1-offload.md` §13 ("32K
+Record: `evidence/x4_32k_rtx-5080_2026-10-17.json`. This answers the open item in `docs/dev/v1-offload.md` §13 ("32K
 is replayed before the owner decides"). It applies x4_gap's 1K / 4K method (`README.md`, "What a dynamic policy
 would fetch") to 32K. No code in core, std or plugins changed.
 

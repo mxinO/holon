@@ -1,4 +1,4 @@
-"""Milestone K's core seams in an engine (docs/v1-kv-tiers.md §4: KS1, KS2, KS4), proven with the toy tier
+"""Milestone K's core seams in an engine (docs/dev/v1-kv-tiers.md §4: KS1, KS2, KS4), proven with the toy tier
 (`testing.toy_tier`) on a tiny model on the CPU before std's tier uses them: a tight device pool demotes blocks to the
 tier and promotes them back, a conversation recomputing what only the tier holds is promoted into place, and the tier's
 copies run on a deferred stream (`holon_judge.deferred`) that lands them 0–2 launches late unless a launch waits.

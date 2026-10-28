@@ -1,4 +1,4 @@
-"""Step 7's held-out plugins on the development vehicle (docs/v1-offload.md acceptance 1, §9 step 7): snapshot traces
+"""Step 7's held-out plugins on the development vehicle (docs/dev/v1-offload.md acceptance 1, §9 step 7): snapshot traces
 (judge `snapshot.trace` over judge/prompts/v1.jsonl, the step-3 engine settings) on fresh engines, and F10's L1 parity
 on a decode trace:
 

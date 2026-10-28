@@ -14,7 +14,7 @@ request's recurrent state), in the payload's own pool. A payload is independent 
 any entry, interior ones included, to make room in its pool, and never costs paged units; dropping an entry drops its
 payloads.
 
-With a tier (the slot `tier`; docs/v1-kv-tiers.md D3, D6) the index sees only the device boundary. An entry is
+With a tier (the slot `tier`; docs/dev/v1-kv-tiers.md D3, D6) the index sees only the device boundary. An entry is
 resident while it holds device units, and resident entries are prefix-closed; the others are entries whose pages
 only the tier holds (`lower`). Eviction scans resident entries only and counts resident children (`kids`): a victim
 whose pages the tier holds, or takes now, is demoted (its device units freed); any other is dropped with its subtree,

@@ -1,4 +1,4 @@
-"""K-M5 (milestone K step 0, docs/v1-kv-tiers.md §8): a CPU replay of the real core `PrefixIndex`, `StateManager` and
+"""K-M5 (milestone K step 0, docs/dev/v1-kv-tiers.md §8): a CPU replay of the real core `PrefixIndex`, `StateManager` and
 `Scheduler` on the gate traces, with a simulated tier and a step cost model in place of the device.
 
 The replay drives the core the way `Engine.step` does at overlap depth 0 (schedule → `step_ops` → `launching` → the
@@ -879,7 +879,7 @@ def main() -> None:
         base = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "HEAD"], capture_output=True, text=True).stdout
         record = {
             "measurement": "K-M5 CPU replay of the core prefix index, state manager and scheduler with a simulated "
-                           "tier (docs/v1-kv-tiers.md §8)",
+                           "tier (docs/dev/v1-kv-tiers.md §8)",
             "date": datetime.date.today().isoformat(),
             "command": "python spikes/k0_tiers/m5/replay.py " + " ".join(sys.argv[1:]),
             "core": {"base_commit": base.strip(), "state": "uncommitted step-1 seams (KS1-KS5) over the base"},

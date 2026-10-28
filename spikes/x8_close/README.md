@@ -1,6 +1,6 @@
 # x8_close — milestone X's close: F5b on the RTX 5080, the capped-fit and F1 rows, the offload locks, D15
 
-`docs/v1-offload.md` §1 acceptance 2, 3 and 7, D4 (F5b's ≥ 5% rule), D15, §6 (F5b's bounded L2), §13 (F5b's prediction
+`docs/dev/v1-offload.md` §1 acceptance 2, 3 and 7, D4 (F5b's ≥ 5% rule), D15, §6 (F5b's bounded L2), §13 (F5b's prediction
 for the RTX 5080: +5–8% at the capped fit). Qwen3-30B-A3B Q4_K_M (`unsloth/Qwen3-30B-A3B-GGUF`) on one RTX 5080
 desktop (CPU tier `x86-avx512`), batch 1, greedy, no drafting, contexts ≤ 32K. Record:
 `evidence/x8_close_rtx-5080_2026-10-18.json` (every round, the tune record, the lock texts and verdict logs, the

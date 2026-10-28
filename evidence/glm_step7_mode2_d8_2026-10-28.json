@@ -1,6 +1,6 @@
 {
  "date": "2026-10-28",
- "doc": "docs/v1-glm.md §13 (step 7: the capped mode (ii) table after D8w and D8s)",
+ "doc": "docs/dev/v1-glm.md §13 (step 7: the capped mode (ii) table after D8w and D8s)",
  "card": "RTX 5090 desktop, the job step capped at 64 GiB (cgroup v2, enforced), the hygiene wrap",
  "config": {
   "holon": "086f08f8: the mode (ii) override set (D10) with moe.loan_fixed_mib 1024, D8w (a whole-expert tail), D8s (rounds below 8,192-token steps), L3, expert_io.beside_ctas 2; the seed fix (ca5b9179) not in",

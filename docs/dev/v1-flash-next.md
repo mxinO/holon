@@ -16,7 +16,7 @@ are applied; §11 records them.
 
 Parameters marked "est." freeze when step 0's evidence lands (§8).
 
-**Scope.** Plan §10 ("Expert caching/offload", milestone FN) and `docs/v1-offload.md`:
+**Scope.** Plan §10 ("Expert caching/offload", milestone FN) and `docs/dev/v1-offload.md`:
 - D2: the target;
 - §1 acceptance 4: the program bars;
 - §4.7: FN's core needs;
@@ -28,7 +28,7 @@ Parameters marked "est." freeze when step 0's evidence lands (§8).
 - M0.3 (Qwen3.8's GDN, gated attention, q8_0 KV);
 - M0.4 (MTP as an aux model).
 
-**Depends on the MoE prefill track** (`docs/v1-moe-prefill.md`):
+**Depends on the MoE prefill track** (`docs/dev/v1-moe-prefill.md`):
 - That track owns `LinearExperts`' prefill dispatch and `kernels.ggml_cuda`'s `vendor.patch`.
 - It lands first, with its own lock propagation, before FN's step 4.
 - FN rebases onto it and uses its D1–D5, including D4, which fuses SwiGLU into gate/up's mmq store.
@@ -53,7 +53,7 @@ Parameters marked "est." freeze when step 0's evidence lands (§8).
 | **HFm** / **HFx** | HF transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py` / `modular_qwen4_exp.py` | — |
 | **SG** | sglang 0.5.21, `srt/models/qwen4_exp_mtp.py` | — |
 
-"R §3.1" is X's study of Strata's tiers, `docs/brainstorm/v1-offload-research.md` §3.1.
+"R §3.1" is X's study of Strata's tiers, read from Strata's public source (unpublished study, §3.1).
 
 ## 0. The model
 
@@ -192,7 +192,7 @@ GGUF headers were parsed by HTTP range; the parsed offsets sum to each shard's s
    - On the 5080 and 5090: cross-placement identity ×3.
    - The PLE RAM and SSD tiers are byte-identical.
    - F5b, where it is used, is bounded against the path-aware floor.
-5. **Program bars** (`docs/v1-offload.md` §1.4; protocol D11; statistics D11):
+5. **Program bars** (`docs/dev/v1-offload.md` §1.4; protocol D11; statistics D11):
 
    | Against | Card, file | Decode | Prefill |
    |---|---|---|---|
@@ -378,7 +378,7 @@ at a time through the judge's existing `_streamed`.**
   - `"idx"` holds, per page, the raw index keys (page × 128 bf16) and the pooled keys (page / 4 × 128 fp32).
   - `page_size % 4 == 0` is required.
   - Two groups, because the core refuses a page group shared by paged specs (`state.py:149-150`). This corrects
-    `docs/v1-offload.md` §4.7.
+    `docs/dev/v1-offload.md` §4.7.
 - **Pooling:**
   - A block is pooled when its 4th token is appended, reading the **stored** raw keys, never in-register values.
   - A block completed by rejected drafts is rewritten when its positions are appended again.
@@ -788,7 +788,7 @@ KV up to 128K is 4.1 GB.
   ≈ 80% at 25% cached. So misses are 69–173 MB per token on IQ2_XS.
 - Dense weights read per token are 3.42 GB, including 1.26 GB of BF16 HC: ≈ 3.8–4.2 ms on the 5080.
 - F5b's gain is marginal at ≈ 2 misses per layer.
-- These replace rev 1's "≈ 50% hits". This section supersedes `docs/v1-offload.md` §7's FN rows.
+- These replace rev 1's "≈ 50% hits". This section supersedes `docs/dev/v1-offload.md` §7's FN rows.
 
 ## 8. Step 0 — measure before freezing
 
@@ -999,7 +999,7 @@ measured.
 | A-N1 (major) | Refusing planner-less state for mixers breaks the minor-version promise | **Accepted** (lead decision). Verified: `design.md:351` (minors only add); planner-less Slot state runs eagerly today (`assembly.py:77-86`, `executor.py:285-287`). The refusal now applies only to the new block-declared path; mixers get a stderr line when graphs go off, as `build.py:96-98` warns. C2 is +2 lines. |
 | A-N2 | D1′ depends on a seam the MoE prefill track does not have | **Accepted.** The track owns and lands T1–T5 (lead decision; sent to the track). FN names them in its header and in D1′ / D12c. |
 | A-N3 | Drafters have no `before_launch` | **Accepted.** Verified: drafter hooks are `hooks.py:103-119` only. The store's own `before_launch` (`store.py:457-465`) derives the sub-step rows (D12a). |
-| A-N4 | K's doc describes FN's old seams | **Accepted, forwarded.** K's doc is outside this worktree. The coordinator updates `docs/v1-kv-tiers.md`'s FN line to "C1–C3, ≤ +47 lines, no FFN branch". |
+| A-N4 | K's doc describes FN's old seams | **Accepted, forwarded.** K's doc is outside this worktree. The coordinator updates `docs/dev/v1-kv-tiers.md`'s FN line to "C1–C3, ≤ +47 lines, no FFN branch". |
 | A note | PLE contract names | **Accepted:** `qwen4_exp.ple_rows@1`, `qwen4_exp.ple_block@1` (D13′). |
 
 **Panel B:**
@@ -3620,6 +3620,14 @@ run-identical ×2; `attention.paged_decode` tuned to `kernels.triton_attn`, 146 
   - `plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/…/1.lock`
   - `…/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/…/1.lock`
   - At the final tree both advanced byte-identical to `2.lock` (§22.10).
+- **Their L2 inputs are tracked** (`judge/goldens/qwen3.8-flash-next-iq2_xs/`, `…-iq3_s/`, as the other models'):
+  step 5's v1-qwen3_5 recordings, rewritten by `holon_judge.recording`'s own save (byte-identical): `v1-fp32` (the
+  golden), `v1-bfloat16-mmq-floor` and `v1-bfloat16-mmvq-floor`, 5.6 MB each. A propagation whose trace moves runs
+  L2 from them: `holon_tools propagate <model> --prompts judge/prompts/v1-qwen3_5.jsonl --golden
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-fp32.safetensors --floor
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-bfloat16-mmq-floor.safetensors
+  judge/goldens/qwen3.8-flash-next-iq2_xs/v1-bfloat16-mmvq-floor.safetensors …` (IQ3_S likewise). The v1-long
+  recordings stay out: no lock or check uses them.
 - **The first write was read from node-local copies of the shards,** so its model id lacked the repository, and
   `check_locks` refused it as not servable by name.
   - The locks above were tuned again with the shards hard-linked into a hub-cache-named directory. The id's build
@@ -3775,7 +3783,7 @@ by the owner, 2026-10-26.
 - Every newest lock's unit pins equal the tree's sources (0 of 25 outdated). `run_all.sh` passes but the known commit
   message.
 - **The lead's call on SHAs (2026-10-24):** the lead replays FN's branch onto main at the merge, without squashing,
-  and writes the old → new map to `docs/history/` (as for 2026-10-20). So the locks' `deploy.commit` (provenance only:
+  and keeps the old → new map with the development archive (as for 2026-10-20). So the locks' `deploy.commit` (provenance only:
   it never makes a plan "changed") and this record's short SHAs still resolve.
 
 **The gates on the final tree:**

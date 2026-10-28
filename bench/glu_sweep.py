@@ -1,4 +1,5 @@
-"""M0.7 step 2 (docs/m07-perf.md D6): the fused gate/up + SwiGLU at one row against its composition, per merged gate/up
+"""M0.7 step 2 (docs/dev/m07-perf.md D6): the fused gate/up + SwiGLU at one row against its composition, per merged
+gate/up
 shape of the given locks, graph-timed: `qlinear_glu` (mmvq's fused gate, `silu(gate) · up` from the f32 sums) vs
 `qlinear` writing [1, 2·inter] in bf16, then FlashInfer's `silu_and_mul`.
 

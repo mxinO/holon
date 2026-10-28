@@ -1,4 +1,5 @@
-"""kernels.cpu_task's `cpu_task@1` (docs/v1-offload.md D6): a CUDA graph hands tasks to the native worker and waits for
+"""kernels.cpu_task's `cpu_task@1` (docs/dev/v1-offload.md D6): a CUDA graph hands tasks to the native worker and waits
+for
 them — each signal runs its slot's task once, on every thread of the pool, before the wait returns —, and the
 protocol fails open: a failing task, a hung task (the spin wait's time bound) and a dead worker (the memop flavour's
 watchdog) each raise the error word, and once the flag is set every later wait returns at once."""
@@ -169,7 +170,7 @@ def _check_landing(data, pieces, rows, runs, keep, req):
 
 
 def test_the_copy_task_reads_pieces_into_landing_rows_and_keeps(lib, tmp_path):
-    """docs/v1-glm.md D8f's landing rows: each O_DIRECT extent's aligned superset read in place at the row's next
+    """docs/dev/v1-glm.md D8f's landing rows: each O_DIRECT extent's aligned superset read in place at the row's next
     4 KiB-aligned offset (no bounce), (offset, nbytes) of its bytes in `runs`, a kept piece copied canonical into its
     keep unit; the oracle agrees on every byte it names; a row too small for a piece's supersets fails the task."""
     import os
@@ -204,9 +205,9 @@ def _io_worker(lib, tasks, backend, urgent=(), depth=4, chunk=8192, memop=False,
 
 @pytest.mark.parametrize("backend", ["uring", "aio"])
 def test_the_io_worker_reads_asynchronously_and_serves_urgent_requests_first(lib, tmp_path, backend):
-    """The `io` pool (docs/v1-glm.md D8f): one completion-driven thread over copy tasks, io_uring or native AIO (forced
-    here), small chunks in flight: canonical units (bounced) and landing rows (in place, kept pieces copied) as the
-    oracle reads them, through graph-free signals and waits; a failing request fails open. An urgent slot's request,
+    """The `io` pool (docs/dev/v1-glm.md D8f): one completion-driven thread over copy tasks, io_uring or native AIO
+    (forced here), small chunks in flight: canonical units (bounced) and landing rows (in place, kept pieces copied) as
+    the oracle reads them, through graph-free signals and waits; a failing request fails open. An urgent slot's request,
     signalled while a large request's chunks are in flight, is answered before it (the large one's unsubmitted chunks
     held meanwhile)."""
     import os

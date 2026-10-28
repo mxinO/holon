@@ -1,4 +1,4 @@
-"""Quantized HF checkpoints as the judge reads them (docs/m06-lowp.md §4.8, D10): its own map from a module's tensor
+"""Quantized HF checkpoints as the judge reads them (docs/dev/m06-lowp.md §4.8, D10): its own map from a module's tensor
 names and dtypes to the normalized parts (not the engine's dialects), std.weights.hf's `reference.py` for the
 arithmetic, and the format owners' decoders that reference is cross-checked against (`owner_check`), compared by
 value in f32 ulps (signed zeros equal).
@@ -10,7 +10,7 @@ NVFP4 / MXFP4 — its own unpacking, scale decoding and `dequantize`, in f32 (�
 2^(e − 127) (exact; when importable); and, given a llama.cpp checkout, gguf-py on its converter's repack of every FP4
 tensor (`_nvfp4_pack` × scale2, `repack_mxfp4_blocks`; exact).
 
-`repack_check` is acceptance 4's lossless repack (docs/m06-lowp.md §1): kernels.ggml_cuda's own ggml blocks of every
+`repack_check` is acceptance 4's lossless repack (docs/dev/m06-lowp.md §1): kernels.ggml_cuda's own ggml blocks of every
 FP4 tensor, dequantized by gguf-py × scale2, against the reference, and byte for byte against the converter's.
 
 `state` is a checkpoint's model as the goldens and floors build it (§4.8), one layer at a time; `gate` holds what the

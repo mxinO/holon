@@ -18,14 +18,14 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
   agree across the limit. Mixed types in one std.moe layer at 7 tokens (sm_86: IQ3_S gate/up on mmq, IQ4_XS down on
   mmvq); ids straight from `moe_topk`; CUDA graphs replayed with routing unlike the capture's at every decode
   bucket.
-- Placement (docs/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots (or every
+- Placement (docs/dev/v1-offload.md D4): mmq with ids always tiles, over a compact list of the active slots (or every
   slot, where that is at most 64 more), so an expert's rows are bitwise the same in arenas of 12, 13, 16, 74 and 128
   slots under any placement, at every tile width, and in compacted launches padded with null-slot rows to the type's
   mmvq limit + 1, on both id helpers (per slot, compact; the SM's `PASS_PROVEN` types; gate/up and down).
 - Violated preconditions set their bit in the kernel's `errors` word and leave only their own rows uncomputed: an id
   out of range, more slots than the binding's bound, a slot repeated inside rows beyond mmq's column tiles (within
   them it is computed; llama.cpp's helper instead left stale entries that wrote over a real row, which M0.2's padding
-  plant relied on; retired, docs/m02-moe.md §4.6).
+  plant relied on; retired, docs/dev/m02-moe.md §4.6).
 - `moe_topk`: the reference's picks up to near-ties (fast-math `__expf` moves probabilities by a few ulps), its
   weights; ±inf and all-NaN rows give unique in-range ids; token counts off the kernel's 8-row blocks.
 - `moe_combine`: within 1 bf16 ulp of the reference, plus the f32 accumulation's rounding (the kernel's FMA) for
@@ -33,7 +33,7 @@ and mmq with ids) against the q8_1 emulator, `moe_topk` and `moe_combine` agains
 - Precision (f64 references written out here): our f32 SwiGLU within the fp32 budget, which a bf16 SwiGLU misses,
   with per-expert gate and up scales too; a std.moe layer binds `linear_experts` with act_dtype bf16 and out_dtype
   f32, and its expert outputs are f32.
-- NVFP4 `scale2` per expert (docs/m06-lowp.md §4.5): HF stacks through `prepare`, the merged gate/up stack's [2, E]
+- NVFP4 `scale2` per expert (docs/dev/m06-lowp.md §4.5): HF stacks through `prepare`, the merged gate/up stack's [2, E]
   rows (distinct per expert and half) and down's [E], on both paths: down against the emulator in f64 on the
   reference weight, and bitwise the unscaled stack's output times each slot's expert scale; gate/up's SwiGLU against
   ours on the unscaled stack's output with the scales (bitwise on mmq); plants N4 (scale by slot) and N5 (scale after
@@ -274,7 +274,7 @@ def test_linear_experts_every_type(ctx, lib, name):
 def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
     """mmq's prefill kernels on every type: the tile width J follows the chunk's tokens (128 at a 512-token chunk,
     64 at the sweep's 64), and each J is its own kernel. A small stack (8 experts, 256 rows) keeps it to ~1M
-    outputs; 513 tokens adds the one-token mmvq tail chunk. D0's passes (docs/v1-moe-prefill.md): `pass_rows` is
+    outputs; 513 tokens adds the one-token mmvq tail chunk. D0's passes (docs/dev/v1-moe-prefill.md): `pass_rows` is
     PASS_ROWS on a pair of `PASS_PROVEN` (this SM's), else CHUNK, and where it is larger a call of up to 4,608 rows
     gives each row its 512-row chunk's bits (holon_testing's check; Qwen3-30B-A3B's 128 experts: the NaN test)."""
     n, out = 8, 256
@@ -289,7 +289,7 @@ def test_linear_experts_every_type_at_prefill_chunks(ctx, sm, name):
 
 
 def test_pass_rows_rule():
-    """docs/v1-glm.md D9's pass size: an option unset or at most PASS_ROWS keeps today's arithmetic exactly (FN's
+    """docs/dev/v1-glm.md D9's pass size: an option unset or at most PASS_ROWS keeps today's arithmetic exactly (FN's
     4,096 at top-10: 3,072; a 2,048-token step budget: 2,048; an unproven pair: CHUNK); only an option above
     PASS_ROWS takes the new rule (the option within the step budget, MAX_PAIRS // top_k and the entry's proven rows),
     and an option past the entry's rows is refused, naming them."""
@@ -374,7 +374,7 @@ def qwen_stacks():
 
 @pytest.mark.parametrize("name", ["q2_0", "iq4_nl"])
 def test_linear_experts_at_in_640(ctx, lib, name):
-    """T6 (docs/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
+    """T6 (docs/dev/v1-moe-prefill.md §10): FN's routed down projection (`in` 640, a whole number of the type's blocks
     but not of 256) on mmvq and mmq with ids, at a chunk and at a pass of two; mmq's last K step stays inside each
     row (the bytes after the stack are poison). Both types are `PASS_PROVEN`: a pass gives each row its chunk's bits
     at 640 too (a small stack, as in the every-type test). mmq takes its `tail` instances there only: at 768 (whole
@@ -434,7 +434,7 @@ def test_routings_and_sizes(ctx, lib, qwen_stacks, name):
 
 @pytest.mark.parametrize("name", ["q4_k", "q6_k"])
 def test_every_tile_of_every_entry_is_written(ctx, lib, name):
-    """D2 (docs/v1-moe-prefill.md): mmq with ids launches only column tiles that hold rows, each block finding its
+    """D2 (docs/dev/v1-moe-prefill.md): mmq with ids launches only column tiles that hold rows, each block finding its
     entry by a binary search over the entries' bounds, at a tile width chosen against the mean rows per entry. Into an
     output pre-filled with NaN every row of every entry is written, through each id helper (calls of 9 to 4,096 rows
     at E = 128), with routings that give one entry many tiles (every token on 8 experts, a skewed popularity) or many
@@ -533,7 +533,7 @@ def test_ids_from_moe_topk(ctx, qwen_stacks):
 def test_graph_replay_follows_the_routing(ctx, qwen_stacks, name):
     """Captured at every decode bucket (mmvq up to the limit, mmq above), replayed with other ids and inputs: the
     result is the eager one on the new routing, bitwise (NVFP4: its per-expert scale2 gathered on the device) — and
-    so with passed buffers (docs/v1-moe-prefill.md D10), static, NaN-poisoned: gate/up's and down's `out`, and one
+    so with passed buffers (docs/dev/v1-moe-prefill.md D10), static, NaN-poisoned: gate/up's and down's `out`, and one
     `scratch` for both calls."""
     if name == "nvfp4/hf":
         gate_up, down, pg, pd, _ = nvfp4_stacks(ctx, EQ)
@@ -580,7 +580,7 @@ SM = 10 * torch.cuda.get_device_capability()[0] + torch.cuda.get_device_capabili
     else 0
 PLACED = sorted({t for s, t, _ in PASS_PROVEN if s == SM})
 EP = 12                                                     # experts placed in an arena, k = 8 of them per token
-SLOTS = (EP, EP + 1, 16, 74)                                # docs/v1-offload.md D4's slot counts
+SLOTS = (EP, EP + 1, 16, 74)                                # docs/dev/v1-offload.md D4's slot counts
 STAGES = {"gate_up": (H, 2 * INTER, 1), "down": (INTER, H, K)}          # in, out, input rows per token
 
 
@@ -640,7 +640,8 @@ def test_expert_rows_do_not_depend_on_the_slots_or_the_tile_width(ctx, lib, name
     (each of SLOTS with a random placement, per-slot id helper, and 128 slots, compact helper; at EP also reversed:
     permutations) and at every mmq tile width (token counts from the mmvq limit + 1 to 320 on the 128-slot arena,
     whose launch lists at most EP + K entries: J from 16 up to 128, chosen against the tokens up to J_AGAINST_T and
-    above against the entries' mean rows, docs/v1-moe-prefill.md D2), all against one launch over EP slots in order at
+    above against the entries' mean rows, docs/dev/v1-moe-prefill.md D2), all against one launch over EP slots in order
+    at
     512 tokens. llama.cpp switched mmq with ids to stream-k below 90 % tile efficiency, splitting K at points that
     move with the slot count: on every GPU at least one of SLOTS did (the dense schedule over the same grid says so),
     and its rows differed."""
@@ -772,7 +773,7 @@ def test_scaled_slots_leave_minus_one_entries_untouched(ctx):
 
 
 def passed_buffers(ctx, facts: dict, parts: dict, x: torch.Tensor, ids: torch.Tensor) -> None:
-    """D10 (docs/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
+    """D10 (docs/dev/v1-moe-prefill.md) on an arena binding, glu none and swiglu (D4's store, and unfused): NaN-poisoned
     `out` and `scratch` of `scratch_bytes` (one for every launch of a call: 4,096 rows, then a chunk, or then an mmvq
     tail) give the allocating call's bits; `scratch` is gate/up's f32 output (none for D4's store), then the mmq
     launches' id maps and q8_1 rows (the persistent workspace holds the mmvq calls'); mmvq calls do none of D10's
@@ -946,14 +947,14 @@ def test_moe_topk_non_finite_rows(ctx, n):
 
 @pytest.mark.parametrize("n,hidden", [(16, 4096), (128, H), (512, 1536)])
 def test_moe_router(ctx, lib, n, hidden):
-    """`moe_router@1` (docs/v1-offload.md §14, step 3c), its fused path (up to `rows` tokens): its logits within the
+    """`moe_router@1` (docs/dev/v1-offload.md §14, step 3c), its fused path (up to `rows` tokens): its logits within the
     f32 budget of the f64 product from x's exact values, bf16 and f32 x; its weights and ids bitwise `moe_topk` on
     those logits, near-ties and NaN rows included (k unique ids in range); a row's logits the same at any token count
     and tile (row-invariant: 1- to 16-row calls against each other), exact ties included (two equal router rows; the
     q8_1 loop runs several rounds at 16 experts of 4,096); the tile counters left zeroed, so a second call
     (a graph replay) gives the same bits; x's q8_1 activations, written in the same launch, bitwise quantize_q8_1's.
     Through the plugin: the fused path's bits up to `rows` tokens, above them the composition's (the f32 linear, then
-    `moe_topk`); for prompt chunks (CHUNK rows and more, experts a multiple of 64: docs/v1-moe-prefill.md D3) the
+    `moe_topk`); for prompt chunks (CHUNK rows and more, experts a multiple of 64: docs/dev/v1-moe-prefill.md D3) the
     router GEMM's logits, within the f32 budget and row-invariant across calls of 512 rows and more, then `moe_topk`'s
     selection on them, bitwise."""
     gen = torch.Generator().manual_seed(n)
@@ -1021,7 +1022,7 @@ def test_moe_router(ctx, lib, n, hidden):
         assert all(bitwise(a, b) for a, b in zip(*held, strict=True) if a is not None), "a bf16 router's bits"
 
 
-GLM = {"scoring": "sigmoid", "bias": True, "scale": 2.5}          # docs/v1-glm.md D6's routing facts
+GLM = {"scoring": "sigmoid", "bias": True, "scale": 2.5}          # docs/dev/v1-glm.md D6's routing facts
 
 
 def check_sigmoid(logits: torch.Tensor, weights: torch.Tensor, ids: torch.Tensor, k: int, bias: torch.Tensor,
@@ -1041,8 +1042,8 @@ def check_sigmoid(logits: torch.Tensor, weights: torch.Tensor, ids: torch.Tensor
 
 @pytest.mark.parametrize("n,k,hidden", [(288, 8, 4096), (8, 2, 512), (128, K, H)])
 def test_glm_routing(ctx, lib, n, k, hidden):
-    """docs/v1-glm.md D6 on both routing paths: sigmoid scores, a selection bias (choosing only), renormalised, × 2.5.
-    `moe_topk` against the reference (picks up to near-ties, weights within 1e-5; near-tie logits; E = 288 too, a
+    """docs/dev/v1-glm.md D6 on both routing paths: sigmoid scores, a selection bias (choosing only), renormalised, ×
+    2.5. `moe_topk` against the reference (picks up to near-ties, weights within 1e-5; near-tie logits; E = 288 too, a
     topk-moe.cu instance that is not a power of 2). The fused router (up to `rows` tokens, `HOLON_ROUTER_CASE(288)`):
     its logits within the f32 budget of the f64 product, row-invariant (1- to 16-row calls), its weights and ids
     bitwise `moe_topk`'s on those logits. Prompt chunks (E a multiple of 32: the router GEMM, at 288 its 32-expert tile
@@ -1187,7 +1188,7 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
     gb, ub = x[:, :INTER].bfloat16(), x[:, INTER:].bfloat16()
     want = g / (1 + torch.exp(-g)) * u
     assert not l0.check((torch.nn.functional.silu(gb) * ub).float(), want, torch.float32, 1).passed
-    limit = 7.0                                    # docs/v1-glm.md D6's clamp: binding on a sizeable share of both
+    limit = 7.0                                    # docs/dev/v1-glm.md D6's clamp: binding on a sizeable share of both
     assert (g > limit).double().mean() >= 0.05 and (u.abs() > limit).double().mean() >= 0.05
     lib.swiglu(x, y, limit=limit)
     gl, ul = g.clamp(max=limit), u.clamp(-limit, limit)
@@ -1202,7 +1203,7 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
 
 @pytest.mark.parametrize("name", ["q8_0", "iq2_xxs", "iq2_s", "iq3_xxs"])
 def test_swiglu_clamp_on_every_path(ctx, lib, name):
-    """docs/v1-glm.md D6's clamp, `glu_limit` (GLM's expert types and the tiny model's Q8_0): the clamped merged
+    """docs/dev/v1-glm.md D6's clamp, `glu_limit` (GLM's expert types and the tiny model's Q8_0): the clamped merged
     stack against our SwiGLU, clamped (as ggml's SWIGLU_CLAMP), of the `glu="none"` output — bitwise where mmq ran
     (its fused store where the stack takes it, else our kernel), within the fp32 budget where mmvq's fused gate did —
     at 1, t, t + 1, 64 and 513 tokens, with a limit binding on ≥ 5% of the gate values and ≥ 5% of the up values; the
@@ -1336,7 +1337,7 @@ def test_nvfp4_scale2_per_expert_on_both_paths(ctx, lib):
         check(y, emulated(down, weighted, h, ids), INTER, f"down T={tokens}")
         assert torch.equal(y, down_none(h, sd.parts, ids) * dw["scale2"][ids.long()][..., None]), f"down T={tokens}"
     ids, x, h = uniform(64, E, seed=5), gate_up_input(64, seed=5), down_input(64, 5)
-    # D4: the fused store (docs/v1-moe-prefill.md) against ours with halves scaled to f32's smallest normals, their
+    # D4: the fused store (docs/dev/v1-moe-prefill.md) against ours with halves scaled to f32's smallest normals, their
     # products below them (flushed alike)
     assert fused.glu_store and check_swiglu(lib, fused, none, sg, x, ids, "subnormal halves",
                                             gu | {"scale2": gu["scale2"] * 1e-36}) is None

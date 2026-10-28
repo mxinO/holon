@@ -1,4 +1,4 @@
-"""M6 step 1: routing traces of a MoE model served by Holon's engine (spike; docs/v1-offload.md §8 M6).
+"""M6 step 1: routing traces of a MoE model served by Holon's engine (spike; docs/dev/v1-offload.md §8 M6).
 
 Runs the engine eagerly (no CUDA graphs, so Python wrappers see every MoE call) and records, per launched step and
 per token row: the row's sequence, whether it is a decode row, and for every MoE layer its top-k expert ids (routing

@@ -1,4 +1,4 @@
-"""GLM step 0, N4's memory term (docs/v1-glm.md D9, §7.1): the live set of a prompt step per token, with and without
+"""GLM step 0, N4's memory term (docs/dev/v1-glm.md D9, §7.1): the live set of a prompt step per token, with and without
 D9's row sub-batching, at 4K / 8K / 16K / 32K-token steps — one KDA layer and one DSA layer of GLM-5.3-Flash's shapes,
 each inside its mHC block, in torch with the KDA chunk kernel at the FLA pin (vLLM 6dd813e0's `ops/kda.py`, importable
 via `--fla <dir>`: the step-0 spike's copy with vLLM's imports stubbed, not Holon's vendored tree), the peak of

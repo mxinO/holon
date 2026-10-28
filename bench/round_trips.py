@@ -1,4 +1,4 @@
-"""Tool-call round trips through every dialect of `frontends.http` on a served model (docs/m05-grammar.md §1
+"""Tool-call round trips through every dialect of `frontends.http` on a served model (docs/dev/m05-grammar.md §1
 acceptance 2, step 5; evidence record).
 
 For each dialect (OpenAI chat, Anthropic Messages, OpenAI Responses) and tool choice (auto, required / any, named):

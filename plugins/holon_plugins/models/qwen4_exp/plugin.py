@@ -1,4 +1,4 @@
-"""models.qwen4_exp: Qwen3.8-Flash-Next (docs/v1-flash-next.md): its recipe over llama.cpp's `qwen4exp` GGUF and its
+"""models.qwen4_exp: Qwen3.8-Flash-Next (docs/dev/v1-flash-next.md): its recipe over llama.cpp's `qwen4exp` GGUF and its
 MTP draft head (`recipe.py`, D9), its PLE unit (`units.py`, D4), PLE's op contracts (`kernels.py`) with their
 oracles (`reference.py`; the kernels are `kernels.ple_triton`'s), and the frontend bundle (`bundle.py`: the GGUF's
 tokenizer and chat template, as `models.qwen3_5`'s)."""

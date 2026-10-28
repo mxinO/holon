@@ -1,4 +1,4 @@
-"""L2's reference form (docs/v1-glm.md D15a) on synthetic recordings: budgets from pairs that should agree, a
+"""L2's reference form (docs/dev/v1-glm.md D15a) on synthetic recordings: budgets from pairs that should agree, a
 candidate at their noise passing, a shift and a one-sided perplexity loss failing, the reference's preconditions."""
 import dataclasses
 

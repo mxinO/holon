@@ -1,4 +1,4 @@
-"""DFlash2 (`drafters.dflash`, docs/m04-spec.md D4, D5) on a tiny Qwen3.5 target with a tiny random draft, on CPU.
+"""DFlash2 (`drafters.dflash`, docs/dev/m04-spec.md D4, D5) on a tiny Qwen3.5 target with a tiny random draft, on CPU.
 
 One engine run per configuration (overlap depth 0 and 1, roomy and preempting pools, chunked prefill), three greedy
 requests and a sampled one in the same batches:

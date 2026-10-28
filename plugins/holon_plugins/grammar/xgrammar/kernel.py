@@ -1,4 +1,5 @@
-"""Applying a compact block of token bitmasks to the logits (docs/m05-grammar.md D4): `mask[i]` (int32 words, bit t of
+"""Applying a compact block of token bitmasks to the logits (docs/dev/m05-grammar.md D4): `mask[i]` (int32 words, bit t
+of
 word w allows token 32·w + t — xgrammar's layout) masks logits row `rows[i]` to -inf where a bit is 0; rows at or past
 the end of `logits` are padding and untouched. On the GPU a Triton kernel: one program per (mask row, block of
 32·WORDS tokens) loads that block's words once and stores -inf only where a bit is 0, with no unpacked [R, V, 32]

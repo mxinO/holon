@@ -1,4 +1,4 @@
-"""L0 for `kernels.fla`'s `kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/v1-glm.md D4), selected through the
+"""L0 for `kernels.fla`'s `kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/dev/v1-glm.md D4), selected through the
 build context, at GLM's shape (64 heads × 128) and the tiny GPU fixture's (2 × 128) and a small one (2 × 64).
 
 - The yardstick (`test_gdn_kernels.py`'s form): per row, the relative Frobenius error of the output and of the final
@@ -44,9 +44,9 @@ INIT = [True, False, True, False, True, True, False, True]
 SLOTS = [0, UNITS - 1, 3, 7, 9, 1, 12, 5]                      # row 4 has no tokens: unit 9 stays as it is
 DECODE_INIT = [True, False, True, True, False, True]
 DECODE_SLOTS = [0, UNITS - 1, 4, 2, 11, 6]
-# × the bf16 yardstick's error, by head count (docs/v1-glm.md D4's table, 16 seeds of the mixed batch): GLM's 64 heads
-# hold GDN's 2.0 (worst 1.33); the 2-head shapes need 4.0 (worst 2.86, a one-token row's output on the chunked path,
-# e.g. a prompt step's 1-token tail). The cause: FLA's two per-head bf16 casts (`kda.py:928` q·scale, `:961` Aqk),
+# × the bf16 yardstick's error, by head count (docs/dev/v1-glm.md D4's table, 16 seeds of the mixed batch): GLM's 64
+# heads hold GDN's 2.0 (worst 1.33); the 2-head shapes need 4.0 (worst 2.86, a one-token row's output on the chunked
+# path, e.g. a prompt step's 1-token tail). The cause: FLA's two per-head bf16 casts (`kda.py:928` q·scale, `:961` Aqk),
 # coherent over a head's outputs, which two heads cannot average, plus small-sample tails; a wrong gate (the plants
 # below) or state is ≥ 10×.
 RATIOS = {64: 2.0, 2: 4.0}

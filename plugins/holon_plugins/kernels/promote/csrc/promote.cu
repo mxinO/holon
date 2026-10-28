@@ -1,4 +1,4 @@
-// placement.promote's resolve contract `moe_resolve.promote@1` on CUDA (F10, docs/v1-offload.md D3): around the store's
+// placement.promote's resolve contract `moe_resolve.promote@1` on CUDA (F10, docs/dev/v1-offload.md D3): around the store's
 // own `moe_resolve@1` launch (whichever provider serves it), one CTA before it stamps the call's routes and promotes
 // its decode misses into empty slots and spares (the map then names their new slots), and one CTA after it lists the
 // promoted pieces' fetches after the staged ones and refills the absent spares from the layer's least recently routed
@@ -16,7 +16,7 @@ namespace {
 constexpr int PADDING = 0, DECODE = 1;                 // row kinds (std.moe.kernels)
 constexpr int OVERFLOW = 2;                            // error bit: a delta record past the log
 constexpr int SPARE = -4, OWN = -5;                    // exclusive tiers' records (moe_tiers@2): b's slots a spare; b
-                                                       // took its spare back (docs/v1-glm.md D8a)
+                                                       // took its spare back (docs/dev/v1-glm.md D8a)
 constexpr int THREADS = 256;
 constexpr int MAX_SPARES = 8;
 

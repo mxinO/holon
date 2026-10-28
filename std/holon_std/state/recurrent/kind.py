@@ -1,9 +1,9 @@
 """`recurrent` state kind: fixed-size state per request (e.g. a linear-attention or SSM state) that a step overwrites
 in place, so it cannot be shared by reference. Prefix reuse copies it: a checkpoint is a payload holding a request's
 whole state at a position (a multiple of the spec's alignment), published into this kind's own pool and adopted by a
-later request with the same prefix (docs/m03-qwen38.md D4).
+later request with the same prefix (docs/dev/m03-qwen38.md D4).
 
-Where checkpoints are taken is a list of policies, from the deployment's plugin options (docs/v1-kv-tiers.md D8):
+Where checkpoints are taken is a list of policies, from the deployment's plugin options (docs/dev/v1-kv-tiers.md D8):
 - `recurrent.policy`: a comma list; the kind checkpoints at the earliest position any of them names.
   - `prompt_end` (the default): once per prompt, at its last aligned position — what an agent's next turn resends;
   - `every:<n>`: every n tokens (n a multiple of the alignment); a prefill step takes one of them in-step and ends one
@@ -169,6 +169,6 @@ class Recurrent:
         return HitLen(0)
 
     def adopt(self, seq, payload: Payload) -> list[MemOp]:
-        """From `payload.pool`: this kind's pool, or a state tier's host copy (docs/v1-kv-tiers.md D7)."""
+        """From `payload.pool`: this kind's pool, or a state tier's host copy (docs/dev/v1-kv-tiers.md D7)."""
         return [MemOp(payload.pool, np.array(payload.units), self.pool.name, np.array(seq.units(self.spec.name)),
                       "pre_forward")]

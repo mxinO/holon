@@ -1,4 +1,4 @@
-"""L0 for the Gated DeltaNet kernels (docs/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
+"""L0 for the Gated DeltaNet kernels (docs/dev/m03-qwen38.md D3, §4.7): `kernels.fla`'s `gated_delta_rule` and
 `kernels.gdn_triton`'s `causal_conv1d` and `gated_rmsnorm` (with FN's sigmoid `out_gate` too), selected through the
 build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channels 10240) and Qwen3.5's (Hv 32: ratio 2,
 8192 channels), Dk = Dv = 128, K = 4, in both v-head orders, plus a small shape at head dim 64.
@@ -17,7 +17,7 @@ build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channel
 - Exactness: a 64-aligned split (128 then 72 tokens) bitwise equal to one shot (both ops); a decode step (conv, rule,
   norm) replayed from a CUDA graph with new inputs bitwise equal to eager; runs repeat bitwise; plan and call
   never sync with the host.
-- `gdn_rewind` (docs/m07-perf.md D5) bitwise equal to its oracle on three layers at once, every row accepting a
+- `gdn_rewind` (docs/dev/m07-perf.md D5) bitwise equal to its oracle on three layers at once, every row accepting a
   different number of drafts, at the widths of MTP and DFlash2.
 - Plants that must fail: conv1d without its state carry; has_init ignored (states read when False); a row on slot 0
   skipped (fla's original `<= 0` sentinel, rebuilt from the vendored source).
@@ -446,7 +446,7 @@ def test_gated_rmsnorm_matches_the_oracle(t, h, d, gate, dtype):
 
 
 def test_gated_rmsnorm_unrounded_for_kda():
-    """KDA's o_norm (`round = "none"`, docs/v1-glm.md D4): f32 through the f32 weight and the sigmoid gate, rounded
+    """KDA's o_norm (`round = "none"`, docs/dev/v1-glm.md D4): f32 through the f32 weight and the sigmoid gate, rounded
     once — the oracle's bits on ≥ 99.9% of elements (the rest one rsqrt ulp off); the default rounding (the norm
     rounded before the weight) matches only ≈ 74%, so the two forms are told apart."""
     t, h, d = 300, 64, 128
@@ -521,7 +521,8 @@ def test_decode_step_graph_replay_equals_eager(order):
     assert torch.equal(out, eager) and torch.equal(pool, p_eager) and torch.equal(conv_state, c_eager)
 
 
-# --- in-step snapshots (docs/m03-in-step-snapshot.md §3.1) ---------------------------------------------------------
+# --- in-step snapshots (docs/dev/m03-in-step-snapshot.md §3.1)
+# ---------------------------------------------------------
 
 def _call(kernel, x, g, state, lens, init, slots, snapshots=(), view=None):
     h = kernel.plan(lens, snapshots)
@@ -615,7 +616,7 @@ def test_snapshots_must_fall_inside_their_row_on_a_chunk():
             kernel.plan([150, 0], [bad])
 
 
-# --- speculative verify rows (docs/m04-spec.md D6): per-token rows, out_slots, masked replay ---------------------
+# --- speculative verify rows (docs/dev/m04-spec.md D6): per-token rows, out_slots, masked replay ---------------------
 # Bitwise: the masked replay equals one call over the accepted tokens alone (the same kernel specialization). Against
 # one-token decode calls (a specialization storing inside its loop) the states agree within STATE_ULPS·eps(f32) of
 # their scale — the design's fallback (§1.3) — and a long run of verify/replay steps stays there without drifting.
@@ -674,7 +675,7 @@ def test_verify_rows_replay_bitwise_to_the_accepted_tokens(shape, order):
 
     replay, before = s0.clone(), s0.clone()
     _verify_replay(rule, x, g, replay, slots, accepted, q)
-    _verify_replay(rule, x, g, before, slots, accepted, q, masked=-1e4)   # docs/v1-glm.md D4: −inf, −1e4's bits
+    _verify_replay(rule, x, g, before, slots, accepted, q, masked=-1e4)   # docs/dev/v1-glm.md D4: −inf, −1e4's bits
     assert torch.equal(replay, before)
     alone = s0.clone()
     take = torch.cat([torch.arange(r * q, r * q + 1 + n, device="cuda") for r, n in enumerate(accepted)])

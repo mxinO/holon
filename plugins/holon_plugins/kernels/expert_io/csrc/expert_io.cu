@@ -474,7 +474,7 @@ struct Roles {
     int roles, staging;
     int part = 0, parts = 1;           // the call copies part `part` of `parts` of each role's list: its entries
                                        // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group) —
-    int size = 0;                      // or, `size` > 0, q = size (docs/v1-glm.md D8f's rounds)
+    int size = 0;                      // or, `size` > 0, q = size (docs/dev/v1-glm.md D8f's rounds)
     // A role read from landing rows (D8f): runs[r][row, x] = (offset in the row, nbytes) of extent x of the piece
     // there; the slot gets the extents back to back. The row's width is its own (`row_bytes`).
     const int64_t * runs[MAX_ROLES] = {};

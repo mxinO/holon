@@ -1,4 +1,5 @@
-"""`grammar.constraint@1` (docs/m05-grammar.md D6): the plain dict a request carries in `SamplingParams.ext`, checked
+"""`grammar.constraint@1` (docs/dev/m05-grammar.md D6): the plain dict a request carries in `SamplingParams.ext`,
+checked
 and translated to an xgrammar grammar here — the frontends build these dicts and never import xgrammar.
 
     {"type": "json_schema", "schema": {...} | bool, "strict": False, "style": "json"}   (style "qwen_xml": the

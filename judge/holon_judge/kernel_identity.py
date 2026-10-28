@@ -1,4 +1,4 @@
-"""Speculation off, nothing changes (docs/m04-spec.md §1.6): `kernels.triton_attn`'s paged attention as it is now,
+"""Speculation off, nothing changes (docs/dev/m04-spec.md §1.6): `kernels.triton_attn`'s paged attention as it is now,
 called with its default facts, against the same kernel at an earlier revision — bitwise, on decode rows, verify rows
 and blocks of 8 up to 3000 tokens, model-dtype and q8_0 KV, every head_dim, one split and several.
 

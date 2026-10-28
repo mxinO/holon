@@ -1,4 +1,4 @@
-"""A toy route transform (`moe_route_transform.drop_last@1`, docs/v1-offload.md D3): every token's last routing rank
+"""A toy route transform (`moe_route_transform.drop_last@1`, docs/dev/v1-offload.md D3): every token's last routing rank
 is dropped (id −1); weights unchanged; the layer's map is checked for its shape only. Its own contract, oracle and
 provider (torch ops, any device), as a held-out transform plugin's would be."""
 import torch

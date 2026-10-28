@@ -58,7 +58,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cu b/ggml/src/ggml-cuda/mmid.cu
 +#include <cub/device/device_radix_sort.cuh>
 +#include <cub/device/device_scan.cuh>
 +
-+// Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
++// Holon: the helper is rewritten (docs/dev/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
 +// ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
 +// included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
 +// precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none) — but a negative id is a pair the call skips on
@@ -584,7 +584,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 +#define GGML_CUDA_MM_IDS_BLOCK_PAIRS 16384
 +
 +// Holon: the most (token, expert) pairs one call sorts: past GGML_CUDA_MM_IDS_BLOCK_PAIRS, the device-wide path (an
-+// eager prefill pass of up to 4,096 rows at top-8, docs/v1-offload.md D8; 16,384 at top-8, docs/v1-glm.md D9)
++// eager prefill pass of up to 4,096 rows at top-8, docs/dev/v1-offload.md D8; 16,384 at top-8, docs/dev/v1-glm.md D9)
 +#define GGML_CUDA_MM_IDS_MAX_PAIRS 131072
 +
 +// Holon: the scratch bytes the helper takes for a call of n_pairs pairs (the device-wide path's; 0 for the others)
@@ -596,7 +596,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmid.cuh b/ggml/src/ggml-cuda/mmid.cuh
 +#define GGML_CUDA_MM_IDS_ERR_COLUMNS 4 // a slot with more pairs than mmq's column tiles (an id repeated in a row)
 +
 +// Holon: the per-slot helper (ggml's: one warp per slot, scanning every pair; z is the slot) for a launch that lists
-+// every slot and a small scan, where it is the faster one (measured on sm_86, docs/v1-offload.md D4; its shared
++// every slot and a small scan, where it is the faster one (measured on sm_86, docs/dev/v1-offload.md D4; its shared
 +// memory holds 4096 pairs); else the compact one
 +static inline bool ggml_cuda_mm_ids_per_slot(const int64_t n_experts, const int64_t n_pairs, const int64_t n_z) {
 +    return n_z == n_experts && n_experts*n_pairs <= 1024*1024 && n_pairs <= 4096;
@@ -636,7 +636,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-config-ampere.cuh b/ggml/src/ggml-cuda/mmq-co
      CASE(GGML_TYPE_IQ2_S, 256, 1, 128, 112, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
      CASE(GGML_TYPE_IQ2_S, 256, 1, 128, 128, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, false);
  
-+    // Holon: IQ1_M in IQ2_S's layout (docs/v1-moe-prefill.md D9)
++    // Holon: IQ1_M in IQ2_S's layout (docs/dev/v1-moe-prefill.md D9)
 +    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,   8, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
 +    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  16, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
 +    CASE(GGML_TYPE_IQ1_M, 256, 1, 128,  32, GGML_CUDA_MMQ_SRAM_LAYOUT_Q3_K, MMQ_ITER_K, true, true);
@@ -661,7 +661,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 --- a/ggml/src/ggml-cuda/mmq.cu
 +++ b/ggml/src/ggml-cuda/mmq.cu
 @@ -1,3 +1,7 @@
-+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
++// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 +// src1's type to the q8_1 quantizers (bf16 activations); x_scale and the bf16 dst in mmq_args; glu, gate_scale,
 +// up_scale, ids_j_tokens and glu_limit through ggml_cuda_mul_mat_q to the launch.
 +
@@ -707,7 +707,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 +        const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
 +        const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
 +        const int64_t ids_j_tokens, // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
-+        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6)
++        const float glu_limit) { // Holon: glu's clamp (docs/dev/v1-glm.md D6)
 +    GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
 +    GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
 +    GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -739,7 +739,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cu b/ggml/src/ggml-cuda/mmq.cu
 -                ncols_opt = (ne12*n_expert_used + ne02 - 1) / ne02;
 -            }
 +            // Holon: each launch entry holds ne12*n_expert_used/n_z rows on average, and the launch covers only the
-+            // tiles that hold rows (launch_mul_mat_q, docs/v1-moe-prefill.md D2), so J is chosen against that mean on
++            // tiles that hold rows (launch_mul_mat_q, docs/dev/v1-moe-prefill.md D2), so J is chosen against that mean on
 +            // every GPU (upstream: against ne12, or on RDNA3 and RDNA4 against the mean over ne02 slots); up to
 +            // ids_j_tokens tokens against ne12, as upstream: there the mean's narrower tiles re-read the weights of the
 +            // experts that hold more rows (16 tokens: up to 8% slower on the RTX 5080 and 5090)
@@ -842,7 +842,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 @@ -1,6 +1,12 @@
  #pragma once
  
-+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
++// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 +// x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
 +// gate_scale, up_scale, glu_limit and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
 +// through process_tile, mul_mat_q, launch_mul_mat_q and mul_mat_q_switch_J.
@@ -857,7 +857,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
  #define MMQ_NWARPS               8
  
 -typedef void (*ggml_cuda_mmq_load_tiles_t)(const char * __restrict__ x, int * x_tile, const int kbx0, const int i_max, const int stride);
-+// Holon: the judge's plants on a dense call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5, set by
++// Holon: the judge's plants on a dense call's stream-k fixup past one 512-row chunk (docs/dev/v1-moe-prefill.md D5, set by
 +// holon_ggml_mmq_plant: bit 1 rounds the partials to bf16 before the fixup, bit 2 skips the fixup), and the count of
 +// such fixups launched, then of those planted (holon_ggml_mmq_fixups); defined in csrc/api.cu
 +extern int holon_mmq_plant;
@@ -884,7 +884,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
              return MMQ_Q8_1_DS_LAYOUT_D4;
          case GGML_TYPE_IQ1_S:
              return MMQ_Q8_1_DS_LAYOUT_DS4;
-+        case GGML_TYPE_IQ1_M: // Holon: f32 scale per 32 activations, as IQ2_XS / IQ2_S (docs/v1-moe-prefill.md D9)
++        case GGML_TYPE_IQ1_M: // Holon: f32 scale per 32 activations, as IQ2_XS / IQ2_S (docs/dev/v1-moe-prefill.md D9)
 +            return MMQ_Q8_1_DS_LAYOUT_D4;
          case GGML_TYPE_IQ4_XS:
          case GGML_TYPE_IQ4_NL:
@@ -974,7 +974,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      }
  }
  
-+// Holon: the fused gate/up store (docs/v1-moe-prefill.md D4). A tile's upper half holds gate rows i, its lower half the
++// Holon: the fused gate/up store (docs/dev/v1-moe-prefill.md D4). A tile's upper half holds gate rows i, its lower half the
 +// up rows of the same i (mmq-load-tiles.cuh's split): the lower half's warps hand their f32 sums to the upper half's
 +// through shared memory (the tiles' space, free after the last k step), which stores y = up * silu(gate) at row i, each
 +// first scaled by the expert's scale2 where there is one: swiglu_f32's expression (csrc/api.cu), so the result is
@@ -1072,7 +1072,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().load_tiles;
  }
  
-+// Holon: T6 (mmq-load-tiles.cuh, docs/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
++// Holon: T6 (mmq-load-tiles.cuh, docs/dev/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
 +// blocks of 32 or 64 values), and their loaders for such rows
 +static constexpr __host__ __device__ bool ggml_cuda_mmq_has_tail(const ggml_type type) {
 +    return type == GGML_TYPE_Q2_0 || type == GGML_TYPE_Q4_0 || type == GGML_TYPE_Q4_1 || type == GGML_TYPE_Q5_0 ||
@@ -1113,7 +1113,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +        const int split, const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert,
 +        const float glu_limit) {
 +        // Holon: glu, the fused gate/up store (ggml_cuda_mmq_write_back_glu) of rows `split` apart, `expert`'s scales,
-+        // the clamp (glu_limit > 0: docs/v1-glm.md D6)
++        // the clamp (glu_limit > 0: docs/dev/v1-glm.md D6)
  
      constexpr int              warp_size  = ggml_cuda_get_physical_warp_size();
      constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
@@ -1153,7 +1153,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      }
  }
  
-+// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/v1-moe-prefill.md D2). Upstream's
++// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/dev/v1-moe-prefill.md D2). Upstream's
 +// order: jt, then the channel zt (with ids the compact entry), the sample wt, the row tile it, over ntx column tiles.
 +// `flat` (the launch's flat range, with ids): the column tiles of the n_z entries form one range of ntx blocks per row
 +// tile: entry z's start at z + expert_bounds[z]/J (each entry's ceil(rows/J) tiles fit before the next start, as
@@ -1209,7 +1209,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 -        const uint3 ntx) {
 +        const uint3 ntx, const float * __restrict__ x_scale, const bool dst_bf16, // Holon: dst's store (mmq_store)
 +        const float * __restrict__ gate_scale, const float * __restrict__ up_scale, // Holon: glu's scales
-+        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
++        const float glu_limit) { // Holon: glu's clamp (docs/dev/v1-glm.md D6; 0: none)
  
      // Skip unused template specializations for faster compilation:
      if (ggml_cuda_mmq_get_config(type, J, fallback, prec_src1).type == GGML_TYPE_COUNT) {
@@ -1451,10 +1451,10 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      int J_best; // Tile width in ne11(dense)/ne12(MoE) direction to use for optimal performance.
 +    const float * x_scale = nullptr; // Holon: NVFP4's per-tensor scale2 (dense), and a bf16 dst (dense): mmq_store
 +    bool dst_bf16 = false;
-+    bool glu = false; // Holon: the fused gate/up store (with ids; docs/v1-moe-prefill.md D4), and its scale2 per expert
++    bool glu = false; // Holon: the fused gate/up store (with ids; docs/dev/v1-moe-prefill.md D4), and its scale2 per expert
 +    const float * gate_scale = nullptr;
 +    const float * up_scale = nullptr;
-+    float glu_limit = 0.0f; // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
++    float glu_limit = 0.0f; // Holon: glu's clamp (docs/dev/v1-glm.md D6; 0: none)
  };
  
  static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const int cc) {
@@ -1487,7 +1487,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 -    const int ntzw = args.nchannels_y * args.nsamples_y;
 +    // Holon: with ids, where a call's tokens span several column tiles, the column tiles of all nchannels_y compact
 +    // entries as one range (mmq_tile), sized per call: nchannels_y + floor(rows/J) + 1 cover any routing of ncols_dst
-+    // rows (docs/v1-moe-prefill.md D2); where they fit one tile, one per entry as upstream (an empty entry's exits)
++    // rows (docs/dev/v1-moe-prefill.md D2); where they fit one tile, one per entry as upstream (an empty entry's exits)
 +    // glu (D4) always: its tile is the flat range's
 +    const bool flat = args.ids_dst && (args.glu || (args.ncols_max + config.J - 1) / config.J > 1);
 +    const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
@@ -1523,7 +1523,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
      const int tiles_efficiency_percent = 100 * ntiles_dst / (nsm*tiles_nwaves);
 -    const dim3 block_nums_stream_k(GGML_CUDA_CC_IS_NVIDIA(cc) && tiles_efficiency_percent >= 90 ? ntiles_dst : nsm, 1, 1);
 +    // Holon: with ids always one block per tile, so that a tile's K order does not depend on the number of slots
-+    // (stream-k splits K at points that do; docs/v1-offload.md D4)
++    // (stream-k splits K at points that do; docs/dev/v1-offload.md D4)
 +    const bool tiling = args.ids_dst || (GGML_CUDA_CC_IS_NVIDIA(cc) && tiles_efficiency_percent >= 90);
 +    const dim3 block_nums_stream_k(tiling ? ntiles_dst : nsm, 1, 1);
  
@@ -1694,7 +1694,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq.cuh b/ggml/src/ggml-cuda/mmq.cuh
 +        const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr,
 +        bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr, // Holon: glu (D4)
 +        int64_t ids_j_tokens = INT64_MAX, // Holon: J against the tokens up to this many (D2); upstream: always
-+        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/v1-glm.md D6)
++        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/dev/v1-glm.md D6)
  
  bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 +
@@ -1707,13 +1707,13 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
  
  #include "mmq.cuh"
  
-+// Holon: `split` (docs/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
++// Holon: `split` (docs/dev/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
 +// fused gate/up tile loads gate rows i... in its upper half and the matching up rows (split rows on) in its lower half;
-+// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/v1-moe-prefill.md D8): `split` in every
++// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/dev/v1-moe-prefill.md D8): `split` in every
 +// loader's signature and row offset, marked at each signature only; T6's `tail` in its loaders' template parameters,
 +// marked at each use
 +
-+// Holon: T6 (docs/v1-moe-prefill.md §10). `tail`: the instance for rows of `stride` blocks whose width is not a
++// Holon: T6 (docs/dev/v1-moe-prefill.md §10). `tail`: the instance for rows of `stride` blocks whose width is not a
 +// multiple of MMQ_ITER_K (mul_mat_q_case picks it at launch; every other row width runs upstream's loads, `tail`
 +// false): the last K step's blocks past the row re-read the row's last block, not the next row's (or past the
 +// buffer). The activations there are q8_1's zero padding, so those products are 0 either way: the same bits as
@@ -2139,7 +2139,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmq-load-tiles.cuh b/ggml/src/ggml-cuda/mmq-load-
      }
  }
  
-+// Holon: IQ1_M's tile loader (docs/v1-moe-prefill.md D9), in IQ2_XS / IQ2_S's layout. A weight is
++// Holon: IQ1_M's tile loader (docs/dev/v1-moe-prefill.md D9), in IQ2_XS / IQ2_S's layout. A weight is
 +// d·(2s + 1)·(g + delta) with g in {0, 1, 2} and delta = -1 ± 1/8, so 8·(g + delta) = 8·g - 7 or 8·g - 9 is an int8 in
 +// {±1, ±7, ±9}, and the per-16 scale d·(2s + 1)/8 (fp16 d times at most 4 bits, over a power of two) is exact as the
 +// f32 x_df. With D4 activations the q8_0_16 vec dots then take the quantized values' exact products: no stored sums.
@@ -2437,7 +2437,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 --- a/ggml/src/ggml-cuda/mmvq.cu
 +++ b/ggml/src/ggml-cuda/mmvq.cu
 @@ -1,3 +1,6 @@
-+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked: the
++// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked: the
 +// dst pointer as void * (a bf16 or f32 dst) through the kernels and their launches; src1's q8_1 buffer as src1_q.
 +
  #include "mmvq.cuh"
@@ -2671,7 +2671,7 @@ diff -ruN a/ggml/src/ggml-cuda/mmvq.cu b/ggml/src/ggml-cuda/mmvq.cu
 -    ggml_cuda_pool_alloc<char> src1_q8_1(ctx.pool(), ne13*ne12 * ne11*ne10_padded * sizeof(block_q8_1)/QK8_1);
 -    {
 +    // Holon: a Q8_1 src1 holds the activations as quantize_row_q8_1_cuda writes them (rows of ne10 padded to
-+    // MATRIX_ROW_PADDING): one quantization shared by several matmuls of one input (docs/m07-perf.md D6)
++    // MATRIX_ROW_PADDING): one quantization shared by several matmuls of one input (docs/dev/m07-perf.md D6)
 +    ggml_cuda_pool_alloc<char> src1_q8_1(ctx.pool());
 +    if (src1->type != GGML_TYPE_Q8_1) {
 +        src1_q8_1.alloc(ne13*ne12 * ne11*ne10_padded * sizeof(block_q8_1)/QK8_1);
@@ -2698,7 +2698,7 @@ diff -ruN a/ggml/src/ggml-cuda/moe-weighted-reduction.cu b/ggml/src/ggml-cuda/mo
 --- a/ggml/src/ggml-cuda/moe-weighted-reduction.cu
 +++ b/ggml/src/ggml-cuda/moe-weighted-reduction.cu
 @@ -1,9 +1,19 @@
-+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker; no signature plumbing beyond
++// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker; no signature plumbing beyond
 +// the marked hunks.
 +
  #include "moe-weighted-reduction.cuh"
@@ -2791,7 +2791,7 @@ diff -ruN a/ggml/src/ggml-cuda/quantize.cu b/ggml/src/ggml-cuda/quantize.cu
 --- a/ggml/src/ggml-cuda/quantize.cu
 +++ b/ggml/src/ggml-cuda/quantize.cu
 @@ -1,6 +1,29 @@
-+// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
++// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 +// x as void * with x_bf16 / type_x (bf16 activations) through the q8_1 quantizers and their launches, read through
 +// load_x / load_x4.
 +
@@ -2988,7 +2988,7 @@ diff -ruN a/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu b/ggml/s
 --- a/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu
 +++ b/ggml/src/ggml-cuda/template-instances/mmq-instance-iq1_m.cu
 @@ -0,0 +1,5 @@
-+// Holon: IQ1_M's mmq instance (docs/v1-moe-prefill.md D9); upstream has none, so this file is Holon's own.
++// Holon: IQ1_M's mmq instance (docs/dev/v1-moe-prefill.md D9); upstream has none, so this file is Holon's own.
 +
 +#include "../mmq.cuh"
 +
@@ -3019,7 +3019,7 @@ diff -ruN a/ggml/src/ggml-cuda/topk-moe.cu b/ggml/src/ggml-cuda/topk-moe.cu
      return true;
  }
 +
-+// Holon: the MoE router in one launch (docs/v1-offload.md §14, step 3c), for decode and verify steps: logits =
++// Holon: the MoE router in one launch (docs/dev/v1-offload.md §14, step 3c), for decode and verify steps: logits =
 +// x · Wᵀ in f32, x [n_rows, hidden] (bf16 or f32) read as its exact f32 values and W [n_experts, hidden] f32, then
 +// topk_moe_cuda's selection on them (holon_topk_select). Block (e, t) computes expert e for the t-th tile of
 +// HOLON_ROUTER_ROWS rows: warp q of HOLON_ROUTER_WARPS sums the q-th of equal slices of hidden — lane l the products

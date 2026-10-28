@@ -1,4 +1,5 @@
-"""Qwen3.8-Flash-Next's PLE ops in Triton (op contracts: models.qwen4_exp; docs/v1-flash-next.md D4, D13′): the n-gram
+"""Qwen3.8-Flash-Next's PLE ops in Triton (op contracts: models.qwen4_exp; docs/dev/v1-flash-next.md D4, D13′): the
+n-gram
 table rows with their history, and the block, float32 throughout."""
 from __future__ import annotations
 

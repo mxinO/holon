@@ -1,4 +1,5 @@
-"""Vetting constraints before the engine process compiles them (docs/m05-grammar.md D5). An xgrammar compile cannot be
+"""Vetting constraints before the engine process compiles them (docs/dev/m05-grammar.md D5). An xgrammar compile cannot
+be
 cancelled, and a compiled grammar can take gigabytes, so each new constraint is first compiled in a worker process
 (`worker.py`) that can be killed: past the timeout (`busy`, retry later), or when its resident set grows `budget`
 bytes past its size at the job's start (`client`: the schema is too complex). A compiled size over `max_size` is

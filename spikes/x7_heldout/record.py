@@ -1,4 +1,4 @@
-"""Step 7's evidence record from the runs' outputs (docs/v1-offload.md acceptance 1):
+"""Step 7's evidence record from the runs' outputs (docs/dev/v1-offload.md acceptance 1):
 
     python spikes/x7_heldout/record.py <snapshot dir> <a1 dir> <page-cache dir> <out.json> <commit> [<gate dir>]
 
@@ -33,7 +33,7 @@ def main() -> None:
         if not name.startswith("resident") and (snaps / f"{name}.json").exists():
             metas[name]["diff"] = snapshot.diff(snapshot.Snapshot.load(snaps / ref),
                                                 snapshot.Snapshot.load(snaps / f"{name}.json"))
-    record = {"what": "docs/v1-offload.md step 7: held-out plugins (acceptance 1)", "gpu": "RTX A5000",
+    record = {"what": "docs/dev/v1-offload.md step 7: held-out plugins (acceptance 1)", "gpu": "RTX A5000",
               "gpu_class": "rtx-a5000", "model": "Qwen3-30B-A3B Q4_K_M (unsloth GGUF)", "commit": commit,
               "torch": torch.__version__, "commands": [
                   "python spikes/x7_heldout/run.py <model.gguf> <dir> '<name>|<runs>|<trace>|<options>' ...",

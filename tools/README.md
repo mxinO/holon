@@ -70,6 +70,11 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 ... propagate <model> --new-model --approve --golden … --floor …
 # pin the fastest provider per decode op on this GPU, then the same checks as propagate
 ... tune <model> [--ops attention.paged_decode rmsnorm …] [--batch 8] [--tokens 64] --golden … --floor …
+
+# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it)
+python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [engine flags]
+# Qwen3.8-Flash-Next's MTP pack as its locks name it: Strata's pack with the head's dense projections in Q8_0
+python -m holon_tools mtp-pack <Strata's mtp-q2_0.gguf> mtp-q2_0-q8.gguf
 ```
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this
@@ -77,7 +82,7 @@ machine's class, else the nearest class's), `--prompts` (prompt set of L2 and of
 `judge/prompts/v1.jsonl`), `--approve`, `--snapshot-runs 3`, `--allow-approx`, and every EngineConfig field as
 a flag (`--device`, `--dtype`, `--max-seqs`, …). `propagate`/`tune` exit 0 when nothing needs doing or the lock was
 written, 2 when the new lock waits for `--approve`, 1 on failure. A plan that binds a plugin declaring
-`numerics = "approx"` (e.g. the route tail skip, `docs/v1-offload.md` §6) is never written without `--allow-approx`:
+`numerics = "approx"` (e.g. the route tail skip, `docs/dev/v1-offload.md` §6) is never written without `--allow-approx`:
 such a lock is a human gate, never a default.
 
 `propagate` builds the plan the checked-out code resolves with the lock's kernel pins (they isolate the model from
@@ -98,10 +103,10 @@ golden and floor recorded before (`--golden`, `--floor`); propagation never reco
 quantized calls take two kernel paths (an offload store's short passes beside its long ones) gives a floor per path
 (`--floor <mmq floor> <mmvq floor>`): each call must take a path one of them emulates, and L2 must pass every
 floor's budgets. A model with no fp32 golden is judged in L2's reference form instead (`--reference <ref>...`,
-one bf16 GPU reference per prompt set, each by the budgets beside it: `docs/v1-glm.md` D15a); the lock records
+one bf16 GPU reference per prompt set, each by the budgets beside it: `docs/dev/v1-glm.md` D15a); the lock records
 how it was judged in a `[judged]` table, which a lock advanced without L2 inherits. `--snapshot-runs 3`
 asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
-(`docs/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
+(`docs/dev/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
 snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can
 never name C, so counting it would make every re-run write another lock. Core changes are seen through the core's
 own `holon` unit pin. Starting from another class's lock (no lock for this class yet), only the pins whose provider
@@ -110,7 +115,7 @@ runs here are kept.
 `tune` builds the base plan, lists for each decode op the providers that run here and support every site, and
 benchmarks one op at a time; a pinned provider is replaced only when beaten by more than 3%, so re-tuning does not
 flip pins on noise. With `--clock` (an engine with a state tier, `--slots tier=std.state_tier`) it first fits the
-tier's `state_tier.step_cost` (`docs/v1-kv-tiers.md` D4) to timed steps at the given settings, prefill steps of one
+tier's `state_tier.step_cost` (`docs/dev/v1-kv-tiers.md` D4) to timed steps at the given settings, prefill steps of one
 row at 256–2048 tokens and decode steps at every row count, in relative error, and the lock takes it. The engine
 settings are the flags', not the starting lock's: pass the lock's (as `--max-seqs 4 --max-model-len …`).
 
@@ -131,7 +136,7 @@ and saves 2064 prefix tokens. Timings for Qwen3-0.6B on an RTX A5000: a first lo
 - The trace's long context stops at the prompt set's longest prompt (2048 tokens); buckets above 64 (`max_seqs` >
   64), spec decoding and grammar are not exercised.
 - CI `isolation-check` (re-run propagate on trusted GPU runners and reject unreproducible locks), sweeping all models.
-- A lock with an offloaded MoE's CPU split (F5b, `docs/v1-offload.md` §6): L2 scores the lock's own settings, and
+- A lock with an offloaded MoE's CPU split (F5b, `docs/dev/v1-offload.md` §6): L2 scores the lock's own settings, and
   F5b's path-aware floor needs a frozen placement at one token per step, so `propagate` and `tune --cpu-split` (without
   `--no-lock`) stop with the judge's `ValueError`; F5b's bounded L2 runs by hand (`spikes/x6_cpu/l2.py`, then
   `holon_judge golden --cpu-split` and `compare`). Plan §10's "F5b locks".

@@ -1,4 +1,4 @@
-"""F5b's decode gain on the development vehicle (docs/v1-offload.md §13, step 6): decode tok/s of arms of the offload
+"""F5b's decode gain on the development vehicle (docs/dev/v1-offload.md §13, step 6): decode tok/s of arms of the offload
 store — F5a and F5b with a split table and worker count — on natural prompts (the first `--batch` prompts of
 judge/prompts/v1.jsonl, cut to `--depth` tokens), timed as bench/holon_tg.py times it (generate N + 1 tokens minus
 generate 1), `--rounds` per arm after a warm-up round (one engine at a time: name an arm twice, A B A B, to interleave),

@@ -1,6 +1,6 @@
 """Qwen3.5's (and 3.8's) frontend bundle: the checkpoint's tokenizer and chat template, from whichever source holds
 the weights (HF directory or GGUF file), and the formats the template writes reasoning and tool calls in
-(docs/m05-grammar.md §3.8; the frontend parses and constrains each format). Qwen3.5's and 3.8's templates write tool
+(docs/dev/m05-grammar.md §3.8; the frontend parses and constrains each format). Qwen3.5's and 3.8's templates write tool
 calls in XML but argument values differently, so the tool format is read off the template."""
 from __future__ import annotations
 

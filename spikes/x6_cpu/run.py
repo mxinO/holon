@@ -1,5 +1,5 @@
 """Snapshot traces (judge `snapshot.trace` over judge/prompts/v1.jsonl) of the development vehicle on fresh engines,
-as spikes/x3_policies/run.py records them (the same engine settings), for step 6's checks (docs/v1-offload.md §6,
+as spikes/x3_policies/run.py records them (the same engine settings), for step 6's checks (docs/dev/v1-offload.md §6,
 §9): F5a configurations byte-identical to all-resident, F5b run-identical with adaptive placement on, the F5b plants.
 
     python spikes/x6_cpu/run.py <model.gguf> <out dir> "<name>|<runs>|<plant>|<plugin options k=v;k=v>" ...

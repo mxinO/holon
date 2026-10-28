@@ -10,7 +10,7 @@
   `choices`, so `holon serve` serves a committed lock without a warning and never drops it;
 - `defaults.toml` (the settings `holon serve` starts from without a lock) sets EngineConfig fields only, selects
   installed plugins of the slots it names, and sets declared plugin options;
-- a lock's `[judged]` table (how L2 judged it, docs/v1-glm.md D15a) names files under `judge/goldens/` that exist
+- a lock's `[judged]` table (how L2 judged it, docs/dev/v1-glm.md D15a) names files under `judge/goldens/` that exist
   with the sha256 it records, so a moved or re-recorded reference or golden does not leave the claim dangling;
 - no lock carries a CPU tier (a class `<gpu>+<cpu tier>/…`, F5b's split) until the lead decides the policy for
   benchmark-only and tier locks: the lookup ranks a lock of the host's tier first, so a committed one would become the

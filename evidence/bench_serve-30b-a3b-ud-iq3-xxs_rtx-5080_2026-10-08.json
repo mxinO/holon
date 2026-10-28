@@ -3,7 +3,7 @@
  "date": "2026-10-08",
  "command": "python bench/run.py --name serve-30b-a3b-ud-iq3-xxs --gpu 0 --model unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5 --backends holon_http llamaserver --rounds 2 --max-batch 32 --max-step-tokens 2048 --traces bench/traces/decode_b1.jsonl bench/traces/decode_b8.jsonl",
  "commit": "63941b4a70217a9f76b3e20e30e54a5f98dd08e9-dirty",
- "dirty": ["M docs/m02-moe.md", " M docs/plan.md"],
+ "dirty": ["M docs/dev/m02-moe.md", " M docs/plan.md"],
  "gpu_class": "rtx-5080",
  "model": "unsloth/Qwen3-30B-A3B-GGUF@d5b1d57bd0b5",
  "rounds": 2,

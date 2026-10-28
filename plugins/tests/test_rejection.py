@@ -1,4 +1,5 @@
-"""L0-dist for `std.spec.rejection` (docs/m04-spec.md §5): speculative sampling with deterministic drafts emits tokens
+"""L0-dist for `std.spec.rejection` (docs/dev/m04-spec.md §5): speculative sampling with deterministic drafts emits
+tokens
 with exactly the target's distribution. 10⁵ independent sequences (one seed each) at fixed seeds, χ² at p = 1e-3 with
 cells of expected count < 5 pooled:
 

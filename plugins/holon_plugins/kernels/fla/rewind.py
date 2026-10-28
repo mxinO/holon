@@ -1,8 +1,9 @@
-"""Our Triton kernel for `gdn_rewind@1` (op contract: std.mixers.gdn; docs/m07-perf.md D5): one launch per verify step
+"""Our Triton kernel for `gdn_rewind@1` (op contract: std.mixers.gdn; docs/dev/m07-perf.md D5): one launch per verify
+step
 for every GDN layer of a group — the saved gates masked past each row's accepted tokens, and the conv state at the
 accepted end gathered from window ‖ saved x straight into the pool. Data movement only (the oracle's values exactly);
 nothing is read back to the host, so it captures into the verify step's graph. The gate a may be wider than b (KDA's
-per-channel gate, H·Dk a token, docs/v1-glm.md D4): each is masked over its own width, in blocks."""
+per-channel gate, H·Dk a token, docs/dev/v1-glm.md D4): each is masked over its own width, in blocks."""
 from __future__ import annotations
 
 import torch

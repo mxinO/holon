@@ -2,7 +2,7 @@
  "name": "mp2_checks",
  "gpu": "RTX 4090",
  "date": "2026-10-18",
- "method": "docs/v1-moe-prefill.md \u00a77.1; spikes/moe_prefill/identity.py, gemm.py, prefill.py; bench/holon_tg.py",
+ "method": "docs/dev/v1-moe-prefill.md \u00a77.1; spikes/moe_prefill/identity.py, gemm.py, prefill.py; bench/holon_tg.py",
  "commits": {
   "main": "b5b1e7f",
   "step1": "1026875",

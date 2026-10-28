@@ -1,6 +1,6 @@
 """The judge's scoped patch for a tie rule (D2 of each model's design): a module's call runs with one attribute (e.g.
 `torch.Tensor.topk`) replaced, restored when the call returns, so only that module's own top-k breaks ties the
-rule's way (docs/v1-flash-next.md D2, docs/v1-glm.md D2)."""
+rule's way (docs/dev/v1-flash-next.md D2, docs/dev/v1-glm.md D2)."""
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,4 +1,4 @@
-"""The judge on GLM-5.3-Flash (docs/v1-glm.md D2, §6.1), in the golden venv (transformers 5.19.0, `local/envs/
+"""The judge on GLM-5.3-Flash (docs/dev/v1-glm.md D2, §6.1), in the golden venv (transformers 5.19.0, `local/envs/
 golden-glm`): the tiny models' GGUFs, rebuilt by llama.cpp's converter (and `llama-quantize` for the GPU copy) to their
 pinned sha256; the f32 file reads back as the checkpoint (`gguf.hf_state`: the KDA convs and MLA's `kv_b_proj` fused
 back, `A_log` from `ssm_a`); the streamed golden of it equals HF's whole forward over the same weights bit for bit
@@ -17,7 +17,7 @@ import transformers
 
 SKIP = ("GLM's golden against HF on the tiny models (D2) did not run: it needs transformers with glm5_next (the golden "
         "venv) and GLM_LLAMA_CPP (llama.cpp at 27c7a76; GLM_LLAMA_QUANTIZE its llama-quantize for the GPU copy): "
-        "docs/release.md §22")
+        "docs/dev/release.md §22")
 READY = hasattr(transformers, "Glm5NextTextConfig") and bool(os.environ.get("GLM_LLAMA_CPP"))
 if not READY:
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one

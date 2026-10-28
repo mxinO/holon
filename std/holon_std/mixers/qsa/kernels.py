@@ -1,4 +1,4 @@
-"""The op contracts of QSA, Qwen3.8-Flash-Next's indexed sparse attention (docs/v1-flash-next.md D6). Their oracles
+"""The op contracts of QSA, Qwen3.8-Flash-Next's indexed sparse attention (docs/dev/v1-flash-next.md D6). Their oracles
 are in `reference.py`; kernels come from kernel plugins. Kernel instances are stateless across steps and safe to call
 inside CUDA graphs. (The unit, `std.mixers.qsa@1`, lands with FN's core seams; these contracts stand alone.)
 
@@ -29,8 +29,8 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
 - `qsa_select@1`: instance `(q [T, Hi, Dk], pooled, table, seq, positions, w [T, Hi] f32 | None = None) -> blocks
   [T, budget / ratio + 1] int32`: per query (q normed and rotated by the unit, any float dtype), the scores of its n
   complete blocks `s_b = Σ_h relu(⟨q_h, pooled_b⟩) / √Dk` — with the fact `head_weights` (true; GLM's DSA indexer,
-  docs/v1-glm.md D5; given only then) `Σ_h w_h · relu(⟨q_h, pooled_b⟩) / √Dk`, `w` the row's signed head weights — in
-  float32 with IEEE products, and its top min(budget / ratio, n) blocks, ties
+  docs/dev/v1-glm.md D5; given only then) `Σ_h w_h · relu(⟨q_h, pooled_b⟩) / √Dk`, `w` the row's signed head weights —
+  in float32 with IEEE products, and its top min(budget / ratio, n) blocks, ties
   to the lower block (D2's rule); written ascending, then the open block n when there is one, then −1. A query with
   n ≤ budget / ratio thus selects every block (dense). Rows of padding tokens are all −1. Score workspaces are
   sub-batched (at most 512 queries per pass). **Shape-invariant:** a query's scores, and so its selection, are the same
@@ -48,7 +48,7 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
 A step whose rows all have host-known lengths ≤ (budget / ratio) · ratio + ratio − 1 (2,051) runs the dense gqa ops
 instead (D6).
 
-GLM-5.3-Flash's DSA (docs/v1-glm.md D5; HF's `Glm5NextTextIndexer` and absorbed `Glm5NextTextAttention`) shares the
+GLM-5.3-Flash's DSA (docs/dev/v1-glm.md D5; HF's `Glm5NextTextIndexer` and absorbed `Glm5NextTextAttention`) shares the
 blocks (pools of `ratio` = 4), the addressing and `qsa_select@1` (with head weights); its state is a latent `"kv"`
 spec — per unit `[page, Dc]` in the model dtype, one copy read as both keys and values — and an `"idx"` spec — per
 unit its raw keys [page, Dk] and gates [page, Dk] (model dtype) and pooled keys [page / ratio, Dk] float32:

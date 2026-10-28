@@ -1,4 +1,4 @@
-"""M0.7 step 0 (docs/m07-perf.md D1, D2, D8): where a step's GPU time goes, per row kind, for one deployment.
+"""M0.7 step 0 (docs/dev/m07-perf.md D1, D2, D8): where a step's GPU time goes, per row kind, for one deployment.
 
 Rows: prefill of P tokens (one request alone: one step), decode at batch B (B requests of --ctx tokens), and verify
 steps at batch B when the deployment drafts; at the deployment's overlap (a window's wall per step is the step's
@@ -271,7 +271,7 @@ def main() -> None:
     ap.add_argument("--ctx", type=int, default=512, help="prompt tokens of each decoding request")
     ap.add_argument("--name", default="")
     ap.add_argument("--llama-crossover", action="store_true", help="kernels.ggml_cuda without its per-shape entries "
-                    "(llama.cpp's rule: D2's baseline, docs/m07-perf.md)")
+                    "(llama.cpp's rule: D2's baseline, docs/dev/m07-perf.md)")
     ap.add_argument("--json")
     args = ap.parse_args()
     if args.llama_crossover:

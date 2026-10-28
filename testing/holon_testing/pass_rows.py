@@ -1,4 +1,4 @@
-"""`linear_experts@2`'s `pass_rows` promise (std.moe.kernels; docs/v1-moe-prefill.md D0, §4), checked on a bound
+"""`linear_experts@2`'s `pass_rows` promise (std.moe.kernels; docs/dev/v1-moe-prefill.md D0, §4), checked on a bound
 instance: every provider that declares `pass_rows` runs it in its L0, over the (SM, type) pairs it declares."""
 from __future__ import annotations
 

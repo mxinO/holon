@@ -2,12 +2,12 @@
 expert id, slots for every entry), its variants `moe_resolve.lfu@1` (F11) and `moe_resolve.lru@1` (F4) — the same CTA
 first updates the policy's state and admits misses into victims' slots —, and `expert_fetch@1` (the zero-copy gather
 of missed units from a mapped host pool into their slots, 8 CTAs × 256 threads of 16-byte loads: step 0's M1,
-docs/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
+docs/dev/v1-offload.md §13), `expert_prefetch@1` and `moe_patch_rows@1` (F5b: a token's row into the CPU's mapped input
 rows, the CPU's output rows into the experts' output). Op contracts: std.moe.kernels, and the placement plugins'
 (placement.lfu, placement.lru). A variant's `lend` (and F11's `lend_tail`)
 runs eagerly (ring steps are never graphed) in torch ops. `MoeResolve.plant` is judge-only: the judge's calibration
 plants set its bits; production never does. After the std offload API's tag no new policy codes land here (a later
-variant ships its own CUDA provider, docs/v1-offload.md D3).
+variant ships its own CUDA provider, docs/dev/v1-offload.md D3).
 
 The native module is built ahead of time (`python -m holon_plugins.kernels.expert_io.prebuild`); without it an
 instance cannot be created and the error names that command."""
@@ -23,7 +23,7 @@ from . import extension
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
-BESIDE_CTAS = 2                            # a store's moves beside the compute (docs/v1-glm.md §13, step 7)
+BESIDE_CTAS = 2                            # a store's moves beside the compute (docs/dev/v1-glm.md §13, step 7)
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
@@ -80,7 +80,7 @@ STATE = {0: (), 1: ("score",), 2: ("last", "clock")}       # each policy's state
 
 
 class MoeResolveLfu(MoeResolve):
-    """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/v1-moe-prefill.md D11): F11 keeps no
+    """`moe_resolve.lfu@1` lends a tail too (placement.lfu's `lend_tail`, docs/dev/v1-moe-prefill.md D11): F11 keeps no
     spares, so the experts holding the range are all it picks. Device ops, no host sync."""
 
     def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
@@ -108,7 +108,7 @@ class ExpertFetch:
     def __call__(self, fetch, n, src, dst, runs=None, beside: bool = False) -> None:
         if runs is None:
             self.lib.fetch(fetch, n, src, dst, self.beside_ctas if beside else 0)
-        else:                                  # landing rows (docs/v1-glm.md D8f): each piece's extents by its runs
+        else:                                  # landing rows (docs/dev/v1-glm.md D8f): each piece's extents by its runs
             self.lib.fetch_runs(fetch, n, src, dst, runs)
 
     def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int | None = None, size: int | None = None,
@@ -187,8 +187,8 @@ class ActivationLoan:
         return self.use_ranges([range_])
 
     def use_ranges(self, ranges: list[torch.Tensor]):
-        """`use` over several device ranges (docs/v1-glm.md D8w: one per class with a tail), in the order given — the
-        caller's smallest first, so small segments fill the small ranges —, none overlapping."""
+        """`use` over several device ranges (docs/dev/v1-glm.md D8w: one per class with a tail), in the order given —
+        the caller's smallest first, so small segments fill the small ranges —, none overlapping."""
         self.release()
         self.lib.loan_set_ranges([r.data_ptr() for r in ranges], [r.numel() for r in ranges])
         self.pool = torch.cuda.MemPool(self.allocator.allocator())

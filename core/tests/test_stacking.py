@@ -1,5 +1,5 @@
-"""The stacking weight rule (docs/m02-moe.md D7): per-expert checkpoint tensors fill one [E, …] parameter; quantized
-ones are adopted slice by slice by the unit owning it (docs/m06-lowp.md D6)."""
+"""The stacking weight rule (docs/dev/m02-moe.md D7): per-expert checkpoint tensors fill one [E, …] parameter; quantized
+ones are adopted slice by slice by the unit owning it (docs/dev/m06-lowp.md D6)."""
 import types
 
 import pytest

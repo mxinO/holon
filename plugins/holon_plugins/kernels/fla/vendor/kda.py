@@ -8,7 +8,7 @@
 # Copyright (c) 2023-2025, Songlin Yang, Yu Zhang
 # ruff: noqa: E501
 #
-# Holon (docs/v1-glm.md D4): vLLM's imports replaced (triton directly; RCP_LN2, cdiv, next_power_of_2 inlined as
+# Holon (docs/dev/v1-glm.md D4): vLLM's imports replaced (triton directly; RCP_LN2, cdiv, next_power_of_2 inlined as
 # vllm.utils.math_utils defines them); the recurrent KDA functions (`fused_recurrent_kda*`, from `.fused_recurrent`,
 # not vendored: KDA's recurrent path is fused_sigmoid_gating.py's IS_KDA branch) and the CustomOp norm layer
 # removed; triton.autotune replaced by `autotune` (utils.py: one pinned config); the chunked path takes the

@@ -1,7 +1,7 @@
-"""GLM's deployments on the real file's first blocks (docs/v1-glm.md D9, §13 steps 5-6): the store's layout and the
+"""GLM's deployments on the real file's first blocks (docs/dev/v1-glm.md D9, §13 steps 5-6): the store's layout and the
 device's free memory at a deployment's --memory-fraction. In a module of their own: an engine another module keeps
 alive (test_reserve's module-scoped fixtures) takes device memory these budgets are measured against. Each skips when
-its file is not given (`holon_testing.gguf_files.slice_blocks` of Maya-S; docs/release.md §22)."""
+its file is not given (`holon_testing.gguf_files.slice_blocks` of Maya-S; docs/dev/release.md §22)."""
 import os
 from unittest import mock
 

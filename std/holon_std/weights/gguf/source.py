@@ -57,7 +57,7 @@ class GGUFSource:
         if nvfp4 := [t.name for t in self._tensors if t.type == GGMLQuantizationType.NVFP4]:
             raise ValueError(f"{self.path}: NVFP4 tensors ({nvfp4[0]}, …) are not served from GGUF: llama.cpp keeps "
                              "their per-tensor scales in separate `.scale` tensors no recipe maps; serve the HF "
-                             "checkpoint instead (docs/m06-lowp.md D1)")
+                             "checkpoint instead (docs/dev/m06-lowp.md D1)")
         hub = [p for p in self.path.parts if p.startswith("models--")]
         # The display name: `<hub repo>/<file stem>` for a hub-cache file, else the stem.
         stem = SPLIT.sub("", self.path.stem)
@@ -67,7 +67,7 @@ class GGUFSource:
         tokens, types = self._value("tokenizer.ggml.tokens") or [], self._value("tokenizer.ggml.token_type") or []
         ends = {i for i, (t, k) in enumerate(zip(tokens, types, strict=True)) if k == 3 and t in _END_OF_TURN}
         named = (self._value(f"tokenizer.ggml.{k}_token_id") for k in ("eos", "eot", "eom"))   # (eom: GLM's
-        #                                                                     <|observation|>, docs/v1-glm.md D13)
+        #                                                                     <|observation|>, docs/dev/v1-glm.md D13)
         self.eos_token_ids = frozenset(ends | {i for i in named if i is not None})
 
     def _value(self, key: str) -> Any:

@@ -1,4 +1,4 @@
-"""What a placement policy and a host tier are to the tiered store (docs/v1-offload.md D3). Plugins implement them
+"""What a placement policy and a host tier are to the tiered store (docs/dev/v1-offload.md D3). Plugins implement them
 structurally, named by a `Ref` in an open plugin option (`moe.placement`, `moe.tiers`), without importing std.
 
 Items are (group, item) pairs — a MoE layer and one of its experts —, each held in one slot per role (gate/up,
@@ -28,13 +28,13 @@ class PlacementPolicy(Protocol):
     device_owned: bool            # the device's resolver owns the whole cache: the host seeds it, never edits it
     heat: str | None              # (optional) the device state an exclusive RAM tier ranks experts by (D10: "hotter")
     exclusive_flag: str | None    # (optional) a device state [1] int32 the store sets to 1 under exclusive tiers: its
-    #                               resolve then logs what they must place (F10's refills: docs/v1-glm.md D8a)
+    #                               resolve then logs what they must place (F10's refills: docs/dev/v1-glm.md D8a)
     frozen: bool                  # (optional) a host policy that never swaps after the seed
     reserved: int                 # (optional) cache slots a group holds in each of its roles' classes outside what a
     #                               step can lend (F10's spares): the store's layout lends only the rest
     prompt_admissions: bool       # (optional, default True) its resolve may admit a prompt row's misses; False (F10:
     #                               decode misses only) lets a staging step under exclusive tiers stage in rounds
-    #                               (docs/v1-glm.md D8s): no staged piece outlives its round
+    #                               (docs/dev/v1-glm.md D8s): no staged piece outlives its round
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         """Device buffers its resolve contract keeps across steps, per group: name -> (shape, dtype). The store holds
@@ -52,7 +52,7 @@ class PlacementPolicy(Protocol):
 
 
 class Tier(Protocol):
-    """A host tier of the store's pieces (docs/v1-offload.md D3, D10), fastest first in `moe.tiers`; it owns its
+    """A host tier of the store's pieces (docs/dev/v1-offload.md D3, D10), fastest first in `moe.tiers`; it owns its
     storage. The first tier is device-readable (pinned RAM); a later one holds what the first does not (the
     checkpoint's file, F9). With every piece in the first, the tiers are inclusive (each piece also in RAM); with fewer,
     exclusive: a piece lives in exactly one of VRAM, RAM and the slower tier, and the store moves it in the graph."""

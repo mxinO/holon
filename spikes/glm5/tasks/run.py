@@ -1,4 +1,4 @@
-"""GLM's task-accuracy gate (docs/v1-glm.md acceptance 1(d), (e); §6.2): `glm_tasks.jsonl` through Holon and through
+"""GLM's task-accuracy gate (docs/dev/v1-glm.md acceptance 1(d), (e); §6.2): `glm_tasks.jsonl` through Holon and through
 Project Maya, greedy, thinking on (the template's default), at most 16,384 new tokens, on the same GGUF, card and
 prompt ids (GLM's chat template through `models.glm5_next`'s bundle), stopping at the model's end-of-turn ids; then
 scored as FN's (`spikes/fn7/tasks/run.py`: the last `Final answer:` after the reasoning; number, text, letter, code;

@@ -12,8 +12,8 @@
 | the judge, goldens, locks and their tools | `docs/design.md` §4.4, §4.6, §10.3; `judge/README.md`; `tools/README.md` |
 | benchmarks | `bench/README.md` |
 
-`docs/plan.md` (milestones) and the milestone documents (`docs/m0*.md`) record history and decisions; read them only
-for the item at hand, never as required reading.
+`docs/plan.md` (roadmap and milestone status) and the development records in `docs/dev/` (one per milestone) hold
+the history and decisions; read them only for the item at hand, never as required reading.
 
 ## Code style
 
@@ -49,7 +49,7 @@ for the item at hand, never as required reading.
   one. Share expensive setup (module-scoped engines, one run checked by several assertions), prefer tiny models on
   the CPU, and use the GPU only where it is the point. Watch `pytest --durations`. Mark a test `slow` (over ≈ 8 s) or
   `model` (a real checkpoint): `pytest` leaves them out, the pre-merge full run takes them with `-m ""`, sharded over
-  idle GPUs (`docs/release.md` §22).
+  idle GPUs (`docs/dev/release.md` §22).
 - Never edit `judge/` goldens/snapshots or `plans/` locks by hand; they are written by the tools.
 
 ## Commits

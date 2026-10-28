@@ -1,4 +1,5 @@
-"""M0.7 step 1 (docs/m07-perf.md D2, D9): the per-shape crossover table from repeated sweeps of the candidate shapes,
+"""M0.7 step 1 (docs/dev/m07-perf.md D2, D9): the per-shape crossover table from repeated sweeps of the candidate
+shapes,
 and D9 at the entries that ship.
 
 A shape gets an entry — the smallest limit in {3, 6, 7} below llama.cpp's for which every graphed row it moves to mmq

@@ -1,4 +1,4 @@
-"""FN acceptance 4, the PLE table's RAM and SSD tiers byte-identical (docs/v1-flash-next.md D5): the deployment's
+"""FN acceptance 4, the PLE table's RAM and SSD tiers byte-identical (docs/dev/v1-flash-next.md D5): the deployment's
 flags with `rows.place` ple:host, then ple:ssd (each its own engine), greedy over the bench plan's warm-up and its
 first `--prompts` 1K prompts, `--tokens` decode tokens each (graphed steps; MTP where the flags draft), top-`K`
 logprobs at every generated position: the token ids and the logprobs' bits must agree. Also each request's tok/s

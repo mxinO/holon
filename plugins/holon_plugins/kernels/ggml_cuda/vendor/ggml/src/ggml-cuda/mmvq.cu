@@ -1,4 +1,4 @@
-// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked: the
+// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked: the
 // dst pointer as void * (a bf16 or f32 dst) through the kernels and their launches; src1's q8_1 buffer as src1_q.
 
 #include "mmvq.cuh"
@@ -1595,7 +1595,7 @@ void ggml_cuda_mul_mat_vec_q(
 
     const int64_t ne10_padded = GGML_PAD(ne10, MATRIX_ROW_PADDING);
     // Holon: a Q8_1 src1 holds the activations as quantize_row_q8_1_cuda writes them (rows of ne10 padded to
-    // MATRIX_ROW_PADDING): one quantization shared by several matmuls of one input (docs/m07-perf.md D6)
+    // MATRIX_ROW_PADDING): one quantization shared by several matmuls of one input (docs/dev/m07-perf.md D6)
     ggml_cuda_pool_alloc<char> src1_q8_1(ctx.pool());
     if (src1->type != GGML_TYPE_Q8_1) {
         src1_q8_1.alloc(ne13*ne12 * ne11*ne10_padded * sizeof(block_q8_1)/QK8_1);

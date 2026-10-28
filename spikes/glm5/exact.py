@@ -1,4 +1,4 @@
-"""GLM acceptance 2, exactness (docs/v1-glm.md §6.2): the snapshot trace (holon_judge.snapshot: a long prompt, its
+"""GLM acceptance 2, exactness (docs/dev/v1-glm.md §6.2): the snapshot trace (holon_judge.snapshot: a long prompt, its
 prefix-hit extension, 62 short requests through every graph bucket, logprobs and seeded sampling) recorded under
 named configurations of one model at one `max_step_tokens`, each on a fresh engine, and diffed against a reference:
 the first run of the first configuration, or `--ref` (a snapshot another process saved). Run-identity (`--runs` of

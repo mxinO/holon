@@ -1,6 +1,6 @@
 {
  "date": "2026-10-27",
- "doc": "docs/v1-glm.md §13 (step 7: the full mode (ii) table after the levers)",
+ "doc": "docs/dev/v1-glm.md §13 (step 7: the full mode (ii) table after the levers)",
  "card": "RTX 5090",
  "config": {
   "holon": "the mode (ii) override set (D10) with moe.loan_fixed_mib 768, L3 (single-buffer staging), expert_io.beside_ctas 2",

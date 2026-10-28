@@ -1,5 +1,5 @@
 {
- "measurement": "K-M5 CPU replay of the core prefix index, state manager and scheduler with a simulated tier (docs/v1-kv-tiers.md \u00a78)",
+ "measurement": "K-M5 CPU replay of the core prefix index, state manager and scheduler with a simulated tier (docs/dev/v1-kv-tiers.md \u00a78)",
  "date": "2026-10-18",
  "command": "python spikes/k0_tiers/m5/replay.py --jobs 1 --out evidence/k0_m5_replay_cpu_2026-10-18.json",
  "core": {

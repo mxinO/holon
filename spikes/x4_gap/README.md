@@ -1,7 +1,7 @@
 # x4_gap — where FreeToken is faster than Holon on the development vehicle
 
 Records: `evidence/x4_gap_rtx-5090_2026-10-17.json` (question 1), `evidence/x4_gap_rtx-5080_2026-10-17.json`
-(questions 2 and 3). A diagnosis for the owner's choice of the development gate's bars (`docs/v1-offload.md` §1
+(questions 2 and 3). A diagnosis for the owner's choice of the development gate's bars (`docs/dev/v1-offload.md` §1
 acceptance 3, §13): no code in core, std or plugins changed.
 
 ## Questions
@@ -64,7 +64,7 @@ Decode tok/s (3 rounds, median):
 | FreeToken offload, rate 1.0 (1.3% misses) | 288.4 | 269.7 | 2.7K / 10.8K |
 
 - **Ratios.** Holon runs 1.15× / 1.23× llama-server and 1.14× / 1.12× FreeToken's resident path.
-- **Why this differs from `docs/release.md`.** The release's 0.93× was llama-bench tg128, which has no server loop or
+- **Why this differs from `docs/dev/release.md`.** The release's 0.93× was llama-bench tg128, which has no server loop or
   sampling, at Holon's older ggml pin. The gate measures llama-server, as here.
 - **The offload store costs +0.22 ms per token on this card with every expert cached.** That is
   `holon_off100 − holon_res`, against the A5000's +0.20. FreeToken's offload path costs +0.53 / +0.60 ms over its

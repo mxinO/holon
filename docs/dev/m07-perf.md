@@ -12,7 +12,7 @@ experiment (design §5.7)"), narrowed and extended by what M0.3–M0.5 recorded 
 (m04-spec §13), mixed prefill/decode steps (M0.5 measured streams silent up to 36 s behind a long prefill), and the
 mmvq/mmq crossover. The small-batch quantized matmul (plan §6.1) leaves M0.7 as a recorded follow-up with a measured
 gate (D9); the forward/sample split stays deferred (M0.5 D2: 1.061× / 1.026×, under its 1.10× rule). Measurements and
-prior art are in the local research note `docs/brainstorm/m07-perf-research.md` (not published) ("R §n", taken on an RTX A5000) and in
+prior art (the public sources of FreeToken, mini-sglang and llama.cpp) are in an unpublished study ("R §n", taken on an RTX A5000) and in
 the reviewers' re-derivations recorded in §10; the consumer classes are re-measured first (step 0).
 
 M0.5 and M0.6 (Gates A and B) are merged into `main`; this branch is rebased onto `main` at 4a44fdc, which includes
@@ -1836,7 +1836,7 @@ lock existed by then). Record `evidence/propagate_m07-close_2026-10-15.json`.
 - `chunk_with_decode` 512 on the plain 27B locks, 0 recorded on every other lock; release step 7's MTP decision sets
   it explicitly for speculative locks.
 - Unused ABI names cut at release step 6 (§17.1).
-- M0.6 Gate B's acceptance 15 (FP8 locks) closed here (`docs/m06-lowp.md`).
+- M0.6 Gate B's acceptance 15 (FP8 locks) closed here (`docs/dev/m06-lowp.md`).
 
 ### 17.6 Suite and CI
 

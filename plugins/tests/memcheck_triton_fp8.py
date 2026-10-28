@@ -1,4 +1,4 @@
-"""No kernel of kernels.triton_fp8 reads or writes past its allocations (docs/m06-lowp.md acceptance 12, once per
+"""No kernel of kernels.triton_fp8 reads or writes past its allocations (docs/dev/m06-lowp.md acceptance 12, once per
 class):
 
     cd plugins

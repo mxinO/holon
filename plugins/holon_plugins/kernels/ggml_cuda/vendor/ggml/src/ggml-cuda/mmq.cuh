@@ -1,6 +1,6 @@
 #pragma once
 
-// Holon (docs/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
+// Holon (docs/dev/v1-moe-prefill.md D8): every semantic hunk carries a "Holon:" marker. Signature plumbing, unmarked:
 // x_scale and dst_bf16 through the write-backs (mmq_store, mmq_dst_at) and the fixup; split through load_tiles; glu,
 // gate_scale, up_scale, glu_limit and channel_x through process_tile and the tile loops; the launch's extra arguments; T6's `tail`
 // through process_tile, mul_mat_q, launch_mul_mat_q and mul_mat_q_switch_J.
@@ -16,7 +16,7 @@
 #define MMQ_ITER_K_FP4         512
 #define MMQ_NWARPS               8
 
-// Holon: the judge's plants on a dense call's stream-k fixup past one 512-row chunk (docs/v1-moe-prefill.md D5, set by
+// Holon: the judge's plants on a dense call's stream-k fixup past one 512-row chunk (docs/dev/v1-moe-prefill.md D5, set by
 // holon_ggml_mmq_plant: bit 1 rounds the partials to bf16 before the fixup, bit 2 skips the fixup), and the count of
 // such fixups launched, then of those planted (holon_ggml_mmq_fixups); defined in csrc/api.cu
 extern int holon_mmq_plant;
@@ -112,7 +112,7 @@ static mmq_q8_1_ds_layout mmq_get_q8_1_ds_layout(const ggml_type type_x) {
             return MMQ_Q8_1_DS_LAYOUT_D4;
         case GGML_TYPE_IQ1_S:
             return MMQ_Q8_1_DS_LAYOUT_DS4;
-        case GGML_TYPE_IQ1_M: // Holon: f32 scale per 32 activations, as IQ2_XS / IQ2_S (docs/v1-moe-prefill.md D9)
+        case GGML_TYPE_IQ1_M: // Holon: f32 scale per 32 activations, as IQ2_XS / IQ2_S (docs/dev/v1-moe-prefill.md D9)
             return MMQ_Q8_1_DS_LAYOUT_D4;
         case GGML_TYPE_IQ4_XS:
         case GGML_TYPE_IQ4_NL:
@@ -565,7 +565,7 @@ static __device__ __forceinline__ void ggml_cuda_mmq_write_back_mma(
     }
 }
 
-// Holon: the fused gate/up store (docs/v1-moe-prefill.md D4). A tile's upper half holds gate rows i, its lower half the
+// Holon: the fused gate/up store (docs/dev/v1-moe-prefill.md D4). A tile's upper half holds gate rows i, its lower half the
 // up rows of the same i (mmq-load-tiles.cuh's split): the lower half's warps hand their f32 sums to the upper half's
 // through shared memory (the tiles' space, free after the last k step), which stores y = up * silu(gate) at row i, each
 // first scaled by the expert's scale2 where there is one: swiglu_f32's expression (csrc/api.cu), so the result is
@@ -980,7 +980,7 @@ static constexpr __device__ ggml_cuda_mmq_load_tiles_t ggml_cuda_mmq_get_load_ti
     return ggml_cuda_mmq_get_util_funcs<type, J, fallback, prec_src1>().load_tiles;
 }
 
-// Holon: T6 (mmq-load-tiles.cuh, docs/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
+// Holon: T6 (mmq-load-tiles.cuh, docs/dev/v1-moe-prefill.md §10): the types whose rows may end inside a K step (whole
 // blocks of 32 or 64 values), and their loaders for such rows
 static constexpr __host__ __device__ bool ggml_cuda_mmq_has_tail(const ggml_type type) {
     return type == GGML_TYPE_Q2_0 || type == GGML_TYPE_Q4_0 || type == GGML_TYPE_Q4_1 || type == GGML_TYPE_Q5_0 ||
@@ -1024,7 +1024,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
         const int split, const float * __restrict__ gate_scale, const float * __restrict__ up_scale, const int expert,
         const float glu_limit) {
         // Holon: glu, the fused gate/up store (ggml_cuda_mmq_write_back_glu) of rows `split` apart, `expert`'s scales,
-        // the clamp (glu_limit > 0: docs/v1-glm.md D6)
+        // the clamp (glu_limit > 0: docs/dev/v1-glm.md D6)
 
     constexpr int              warp_size  = ggml_cuda_get_physical_warp_size();
     constexpr int              nwarps     = ggml_cuda_mmq_get_nthreads(type, J, fallback, prec_src1) / warp_size;
@@ -1102,7 +1102,7 @@ static __device__ __forceinline__ void mul_mat_q_process_tile(
     }
 }
 
-// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/v1-moe-prefill.md D2). Upstream's
+// Holon: the output tile of flat tile index t, the column tile jt fastest (docs/dev/v1-moe-prefill.md D2). Upstream's
 // order: jt, then the channel zt (with ids the compact entry), the sample wt, the row tile it, over ntx column tiles.
 // `flat` (the launch's flat range, with ids): the column tiles of the n_z entries form one range of ntx blocks per row
 // tile: entry z's start at z + expert_bounds[z]/J (each entry's ceil(rows/J) tiles fit before the next start, as
@@ -1157,7 +1157,7 @@ static __global__ void mul_mat_q(
         const uint3 sample_ratio, const uint3 nsamples_y, const int stride_sample_x, const int stride_sample_y, const int stride_sample_dst,
         const uint3 ntx, const float * __restrict__ x_scale, const bool dst_bf16, // Holon: dst's store (mmq_store)
         const float * __restrict__ gate_scale, const float * __restrict__ up_scale, // Holon: glu's scales
-        const float glu_limit) { // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
+        const float glu_limit) { // Holon: glu's clamp (docs/dev/v1-glm.md D6; 0: none)
 
     // Skip unused template specializations for faster compilation:
     if (ggml_cuda_mmq_get_config(type, J, fallback, prec_src1).type == GGML_TYPE_COUNT) {
@@ -1588,10 +1588,10 @@ struct mmq_args {
     int J_best; // Tile width in ne11(dense)/ne12(MoE) direction to use for optimal performance.
     const float * x_scale = nullptr; // Holon: NVFP4's per-tensor scale2 (dense), and a bf16 dst (dense): mmq_store
     bool dst_bf16 = false;
-    bool glu = false; // Holon: the fused gate/up store (with ids; docs/v1-moe-prefill.md D4), and its scale2 per expert
+    bool glu = false; // Holon: the fused gate/up store (with ids; docs/dev/v1-moe-prefill.md D4), and its scale2 per expert
     const float * gate_scale = nullptr;
     const float * up_scale = nullptr;
-    float glu_limit = 0.0f; // Holon: glu's clamp (docs/v1-glm.md D6; 0: none)
+    float glu_limit = 0.0f; // Holon: glu's clamp (docs/dev/v1-glm.md D6; 0: none)
 };
 
 static size_t mmq_get_nbytes_shared(const ggml_cuda_mmq_config & config, const int cc) {
@@ -1627,7 +1627,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int nty  = (args.nrows_x   + config.I - 1) / config.I;
     // Holon: with ids, where a call's tokens span several column tiles, the column tiles of all nchannels_y compact
     // entries as one range (mmq_tile), sized per call: nchannels_y + floor(rows/J) + 1 cover any routing of ncols_dst
-    // rows (docs/v1-moe-prefill.md D2); where they fit one tile, one per entry as upstream (an empty entry's exits)
+    // rows (docs/dev/v1-moe-prefill.md D2); where they fit one tile, one per entry as upstream (an empty entry's exits)
     // glu (D4) always: its tile is the flat range's
     const bool flat = args.ids_dst && (args.glu || (args.ncols_max + config.J - 1) / config.J > 1);
     const int ntx  = flat ? args.nchannels_y + args.ncols_dst/config.J + 1 : (args.ncols_max + config.J - 1) / config.J;
@@ -1668,7 +1668,7 @@ static void launch_mul_mat_q(ggml_backend_cuda_context & ctx, const mmq_args & a
     const int tiles_nwaves = (ntiles_dst + nsm - 1) / nsm;
     const int tiles_efficiency_percent = 100 * ntiles_dst / (nsm*tiles_nwaves);
     // Holon: with ids always one block per tile, so that a tile's K order does not depend on the number of slots
-    // (stream-k splits K at points that do; docs/v1-offload.md D4)
+    // (stream-k splits K at points that do; docs/dev/v1-offload.md D4)
     const bool tiling = args.ids_dst || (GGML_CUDA_CC_IS_NVIDIA(cc) && tiles_efficiency_percent >= 90);
     const dim3 block_nums_stream_k(tiling ? ntiles_dst : nsm, 1, 1);
 
@@ -1843,7 +1843,7 @@ void ggml_cuda_mul_mat_q(
         const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr,
         bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr, // Holon: glu (D4)
         int64_t ids_j_tokens = INT64_MAX, // Holon: J against the tokens up to this many (D2); upstream: always
-        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/v1-glm.md D6)
+        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/dev/v1-glm.md D6)
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 

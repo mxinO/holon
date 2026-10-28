@@ -3,7 +3,7 @@
 Report-only, not a release gate. The pi coding agent drove `holon serve` (Qwen3.8-27B UD-Q4_K_M) through
 Holon's OpenAI-compatible endpoint. The test had three goals: measure decode and prefill speed under a real agent's
 traffic, check the endpoint (streaming, tool calls, reasoning, multi-turn sessions), and report anything broken.
-Record: [`evidence/agent_test_pi_rtx-5090_2026-10-16.json`](../evidence/agent_test_pi_rtx-5090_2026-10-16.json)
+Record: [`evidence/agent_test_pi_rtx-5090_2026-10-16.json`](../../evidence/agent_test_pi_rtx-5090_2026-10-16.json)
 (smoke, probes, counted series and their summary). Harness: `bench/demo/pi_run.py` and `bench/capture_proxy.py`
 (bench code only; nothing in the engine changed).
 
@@ -42,7 +42,7 @@ Record: [`evidence/agent_test_pi_rtx-5090_2026-10-16.json`](../evidence/agent_te
 - **Server.** The commit under test is on a branch cut from `main` at b51af16; it changes only `bench/` and its
   test. The run used a CUDA 13.0 container with `uv sync --group dev` and `holon prebuild --sm 120`.
   `holon serve unsloth/Qwen3.8-27B-GGUF` picked the right file and lock. It then refused to start offline, because
-  the shared HF cache has no `refs/main`, as in release step 9 (`docs/release.md` §18.1). So the file's path in the
+  the shared HF cache has no `refs/main`, as in release step 9 (`docs/dev/release.md` §18.1). So the file's path in the
   cache was served. It started from `plans/…/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/3.lock`:
   - context 49,152, `max_seqs` 4, `chunk_with_decode` 512, prefix cache on, the grammar processor, no speculation;
   - plan `sha256:d1daeb23…`, the lock's own;
@@ -179,7 +179,7 @@ cache.
   a tool history, and `strict: false` tools (unconstrained, as documented).
 - **Ignored, harmlessly:** `store: false`.
 - **Sampling.** pi sends no sampling parameters, so every request sampled at the server's defaults (temperature 1.0,
-  top-p 1.0, top-k off), as with Claude Code (`docs/release.md` §18.3).
+  top-p 1.0, top-k off), as with Claude Code (`docs/dev/release.md` §18.3).
 - **Not exercised:** the context limit. pi compacts at `contextWindow` − 16,384 = 32,768 tokens, and the peak
   context was 16,290. No compaction or retry happened.
 
@@ -188,7 +188,7 @@ cache.
 These figures cover the 42 counted requests (5 sessions). Contexts ran from 1.6K to 16.3K tokens, and output from
 22 to 5,020 tokens per request (median 218, mostly reasoning).
 
-| metric | value | published single-stream (`docs/release.md` §17, this card's 27B) |
+| metric | value | published single-stream (`docs/dev/release.md` §17, this card's 27B) |
 |---|---|---|
 | decode, 1000 / TPOT, p50 | **83.8 tok/s** (TPOT 11.93 ms) | tg128 87.3 tok/s; `holon serve` `decode_b1` TPOT 11.43 ms |
 | decode at TPOT p90 | 81.6 tok/s (TPOT 12.25 ms) | |
@@ -267,13 +267,13 @@ whether the final reply was exactly the requested word (not scored).
   commands; the local transcripts show those calls ran pytest (and, in the workloads runs, the new CLI). Every diff zero-pads the cents and adds `buy_n_get_one`.
 - **Workloads runs.** These listed the directory (`find` or `ls`), read `workloads.py`, `driver.py` and the seeded tests, edited `workloads.py` once or
   twice, wrote `tests/test_stats.py` (5 and 4 new tests), and ran the suite and the CLI.
-- **Next to Claude Code's D7 runs** (`docs/release.md` §18.3: 13–16 turns, 131–292 s on an RTX 4090 or 5080): pi
+- **Next to Claude Code's D7 runs** (`docs/dev/release.md` §18.3: 13–16 turns, 131–292 s on an RTX 4090 or 5080): pi
   takes about half the turns. Its system prompt and tools are ≈ 1.6K tokens against Claude Code's ≈ 17K, and it
   sends no side requests. Different cards, so the times are not a comparison.
 
 ## Fixed in v0.1.1
 
-The three findings are fixed in v0.1.1 (`docs/RELEASE_NOTES_v0.1.1.md`):
+The three findings are fixed in v0.1.1 (`docs/releases/RELEASE_NOTES_v0.1.1.md`):
 
 1. **`developer` messages** are system messages on every route; a leading run of system and developer messages that
    holds one becomes one system prompt. pi's request shape now renders with its system prompt kept and no 400 on all
@@ -287,7 +287,7 @@ The three findings are fixed in v0.1.1 (`docs/RELEASE_NOTES_v0.1.1.md`):
    `usage.prompt_tokens_details.cached_tokens` here (and the other routes' equivalents). This needed a core field
    (`TokenDelta.cached_tokens`, plugin ABI 1.1) and a propagation of every lock, with byte-identical traces.
 
-**Re-run** ([`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`](../evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json)):
+**Re-run** ([`evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json`](../../evidence/agent_test_pi_v011_rtx-5090_2026-10-16.json)):
 the same RTX 5090 desktop, clock-screened (before p10 / p50 2550 / 2640 MHz, steady; after 2047 / 2505, not steady
 under the power cap, no thermal slowdown), serving v0.1.1's propagated lock 4, and pi 0.73.1 with the docs' minimal
 provider (no `compat`: it sends `developer` and `reasoning_effort`). One demo run per thinking level:

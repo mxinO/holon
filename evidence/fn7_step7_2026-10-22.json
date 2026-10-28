@@ -1,7 +1,7 @@
 {
  "name": "fn7_step7",
  "date": "2026-10-22",
- "method": "FN step 7 on the bar cards (docs/v1-flash-next.md section 21). Bench: bench/offload_ctx.py, batch 1, corpus fn, contexts 1K/4K/32K, 3 rounds, medians; Strata's no-approximation arms in the same allocation; hit_rate_all = hits over every routed expert (Strata: with the misses its GPU read over PCIe). Breakdowns: spikes/fn7/breakdown.py (nsys, eager), the fetch rate from the store's fetched bytes. Spikes: spikes/fn6, spikes/fn7.",
+ "method": "FN step 7 on the bar cards (docs/dev/v1-flash-next.md section 21). Bench: bench/offload_ctx.py, batch 1, corpus fn, contexts 1K/4K/32K, 3 rounds, medians; Strata's no-approximation arms in the same allocation; hit_rate_all = hits over every routed expert (Strata: with the misses its GPU read over PCIe). Breakdowns: spikes/fn7/breakdown.py (nsys, eager), the fetch rate from the store's fetched bytes. Spikes: spikes/fn6, spikes/fn7.",
  "cards": {
   "rtx-5080": {
    "bench": {

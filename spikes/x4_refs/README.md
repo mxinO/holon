@@ -1,6 +1,6 @@
 # x4_refs — reference engines for milestone X's development gate (RTX 5080)
 
-Acceptance 3 of `docs/v1-offload.md` (D14's method, §13's roofline): Qwen3-30B-A3B Q4_K_M
+Acceptance 3 of `docs/dev/v1-offload.md` (D14's method, §13's roofline): Qwen3-30B-A3B Q4_K_M
 (`unsloth/Qwen3-30B-A3B-GGUF`), batch 1, greedy, contexts ≤ 32K, at the natural fit (≈ 47% of the expert bytes in
 VRAM) and the capped fit (≈ 25%). Record: `evidence/x4_refs_rtx-5080_2026-10-17.json`.
 

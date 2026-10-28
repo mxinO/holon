@@ -14,8 +14,8 @@ Builds on:
   `draft_policy` / `verifier` slots;
 - M0.3: GDN state, in-step snapshots, the 27B GGUF locks.
 
-Drafter facts come from source, with citations, in the local research note `docs/brainstorm/m04-drafters-spec.md` (not published).
-It covers SGLang `dflash_worker_v2.py` / `eagle_worker_v2.py` / `qwen3_5_mtp.py`, llama.cpp `dflash.cpp` /
+Drafter facts come from the public sources of SGLang, llama.cpp and transformers, read at pinned commits and cited by
+`file:line` in an unpublished study of them. It covers SGLang `dflash_worker_v2.py` / `eagle_worker_v2.py` / `qwen3_5_mtp.py`, llama.cpp `dflash.cpp` /
 `qwen35.cpp` / `speculative.cpp`, and transformers `candidate_generator.py`.
 
 ## 1. Goal and acceptance

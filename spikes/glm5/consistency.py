@@ -1,4 +1,4 @@
-"""GLM's self-consistency gate (docs/v1-glm.md acceptance 1(c), §6.2): Holon's paths against each other on the full
+"""GLM's self-consistency gate (docs/dev/v1-glm.md acceptance 1(c), §6.2): Holon's paths against each other on the full
 model, no golden (FN's gate, spikes/fn7/consistency.py, without MTP: D7 defers it). On FN's four `v1-long` prompts
 (natural text and recall, 5K-20K tokens), retokenized for GLM (`judge/prompts/v1-long-glm5_next.jsonl`):
 

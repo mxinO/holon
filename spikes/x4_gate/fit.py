@@ -1,4 +1,4 @@
-"""The offload store's natural fit (docs/v1-offload.md D9): what its arenas hold when the expert cache fills the VRAM
+"""The offload store's natural fit (docs/dev/v1-offload.md D9): what its arenas hold when the expert cache fills the VRAM
 left above a paged floor of `--floor` tokens (default: the context), batch 1. Prints each class's cache slots and the
 `moe.cache` value that pins them (D4: a lock pins the slot counts through the store's own option), as JSON.
 

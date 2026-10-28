@@ -1,4 +1,4 @@
-"""GLM step 5, lending's effect on h (docs/v1-glm.md §9 step 5, §7.4): the decode hit rate — the share of the decode
+"""GLM step 5, lending's effect on h (docs/dev/v1-glm.md §9 step 5, §7.4): the decode hit rate — the share of the decode
 rows' routed experts the VRAM cache held when routed, as `bench/offload_ctx.py` taps it — over the 256 tokens after
 each prompt, per configuration. A prompt step that lends cache slots (the ring, the tail, the activation loan)
 displaces cached experts; the decode after it reads them back. Prompts are spans of natural text (a GLM-tokenized

@@ -979,7 +979,7 @@
   }
  },
  "notes": [
-  "RTX 5090 desktop (sm_120a), one Pyxis container per allocation. The first node's GPU fell off the bus (Xid 79) during the Qwen3-8B A/B; that run was repeated on a second node (the 30B rows come from the first, the 8B rows and holon_tg from the second).",
+  "RTX 5090 desktop (sm_120a), one container per allocation. The first node's GPU fell off the bus (Xid 79) during the Qwen3-8B A/B; that run was repeated on a second node (the 30B rows come from the first, the 8B rows and holon_tg from the second).",
   "Snapshots: see the RTX A5000 record (bitwise changes; identical to bdd8422)."
  ],
  "commits": {

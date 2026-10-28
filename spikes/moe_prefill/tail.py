@@ -1,4 +1,4 @@
-"""Step 3b's perf check (docs/v1-moe-prefill.md §7, D11): the offload store with `moe.ring_lend` `tail` against
+"""Step 3b's perf check (docs/dev/v1-moe-prefill.md §7, D11): the offload store with `moe.ring_lend` `tail` against
 `coldest`, batch 1, one engine process per mode, at each context:
 
 - the prompt's borrowing steps by use (`borrowed`: `ring` = a ring step with `ring_ok`, else `stage`); a `SHORT` step

@@ -1,4 +1,4 @@
-"""The oracle of transforms.tail_skip (A1, docs/v1-offload.md D1, D3, §6: Strata's route tail skip, `approx`).
+"""The oracle of transforms.tail_skip (A1, docs/dev/v1-offload.md D1, D3, §6: Strata's route tail skip, `approx`).
 
 `moe_route_transform.tail_skip@1` is `moe_route_transform@1` (std.moe.kernels: `(ids [T, k] int32, weights [T, k] f32,
 residency [E, R] int32) -> (ids, weights)`, between the top-k and the resolve, with the layer's map as the resolve

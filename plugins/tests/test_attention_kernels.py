@@ -174,7 +174,8 @@ GROUP = {128: 8, 256: 6}           # query heads per KV head: Qwen3-30B-A3B; Qwe
 @pytest.mark.parametrize("head_dim", [128, 256])
 @pytest.mark.parametrize("cls", sorted(CLASSES))
 def test_triton_attn_configs_fit_every_class(cls, head_dim, layout):
-    """docs/m07-perf.md §4: the launch config a class's verify kernel runs at each width a deployment declares, compiled
+    """docs/dev/m07-perf.md §4: the launch config a class's verify kernel runs at each width a deployment declares,
+    compiled
     for the class's SM, takes at most its shared memory — the config `fitted` at build (on the class's own device;
     here with its fingerprint), checked at one split and several for the widest width that runs each config (shared
     memory grows with BLOCK_M, and so with the width). Before the fix the RTX 5090's pinned (64, 4, 3) took 106,752 B
@@ -201,7 +202,7 @@ def test_triton_attn_tiles_and_stages_are_bitwise(geometry, masks):
     over the grid (16 rows x 8 or 6 heads: two tiles of 64 pairs) give today's single tile's bits where Triton keeps
     its warp layout — at head_dim 256 (the 27B's 16-row blocks). At head_dim 128 a 128-pair tile puts its warps along
     the rows and a 64-pair one along the columns (Triton's chained-dot rule: rows >= head_dim), so the row sums run in
-    another order: one bf16 ulp in a few values (docs/m07-perf.md §12.4); no lock runs over 64 pairs."""
+    another order: one bf16 ulp in a few values (docs/dev/m07-perf.md §12.4); no lock runs over 64 pairs."""
     q, kv, batch, pages = _case([(s, 16) for s in (0, 5, 200, 2041)], *geometry)
     for splits in (1, 3):
         def run(cfg, block=None, splits=splits):

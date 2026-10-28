@@ -1,4 +1,4 @@
-"""Qwen3.8-Flash-Next's model plugin on the CPU against HF's fixtures (docs/v1-flash-next.md §6.1): the tiny model
+"""Qwen3.8-Flash-Next's model plugin on the CPU against HF's fixtures (docs/dev/v1-flash-next.md §6.1): the tiny model
 (8 layers, QSA at 3 and 7, PLE at 1, n = 4, vocabulary 248,320) from its GGUF as llama.cpp's converter writes it, run by
 the engine in float32 with the testing CPU providers; the fixtures are HF's one-shot forward under D2's tie rule
 (`holon_testing.qwen4exp_files`). Each prompt (100 tokens with an EOS) runs as its 124 fixture ids with prompt logprobs,
@@ -39,7 +39,7 @@ from holon_testing import qwen4exp_files as q
 GGUF = os.environ.get("FN_TINY_GGUF")
 SKIP = ("FN's tiny-model proof (acceptance 1(a)) did not run: set FN_TINY_GGUF to the tiny GGUF that `python -m "
         "holon_testing.qwen4exp_files --out <dir> --llama <llama.cpp 27c7a76> --strata <Strata 296b59d>` builds in "
-        "the golden venv (docs/release.md §22)")
+        "the golden venv (docs/dev/release.md §22)")
 if GGUF is None:
     warnings.warn(SKIP, stacklevel=1)       # loud: a skipped proof is not a passed one
 pytestmark = pytest.mark.skipif(GGUF is None, reason=SKIP)

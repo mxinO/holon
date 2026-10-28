@@ -1,4 +1,4 @@
-"""A fixed number of drafts per step by how many requests run (docs/m04-spec.md D7), from the deployment's plugin
+"""A fixed number of drafts per step by how many requests run (docs/dev/m04-spec.md D7), from the deployment's plugin
 options:
 
 - `spec.k`: `"<k>"`, or a table `"<rows>:<k>,<rows>:<k>,…"` read as "from this many running requests on, k" (e.g.

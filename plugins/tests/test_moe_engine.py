@@ -1,6 +1,6 @@
 """Qwen3-MoE end to end on the CPU (test-only reference kernels) against an independent oracle: a tiny random HF
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
-same (dequantized) weights (docs/m02-moe.md, step 1)."""
+same (dequantized) weights (docs/dev/m02-moe.md, step 1)."""
 import contextlib
 import json
 import os
@@ -118,7 +118,8 @@ def test_the_gate_up_merge_puts_gate_first_and_binds_one_kernel(tiny_moe, tmp_pa
 
 @pytest.mark.parametrize("store", ["resident", "offload"])
 def test_a_prefill_step_passes_whole_chunks_then_its_tail(tiny_moe, tmp_path, monkeypatch, store):
-    """docs/v1-moe-prefill.md D1 on both stores (offload: a streaming step, the ring on): a step's expert passes take
+    """docs/dev/v1-moe-prefill.md D1 on both stores (offload: a streaming step, the ring on): a step's expert passes
+    take
     the smaller of the two stacks' `pass_rows` (the reference provider's: 4,096 within a 4,100-token step budget) in
     whole chunks, and the step's last partial chunk is a pass of its own, so every row's chunk and kernel path are a
     chunk's: calls of 512 then 88 rows at 600 tokens, 1,024 then 3 at 1,027, 4,096 then 4 at 4,100, each for gate/up
@@ -253,8 +254,8 @@ def _served(engine, prompts, mirrored=None) -> tuple[list, dict]:
 
 
 def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path, capsys):
-    """docs/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map and
-    in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
+    """docs/dev/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map
+    and in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
     Q4_0 —, every miss fetched into staging slots: the outputs are bitwise the resident store's whatever the cache
     holds (every expert by default, as many as a short fill pool's bytes hold, half, a profile's pick per class, none).
     The static policy caches whole experts, F2's warm start: item 0, 1, … of every layer, or a profile's hottest; a
@@ -372,7 +373,7 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
 
 
 def test_only_decode_steps_count_and_decay(tiny_moe, tmp_path):
-    """F11 decays and admits once per step, from its decode rows (docs/v1-offload.md D4): a one-token last prompt
+    """F11 decays and admits once per step, from its decode rows (docs/dev/v1-offload.md D4): a one-token last prompt
     chunk is a prefill row (the scheduler's `row_kind`), beside other prompts even past the step's first 512-token
     expert pass (prompts of 1, 513 and 1 tokens in one step) and in a step of nothing else (three one-token prompts),
     so the replay oracle still matches the device step by step; a plan without row kinds is refused."""
@@ -441,7 +442,7 @@ def test_prefill_steps_borrow_slots_and_give_them_back(tiny_moe_deep, tmp_path, 
 
 @pytest.fixture(scope="module")
 def wide_moe(tmp_path_factory):
-    """FN's MoE shape at a tiny width (docs/v1-moe-prefill.md §5.1): 512 experts, top-10, two layers, as a GGUF of
+    """FN's MoE shape at a tiny width (docs/dev/v1-moe-prefill.md §5.1): 512 experts, top-10, two layers, as a GGUF of
     Q8_0 stacks, its prompts and the resident store's outputs."""
     torch.manual_seed(2)
     cfg = Qwen3MoeConfig(vocab_size=512, hidden_size=64, intermediate_size=128, moe_intermediate_size=32,
@@ -535,7 +536,7 @@ def _tail_checked(store):
 
 @pytest.mark.parametrize("stream", [0, 20])
 def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, stream):
-    """docs/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
+    """docs/dev/v1-moe-prefill.md D10, D11 on the CPU at FN's E = 512, top-10, under F11 (`moe.ring_lend = tail`): a
     streaming step first lends the tail — call 0, the last slots of the largest class arena (gate/up's), enough for
     the passes' `out` and `scratch` —, then X's rounds (calls 1…), every step's terms as `_tail_checked` asserts them;
     the first, on a cache with no spare empty slots, stages from the rounds' slots without falling short. The passes'
@@ -579,7 +580,7 @@ def test_a_tail_step_lends_its_passes_a_contiguous_range(wide_moe, capsys, strea
     assert fired > 0 and parity(trace)["first_differing_step"] is not None
     with pytest.raises(ValueError, match="cannot stage a prefill pass"):
         _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.cache": "*=0.5"})
-    for policy in ("placement.lru@1", "placement.profile_decay@1"):      # (F10 lends a tail: docs/v1-glm.md D8a)
+    for policy in ("placement.lru@1", "placement.profile_decay@1"):      # (F10 lends a tail: docs/dev/v1-glm.md D8a)
         with pytest.raises(ValueError, match="does not lend a tail"):
             _engine(file, state_memory=1 << 24, host_memory=1 << 26, plugin_options=tail | {"moe.placement": policy})
 
@@ -663,7 +664,8 @@ def test_a_cache_too_small_to_lend_stages_instead(tiny_moe, tmp_path):
 
 
 def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
-    """The delta log has a region of 2 × items records per layer (docs/v1-offload.md D4), and one for the returned lent
+    """The delta log has a region of 2 × items records per layer (docs/dev/v1-offload.md D4), and one for the returned
+    lent
     slots' marker (FN D12a): a decode step of k · rows ≥ E routes whose first layer admits and then lends every
     resident expert of every layer (in the forward, after the step's first resolve, as the ring will) logs it all
     without overflow, the host mirror follows the device, and the outputs stay the resident store's."""
@@ -690,7 +692,7 @@ def test_the_delta_log_holds_a_steps_admissions_and_lending(tiny_moe, tmp_path):
 
 
 def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
-    """The route-transform call site (docs/v1-offload.md D3, `moe.route_transform`): a transform plugin's contract
+    """The route-transform call site (docs/dev/v1-offload.md D3, `moe.route_transform`): a transform plugin's contract
     runs between the top-k and the resolve, with the layer's map; a dropped route (here every token's last rank) reads
     its rank's null slot and counts nowhere, so the outputs are those of the top-k with that rank's weight zeroed (to
     rounding on the CPU, whose reference GEMMs round a row by the expert's batch: dropping one changes the others'). A
@@ -735,7 +737,8 @@ def test_a_route_transform_drops_routes_end_to_end(tiny_moe, tmp_path):
 
 
 def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path):
-    """F5b (docs/v1-offload.md D4–D7) on the CPU providers: with a split table (`moe.cpu_plan`; past its end the last
+    """F5b (docs/dev/v1-offload.md D4–D7) on the CPU providers: with a split table (`moe.cpu_plan`; past its end the
+    last
     entry's share), a pass of at most the graphed steps' tokens (decode, or a short prompt chunk) gives the CPU
     `plan[n]` of its n misses — computed by
     `cpu_experts@1`'s oracle, the activations quantized as ggml-cpu quantizes them, patched in before the combine —,
@@ -813,7 +816,8 @@ def test_a_second_seed_reads_only_what_ram_did_not_hold(tiny_moe, tmp_path, monk
 
 
 def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
-    """docs/v1-offload.md D10, F9: with RAM holding a quarter of the pieces (`moe.ram`) and the checkpoint's file the
+    """docs/dev/v1-offload.md D10, F9: with RAM holding a quarter of the pieces (`moe.ram`) and the checkpoint's file
+    the
     rest (std.tiered.gguf_direct@1), every expert lives in one of VRAM, RAM and the SSD: SSD misses are read by the
     copy task, F11's victims demoted into RAM (the admitted staged, then moved), decode SSD reads kept — and the
     outputs are the resident store's bit for bit, F11's VRAM residency its replay's, the RAM units owned once each and
@@ -875,7 +879,7 @@ def gpu_moe(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def gpu_moe_wide(tmp_path_factory):
-    """`gpu_moe` wide enough for a staging step's rounds (docs/v1-glm.md D8s: a class lends a fixed set of a round's
+    """`gpu_moe` wide enough for a staging step's rounds (docs/dev/v1-glm.md D8s: a class lends a fixed set of a round's
     RAM slots and the landing rows' past its tail), its down experts two classes on disjoint layers as GLM's (D8w's
     tails, one a class): 128 experts, 8 a token, widths 512, four layers, layers 0-1's down Q5_0, 2-3's Q4_0."""
     torch.manual_seed(2)
@@ -930,7 +934,8 @@ def _gpu_engine(model, **kw) -> Engine:
                                            ("std.tiered.static@1", "*=0.25 ssd"),
                                            ("placement.promote@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
-    """docs/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas, kernels.expert_io's
+    """docs/dev/v1-offload.md §6's exact class on the GPU kernels (kernels.ggml_cuda over class arenas,
+    kernels.expert_io's
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
@@ -938,7 +943,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
     coldest or sent to the SSD, while its own staging slots stay a graphed step's, and its SSD reads land in landing
     rows of two, a call's in rounds, its prompt steps of 8 tokens or more reading the next layers' sets ahead:
-    docs/v1-glm.md D8b+e, D8f). F11's
+    docs/dev/v1-glm.md D8b+e, D8f). F11's
     residency, step by step, is its replay oracle's (L1 parity), with admissions in graphed and eager steps, the ring's
     copies on SMs or on copy engines; a borrowing step's lending and ring never wait for the device (with copy
     engines, but for one explicit sync to read the copy list). A
@@ -1025,7 +1030,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         assert any(splits) == split              # "ssdsplit": RAM misses beside the hits' passes (D8c)
         starts = [i for i, e in enumerate(order) if e == "call"]  # round 0's reads requested before the RAM gather
         assert starts and all(order[i + 1:i + 3] == ["rows 0", "ram"] for i in starts), order[:8]   # (C S1-M1)
-        # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/v1-glm.md D8f)
+        # ssd1: a call's SSD misses past its landing rows, read in rounds of 2 (docs/dev/v1-glm.md D8f)
         peak = max((int(t) for k, t in calls if k == "ssd"), default=0)
         assert not one or (store.landing_rows == 2 and peak > 2), peak
         assert not one or sum(int(t) for k, t in calls if k == "hit") > 0     # ssd1: prompt steps of 8 tokens or
@@ -1218,10 +1223,10 @@ def test_a_required_loan_without_the_startup_profile_is_refused(gpu_moe):
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy", ["", "placement.promote@1"])
 def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, policy):
-    """`moe.lend_peak = require` (docs/v1-glm.md D9): a mode (ii)-shaped layout — RAM holding a quarter of the experts,
-    three quarters cached, tail lending — starts, its large steps stage (no ring under exclusive tiers) with their
-    activations in the lent tail, and serves the resident store's bits — under F11 and under F10 (its spares in the
-    tail released: docs/v1-glm.md D8a); a layout that would lend none refuses to start, naming why."""
+    """`moe.lend_peak = require` (docs/dev/v1-glm.md D9): a mode (ii)-shaped layout — RAM holding a quarter of the
+    experts, three quarters cached, tail lending — starts, its large steps stage (no ring under exclusive tiers) with
+    their activations in the lent tail, and serves the resident store's bits — under F11 and under F10 (its spares in
+    the tail released: docs/dev/v1-glm.md D8a); a layout that would lend none refuses to start, naming why."""
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
@@ -1245,8 +1250,8 @@ def test_a_required_loan_is_lent_under_exclusive_tiers_or_refused(gpu_moe, polic
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_rams_long_heat_is_its_oracles(gpu_moe):
-    """`moe.ram_heat` (docs/v1-glm.md §7.4's lever 1, step 6): an exclusive RAM tier's victims by a long-memory heat of
-    its own — each step's decode tokens decay it by the factor a token, then add the step's routed counts — which the
+    """`moe.ram_heat` (docs/dev/v1-glm.md §7.4's lever 1, step 6): an exclusive RAM tier's victims by a long-memory heat
+    of its own — each step's decode tokens decay it by the factor a token, then add the step's routed counts — which the
     tiers' placement and the parking rank by in place of the policy's. Against its oracle over the committed steps'
     counts (the last step's are folded at the next step's start), graphed decode steps included; the resident store's
     bits."""
@@ -1483,8 +1488,8 @@ def _slots_once(store) -> bool:
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("policy", ["", "placement.promote@1"])
 def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy):
-    """D8w (docs/v1-glm.md): under exclusive tiers the tail's experts are lent whole — the tail's class's last n slots
-    and the down class's last m, its residents relocated into the slots the lent experts free (copied after their
+    """D8w (docs/dev/v1-glm.md): under exclusive tiers the tail's experts are lent whole — the tail's class's last n
+    slots and the down class's last m, its residents relocated into the slots the lent experts free (copied after their
     pieces are parked, before the forward writes the loan), so the loan's ranges hold no mapped piece; a layer whose
     expert was lent gets the tail slot back at the step's end; each slot is held once; the host mirror (map and empty
     stacks) is the device's; every piece's bytes are the file's and the streams the resident store's, with the
@@ -1554,10 +1559,10 @@ def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy):
 @pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
-    """D8s (docs/v1-glm.md): under exclusive tiers and F10 a lending step stages its misses in rounds — RAM misses by
-    a round's slots, SSD reads by the landing rows — through one fixed set of slots a class, each part computed before
-    the next one's gather reuses them: it lends the fixed set, not a layer's most missing, and serves the resident
-    store's outputs with every piece's bytes the file's. Each round plant is caught."""
+    """D8s (docs/dev/v1-glm.md): under exclusive tiers and F10 a lending step stages its misses in rounds — RAM misses
+    by a round's slots, SSD reads by the landing rows — through one fixed set of slots a class, each part computed
+    before the next one's gather reuses them: it lends the fixed set, not a layer's most missing, and serves the
+    resident store's outputs with every piece's bytes the file's. Each round plant is caught."""
     from holon_judge import planted
     from holon_std.tiered import store as tiered_store
 
@@ -1603,10 +1608,10 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
-    """Step 1's review C S1-m2 (test_reserve.py's rule under exclusive tiers, docs/v1-glm.md D9): with the loan
+    """Step 1's review C S1-m2 (test_reserve.py's rule under exclusive tiers, docs/dev/v1-glm.md D9): with the loan
     required, each step's peak beyond what was allocated before it is at most the profiled reserve plus the step's
     own activation loan — staged prompt steps of a full width and a tail, and a prompt's chunks beside decode rows (a
-    step with a decode row never reads ahead: docs/v1-glm.md D8f)."""
+    step with a decode row never reads ahead: docs/dev/v1-glm.md D8f)."""
     from holon.core import platform
 
     file, _, _ = gpu_moe
@@ -1646,7 +1651,7 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
-    """Step 1's review C S1-m2 (docs/v1-glm.md D8f): the down role of two classes (layer 3's Q8_0, the others' Q4_0,
+    """Step 1's review C S1-m2 (docs/dev/v1-glm.md D8f): the down role of two classes (layer 3's Q8_0, the others' Q4_0,
     as GLM's two down types) reads its SSD misses into one landing pool, row j at the same bytes for both (a layer's
     on-demand rows and the next layers' read-ahead sets never overlap); the streams are the resident store's."""
     file, prompts, _ = gpu_moe
@@ -1688,7 +1693,7 @@ def _ram_units_hold_their_pieces(store) -> int:
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
-    """Step 1's review S1-B1 (docs/v1-glm.md D8b, D9): RAM with free units, the tail lent with the step's activation
+    """Step 1's review S1-B1 (docs/dev/v1-glm.md D8b, D9): RAM with free units, the tail lent with the step's activation
     loan (`require`): lent experts are parked from intact slots — the step's lending runs before the loan is handed to
     the forward, an expert holding a loan slot goes to the SSD, the copies are waited for before a lent slot is reused —
     so every RAM-resident expert's units hold its pieces as the file does, and the streams are the resident store's."""

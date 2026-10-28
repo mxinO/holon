@@ -1,4 +1,4 @@
-"""Build the frozen long-context prompt set `judge/prompts/v1-long.jsonl` (docs/v1-flash-next.md acceptance 1b and
+"""Build the frozen long-context prompt set `judge/prompts/v1-long.jsonl` (docs/dev/v1-flash-next.md acceptance 1b and
 D11's comparison corpus; run once, the JSONL is the artifact and this script its provenance).
 
 Eight conversations of 4K-32K tokens in Qwen3.8-Flash-Next's own chat template and tokenizer; four are recall

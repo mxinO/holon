@@ -1,4 +1,4 @@
-"""KV formats (docs/m03-qwen38.md D6): the q8_0 reference against gguf-py's own Q8_0 (an independent oracle), the
+"""KV formats (docs/dev/m03-qwen38.md D6): the q8_0 reference against gguf-py's own Q8_0 (an independent oracle), the
 fp8 cast's saturation, and the engine serving the tiny Qwen3.5 model with each format on the CPU — the quantized
 caches close to the model-dtype one, which is exact."""
 import gguf

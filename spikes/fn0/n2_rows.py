@@ -1,4 +1,4 @@
-"""FN step 0, N2 (docs/v1-flash-next.md section 8): the PLE table's two read paths on a bar card, which set D5's
+"""FN step 0, N2 (docs/dev/v1-flash-next.md section 8): the PLE table's two read paths on a bar card, which set D5's
 SSD read-ahead depth.
 
 - **Zero-copy row gather** (D5's RAM tier): the IQ4_NL table (`per_layer_token_embd.weight` of the model's second

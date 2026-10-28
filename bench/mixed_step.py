@@ -1,4 +1,4 @@
-"""A mixed step's wall time by GQA's path for its decode rows (docs/m07-perf.md D7, §10 correctness m3): the prefill
+"""A mixed step's wall time by GQA's path for its decode rows (docs/dev/m07-perf.md D7, §10 correctness m3): the prefill
 kernel over both slices (one call) against the decode kernel for the decode rows beside the prefill kernel for the
 chunk (two calls), on one engine.
 
