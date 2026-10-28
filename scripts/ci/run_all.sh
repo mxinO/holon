@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run all static CI checks. Usage: scripts/ci/run_all.sh [base-ref]
 set -uo pipefail
-cd "$(dirname "$0")"
+root="$(cd "$(dirname "$0")/../.." && pwd)"   # the checks import this checkout's packages, never an installed copy
+export PYTHONPATH="$root/core:$root/std:$root/plugins:$root/judge:$root/testing:$root/tools${PYTHONPATH:+:$PYTHONPATH}"
+cd "$root/scripts/ci"
 rc=0
 for c in check_core_denylist.py check_core_loc.py check_no_env.py check_torch_cuda.py check_private.py check_locks.py check_provenance.py \
          check_manifest_deps.py check_docs.py check_version.py; do
