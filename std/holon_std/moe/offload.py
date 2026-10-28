@@ -23,9 +23,11 @@ default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
 `moe.read_ahead` (exclusive tiers: the landing rows of a layer's read-ahead set, the first of its SSD-only experts read
 two layers ahead in prompt steps of 2,048 tokens or more; default the graphed steps' staging: docs/dev/v1-glm.md D8f),
-`moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
-reserving only the worst smaller step's peak; `require`: as `on`, and the store refuses to start where it would lend
-none; default `off`), `moe.route_transform`
+`moe.copy_beside` (exclusive tiers: an eager staging step's gathers by copy engines beside the compute, in parts —
+`stage` its steps of 8,192 prompt tokens or more, `rounds` the smaller ones, `on` both, `off` neither;
+docs/dev/v1-glm.md D8g; default `on`), `moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's
+activations come from its lent tail, the engine reserving only the worst smaller step's peak; `require`: as `on`,
+and the store refuses to start where it would lend none; default `off`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
 the CPU's share of the misses: `cpu.py`)."""
@@ -65,7 +67,8 @@ def _store(ctx, experts: int, top_k: int):
                         ram_heat=float(opts.get("moe.ram_heat", 0.0)),
                         loan_margin=float(opts["moe.loan_margin"]) if "moe.loan_margin" in opts else None,
                         loan_taper=_taper(opts.get("moe.loan_taper", "")),
-                        loan_largest=float(opts.get("moe.loan_largest", 0.0))))
+                        loan_largest=float(opts.get("moe.loan_largest", 0.0)),
+                        beside=str(opts.get("moe.copy_beside", "on"))))
 
 
 def _taper(value) -> tuple[int, int] | None:

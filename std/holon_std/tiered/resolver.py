@@ -6,6 +6,9 @@ I/O worker reads its SSD pieces (`cpu_task@1`'s copy task), and after the gather
 units and the admitted moved from staging into their slots."""
 from __future__ import annotations
 
+import functools
+
+import numpy as np
 import torch
 
 from .ring import PSEUDO, SHORT
@@ -20,7 +23,8 @@ class DeviceResolver:
         self.store, self.group_id, self.classes = store, group_id, classes
         self.group = None                     # its row in the store's tables, once attached (`attach`)
         self._prepared = False                # the pass is prepared, not yet resolved
-        self.io_slot = None                   # exclusive tiers: its SSD reads' slot on the I/O worker
+        self.io_slot = None                   # exclusive tiers: its SSD reads' slot on the I/O worker (D8g: one a
+        self.io_slots: tuple = ()             # landing half, `io_slots`)
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
         site = f"std.tiered[{store.name}]"
         op = store.policy.resolve_variant or RESOLVE
@@ -81,8 +85,9 @@ class DeviceResolver:
         if store.exclusive:
             store.call_start.copy_(store.n_delta[self.group:self.group + 1])
         split = split and getattr(self.resolve, "splits", False) and before_fetch is None
-        rounds = store.exclusive and store.lent is not None and store.lent.rounds and \
-            self.group < store.borrowing_groups
+        lent = store.exclusive and store.lent is not None and self.group < store.borrowing_groups
+        rounds = lent and store.lent.rounds
+        beside = lent and store._beside and parts > 1 and before_fetch is None and not split     # D8g
         if rounds and (parts <= 1 or before_fetch is not None or split):
             raise RuntimeError(f"{store.name}: a pass of layer {self.group} did not pipeline in a step that stages in "
                                "rounds (docs/dev/v1-glm.md D8s: its fixed slots hold one part at a time)")
@@ -98,6 +103,8 @@ class DeviceResolver:
             **({"split": True} if split else {}), **self.state)
         slots, fetch, n, cpu = out[:4]
         self._prepared = False
+        if beside:
+            return self._beside(ids, kinds, slots, fetch, n)
         if rounds:
             return self._rounds(ids, kinds, slots, fetch, n)
         if store.exclusive:                      # exclusive tiers: RAM misses, then SSD rounds (docs/dev/v1-glm.md D8f)
@@ -219,30 +226,9 @@ class DeviceResolver:
         most = min(store.items, store.top_k * len(ids))
         hits = -(-store.ahead_rows // q) if store._ahead else 0
         ram, ssd = -(-most // q), -(-most // a)
-        roles, width = len(self.classes), self.stage.shape[1]
-        dev = ids.device
-        part_of = torch.full((roles, width + 1), -1, dtype=torch.int64, device=dev)
-        new_of = torch.full((roles, width + 1), -1, dtype=torch.int32, device=dev)
-        fixed = store.lent.fixed
         lists = [(store.hit, store.n_hit, 0, q, 0)] if store._ahead else []
         lists += [(fetch, store.n_ram, hits, q, 0), (store.ssd, store.n_ssd, hits + ram, a, q)]
-        for r in range(roles):
-            own = fixed[int(store.class_table[g, r])]
-            for table, count, first, size, at in lists:
-                pos = torch.arange(table.shape[-1], device=dev)
-                listed = pos < count[r]
-                index = torch.where(listed, PSEUDO - table[r, 1].long(), width).clamp(0, width)
-                slot = own[self._round_slot(at, pos, size)]
-                part_of[r].scatter_(0, index, self._round_part(r, first, pos, size))
-                new_of[r].scatter_(0, index, slot)
-                table[r, 1].copy_(torch.where(listed, slot, table[r, 1]))
-        # every role's lists name the same experts in the same places (whole experts): else the error word's SHORT
-        counts = torch.stack([c[:roles] for _, c, *_ in lists])
-        store.errors.bitwise_or_((counts != counts[:, :1]).any().int() * SHORT)
-        staged = slots <= PSEUDO
-        index = torch.where(staged, PSEUDO - slots.long(), width).clamp(0, width).view(roles, -1)
-        slots = torch.where(staged, new_of.gather(1, index).view_as(slots), slots)
-        part = torch.where(staged, part_of.gather(1, index).view_as(slots), -1).amax(0)
+        slots, part = self._place_rounds(lists, slots)
         landed = []
         for p in range(hits):
             def hit(p=p):
@@ -262,6 +248,81 @@ class DeviceResolver:
                     self._moves(ids)
             landed.append(read)
         return slots, part, landed
+
+    def _place_rounds(self, lists: list, slots: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """D8s: each listed miss (`lists`: (table [R, 2, F], count [R], its first part, a part's size, its place in the
+        fixed set)) its part and that part's fixed slot, in the lists and in `slots` (its stage entry PSEUDO − i).
+        Returns (slots, part [T, k])."""
+        store, g = self.store, self.group
+        roles, width = len(self.classes), self.stage.shape[1]
+        dev = slots.device
+        part_of = torch.full((roles, width + 1), -1, dtype=torch.int64, device=dev)
+        new_of = torch.full((roles, width + 1), -1, dtype=torch.int32, device=dev)
+        fixed = store.lent.fixed
+        for r in range(roles):
+            own = fixed[int(store.class_table[g, r])]
+            for table, count, first, size, at in lists:
+                pos = torch.arange(table.shape[-1], device=dev)
+                listed = pos < count[r]
+                index = torch.where(listed, PSEUDO - table[r, 1].long(), width).clamp(0, width)
+                slot = own[self._round_slot(at, pos, size)]
+                part_of[r].scatter_(0, index, self._round_part(r, first, pos, size))
+                new_of[r].scatter_(0, index, slot)
+                table[r, 1].copy_(torch.where(listed, slot, table[r, 1]))
+        self._whole(lists)
+        staged = slots <= PSEUDO
+        index = torch.where(staged, PSEUDO - slots.long(), width).clamp(0, width).view(roles, -1)
+        slots = torch.where(staged, new_of.gather(1, index).view_as(slots), slots)
+        return slots, torch.where(staged, part_of.gather(1, index).view_as(slots), -1).amax(0)
+
+    def _whole(self, lists: list) -> None:
+        """Every role's lists name the same experts in the same places (whole experts): else the error word's
+        SHORT."""
+        counts = torch.stack([c[:len(self.classes)] for _, c, *_ in lists])
+        self.store.errors.bitwise_or_((counts != counts[:, :1]).any().int() * SHORT)
+
+    def _stage_parts(self, lists: list, slots: torch.Tensor) -> torch.Tensor:
+        """D8g's stage mode: each listed miss's part (`lists` as `_place_rounds`'), by its staging slot (each miss its
+        own); part [T, k], the latest of an entry's pieces' (−1: resident or a null slot)."""
+        part = torch.full(slots.shape[1:], -1, dtype=torch.int64, device=slots.device)
+        for r, c in enumerate(self.classes):
+            of = torch.full((c.size + 1,), -1, dtype=torch.int64, device=slots.device)
+            for table, count, first, size, _ in lists:
+                pos = torch.arange(table.shape[-1], device=slots.device)
+                at = torch.where(pos < count[r], table[r, 1].long(), c.size).clamp(0, c.size)
+                of.scatter_(0, at, self._round_part(r, first, pos, size))
+            of[c.size] = -1
+            part = torch.maximum(part, of[slots[r].long().clamp(0, c.size)])
+        self._whole(lists)
+        return part
+
+    def _beside(self, ids: torch.Tensor, kinds: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor,
+                n: torch.Tensor):
+        """D8g (docs/dev/v1-glm.md): an eager staging call's gathers by copy engines beside the compute. After the tier
+        op round 0's reads are signalled (landing half 0), each miss gets its part — the read-ahead hits' and the RAM
+        misses' (in rounds: by `rounds_q`, through the fixed set; else one part, each miss its own staging slot), then
+        the SSD rounds' (by the landing rows) —, the read-ahead set waited for (A G3-m1: before `tiered`, so every
+        stream after it follows the read), and the lists read back (`tiered`). Returns (slots, part [T, k], landed):
+        `landed` a `_Beside`, its length known once the lists are back — taken after part −1 is enqueued."""
+        store, g = self.store, self.group
+        main = torch.accelerator.current_stream(ids.device)
+        self._tier_op(ids, kinds, fetch, n)
+        store.round_rows(0)                      # round 0's reads first, on main before `tiered` (half 0)
+        store.io.signal(self.io_slots[0])
+        rounds, a = store.lent.rounds, store.landing_rows
+        size = store.rounds_q if rounds else self.stage.shape[1]
+        c_hit, c_ram = store.n_hit.max().long(), store.n_ram.max().long()
+        first_ram = -(-c_hit // size) if rounds else 0
+        first_ssd = first_ram + -(-c_ram // size) if rounds else (c_hit + c_ram > 0).long()
+        lists = [(store.hit, store.n_hit, 0, size, 0)] if store._ahead else []
+        lists += [(fetch, store.n_ram, first_ram, size, 0), (store.ssd, store.n_ssd, first_ssd, a, size)]
+        if rounds:
+            slots, part = self._place_rounds(lists, slots)
+        else:
+            part = self._stage_parts(lists, slots)
+        if store._ahead:                         # read ahead: its set signalled two layers back (or at step start)
+            store.io.wait(store.ahead_slots[g])
+        return slots, part, _Beside(self, ids, main, store.read_back(fetch), rounds)
 
     @staticmethod
     def _round_slot(at: int, pos: torch.Tensor, size: int) -> torch.Tensor:
@@ -347,3 +408,168 @@ class DeviceResolver:
     def done(self) -> None:
         """After the layer's expert passes (the step's ring moves on)."""
         self.store.layer_done(self.group)
+
+
+class _Beside:
+    """D8g (docs/dev/v1-glm.md): a call's gathers by copy engines beside the compute, as the host issues them; the
+    sequence of its parts' `landed` callables. Its length is known once the call's lists are back (`load`, after the
+    pass enqueued part −1); `self[i]()` makes the main stream wait for part i — where parts reuse one fixed set (a
+    rounds step), after starting its copies with main current —, the last one then the call's moves.
+
+    The streams: main, the store's control stream (the SSD rounds' device waits, copies and next signals) and each
+    class's two `expert_prefetch@1` instances' (`parts`, `rounds`). The fences are `torch.Event`s (generic, recorded
+    before they are waited): F1 `tiered` (main after the tier op, round 0's signal, the read-ahead's wait and the
+    readback), which the control stream waits before anything; F2 a part's copies (its keys) or an SSD round's `ssd[r]`
+    (control), waited on main before its pass; F3a a front part p ≥ 1 of a rounds step starts with main current, after
+    part p − 1's pass (the provider waits the current stream); F3b `computed[r]` (main, after round r's pass), which
+    the control stream waits before round r + 1's copies into the same fixed set (a rounds step); F5 round r + 2's
+    rows and signal (the same landing half, its own request table) follow round r's copies on the control stream. Every
+    round signalled is waited by main before the call ends (a REQ over an unseen DONE would answer an old wait)."""
+
+    def __init__(self, resolver: DeviceResolver, ids: torch.Tensor, main, tiered, rounds: bool) -> None:
+        self.resolver, self.store, self.ids, self.main, self.tiered = resolver, resolver.store, ids, main, tiered
+        self.rounds, self.parts = rounds, None
+
+    def __len__(self) -> int:
+        return len(self.load())
+
+    def __getitem__(self, i: int):
+        return self.load()[i]
+
+    def load(self) -> list:
+        """The call's lists back (the host waits `tiered`), its first copies issued: front part 0 (stage: its one
+        front part) under the control stream after `tiered`, round 1's signal, round 0's copies."""
+        if self.parts is not None:
+            return self.parts
+        s, res = self.store, self.resolver
+        self.lists = s.read_lists(self.tiered)
+        q, a = s.rounds_q, s.landing_rows
+        size = q if self.rounds else res.stage.shape[1]
+        n_hit, n_ram, n_ssd = (int(self.lists[k].max()) for k in ("n_hit", "n_ram", "n_ssd"))
+        n_hit = n_hit if s._ahead else 0
+        if self.rounds:                          # (kind, first entry, past its last) per front part
+            self.front = [[("hit", p, p + size)] for p in range(0, n_hit, size)] + \
+                [[("ram", p, p + size)] for p in range(0, n_ram, size)]
+        else:
+            self.front = [[("hit", 0, n_hit), ("ram", 0, n_ram)]] if n_hit + n_ram else []
+        self.n_rounds = -(-n_ssd // a)
+        self.keys = [[] for _ in self.front]
+        self.events, self.computed, self.signalled, self.waited = {}, {}, {0}, set()
+        control = s.control_stream()
+        control.wait_event(self.tiered)          # F1
+        with control:
+            for p in range(len(self.front) if not self.rounds else min(1, len(self.front))):
+                self.start(p)
+            self.next_round(1)                   # round 1's reads into half 1 (round 0's went before `tiered`)
+            if not self.n_rounds:                # round 0 asked nothing: its answer seen all the same
+                s.io.wait(res.io_slots[0])
+                self.events[0] = torch.Event(device=self.ids.device)
+                self.events[0].record(control)
+        if self.n_rounds:
+            self.ssd(0)
+        self.parts = [functools.partial(self.part, p) for p in range(len(self.front))] + \
+            [functools.partial(self.round, r) for r in range(self.n_rounds)]
+        if not self.parts:
+            self.finish()
+        return self.parts
+
+    def start(self, p: int) -> None:
+        """Front part p's copies on each class's `parts` instance, after the current stream's work."""
+        s, res, g = self.store, self.resolver, self.resolver.group
+        for r, c in enumerate(res.classes):
+            for kind, lo, hi in self.front[p]:
+                table, count = ("hit", "n_hit") if kind == "hit" else ("fetch", "n_ram")
+                at = self.lists[table][r][:, lo:min(hi, int(self.lists[count][r]))]
+                if not at.shape[1]:
+                    continue
+                if kind == "hit":                # landing rows: each row's piece from its read-ahead request
+                    src, _ = s.landing_view(c.name, device=False)
+                    runs = s.landing_runs(c.name, at[0], s.ahead_pieces(g, r, at[0]))
+                else:
+                    src, runs = c.host_view(), None
+                self.keys[p].append(self.copy(s.copies[c.name][0], at, src, c, runs))
+
+    def copy(self, inst, at, src, c, runs):
+        """One `start` of `at` [2, n] (source row or unit, slot) into class c's slots; its (instance, key)."""
+        key = self.store.copy_key()
+        inst.start(key, torch.from_numpy(np.ascontiguousarray(at, dtype=np.int32)),
+                   torch.tensor([at.shape[1]], dtype=torch.int32), src, c.slots(), runs)
+        return inst, key
+
+    def ssd(self, r: int) -> None:
+        """SSD round r on the control stream: (a rounds step's round r ≥ 1: after main computed round r − 1, F3b) the
+        device's wait for its half's request, its copies from the landing rows (the half's rows), their end
+        (`ssd[r]`), then round r + 2's rows and signal on the same half (F5)."""
+        s, res = self.store, self.resolver
+        half, a = r % 2, s.landing_rows
+        control = s.control_stream()
+        with control:
+            if (computed := self.computed.get(r - 1)) is not None:      # F3b (recorded in a rounds step only)
+                control.wait_event(computed)
+            s.io.wait(res.io_slots[half])
+            keys = []
+            for k, c in enumerate(res.classes):
+                j = np.arange(r * a, min((r + 1) * a, int(self.lists["n_ssd"][k])))
+                if not len(j):
+                    continue
+                at = self.lists["ssd"][k][:, j].copy()
+                at[0] += half * a
+                pieces = self.lists["io_rows"][k, 1 + j, 0]
+                src, _ = s.landing_view(c.name, device=False)
+                keys.append(self.copy(s.copies[c.name][1], at, src, c, s.landing_runs(c.name, at[0], pieces)))
+            for inst, key in keys:
+                inst.wait(key)
+            self.events[r] = torch.Event(device=self.ids.device)
+            self.events[r].record(control)
+            self.next_round(r + 2)
+
+    def next_round(self, r: int) -> None:
+        """Round r's rows and signal on the current stream, into its half (`r % 2`), if the call has a round r."""
+        if r < self.n_rounds:
+            self.store.round_rows(r, half=r % 2)
+            self.store.io.signal(self.resolver.io_slots[r % 2])
+            self.signalled.add(r)
+
+    def part(self, p: int) -> None:
+        """Front part p landed on main (a rounds step's p ≥ 1 started here, with main current: F3a)."""
+        if self.rounds and p:
+            now = torch.accelerator.current_stream(self.ids.device)
+            if (now.stream_id, now.device_index) != (self.main.stream_id, self.main.device_index):
+                raise RuntimeError(f"{self.store.name}: a rounds part's copies started off the main stream (D8g F3a)")
+            self.start(p)
+        self.land(p)
+        if p == len(self.parts) - 1:
+            self.finish()
+
+    def round(self, r: int) -> None:
+        """SSD round r landed on main: its control work issued once main enqueued round r − 1's pass (F3b's record
+        first), then main waits `ssd[r]`."""
+        if r:
+            if self.rounds:
+                self.computed[r - 1] = torch.Event(device=self.ids.device)
+                self.computed[r - 1].record(self.main)
+            self.ssd(r)
+        self.land(len(self.front) + r)
+        if len(self.front) + r == len(self.parts) - 1:
+            self.finish()
+
+    def land(self, i: int) -> None:
+        """Main waits for part i (F2): a front part's copies, or SSD round's `ssd[r]`."""
+        if i < len(self.front):
+            for inst, key in self.keys[i]:
+                inst.wait(key)
+        else:
+            self.main.wait_event(self.events[i - len(self.front)])
+            self.waited.add(i - len(self.front))
+
+    def finish(self) -> None:
+        """After the last part's wait: every round signalled waited by main, then the call's moves (F4)."""
+        for r, event in self.events.items():
+            if r not in self.waited:
+                self.main.wait_event(event)
+                self.waited.add(r)
+        if self.waited != self.signalled:
+            raise RuntimeError(f"{self.store.name}: SSD rounds {sorted(self.signalled)} signalled, "
+                               f"{sorted(self.waited)} waited (D8g)")
+        self.resolver._moves(self.ids)
+        self.parts, self.ids = [], None          # (its parts' partials refer to it: no step tensor kept past the call)

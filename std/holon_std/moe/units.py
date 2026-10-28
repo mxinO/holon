@@ -377,18 +377,23 @@ class MoE(nn.Module):
     def _parts(self, xin, gate_up, down, part, landed, out_h, out_y, scratch) -> torch.Tensor:
         """A pipelined pass: the entries of part −1 (resident pieces, null slots) first, then each part's as its
         fetch lands, every call computing its own entries (the others' ids −1, their rows untouched) into one `out`
-        per stack — each row as the one call over every entry gives it (a call's rows do not depend on its others)."""
+        per stack — each row as the one call over every entry gives it (a call's rows do not depend on its others).
+        `landed`'s length is taken after part −1 is enqueued (D8g: the host learns its parts while the device computes
+        it)."""
         tokens, k = part.shape
         if out_h is None:
             out_h = torch.empty(tokens, k, self._gate_up.out_y, device=part.device)
         if out_y is None:
             out_y = torch.empty(tokens, k, self._down.out_y, device=part.device)
-        for i in range(-1, len(landed)):
-            if i >= 0:
-                landed[i]()
+
+        def run(i: int) -> None:
             mine = part == i
             h = self._gate_up(xin, torch.where(mine, gate_up, -1), out_h, scratch)
             self._down(h, torch.where(mine, down, -1), out_y, scratch)
+        run(-1)
+        for i in range(len(landed)):
+            landed[i]()
+            run(i)
         return out_y
 
     def _forward(self, x: torch.Tensor, residual: torch.Tensor | None, join=None) -> torch.Tensor:

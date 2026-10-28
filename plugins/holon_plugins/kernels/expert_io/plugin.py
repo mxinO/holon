@@ -125,21 +125,26 @@ class ExpertFetch:
 class ExpertPrefetch:
     """D8's ring copies on a stream of its own, after the work enqueued so far, each key's end an event the compute
     stream waits on: from the device's tables, the fetch kernel on few SMs (zero-copy reads of the mapped host pool);
-    from the host's, copy-engine DMA from the pinned host pool (`cudaMemcpyBatchAsync`)."""
+    from the host's, copy-engine DMA from the pinned host pool (`cudaMemcpyBatchAsync`), or from landing rows by their
+    `runs` (docs/dev/v1-glm.md D8g: a copy per extent)."""
+
+    runs = True                            # `start(..., runs)` from landing rows, with copy "dma" (std.moe.kernels)
 
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, copy: str) -> None:
         self.lib, self.stream, self.landed = modules(ctx.fingerprint.sm), torch.cuda.Stream(ctx.device), {}
         self.copy = copy
 
-    def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
-        if fetch.is_cuda != (self.copy == "sm"):
-            raise ValueError(f"expert_prefetch@1 ({self.copy}): the copy list on the {fetch.device.type}")
+    def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor,
+              runs: torch.Tensor | None = None) -> None:
+        if fetch.is_cuda != (self.copy == "sm") or (runs is not None and self.copy == "sm"):
+            raise ValueError(f"expert_prefetch@1 ({self.copy}): the copy list on the {fetch.device.type}"
+                             + (", with runs (dma only)" if runs is not None else ""))
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
         if self.copy == "sm":                                              # the device's list: SM copies
             with torch.cuda.stream(self.stream):
                 self.lib.fetch(fetch, n, src, dst, 1)          # one CTA: beside a prefill pass's mmq
         else:                                                              # the host's: copy engines
-            self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream)
+            self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream, runs)
         self.landed[key] = torch.cuda.Event()
         self.landed[key].record(self.stream)
 

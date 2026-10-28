@@ -9,6 +9,7 @@
 #include <climits>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <cstdint>
 #include <vector>
 
@@ -1206,10 +1207,17 @@ void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at
 // expert_prefetch@1 from the host's copy list: unit src[fetch[0, i]] -> slot dst[fetch[1, i]] for i < n, as one batch
 // of copy-engine DMA on `stream`, a run of consecutive units into consecutive slots one copy. `src` is pinned host
 // memory; the list is read before this returns.
-void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at::Tensor & dst, int64_t stream_handle) {
+// `runs` (docs/dev/v1-glm.md D8g): src is landing rows [rows, row], entry i's piece the extents runs[fetch[0, i], x] =
+// (offset in the row, nbytes) name there, back to back in its slot; a copy per extent
+void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at::Tensor & dst, int64_t stream_handle,
+                const std::optional<at::Tensor> & runs) {
     TORCH_CHECK(!src.is_cuda() && src.is_pinned() && dst.is_cuda() && src.dim() == 2 && dst.dim() == 2 &&
-                src.size(1) == dst.size(1) && src.is_contiguous() && dst.is_contiguous() && src.scalar_type() == at::kByte &&
-                dst.scalar_type() == at::kByte, "src [U, unit] pinned host bytes, dst [S, unit] CUDA bytes");
+                (runs || src.size(1) == dst.size(1)) && src.is_contiguous() && dst.is_contiguous() &&
+                src.scalar_type() == at::kByte && dst.scalar_type() == at::kByte,
+                "src [U, unit] (with runs [U, row]) pinned host bytes, dst [S, unit] CUDA bytes");
+    TORCH_CHECK(!runs || (!runs->is_cuda() && runs->scalar_type() == at::kLong && runs->dim() == 3 &&
+                          runs->size(0) == src.size(0) && runs->size(2) == 2 && runs->is_contiguous()),
+                "runs [U, X, 2] int64 on the host");
     TORCH_CHECK(!fetch.is_cuda() && fetch.scalar_type() == at::kInt && fetch.dim() == 2 && fetch.size(0) == 2 &&
                 n <= fetch.size(1), "fetch [2, F] int32 on the host, n <= F");
     const c10::cuda::CUDAGuard guard(dst.device());
@@ -1222,7 +1230,28 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
     std::vector<void *> dsts;
     std::vector<const void *> srcs;
     std::vector<size_t> sizes;
-    for (int64_t i = 0; i < n;) {
+    if (runs) {
+        const int64_t X = runs->size(1), row = src.size(1);
+        const int64_t * r = runs->data_ptr<int64_t>();
+        for (int64_t i = 0; i < n; ++i) {
+            TORCH_CHECK(u[i] >= 0 && u[i] < src.size(0) && s[i] >= 0 && s[i] < dst.size(0), "copy ", i,
+                        " outside src or dst");
+            int64_t at = 0;
+            for (int64_t x = 0; x < X; ++x) {
+                const int64_t off = r[(int64_t(u[i]) * X + x) * 2], nbytes = r[(int64_t(u[i]) * X + x) * 2 + 1];
+                if (!nbytes) {
+                    continue;
+                }
+                TORCH_CHECK(off >= 0 && off + nbytes <= row && at + nbytes <= unit, "copy ", i, ": a run past its row "
+                            "or slot");
+                dsts.push_back(to + int64_t(s[i]) * unit + at);
+                srcs.push_back(from + int64_t(u[i]) * row + off);
+                sizes.push_back(size_t(nbytes));
+                at += nbytes;
+            }
+        }
+    }
+    for (int64_t i = 0; i < (runs ? 0 : n);) {
         int64_t run = 1;
         while (i + run < n && u[i + run] == u[i] + run && s[i + run] == s[i] + run) {
             ++run;
@@ -1391,7 +1420,9 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           pybind11::arg("clock") = pybind11::none());
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
-    m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
+    m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream (`runs`: "
+          "from landing rows, a copy per extent)", pybind11::arg("fetch"), pybind11::arg("n"), pybind11::arg("src"),
+          pybind11::arg("dst"), pybind11::arg("stream"), pybind11::arg("runs") = std::nullopt);
     m.def("fetch_roles", &gather_roles, "expert_fetch@1's gather_roles: every role's fetch of a group in one launch "
           "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging); one part of "
           "the lists (`parts`, or a fixed `size`); `runs`: srcs are landing rows (D8f)",

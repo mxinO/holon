@@ -132,7 +132,7 @@ class TieredStore:
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0,
                  loan_margin: float | None = None, loan_taper: tuple[int, int] | None = None,
-                 loan_largest: float = 0.0) -> None:
+                 loan_largest: float = 0.0, beside: str = "on") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -162,6 +162,19 @@ class TieredStore:
         if not 0.0 <= ram_heat < 1.0:
             raise ValueError(f"{name}: ram_heat {ram_heat}: a decay factor a token in [0, 1)")
         self._ram_decay, self.ram_heat = ram_heat, None
+        # `beside` (`moe.copy_beside`, docs/dev/v1-glm.md D8g): under exclusive tiers an eager staging step's gathers
+        # by copy engines beside the compute — "stage" (steps of ROUNDS_BELOW prompt tokens or more), "rounds" (the
+        # smaller ones), "on" both, "off" neither; where the device's `expert_prefetch@1` copies from the host's lists
+        # with runs (`copies`, per class: the parts' instance and the SSD rounds')
+        if beside not in ("on", "stage", "rounds", "off"):
+            raise ValueError(f"{name}: moe.copy_beside {beside!r}: on, stage, rounds or off")
+        self._beside_modes = {"on": ("stage", "rounds"), "off": ()}.get(beside, (beside,))
+        self.copies: dict[str, tuple] = {}
+        self.halves = 1                          # the on-demand landing halves (two under D8g: ping-pong)
+        self._beside = False                     # this step's gathers go beside the compute (D8g)
+        self._readback: dict[str, torch.Tensor] | None = None
+        self._keys = 0                           # D8g's copy keys, one per start
+        self._runs_host: dict[str, np.ndarray] = {}
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
@@ -380,6 +393,10 @@ class TieredStore:
             if self.exclusive:                   # its SSD reads, copy tasks on the I/O worker (bound at materialize):
                 self.reads.append(_Reads(self, g))                  # on demand (urgent), and its read-ahead set's
                 r.io_slot = self.io.bind(self.reads[-1], urgent=True)
+                r.io_slots = (r.io_slot,)
+                if self.halves == 2:             # D8g: the second landing half's, its own request table (A G2-M1)
+                    self.reads.append(_Reads(self, g, half=1))
+                    r.io_slots += (self.io.bind(self.reads[-1], urgent=True),)
                 self.reads.append(_Reads(self, g, ahead=True))
                 self.ahead_slots[g] = self.io.bind(self.reads[-1])
 
@@ -439,6 +456,16 @@ class TieredStore:
             self._ram_decay_t = self.ctx.static(f"{self.name}.ram_decay", (1,), torch.float32)
             self.heat = self.ram_heat
         self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
+        # D8g: per class two copy-engine instances (the hits' and RAM's parts, the SSD rounds': each its own stream),
+        # where the device's `expert_prefetch@1` copies from the host's lists with landing rows' runs
+        dma = [{"unit_bytes": c.unit_bytes, "copy": "dma"} for c in classes]
+        if self._beside_modes and all(self.ctx.candidates(EXPERT_PREFETCH, f) for f in dma):
+            site = f"std.tiered[{self.name}]"
+            pick = [[self.ctx.select_kernel(EXPERT_PREFETCH, site=f"{site}.{c.name}.{use}", **f).impl(self.ctx, **f)
+                     for use in ("parts", "rounds")] for c, f in zip(classes, dma, strict=True)]
+            if all(getattr(i, "runs", False) for p in pick for i in p):
+                self.copies = {c.name: tuple(p) for c, p in zip(classes, pick, strict=True)}
+                self.halves = 2
 
     @property
     def layers(self) -> list[int]:
@@ -508,12 +535,13 @@ class TieredStore:
                                 for row in np.unique(self.class_table, axis=0)]
             self._class_fetch = {name: f for r in self.resolvers for name, f in r.fetches().items()}
             rows = 3 * (1 + self.landing_rows)                     # a round's request rows, the worker's view
-            self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.roles,
-                                    pref_units=self.roles, device="host", mapped=True)
+            self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.halves * self.roles,
+                                    pref_units=self.halves * self.roles, device="host", mapped=True)   # (a half's)
             rows = 3 * (1 + self.ahead_rows)                       # each read-ahead set's request rows
             self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
                                        pref_units=DEPTH * self.roles, device="host", mapped=True)
-            self.descriptors, shape, n_rows = {}, {}, self.landing_rows + DEPTH * self.ahead_rows
+            self.descriptors, shape, n_rows = {}, {}, self.landing_rows * self.halves + DEPTH * self.ahead_rows
+            self.piece_runs = {}                 # D8g: each piece's runs in a landing row (the I/O worker's rule)
             for c in classes:
                 rows = []
                 for n in range(len(c.pieces)):
@@ -526,6 +554,7 @@ class TieredStore:
                 width = max(map(len, rows))
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)
+                self.piece_runs[c.name] = _runs(self.descriptors[c.name].numpy())
                 shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
                 self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
                                              min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
@@ -638,7 +667,7 @@ class TieredStore:
         self.ring.fill_(-1)
         self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).clamp(max=self.stage_slots - 1)
                          .expand(self.roles, -1))
-        self._mode, self.lent, self._parts, self._rounds = None, None, 1, False
+        self._mode, self.lent, self._parts, self._rounds, self._beside = None, None, 1, False, False
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
@@ -653,22 +682,24 @@ class TieredStore:
         self._sized = False                     # the arena's size is checked at the first launch after a materialize
         self.borrowed = dict.fromkeys(self.borrowed, 0)
 
-    def io_device(self) -> torch.Tensor:
-        """A round's SSD request rows, as the I/O worker reads them (mapped)."""
-        return self.io_pool.device_view(torch.int32, (self.roles, 1 + self.landing_rows, 3))
+    def io_device(self, half: int = 0) -> torch.Tensor:
+        """A round's SSD request rows, as the I/O worker reads them (mapped): landing half `half`'s table."""
+        return self.io_pool.device_view(torch.int32, (self.halves, self.roles, 1 + self.landing_rows, 3))[half]
 
-    def round_rows(self, r: int) -> None:
+    def round_rows(self, r: int, half: int = 0) -> None:
         """Round r's request rows (its count, then rows r·A … (r + 1)·A − 1 of `moe_tiers@2`'s) into the worker's
-        view, on the current stream."""
-        a, view = self.landing_rows, self.io_device()
+        view of landing half `half` (its rows A·half on: D8g's ping-pong), on the current stream."""
+        a, view = self.landing_rows, self.io_device(half)
         rows = self.io_rows[:, 1 + r * a:1 + (r + 1) * a]
         view[:, 1:1 + rows.shape[1]].copy_(rows)
+        if half:
+            view[:, 1:1 + rows.shape[1], 1].add_(half * a)
         view[:, 0, 0].copy_((self.io_rows[:, 0, 0] - r * a).clamp(0, a))
 
     def landing_view(self, name: str, device: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
         """Class `name`'s landing rows [rows, row] and their runs [rows, X, 2], as the device (or host) sees them."""
         pool, row = self.landing[name]                                   # (its role's pool)
-        n, width = self.landing_rows + DEPTH * self.ahead_rows, self.descriptors[name].shape[1]
+        n, width = self.landing_rows * self.halves + DEPTH * self.ahead_rows, self.descriptors[name].shape[1]
         view = (lambda p, *a: p.device_view(*a)) if device else (lambda p, *a: p.view(*a))
         return view(pool, torch.uint8, (n, row)), view(self.runs[name], torch.int64, (n, width, 2))
 
@@ -680,7 +711,7 @@ class TieredStore:
     def read_ahead(self, g: int) -> None:
         """Layer g's read-ahead (docs/dev/v1-glm.md D8f), on the current stream: the first A_ra of its SSD-only set,
         lowest ids first, into its set's rows (its map `ahead_map[g]`), requested, signalled."""
-        a, base = self.ahead_rows, self.landing_rows + (g % DEPTH) * self.ahead_rows
+        a, base = self.ahead_rows, self.ahead_base(g)
         only = (self.residency.device[g] == -2).all(-1)                            # [E]
         rank = only.int().cumsum(0) - 1
         take = only & (rank < a)
@@ -694,6 +725,55 @@ class TieredStore:
             rows[0, 0] = take.sum()
             view[r].copy_(rows[:a + 1])
         self.io.signal(self.ahead_slots[g])
+
+    def ahead_base(self, g: int) -> int:
+        """Layer g's read-ahead set's first landing row (past the on-demand halves)."""
+        return self.landing_rows * self.halves + (g % DEPTH) * self.ahead_rows
+
+    def control_stream(self) -> torch.Stream:
+        """D8g's control stream (one per store): the SSD rounds' waits, copies and next signals beside the compute."""
+        if "control" not in self._fetch_streams:
+            self._fetch_streams["control"] = torch.Stream(device=self.ctx.device)
+        return self._fetch_streams["control"]
+
+    def read_back(self, fetch: torch.Tensor) -> torch.Event:
+        """D8g: a call's lists the host's copies need (the RAM list, the read-ahead hits, the SSD list and its
+        request rows, their counts) into pinned host memory on the current stream, and the event after them
+        (`tiered`); the host takes them after waiting it (`_Beside`), before the next call's copy is enqueued."""
+        names = {"fetch": fetch, "n_ram": self.n_ram, "hit": self.hit, "n_hit": self.n_hit, "ssd": self.ssd,
+                 "n_ssd": self.n_ssd, "io_rows": self.io_rows}
+        if self._readback is None:
+            self._readback = {k: torch.empty(v.shape, dtype=v.dtype, pin_memory=True) for k, v in names.items()}
+        for k, v in names.items():
+            self._readback[k].copy_(v, non_blocking=True)
+        tiered = torch.Event(device=self.ctx.device)
+        tiered.record()
+        return tiered
+
+    def ahead_pieces(self, g: int, role: int, rows: np.ndarray) -> np.ndarray:
+        """D8g: the pieces layer g's read-ahead set asked for into landing rows `rows` (its request rows, on the
+        host)."""
+        table = self.ahead_view(device=False)[g % DEPTH, role].numpy()
+        return table[1 + rows - self.ahead_base(g), 0]
+
+    def landing_runs(self, name: str, rows: np.ndarray, pieces: np.ndarray) -> torch.Tensor:
+        """D8g: class `name`'s runs [rows, X, 2] on the host with landing rows `rows` holding `pieces` (their runs
+        known from the descriptors: `_runs`); the other rows as an earlier copy left them."""
+        if name not in self._runs_host:
+            n = self.landing_rows * self.halves + DEPTH * self.ahead_rows
+            self._runs_host[name] = np.zeros((n, *self.piece_runs[name].shape[1:]), dtype=np.int64)
+        self._runs_host[name][rows] = self.piece_runs[name][pieces]
+        return torch.from_numpy(self._runs_host[name])
+
+    def read_lists(self, tiered: torch.Event) -> dict[str, np.ndarray]:
+        """D8g: the lists `read_back` copied, once `tiered` has passed (the host waits it), as the host's own."""
+        tiered.synchronize()
+        return {k: v.numpy().copy() for k, v in self._readback.items()}
+
+    def copy_key(self) -> int:
+        """A new key for an `expert_prefetch@1` start (D8g)."""
+        self._keys += 1
+        return self._keys
 
     def _piece_index(self, c: SlotClass, g: int, i: int, r: int) -> int:
         """The class's index of group g's (in map order) item i's role r."""
@@ -809,6 +889,10 @@ class TieredStore:
         self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
             self.large_passes(at) and not self.exclusive else 1
         self._rounds = self._mode == "stage" and self._parts == 1 and at < ROUNDS_BELOW and self.rounds_able
+        # D8g: a staging step's gathers beside the compute (its passes all pipeline: every one of them computes part
+        # by part) — in rounds below ROUNDS_BELOW, else each miss in its own staging slot
+        self._beside = bool(self.copies) and self._mode == "stage" and self._parts == 1 and self._pipelining and \
+            ("rounds" if self._rounds else "stage") in self._beside_modes and (self._rounds or at >= ROUNDS_BELOW)
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned:
             self._loan_overflowed()
@@ -1008,7 +1092,7 @@ class TieredStore:
         else 1."""
         if self._parts > 1:
             return self._parts
-        if self._rounds:                        # D8s: every pass part by part (its resolver counts the parts)
+        if self._rounds or self._beside:        # D8s, D8g: every pass part by part (its resolver counts the parts)
             return 2
         return self.pipeline if self._mode == "stage" and self.large_passes(tokens) and not self.exclusive else 1
 
@@ -1572,6 +1656,22 @@ def _superset(desc: tuple) -> int:
     return -(-(hi - lo) // ALIGN) * ALIGN if nbytes else 0
 
 
+def _runs(desc: np.ndarray) -> np.ndarray:
+    """Each piece's runs in a landing row [P, X, 2] from its descriptors [P, X, 4] (fd, O_DIRECT, offset, nbytes): the
+    I/O worker's rule (kernels.cpu_task's `plan_copy`) — each extent's aligned superset at the row's next aligned
+    offset, (offset in the row, nbytes) of its bytes; (0, 0) past them."""
+    runs, at = np.zeros((*desc.shape[:2], 2), dtype=np.int64), np.zeros(desc.shape[0], dtype=np.int64)
+    for x in range(desc.shape[1]):
+        direct, offset, nbytes = desc[:, x, 1] != 0, desc[:, x, 2], desc[:, x, 3]
+        lo = np.where(direct, offset // ALIGN * ALIGN, offset)
+        hi = np.where(direct, -(-(offset + nbytes) // ALIGN) * ALIGN, offset + nbytes)
+        some = nbytes > 0
+        runs[:, x, 0] = np.where(some, at + offset - lo, 0)
+        runs[:, x, 1] = np.where(some, nbytes, 0)
+        at += np.where(some, -(-(hi - lo) // ALIGN) * ALIGN, 0)
+    return runs
+
+
 def _offsets(extents: list[Extent]) -> list[tuple[Extent, int]]:
     """Each extent with its offset in the piece (the pieces are their extents, concatenated)."""
     out, at = [], 0
@@ -1585,14 +1685,14 @@ class _Reads:
     """A layer's SSD reads (exclusive tiers): `cpu_task@1`'s copy task over its roles' descriptors, RAM tier pools and
     request rows, bound once the pools exist (the I/O worker reads `native` when it starts, after this)."""
 
-    def __init__(self, store: TieredStore, g: int, ahead: bool = False) -> None:
-        self.store, self.g, self.ahead, self.task = store, g, ahead, None
+    def __init__(self, store: TieredStore, g: int, ahead: bool = False, half: int = 0) -> None:
+        self.store, self.g, self.ahead, self.half, self.task = store, g, ahead, half, None
 
     def bind(self) -> None:
         if self.task is None:                   # landing rows, their runs, kept pieces into the RAM units
             s = self.store
             io = s.ahead_view(device=False)[self.g % DEPTH] if self.ahead else \
-                s.io_pool.view(torch.int32, (s.roles, 1 + s.landing_rows, 3))
+                s.io_pool.view(torch.int32, (s.halves, s.roles, 1 + s.landing_rows, 3))[self.half]
             self.task = s.io.copy([(s.descriptors[c.name], *s.landing_view(c.name, device=False)[:1], io[r],
                                     s.landing_view(c.name, device=False)[1], c.host_view())
                                    for r, c in enumerate(s.layer_classes[self.g])])

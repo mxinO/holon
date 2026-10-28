@@ -2064,6 +2064,276 @@ def part_one_role() -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def _beside_patched(patches: dict, fired: collections.Counter) -> Iterator[collections.Counter]:
+    """D8g's plants (docs/dev/v1-glm.md): `patches` {(class, name): f(original) → replacement}, each counted in
+    `fired` where its condition occurred."""
+    with contextlib.ExitStack() as stack:
+        for (cls, name), make in patches.items():
+            stack.enter_context(mock.patch.object(cls, name, make(getattr(cls, name))))
+        yield fired
+
+
+@contextlib.contextmanager
+def worker_late() -> Iterator[collections.Counter]:
+    """D8g's harness for the I/O worker (no plant): a call's round 0 seen by the worker late — its signal deferred
+    from main, before `tiered`, to the control stream after round 1's rows and signal — as a busy worker would."""
+    from holon_std.tiered.resolver import DeviceResolver, _Beside
+
+    fired = collections.Counter()
+
+    def beside(f):
+        def run(self, *a):
+            with mock.patch.object(self.store.io, "signal", lambda slot: None):
+                out = f(self, *a)
+            out[2].late = self.io_slots[0]
+            return out
+        return run
+
+    def next_round(f):
+        def run(self, r):
+            f(self, r)
+            if r == 1 and getattr(self, "late", None) is not None:
+                fired["deferred"] += self.n_rounds > 1
+                self.store.io.signal(self.late)
+                self.late = None
+        return run
+    with _beside_patched({(DeviceResolver, "_beside"): beside, (_Beside, "next_round"): next_round}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def gather_part_unwaited() -> Iterator[collections.Counter]:
+    """D8g F2 dropped: a part's pass not waiting its copies (calls of two parts or more)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def land(f):
+        def run(self, i):
+            fired["parts"] += len(self.front) + self.n_rounds > 1
+        return run
+    with _beside_patched({(_Beside, "land"): land}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def round_set_reused_early() -> Iterator[collections.Counter]:
+    """D8g F3a dropped: a rounds call's front part p ≥ 1 started under the control stream, not after part p − 1's
+    pass."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def start(f):
+        def run(self, p):
+            if not (self.rounds and p):
+                return f(self, p)
+            fired["parts"] += 1
+            with self.store.control_stream():
+                return f(self, p)
+        return run
+    with _beside_patched({(_Beside, "start"): start}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def ssd_set_reused_early() -> Iterator[collections.Counter]:
+    """D8g F3b dropped: a rounds call's SSD round r ≥ 1 copied into the fixed set without waiting round r − 1's
+    pass (`computed`)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def ssd(f):
+        def run(self, r):
+            fired["rounds"] += self.computed.pop(r - 1, None) is not None
+            return f(self, r)
+        return run
+    with _beside_patched({(_Beside, "ssd"): ssd}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def fence_waits_unrecorded() -> Iterator[collections.Counter]:
+    """D8g F3b's wait enqueued before its record (an unrecorded event's wait is no wait)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def round_(f):
+        def run(self, r):
+            if not (r and self.rounds):
+                return f(self, r)
+            fired["rounds"] += 1
+            event = self.computed[r - 1] = torch.Event(device=self.ids.device)
+            self.ssd(r)
+            event.record(self.main)
+            self.land(len(self.front) + r)
+            if len(self.front) + r == len(self.parts) - 1:
+                self.finish()
+        return run
+    with _beside_patched({(_Beside, "round"): round_}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def landing_half_reused_early() -> Iterator[collections.Counter]:
+    """D8g F5 dropped: round r + 2's rows and signal before round r's copies from the same landing half (calls of
+    three rounds or more)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def ssd(f):
+        def run(self, r):
+            if r + 2 < self.n_rounds:
+                fired["rounds"] += 1
+                with self.store.control_stream():
+                    self.next_round(r + 2)
+                self.n_rounds, n = r + 2, self.n_rounds         # (not signalled again after the copies)
+                try:
+                    return f(self, r)
+                finally:
+                    self.n_rounds = n
+            return f(self, r)
+        return run
+    with _beside_patched({(_Beside, "ssd"): ssd}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def round_rows_shared() -> Iterator[collections.Counter]:
+    """D8g (A G2-M1): both landing halves' tasks on one request table, the worker late (`worker_late`): round 1's
+    rows overwrite round 0's request before the worker reads it."""
+    from holon_std.tiered import store as tiered
+
+    with worker_late() as fired:
+        bind, rows = tiered._Reads.bind, tiered.TieredStore.round_rows
+
+        def shared_bind(self):
+            half, self.half = self.half, 0
+            try:
+                bind(self)
+            finally:
+                self.half = half
+
+        def shared_rows(self, r, half=0):
+            fired["rows"] += half
+            rows(self, r, half=half)
+            if half:                                 # (half 1's rows, as half 0's table holds them)
+                self.io_device(0).copy_(self.io_device(1))
+        with mock.patch.object(tiered._Reads, "bind", shared_bind), \
+                mock.patch.object(tiered.TieredStore, "round_rows", shared_rows):
+            yield fired
+
+
+@contextlib.contextmanager
+def io_word_stale() -> Iterator[collections.Counter]:
+    """D8g: a round's copies after the other landing half's answer (its `k_wait` on the wrong slot)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def ssd(f):
+        def run(self, r):
+            io, slots = self.store.io, self.resolver.io_slots
+            wait = io.wait
+            fired["rounds"] += 1
+            with mock.patch.object(io, "wait", lambda slot: wait(slots[1 - slots.index(slot)])):
+                return f(self, r)
+        return run
+    with _beside_patched({(_Beside, "ssd"): ssd}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def cuda_event_on_generic() -> Iterator[collections.Counter]:
+    """D8g F2 as a CUDA-typed event (`ssd[r]`): main, a generic stream, ignores its wait (torch 2.11)."""
+    from holon_std.tiered.resolver import _Beside
+
+    fired = collections.Counter()
+
+    def ssd(f):
+        def run(self, r):
+            f(self, r)
+            with self.store.control_stream():
+                self.events[r] = torch.cuda.Event()
+                self.events[r].record()
+            fired["rounds"] += 1
+        return run
+    with _beside_patched({(_Beside, "ssd"): ssd}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def readback_unwaited() -> Iterator[collections.Counter]:
+    """D8g F1's host wait dropped: a call's lists taken before its readback landed."""
+    from holon_std.tiered.store import TieredStore
+
+    fired = collections.Counter()
+
+    def lists(f):
+        def run(self, tiered):
+            fired["calls"] += 1
+            return {k: v.numpy().copy() for k, v in self._readback.items()}
+        return run
+    with _beside_patched({(TieredStore, "read_lists"): lists}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def readahead_wait_after_tiered() -> Iterator[collections.Counter]:
+    """D8g (A G3-m1): the read-ahead set's wait on main after `tiered`, so the hits' copies under the control stream
+    do not follow it."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    fired = collections.Counter()
+
+    def beside(f):
+        def run(self, *a):
+            store = self.store
+            if not store._ahead:
+                return f(self, *a)
+            with mock.patch.object(store.io, "wait", lambda slot: None):
+                out = f(self, *a)
+            store.io.wait(store.ahead_slots[self.group])
+            fired["calls"] += 1
+            return out
+        return run
+    with _beside_patched({(DeviceResolver, "_beside"): beside}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
+def readahead_slot_reused() -> Iterator[collections.Counter]:
+    """D8g: layer g + DEPTH's read-ahead set (layer g's set's rows) requested as layer g's lists come back, before its
+    hits' copies from those rows ran."""
+    from holon_std.tiered import store as tiered
+    from holon_std.tiered.resolver import _Beside
+
+    fired, early = collections.Counter(), set()
+
+    def load(f):
+        def run(self):
+            fresh, parts = self.parts is None, f(self)
+            s, g = self.store, self.resolver.group
+            if fresh and s._ahead and g + tiered.DEPTH < s.borrowing_groups and self.lists["n_hit"].max() > 0:
+                fired["calls"] += 1
+                s.read_ahead(g + tiered.DEPTH)
+                early.add((s.step, g + tiered.DEPTH))
+            return parts
+        return run
+
+    def read_ahead(f):
+        def run(self, g):
+            if (self.step, g) not in early:
+                return f(self, g)
+        return run
+    with _beside_patched({(_Beside, "load"): load, (tiered.TieredStore, "read_ahead"): read_ahead}, fired):
+        yield fired
+
+
+@contextlib.contextmanager
 def spare_lent_outside_tail() -> Iterator[collections.Counter]:
     """D8s (C): a staging step's lending (calls ≥ 1, not the tail's) given a spare's slots — the first lent expert of
     each layer with a spare holds it. Output-invisible (a spare's bytes are its owner's): judged by the count of spare
@@ -2751,6 +3021,14 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     # D8s: a staging step's rounds through fixed slots
     "round_slots_reused_early": round_slots_reused_early, "round_slot_shared": round_slot_shared,
     "part_one_role": part_one_role, "spare_lent_outside_tail": spare_lent_outside_tail,
+    # D8g: gathers by copy engines beside the compute (`worker_late`: its harness's late worker, no plant)
+    "worker_late": worker_late, "gather_part_unwaited": gather_part_unwaited,
+    "round_set_reused_early": round_set_reused_early, "ssd_set_reused_early": ssd_set_reused_early,
+    "fence_waits_unrecorded": fence_waits_unrecorded, "landing_half_reused_early": landing_half_reused_early,
+    "round_rows_shared": round_rows_shared, "io_word_stale": io_word_stale,
+    "cuda_event_on_generic": cuda_event_on_generic,
+    "readback_unwaited": readback_unwaited, "readahead_wait_after_tiered": readahead_wait_after_tiered,
+    "readahead_slot_reused": readahead_slot_reused,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/dev/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate

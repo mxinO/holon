@@ -973,7 +973,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
                                   lambda self, *a: splits.append(a[-1]) or order.append("call") or tiers(self, *a))
     order, rows, gather = [], tiered_store.TieredStore.round_rows, DeviceResolver._gather
     spy_rows = mock.patch.object(tiered_store.TieredStore, "round_rows",
-                                 lambda self, r: order.append(f"rows {r}") or rows(self, r))
+                                 lambda self, r, **kw: order.append(f"rows {r}") or rows(self, r, **kw))
     spy_gather = mock.patch.object(DeviceResolver, "_gather", lambda self, f, n, landed=False, part=0: order.append(
         "ssd" if landed else "ram") or gather(self, f, n, landed=landed, part=part))
     with (spy_tiers, spy_rows, spy_gather,
@@ -989,8 +989,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     if ssd:                                          # (prompt steps of 8 tokens or more read ahead; never one with
         store.read_ahead_tokens = 8                  # a decode row: at 4 sequences, mixed steps keep: D8f)
     calls = []                                       # eager calls' SSD misses (round 0's count) and read-ahead hits
-    spy_rows = mock.patch.object(tiered_store.TieredStore, "round_rows", lambda self, r: (
-        r or calls.append(("ssd", self.n_ssd[:1].clone())), rows(self, r))[1])
+    spy_rows = mock.patch.object(tiered_store.TieredStore, "round_rows", lambda self, r, **kw: (
+        r or calls.append(("ssd", self.n_ssd[:1].clone())), rows(self, r, **kw))[1])
     spy_hits = mock.patch.object(DeviceResolver, "_gather", lambda self, f, n, landed=False, part=0: (
         landed and part is None and calls.append(("hit", n[:1].clone())), gather(self, f, n, landed=landed,
                                                                                 part=part))[1])
@@ -1076,8 +1076,10 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     worst step, then reserves only the worst one below `ring_tokens` (smaller); a streaming step's forward allocates
     from the tail's last bytes (`activation_loan@1`: kernels.expert_io's MemPool), a range in proportion to its prompt
     tokens, past the passes' buffers; the outputs are the resident store's bit for bit (CUDA graphs on, overlap on).
-    A buffer kept from inside a lending step stops the engine at the next launch."""
+    The loan options' defaults lend the bytes the loan had before them (FN's RTX 5080 lock's layout). A buffer kept
+    from inside a lending step stops the engine at the next launch."""
     from holon.core import platform
+    from holon_std.tiered.store import LOAN_MARGIN, LOAN_SLACK, _profiled_tokens
 
     file, prompts, want = gpu_moe
     peaks, measure = [], platform.peak_memory
@@ -1091,15 +1093,24 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     store = engine.ctx.shared_objects[KEY]
     assert len(peaks) == 2 and 0 < peaks[1] < peaks[0] and store._loan_bytes >= peaks[0]
     ranges, use = [], store._loan.use
-    store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel(), store.step_tokens)), use(r))[1]
+    store._loan.use = lambda r: (ranges.append((r.data_ptr(), r.numel(), store.step_tokens, store._step_loan,
+                                                store._step_tail, store._step_gu_loan)), use(r))[1]
     assert _served(engine, prompts) == want
     cls, n = store.tail
     c = list(store.classes.values())[cls]
     end = c.slots()[c.size - 1].data_ptr() + c.unit_bytes
+    # the loan options' defaults (moe.loan_margin, moe.loan_taper, moe.loan_largest: provisional, docs/dev/v1-glm.md
+    # D8g) lend the bytes the loan had before them, as FN's RTX 5080 lock's layout (RAM holds every expert) takes it
+    align, tokens = store._align, _profiled_tokens(engine.ctx.options)
+    before = lambda share: -(-(int(share) + LOAN_SLACK) // align) * align                   # noqa: E731
+    assert store._loan_bytes == before(store._peak_per_token * tokens * LOAN_MARGIN)
+    buffers = lambda at: max(f(at) for f in store.tail_bytes)                               # noqa: E731
     assert store.borrowed["ring"] and ranges                 # each the tail's last bytes (512-byte aligned), its
-    for at, nbytes, tokens in ranges:                        # step's share of the worst step's loan
+    for at, nbytes, tokens, loan, tail, gu in ranges:        # step's share of the worst step's loan
         share = store._loan_per_token * tokens
         assert at + nbytes == end and at % 512 == 0 and share < nbytes + 512 and nbytes <= store._loan_bytes
+        assert loan == gu == min(store._loan_bytes, before(share))
+        assert tail == (cls, min(n, -(-(buffers(tokens) + loan) // c.unit_bytes)))
     assert store._loan.held() == 0 and store._loan.lib.loan_overflow() == 0     # the range held every segment
     kept, real = [], store.activations
 
@@ -1651,7 +1662,8 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
     file, prompts, want = gpu_moe_wide
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
-            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+            "moe.copy_beside": "off"}                # (D8s's own gathers; D8g's: the next test)
     for plant in (None, "round_slots_reused_early", "round_slot_shared", "part_one_role", "spare_lent_outside_tail"):
         # (the spare plant on steps that lend no tail: a tail step releases the spares before its other lending)
         tail = {"moe.ring_lend": "coldest", "moe.lend_peak": "off"} if plant == "spare_lent_outside_tail" else {}
@@ -1688,6 +1700,143 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
             engine.close()
 
 
+@pytest.fixture(scope="module")
+def gpu_moe_wide_one(gpu_moe_wide):
+    """`gpu_moe_wide`'s resident outputs at one sequence (a graphed step's staging, and so the landing rows, 8 wide)."""
+    file, prompts, _ = gpu_moe_wide
+    engine = _gpu_engine(file, max_seqs=1)
+    want = _served(engine, prompts)
+    engine.close()
+    return file, prompts, want
+
+
+@contextlib.contextmanager
+def _beside_delayed(late: str, ns: int = 10_000_000):
+    """D8g's delayed-producer harness: `late` "copies" (each copy's provider stream sleeps first), "producers" (and
+    each SSD request and read-ahead set: the worker sees it late), "worker" (each read-ahead set's signal on a stream
+    of its own after a sleep, its wait after it: the worker reads it late, as a busy one does) or "readers" (main
+    before each part's
+    pass: its slots' readers late, for the fences that guard their reuse)."""
+    from holon_std.tiered.resolver import _Beside
+    from holon_std.tiered.store import TieredStore
+
+    copy, rows, ahead, land = _Beside.copy, TieredStore.round_rows, TieredStore.read_ahead, _Beside.land
+
+    def late_copy(self, inst, *a):
+        with torch.cuda.stream(inst.stream):
+            torch.cuda._sleep(ns)
+        return copy(self, inst, *a)
+
+    def late_request(f):
+        def run(self, *a, **kw):
+            torch.cuda._sleep(ns)
+            return f(self, *a, **kw)
+        return run
+
+    def late_land(self, i):
+        land(self, i)
+        torch.cuda._sleep(ns)
+    side, signalled, patched = torch.cuda.Stream(), {}, []
+
+    def worker_ahead(self, g):                   # (a wait on a slot follows its deferred signal: the word's protocol)
+        io = self.io
+        if not patched:
+            wait = io.wait
+
+            def waiting(slot):
+                if slot in signalled:
+                    torch.cuda.current_stream().wait_event(signalled.pop(slot))
+                wait(slot)
+            io.wait = waiting
+            patched.append(io)
+        signal = io.signal
+
+        def deferred(slot):
+            side.wait_stream(torch.cuda.current_stream())
+            with torch.cuda.stream(side):
+                torch.cuda._sleep(ns)
+                signal(slot)
+                signalled[slot] = torch.cuda.Event()
+                signalled[slot].record()
+        io.signal = deferred
+        try:
+            return ahead(self, g)
+        finally:
+            del io.signal
+    with contextlib.ExitStack() as stack:
+        stack.callback(lambda: [delattr(io, "wait") for io in patched])
+        patches = {"copies": [(_Beside, "copy", late_copy)], "readers": [(_Beside, "land", late_land)],
+                   "worker": [(TieredStore, "read_ahead", worker_ahead)],
+                   "producers": [(_Beside, "copy", late_copy), (TieredStore, "round_rows", late_request(rows)),
+                                 (TieredStore, "read_ahead", late_request(ahead))]}[late]
+        for cls, name, f in patches:
+            stack.enter_context(mock.patch.object(cls, name, f))
+        yield
+
+
+_BESIDE = [(v, None, late, 1) for v in ("rounds", "stage") for late in ("producers", "copies", "readers")]
+_BESIDE += [("stage", None, "worker", 1), ("stage", None, "copies", 4)]       # (four: steps with decode rows too)
+_BESIDE += [("rounds", p, late, 1) for p, late in (
+    ("worker_late", "producers"), ("gather_part_unwaited", "copies"), ("round_set_reused_early", "readers"),
+    ("ssd_set_reused_early", "readers"), ("fence_waits_unrecorded", "readers"), ("landing_half_reused_early", "copies"),
+    ("round_rows_shared", "producers"), ("io_word_stale", "producers"), ("cuda_event_on_generic", "copies"),
+    ("readback_unwaited", "producers"))]
+_BESIDE += [("stage", p, late, 1) for p, late in (("readahead_wait_after_tiered", "worker"),
+                                                 ("readahead_slot_reused", "copies"))]
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("variant, plant, late, seqs", _BESIDE)
+def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide_one, variant, plant, late, seqs):
+    """D8g (docs/dev/v1-glm.md): an eager staging step's gathers by copy engines beside the compute — in rounds through
+    the fixed set (steps below ROUNDS_BELOW: front parts of 8, SSD rounds of 8 landing rows in two halves), or each
+    miss in its own staging slot (`stage`, here from any size, with read-ahead hits; at four sequences, steps with
+    decode rows too) — serve the
+    resident store's outputs with every piece's bytes the file's, under each of the delayed-producer harness's delays
+    (`_beside_delayed`; and a late worker, `worker_late`). Each plant, one fence dropped under the delay that would
+    expose it, is caught where its condition occurred."""
+    from holon_judge import planted
+    from holon_std.tiered import store as tiered_store
+    from holon_std.tiered.resolver import _Beside
+
+    file, prompts, want = gpu_moe_wide_one if seqs == 1 else gpu_moe_wide
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.1",
+            "moe.placement": "placement.promote@1",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.copy_beside": variant,
+            "cpu_task.timeout": 2.0}
+    load, calls = _Beside.load, []
+
+    def spy(self):
+        fresh = self.parts is None
+        parts = load(self)
+        if fresh:
+            calls.append((self.rounds, len(self.front), self.n_rounds))
+        return parts
+    below = tiered_store.ROUNDS_BELOW if variant == "rounds" else 0
+    with (mock.patch.object(_Beside, "load", spy), mock.patch.object(tiered_store, "ROUNDS_BELOW", below),
+          mock.patch.object(tiered_store, "ON_DEMAND", 4), mock.patch.object(tiered_store, "ROUND_SLOTS", 8),
+          _beside_delayed(late), planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired):
+        engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=seqs, plugin_options=opts)
+        store = engine.ctx.shared_objects[KEY]
+        store.read_ahead_tokens = 8
+        try:
+            ok = _served(engine, prompts) == want and _bytes_exact(store) == 0
+        except Exception as e:                   # (a plant the store refuses, a wait timed out, lists unread)
+            assert plant not in (None, "worker_late"), e
+            ok = False
+        engine.close()
+    if plant in (None, "worker_late"):
+        assert calls and all(r == (variant == "rounds") for r, _, _ in calls), calls
+        fronts, rounds = max(f for _, f, _ in calls), max(n for _, _, n in calls)
+        assert ok and fronts >= (2 if variant == "rounds" else 1) and rounds >= (3 if seqs == 1 else 1), (fronts,
+                                                                                                      rounds)
+        assert plant is None or fired["deferred"], fired
+    else:
+        assert any(fired.values()) and not ok, (plant, fired, ok)
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
     """Step 1's review C S1-m2 (test_reserve.py's rule under exclusive tiers, docs/dev/v1-glm.md D9): with the loan
@@ -1702,7 +1851,7 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     with mock.patch.object(platform, "peak_memory", lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+        engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=opts)
     store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
     store.read_ahead_tokens, hooks, ahead = 8, engine.executor._before, []
 
@@ -1735,7 +1884,9 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
 def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
     """Step 1's review C S1-m2 (docs/dev/v1-glm.md D8f): the down role of two classes (layer 3's Q8_0, the others' Q4_0,
     as GLM's two down types) reads its SSD misses into one landing pool, row j at the same bytes for both (a layer's
-    on-demand rows and the next layers' read-ahead sets never overlap); the streams are the resident store's."""
+    on-demand rows and the next layers' read-ahead sets never overlap); the streams are the resident store's. Every
+    piece's runs in a landing row are as the store derives them from its descriptors (D8g's copies by copy engines:
+    the I/O worker's rule)."""
     file, prompts, _ = gpu_moe
     mixed = tmp_path / "mixed.gguf"
     write(file.parent / "hf", mixed, Q.Q8_0, types={"3.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q4_0})
@@ -1751,6 +1902,21 @@ def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
     down = [store.landing_view(name, device=False)[0] for name, c in store.classes.items() if c.pieces[0][2] == 1]
     assert len(down) == 2 and down[0].data_ptr() == down[1].data_ptr() and down[0].shape == down[1].shape
     assert store.exclusive and engine.ctx.shared_objects["cpu_task.io"].native.io_stats()["bytes"] > 0
+    torch.cuda.synchronize()                         # D8g: each piece's runs as the I/O worker lays it out (idle)
+    a, table = store.landing_rows, store.io_pool.view(torch.int32, (store.halves, store.roles, 1 + store.landing_rows,
+                                                                    3))[0]
+    for reads in (x for x in store.reads if not x.ahead and not x.half):
+        classes = store.layer_classes[reads.g]
+        for at in range(0, store.items, a):
+            pieces = [[store._piece_index(c, reads.g, i, r) for i in range(at, min(at + a, store.items))]
+                      for r, c in enumerate(classes)]
+            for r, p in enumerate(pieces):
+                table[r, 0, 0] = len(p)
+                table[r, 1:1 + len(p)] = torch.tensor([[x, j, -1] for j, x in enumerate(p)], dtype=torch.int32)
+            reads()
+            for r, (c, p) in enumerate(zip(classes, pieces, strict=True)):
+                runs = store.landing_view(c.name, device=False)[1][:len(p)].numpy()
+                assert np.array_equal(runs, store.piece_runs[c.name][p]), (reads.g, r, at)
     engine.close()
 
 
@@ -1787,7 +1953,7 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     for plant in (contextlib.nullcontext, parking_late, parking_unwaited):     # the fence, then under a forced delay
         with plant() as fired:
-            engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts)
+            engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=opts)
             store = engine.ctx.shared_objects[KEY]
             got = _served(engine, prompts)
             assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
@@ -1840,7 +2006,7 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     short = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.5"}   # + exclusive tiers
     runs = []
     for policy, ram in (("std.tiered.static@1", {}), ("std.tiered.static@1", {}), ("", short), ("", {})):
-        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=split | ram | {"moe.placement": policy},
+        engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=split | ram | {"moe.placement": policy},
                              **small)
         with route_dump(engine) as trace:
             runs.append(_served(engine, prompts))

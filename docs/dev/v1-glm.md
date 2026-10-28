@@ -746,8 +746,8 @@ routed set, and the 32K decode's 79 MB a token.
   attributed.
 
 **D8g — Step 7: exclusive tiers' gathers beside the compute, by copy engines (D8p rev 2's parts, on D8w and D8s; the
-coordinator's lever after the 32K timeline). Design rev 3: rev 2's re-review applied (A's G2-M1, G2-M2 and minors,
-B's r2-m1, C's m1-m3); A to re-check; not yet built.** *Why, measured* (nsys of one prompt step at mode (ii)'s flags
+coordinator's lever after the 32K timeline). Design rev 3 (rev 2's re-review applied: A's G2-M1, G2-M2 and minors,
+B's r2-m1, C's m1-m3), cleared by A with G3-m1; built (as built: the last bullets).** *Why, measured* (nsys of one prompt step at mode (ii)'s flags
 with the borrow options, RTX 5090; §13 step 7):
 
 | Prompt | Main stream | Gathers on main (`k_fetch_roles`) | Waits on SSD rounds (`k_wait`) | The rest (compute) | Prompt SSD GiB / the drive's time at 2.3 GiB/s |
@@ -853,11 +853,41 @@ it).
   s, **0.880 → ≈ 0.92-0.94**. **4K prefill** (its drive ≈ 95% busy): **1.028 → ≈ 1.03-1.06**. Decode unchanged.
 - **Locks.** Exclusive layouts only, every edit gated on `store.exclusive` (mode (ii)'s overrides; no lock); every
   RAM-holds-all lock, GLM's mode (i) ones and FN's DMA ones included, must advance byte-identical. **No core lines.**
-- **With the build** (B-opt-M1's conditions for keeping the loan options in v1): their help texts say "provisional:
-  replaced by the measured loan rule (plan §10)", `tune` does not search them, a test shows the defaults give FN's
-  RTX 5080 lock's profile exactly the loan bytes it had, and plan §10's item proposes an optional `lend_profile(peaks)`
-  member (an additive ABI minor) and names what it deletes (`moe.loan_fixed_mib`, `moe.loan_taper`, most of
-  `moe.loan_margin`).
+- **With the build** (B-opt-M1's conditions for keeping the loan options in v1), done: their help texts say
+  "provisional: replaced by the measured loan rule, plan §10", `tune` does not search them (it searches kernels and
+  F5b's plan only), `test_a_tail_store_lends_its_streaming_steps_their_activations` shows the defaults lend FN's RTX
+  5080 lock's layout the loan bytes, tails and gate/up range it had before them, and plan §10's item proposes an
+  optional `ActivationLender.lend_profile(peaks)` (an additive ABI minor) deleting `moe.loan_fixed_mib`,
+  `moe.loan_taper`, `moe.loan_largest` and most of `moe.loan_margin`.
+- **As built.** `std.tiered`'s `_Beside` (resolver.py) is a call's `landed` sequence: its length is read after part −1
+  is enqueued (`moe.units`' pipelined pass takes it then), the host waits `tiered` there (`TieredStore.read_lists`) and
+  issues the call's copies part by part. G3-m1 is its first fix: the read-ahead set's `k_wait` sits on main before
+  `tiered` (every stream after `tiered` follows the read). Where it differs from the text above:
+  - **Stage mode's parts:** one front part (every read-ahead hit and RAM miss, each in its own staging slot, started
+    under the control stream after `tiered`), then the SSD rounds through the same control-stream machinery as rounds
+    mode (two halves, their own tables, F5), minus F3b (slots used once). Rounds mode: front parts of `rounds_q`, part
+    0 under control, the others with main current (asserted), then SSD rounds with F3b; read-ahead hits (steps of
+    2,048 prompt tokens or more: 4K) go through the front parts as the RAM misses do.
+  - **One readback buffer, copied out:** the host copies the lists into its own arrays after waiting `tiered` and
+    before the next call's readback is enqueued, so F6's parity is moot (its plant `readback_parity_stale` became
+    `readback_unwaited`: the lists taken without the wait).
+  - **The landing rows' runs** for the copy-engine copies are the store's (`_runs`, from the descriptors; a test
+    asserts them equal to the I/O worker's for every piece of the two-down-class model), passed to
+    `expert_prefetch@1`'s `start(..., runs)` (`kernels.expert_io`'s `copy_batch`, a copy per extent).
+  - **F4** (the moves after the last part's wait) holds by construction but has no plant: no call of a D8g step moved
+    anything in the tests (F11 at one sequence, F10 at four: its admissions go to spares), so a plant moving them
+    early could not be shown to occur.
+  - **The switch:** `moe.copy_beside` (`on`, `stage`, `rounds`, `off`; provisional, the A/B's: a variant it drops goes
+    with it). The second landing half costs pinned host memory (A rows a role): three tests' 128 MiB host budgets went
+    to 256 MiB.
+  - **Plants** (`test_gathers_beside_the_compute_hold_their_fences`, the delayed-producer harness `_beside_delayed`:
+    late copies, late requests, a late worker — a read-ahead's signal on a stream of its own after a sleep, its wait
+    after it — or late readers; `worker_late` defers round 0's request past round 1's rows): each clean run exact under
+    every delay (rounds: ≥ 2 front parts and ≥ 3 SSD rounds a call; stage: one front part, ≥ 3 rounds; and four
+    sequences, steps with decode rows), and every plant caught where its condition occurred — `gather_part_unwaited`,
+    `round_set_reused_early`, `ssd_set_reused_early`, `fence_waits_unrecorded`, `landing_half_reused_early`,
+    `round_rows_shared`, `io_word_stale`, `cuda_event_on_generic`, `readback_unwaited`,
+    `readahead_wait_after_tiered`, `readahead_slot_reused`.
 
 **D8r — Step 7: the post-prompt refill. Pending a measured spike (C's review, the coordinator's call): not designed
 further until it clears.** C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the

@@ -161,6 +161,9 @@ then `staging` slots, then cache slots.
   until key's copies have landed (each key waited for once). Facts: unit_bytes, copy — the copy list's placement an
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
+  Optional: a `dma` instance with `runs = True` also takes `start(..., runs [U, X, 2] int64)` on the host — `src`
+  landing rows [U, row] then, entry i's piece the extents `runs[fetch[0, i], x] = (offset in the row, nbytes)` name
+  there, back to back in its slot (docs/dev/v1-glm.md D8g).
 
 - `activation_loan@1` (FN step 7: a tail step's activations from its lent tail, the core's ActivationLender): an
   instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
