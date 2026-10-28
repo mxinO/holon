@@ -745,6 +745,67 @@ routed set, and the 32K decode's 79 MB a token.
   token over tokens 1–32; the loan's overflow 0 at 1K / 4K / 32K. Short of the ≈ 21 GiB predicted, not yet
   attributed.
 
+**D8g — Step 7: exclusive tiers' gathers beside the compute, by copy engines (D8p rev 2's parts, on D8w and D8s; the
+coordinator's lever after the 32K timeline). Design, for review by A, B and C before it is built.** *Why, measured*
+(nsys of one prompt step at mode (ii)'s flags with the borrow options, RTX 5090; `local` timeline scripts, §13 step 7):
+
+| Prompt | Main stream | Gathers on main (`k_fetch_roles`) | Waits on SSD rounds (`k_wait`) | The rest (compute) | Prompt SSD GiB / the drive's time at 2.3 GiB/s |
+|---|---|---|---|---|---|
+| 1K | 5.05 s | 1.50 s | 2.92 s | 0.62 s | 8.75 / ≈ 3.7 s |
+| 4K | 6.00 s | 1.71 s | 2.55 s | 1.69 s | 11.9 / ≈ 5.0 s |
+| 32K | 13.20 s | **4.26 s** (RAM misses 2.12, read-ahead hits 2.14) | 0.01 s | 8.88 s | 20.2 / ≈ 8.6 s |
+
+(nsys inflates the windows ≈ 10%; the drive's rate is the I/O worker's own, 25 GiB in 10.7 s busy at 32K.) Every
+gather of an exclusive call runs on the main stream between its layer's compute: at 32K no ring (`moe.stream_tokens`
+65536), no pipelined parts (`_parts` = 1 when exclusive), no rounds (gated below 8K); mode (i) moves the same bytes
+through its ring beside the compute and prefills 32K in 9.47 s. Below 8K a step is drive-bound, and D8s's rounds idle
+the drive too: round r + 1 is signalled only when the main stream reaches it, after round r's gather and compute.
+- **The change.** In an eager prompt step under exclusive tiers, a layer call's gathers run on the store's gather
+  stream by copy engines, in parts, the main stream computing part −1 (the resident rows) and then each part once its
+  copies land: the RAM misses and the read-ahead hits in stage mode (≥ 8K tokens, every miss its own staging slot);
+  in rounds (below 8K) the hits' and RAM's parts through a doubled fixed set, and each SSD round's landing rows → slots
+  too. **Landing rows double** (2 × A_od, ping-pong by round): round r + 1 is signalled when round r lands, not when
+  main reaches it, so the drive reads while the GPU gathers and computes.
+- **Copy engines, not SMs.** An SM gather beside stream-k mmq — which holds every SM for the pass — waits for the
+  pass to drain, so it would not overlap; copy-engine DMA does. The lists are on the device (the tier op writes
+  them), so a call reads them back: after the tier op the call's RAM and hit lists (counts and (unit, slot) pairs,
+  ≤ 2 × F int32 a role) are copied into one of two pinned readback buffers (by call parity) and the host waits that
+  event — one host sync a layer call, the CPU's lead lost there (the GPU idles ≈ 0.1 ms a call, ≈ 10 ms a 32K step)
+  — then issues each part's `cudaMemcpyBatchAsync` (`kernels.expert_io`'s `copy_batch`, extended to the landing
+  rows' runs: a copy per extent). An SSD round's copies are issued once the host sees the I/O worker's completion word
+  for it (a host wait, not the device's `k_wait`). Providers without `copy_batch` keep today's main-stream gathers.
+- **Fences — the `torch.Event` rule.** Every fence is a `torch.Event` (generic), recorded and waited on generic
+  `torch.Stream`s and `torch.accelerator.current_stream()`, never a `torch.cuda.Event` (a generic stream's
+  `wait_event` ignores one in torch 2.11: item 2's no-op fences; `check_events.py` guards it), and a stream waits
+  only on an event recorded in this step (an earlier one is moot: the step's join). The fences:
+  F1 `tiered` (main, after the tier op: the host's readback wait, and the gather stream's `wait_event` before any
+  copy — so a call's copies follow the previous call's compute and the admissions its tier op waited);
+  F2 `landed[p]` (gather stream, after part p's copies: main waits it before part p's pass);
+  F3 `computed[p]` (main, after part p's pass: the gather stream waits it before part p + 2's copies into the same
+  half of a doubled fixed set — rounds only; stage mode never reuses a slot within a call);
+  F4 the moves wait the last `landed` (admissions read staged slots), then the moves stream waits main (as today);
+  F5 the landing rows: round r + 2 reads into round r's half only after round r's copies landed (the gather stream's
+  `landed` for that round, waited by the host before signalling the I/O worker);
+  F6 a readback buffer is rewritten two calls later, after the host waited that call's F1 (host order).
+  The loan's ranges are never a copy's destination (D8w's `_in_loan` assertion stays).
+- **Slots.** Stage mode: unchanged. Rounds: the hits' and RAM's fixed set doubles (2 × `rounds_q` a class), the
+  landing rows double (2 × A_od, host pinned memory, ≈ 2 × 32 × 7 MiB a role); `rounds_able` asks lend room for
+  2 × (2q + a). `Lent`, the loan and `test_reserve.py`'s tiny-GLM cases count them.
+- **Plants** (each failing the GPU tiny model's exclusive bitwise tests or `_bytes_exact`): `gather_part_unwaited`
+  (part p computed without waiting F2), `round_half_reused_early` (F3 dropped: part p + 2 copied over part p before
+  its pass), `readback_parity_stale` (a call's copies from the other buffer), `landing_half_reused_early` (F5 dropped),
+  `moves_before_gathers` (F4 dropped), and `cuda_event_on_generic` (F2 as a CUDA-typed event: the delayed-producer
+  test fails with it).
+- **Exactness.** Copies and placement only: the exclusive bitwise tests (stage and rounds, F10 and F11) with the
+  gathers beside, `_bytes_exact`, every slot held once.
+- **Predicted** (the bench's cells, mode (ii)): **32K prefill** 12.9 → ≈ 9.5–10.3 s (the gathers' ≈ 75 GB a step
+  at ≥ 20 GB/s by copy engine fits under 9.5 s of compute; mode (i)'s rate the bound): **0.767 → ≈ 0.97–1.05**.
+  **1K prefill** is drive-bound (the drive ≈ 82% busy today): with the gathers beside and the drive never idle,
+  4.45 → ≈ 3.7–3.9 s: **0.880 → ≈ 1.0–1.06**. **4K prefill**, its drive already ≈ 95% busy: ≈ +3–5% (1.028 →
+  ≈ 1.06). Decode is unchanged (its steps are graphed: no parts).
+- **Locks.** Exclusive layouts only (mode (ii)'s overrides; no lock): every RAM-holds-all lock, GLM's mode (i) ones
+  included, must advance byte-identical. **No core lines.**
+
 **D9 — Prefill: one 32K step per prompt in both modes (passes of 16,384), with opt-in sub-batched activations.**
 - **Why:** N0 measured Maya's 32K prompt at 3,195 tok/s, read as 2 × 16K chunks that are compute-bound (≈ 0.29 ms a
   token; its copy lane busy 4.3 s of a 4.7 s chunk). A 4K-step Holon pays the ≈ 68 GB stream eight times; from 8K
@@ -1646,6 +1707,7 @@ the I/O worker's counters (`io_stats`), nsys over 16 decode tokens after a 1K pr
 | The 32K borrow (the coordinator's lever after the table; the breakdown on an RTX A5000 with the 12-block slice at the mode (ii) flags, the probe on one RTX 5090 desktop, base and arms in one session) | **What the tail holds:** 10.77 GiB (1,596 experts whole): the passes' buffers 3.57 (a 16,384-row pass) + the loan 7.20 = the profile's peak 3.87 × 1.6 + 1.0 fixed; a 32K step's live allocations at its peak 3.55 GiB, 2.00 of them the mHC residual streams (fp32, 4 × 4,096 a token), DSA / MLA ≈ 0.78, FlashInfer 0.34, dense mmq 0.29, the mHC mix 0.25. **Arms** (32K prompt GiB / displaced pieces / decode MB a token over tokens 1-32, 33-256 / prefill s / request s): base 23.23 / 4,084 / 222, 42.5 / 13.14 / 29.35; **(a) margin 1.12, the fixed bytes tapered from 8K to 0 at 32K, one range ≥ half the loan: 20.16 / 3,206 / 185, 38.5 / 12.73 / 27.63**; (b) 8K passes: 21.45 / 3,527 / 199, 40.0 / 16.83 / 31.93 (−22% of 32K prefill: rejected); (c) both: 18.65 / 2,752 / 164, 37.1 / 16.33 / 30.66. (a)'s loan_need sweep (1K-32K × prompt logprobs none / 1 / 20) overflowed nothing. **Found on the way:** with a smaller loan the 2 GiB residual streams fit no loan range (the gate/up range was the loan less the down tails' bytes; 1.6's slack hid it). **Built** (4ef014de, std only): `moe.loan_margin`, `moe.loan_taper`, `moe.loan_largest` (one range holds that share of a step's peak; GLM's streams 0.52 → 0.55), the gate/up range all the tail's gate/up slots past the buffers; defaults keep today's sizing |
 | The engine restarts (1 in ≈ 1,500 requests in the RTX 5090 grammar conformance run: a segfault in an unrelated allocation) | **Root cause: torch 2.11's `MemPool.snapshot()` corrupts the host heap**, and the activation loan's `held()` called it every lent step. Found by replicas under glibc's checks (`PYTHONMALLOC=malloc MALLOC_CHECK_=3 MALLOC_PERTURB_=165`) on RTX A5000s with the 12-block slice: the same abort at the same small allocation (`executor._context`) with the grammar on or off; 6 aborts in ≈ 7,500 requests with the loan, 0 in 2,558 with `moe.lend_peak=off`; xgrammar alone clean (7.7M fill / accept steps), Qwen3-8B (no loan) clean; then the provider alone in seconds, and a plain `MemPool` with torch's default allocator and its snapshot (the global `memory_snapshot()` clean). **Fixed on main** (`mxinO/loan-fix`, merged): the native loan counts its bytes out, `held()` reads them after `release()`; FN IQ2_XS at its RTX 5080 settings aborted between requests 200 and 400 before, ran clean after; FN's two locks and the vehicle's offload lock advanced, traces byte-identical. Merged here with D8w's ranges (8e04b277); the multi-range loan clean over 20,000 stress steps |
 | The capped mode (ii) table after the 32K borrow (as before: D11, 3 rounds after a warm-up, one RTX 5090 desktop, 64 GiB enforced; 4ef014de at `moe.loan_margin` 1.12, `moe.loan_taper` 8192,32768, `moe.loan_largest` 0.55; `evidence/glm_step7_mode2_borrow_2026-10-28.json`) | Holon / Maya, prefill 1K / 4K / 32K **0.880 / 1.028 / 0.767**, decode **0.950 / 0.875 / 0.786** (after D8: 0.887 / 1.014 / 0.753 and 0.971 / 0.879 / 0.727): 32K decode +8%, 32K prefill +2%, the 1K cells within their rounds' spread. Prompt reads 8.75 / 11.91 / 20.17 GiB, decode 33 / 46 / 59 MB a token; a pass of 24 requests 693 GiB of NVMe reads with its start (862 before the seed fix and the borrow; Maya 652-656 / 573-587); least free 521 MiB, no allocator retry; the built options' loan_need sweep overflowed nothing at 1K-32K |
+| The RTX 5090 mode (i) lock and the three loan options (the coordinator's condition; the lock's flags at `moe.loan_fixed_mib` 1,024, e6e73933) | The loan_need sweep overflowed nothing (1K-32K × prompt logprobs none / 1 / 20); the 32K A/B (8 × 32K, a warm-up, 2 rounds reversed): prefill 2,985 → **3,462** tok/s (1.161 / 1.158), decode 36.4 → 36.7 (1.011 / 1.005), hit rate 0.708 → 0.711, no allocator retry. **The lead's call: the mode (i) lock takes `moe.loan_margin` 1.12, `moe.loan_taper` 8192,32768, `moe.loan_largest` 0.55 at the close propagation** |
 | The RAM gather's rate (THP, piece sizes) | ≈ 611 MiB of host bytes a decode token (84.4 RAM experts and 5.1 SSD rows, item 4's replay) over `k_fetch_roles`' 13.9 ms before item 2: ≈ 46 GB/s, FN's 45-48; ≈ 40 GB/s beside item 2's copies. The RAM tier THP-backed (the hygiene log), units of 4.125 / 3.06 / 2.56 MiB at 64 KiB alignment (FN's IQ2_XS 1.5 MB): no gap to close there |
 | 3. Maya's RAM victim rule (`moe.ram_protect`, 0ef371c6; **reverted**, `moe.ram_heat` 0.999 stays) | SSD MB a token at rest after 1K / 32K, after-1K tokens 1-32, the 1K prompt's GiB: `ram_heat` 0.999 42.3 / 47.6, 76.3, 10.85; 0.993 (Maya's aging, ≈ halving every 32,768 routes) 42.3 / 46.8, 76.3, 10.84; 0.993 + a 64-token window 42.1 / 46.9, 75.1, 10.73; 0.999 + 64 42.1 / 47.2, 75.1, 10.73; no `ram_heat` (the policy's heat) 44.5 / 46.3, 99.0, 11.36. Decode ms within 51.3-52.7 for all. `ram_heat` itself is what helps (99 → 76 MB a token after a 1K prompt); the decay and the window move reads by ≤ 1.6%, within a run's noise: the misses at rest are capacity, not the victim rule (Maya's own notes say as much) |
 | 4. The decode look-ahead (`spikes/glm7/lookahead.py --map`: Maya's top-8 predictions replayed against Holon's tier map, 765 eager decode tokens) | 5.1 SSD reads a token; predicted d ≤ 1 layer early: 2.55 covered (50%) for 7.3 reads issued (4.8 wasted); d ≤ 4: 3.07 (60%) for 23.6 issued (20.6 wasted, 1.9 of them routed by that layer within 32 tokens). Maya runs it off by default (§7.4) after measuring it not faster. **Closed unbuilt**: the waste is 2-7× the covered reads on the one drive |
