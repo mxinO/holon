@@ -806,6 +806,60 @@ the drive too: round r + 1 is signalled only when the main stream reaches it, af
 - **Locks.** Exclusive layouts only (mode (ii)'s overrides; no lock): every RAM-holds-all lock, GLM's mode (i) ones
   included, must advance byte-identical. **No core lines.**
 
+**D8r — Step 7: the post-prompt refill (the coordinator's second lever after the 32K timeline; design, for the panel
+with D8g's fixes, built after D8g).** *Why, measured* (the per-piece probe at mode (ii)'s flags with the borrow options,
+the bench's 24 requests): a 32K prompt displaces 10.7 GiB of pieces to the SSD (7.5 GiB of them from VRAM: the tail's
+experts and the staging's lends) and its decode then reads **59% of its SSD bytes re-reading them** (184 MB a token
+over tokens 1-32, 0.68 of it displaced; 39 MB over 33-256, 0.53), while the drive is busy only ≈ 40% of decode
+(≈ 1 GB/s of ≈ 2.3). Lending other experts does not help (the coldest by heat: −8% of the re-reads; even an oracle
+choice −40%: a 32K decode touches ≈ 2,570 of 3,139 resident experts while the step lends ≈ 1,136): the bytes have to
+come back, and the idle drive can bring them back before they are asked for. **Not FN's rejected refill:** there the
+pre-prompt cache contents covered 17-28% of the decode's misses; here the displaced set *is* the re-read set, measured
+(59% at 32K).
+- **The replay** (offline, on the probe's recording: after each lending prompt the drive reads the displaced pieces
+  back with only the bandwidth the decode's own misses leave — they go first —, 2.4 GiB/s, the I/O worker's measured
+  rate; a piece that lands before its first decode use is a hit; a decode token's time 25.4 ms + 0.6 ms a SSD MB, the
+  line through the table's 4K and 32K cells): refilling the VRAM-displaced pieces by RAM's heat, 32K decode reads
+  193 → 159 MB a token over tokens 1-32 and 40 → 26 over 33-256, all 7.5 GiB back within the 256 tokens: **a modelled
+  1.20× at 32K** (0.786 → ≈ 0.94), 1.09× at 4K, 1.06× at 1K. The order hardly matters (heat or layer order alike; an
+  oracle's first-use order 1.40×); the RAM-displaced pieces too would add ≈ +0.05 (a later step).
+- **The change.** At a lending prompt step's commit the store lists the experts it displaced from VRAM (the tail's
+  picks, the staging's lends that were not parked) by RAM's heat, and holds back as many of the class's empty slots
+  (the tail's, now free) as refill targets — taken off the device's empty stacks at the next launch, as F10's spares
+  are, so no admission can take them. The I/O worker reads the listed pieces from the checkpoint into a refill area
+  (pinned host memory, two halves of `moe.refill_rows` rows) as a background class of request; each landed half is
+  copied into its target slots by copy engine on the gather stream (D8g's), and a map edit (`ResidencyMap.edit`:
+  the piece's entry from SSD-only to its slot, precondition "still SSD-only") makes it live at a later launch. A slot
+  whose edit fails (the decode admitted the expert meanwhile) goes back to the empty stack; a refill not finished when
+  the next lending prompt arrives is abandoned, its held slots returned.
+- **Interaction with D8g.** Refill copies use D8g's gather stream and copy engines but their own pinned area, never
+  D8g's landing-row halves, so a prompt's rounds and a refill share nothing but the drive and PCIe; a refill runs only
+  between prompt steps (a new prompt step cancels its queued reads first), so it never competes with a prompt's
+  rounds for the drive.
+- **Caveats, stated.** (1) The time model is a straight line through two cells (4K and 32K, 46 and 57 MB a token):
+  decode's time may not fall as fast as its bytes, so the build is measured, not trusted (the kill criterion).
+  (2) Demand reads never queue behind refill reads: the I/O worker submits a background read only while no demand
+  read is pending and keeps at most two in flight, so a demand read waits at most ≈ two piece reads (≈ 3-6 ms); a
+  test asserts a demand round's latency with a refill running stays within that bound. (3) Refilled pieces need
+  free slots: only the VRAM-displaced pieces, into the empty slots the lending step freed and held back (never a slot
+  the device can admit into until it is returned); RAM-displaced pieces are not refilled in this step.
+- **Fences** (D8g's `torch.Event` rule: generic events on generic streams, a wait only on an event recorded in this
+  step): R1 a half's copies → `refilled` (gather stream) → the main stream waits it at the launch whose map edit makes
+  the slots live (the edit is placed at that launch, so no forward reads a slot before its bytes land); R2 a refill
+  half is reread from the SSD only after its copies' event completed (host wait before submitting); R3 held slots
+  leave the device's empty stacks at a launch before any copy targets them (launch-ordered writes) and return through
+  the edit or the release.
+- **Plants:** `refill_slot_not_held` (targets left on the empty stack: an admission takes one, the copy overwrites a
+  live piece: `_bytes_exact`), `refill_live_before_landed` (R1 dropped: the edit at the launch before the copy),
+  `refill_half_reused_early` (R2 dropped), `refill_ahead_of_demand` (a background read queued before demand reads:
+  the latency test fails).
+- **Exactness.** Placement only: a refilled piece's bytes are the checkpoint's (`_bytes_exact`), the outputs the
+  resident store's (the exclusive bitwise tests with refill on, a forced slow refill and a forced early prompt).
+- **Kill criterion.** Built after D8g, measured on the capped table: **32K decode must reach ≥ 1.10× today's
+  (16.8 → ≥ 18.5 tok/s, Holon / Maya ≥ 0.86), or D8r is dropped** (its code removed, the result recorded).
+- Only exclusive layouts refill (mode (ii)'s overrides; no lock); **no core lines**: the store, `kernels.cpu_task`'s
+  background request class and `kernels.expert_io`'s copies.
+
 **D9 — Prefill: one 32K step per prompt in both modes (passes of 16,384), with opt-in sub-batched activations.**
 - **Why:** N0 measured Maya's 32K prompt at 3,195 tok/s, read as 2 × 16K chunks that are compute-bound (≈ 0.29 ms a
   token; its copy lane busy 4.3 s of a 4.7 s chunk). A 4K-step Holon pays the ≈ 68 GB stream eight times; from 8K
