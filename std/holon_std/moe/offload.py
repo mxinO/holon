@@ -62,7 +62,18 @@ def _store(ctx, experts: int, top_k: int):
                         cache=str(opts.get("moe.cache", "")), profile=profile,
                         ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0)),
                         loan_fixed=int(opts.get("moe.loan_fixed_mib", 0)) << 20,
-                        ram_heat=float(opts.get("moe.ram_heat", 0.0))))
+                        ram_heat=float(opts.get("moe.ram_heat", 0.0)),
+                        loan_margin=float(opts["moe.loan_margin"]) if "moe.loan_margin" in opts else None,
+                        loan_taper=_taper(opts.get("moe.loan_taper", "")),
+                        loan_largest=float(opts.get("moe.loan_largest", 0.0))))
+
+
+def _taper(value) -> tuple[int, int] | None:
+    """`moe.loan_taper`: "full,zero" prompt tokens (empty: none)."""
+    if not str(value).strip():
+        return None
+    full, zero = (int(x) for x in str(value).split(","))
+    return full, zero
 
 
 def _rows(ctx) -> int:

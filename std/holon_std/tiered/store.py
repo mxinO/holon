@@ -130,7 +130,9 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0) -> None:
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0,
+                 loan_margin: float | None = None, loan_taper: tuple[int, int] | None = None,
+                 loan_largest: float = 0.0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -138,6 +140,19 @@ class TieredStore:
         # device's own memory, which the reserve does not hold (GLM step 5: 5K-8K-token steps with prompt logprobs ran
         # out of memory at the deployment's fraction)
         self._loan_fixed = max(loan_fixed, LOAN_SLACK)
+        # `loan_margin` (`moe.loan_margin`): the lent peak's room for the allocator's segments (LOAN_MARGIN by default;
+        # GLM's 32K steps need 1.07-1.12x). `loan_taper` (`moe.loan_taper`, (full, zero) prompt tokens): the fixed
+        # bytes whole up to `full` tokens, falling linearly to LOAN_SLACK at `zero` (a large step's fixed costs fit its
+        # share: GLM's 32K steps overflowed nothing with no fixed bytes, its 2K ones 768 MiB). `loan_largest`
+        # (`moe.loan_largest`): under a whole-expert tail one loan range holds this share of a step's peak (its largest
+        # allocation must fit a range: GLM's residual streams are 0.52 of its peak; 0: no such need)
+        loan_margin = LOAN_MARGIN if loan_margin is None else loan_margin
+        if loan_margin < 1.0 or not 0.0 <= loan_largest <= 1.0:
+            raise ValueError(f"{name}: moe.loan_margin {loan_margin} (at least 1) or moe.loan_largest {loan_largest} "
+                             "(a share of the peak)")
+        if loan_taper is not None and not 0 < loan_taper[0] < loan_taper[1]:
+            raise ValueError(f"{name}: moe.loan_taper {loan_taper}: full,zero prompt tokens, full < zero")
+        self._loan_margin, self._loan_taper, self._loan_largest = loan_margin, loan_taper, loan_largest
         self.loan_overflows, self.loan_overflow_most = 0, 0        # lent steps that overflowed; the most bytes
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         # `ram_heat` (`moe.ram_heat`, docs/dev/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
@@ -188,6 +203,7 @@ class TieredStore:
         self.lend_peak, self._require_loan, self._asked = lend_peak != "off", lend_peak == "require", False
         self._loan, self._loan_bytes, self._loaned = None, 0, False
         self._loan_per_token, self._step_loan = 0.0, 0       # the loan's bytes per prompt token; this step's
+        self._peak_per_token = 0.0                           # the profile's peak per prompt token (no margin)
         self.tail: tuple[int, int] | None = None             # (class index, its last n slots): set at materialize
         # D8w (docs/dev/v1-glm.md), exclusive tiers: the whole-expert tail's other classes, {class index: its last m
         # slots}, beside the tail's class; a tail step's own share of them; its loan's bytes in the tail's class
@@ -807,12 +823,13 @@ class TieredStore:
             cls, n = self.tail
             if self._loan is not None:          # the activations of a step of `at` prompt tokens, at most the worst's
                 self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
-            need = max((f(at) for f in self.tail_bytes), default=0) + self._step_loan
-            n_step = min(n, self._split(need - self._step_loan, self._step_loan, cls, lambda c: c.cap))
+            buffers = max((f(at) for f in self.tail_bytes), default=0)
+            n_step = min(n, self._split(buffers, self._step_loan, cls, lambda c: c.cap, self._largest(at)))
             self._step_tail = (cls, n_step)
             self._step_down = {c: min(m, self.tail_down.get(c, 0)) for c, m in self._down(n_step).items()}
-            down = sum(m * list(self.classes.values())[c].unit_bytes for c, m in self._step_down.items())
-            self._step_gu_loan = max(self._step_loan - down, 0) if self._step_down else self._step_loan
+            # (a whole-expert tail lends its gate/up slots past the buffers whole: a range the largest allocation fits)
+            unit = list(self.classes.values())[cls].unit_bytes
+            self._step_gu_loan = n_step * unit - buffers if self._step_down and self._step_loan else self._step_loan
         elif self._loan is not None and self._own_tail is not None and self.large_passes(at):   # a staging layout's
             self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))           # loan: its own tail's end
         reach, self._written = max(at, self._written), at          # the last step's rows become padding
@@ -908,7 +925,8 @@ class TieredStore:
                                         self.ctx.candidates(ACTIVATION_LOAN, {}))) if not ok]
         if missing:
             return self._no_loan(", ".join(missing))
-        loan = -(-(int(peak * LOAN_MARGIN) + self._loan_fixed) // self._align) * self._align
+        tokens = _profiled_tokens(self.ctx.options)
+        loan = -(-(int(peak * self._loan_margin) + self._fixed(tokens)) // self._align) * self._align
         self._loan_bytes = loan
         try:
             tail = self._tail(lambda c: c.cap)         # the tail grows by the loan (for the final materialize)
@@ -920,7 +938,8 @@ class TieredStore:
             return 0
         self._loan = self.ctx.select_kernel(ACTIVATION_LOAN, site=f"std.tiered[{self.name}]").impl(self.ctx)
         self._own_tail = None           # the smaller profile next: its passes' buffers are its own, as they will be
-        self._loan_per_token = peak * LOAN_MARGIN / _profiled_tokens(self.ctx.options)
+        self._loan_per_token = peak * self._loan_margin / tokens
+        self._peak_per_token = peak / tokens
         self.tail = tail
         self.tail_down = self._down(tail[1], lambda c: c.cap)
         return self.ring_tokens
@@ -1333,7 +1352,18 @@ class TieredStore:
     def _step_loan_bytes(self, at: int) -> int:
         """The loan of a step of `at` prompt tokens: its share of the worst step's plus the fixed bytes, aligned (at
         most the worst's: the caller's `min`)."""
-        return -(-(int(self._loan_per_token * at) + self._loan_fixed) // self._align) * self._align
+        return -(-(int(self._loan_per_token * at) + self._fixed(at)) // self._align) * self._align
+
+    def _fixed(self, at: int) -> int:
+        """The loan's fixed bytes for a step of `at` prompt tokens: `moe.loan_fixed_mib`, tapered (`loan_taper`)."""
+        if self._loan_taper is None or at <= self._loan_taper[0]:
+            return self._loan_fixed
+        full, zero = self._loan_taper
+        return max(int(self._loan_fixed * max(0.0, (zero - at) / (zero - full))), LOAN_SLACK)
+
+    def _largest(self, at: int) -> int:
+        """The bytes one loan range of a step of `at` prompt tokens holds whole (`loan_largest`)."""
+        return int(self._loan_largest * self._peak_per_token * at)
 
     def _tail(self, slots: Callable[[SlotClass], int]) -> tuple[int, int] | None:
         """The tail under `ring_lend = "tail"` (D11), where steps stream: the largest class arena — the first role's
@@ -1346,7 +1376,8 @@ class TieredStore:
         first = [classes.index(self.groups[g][0]) for g in self._order]
         cls = max(sorted(set(first)), key=first.count)
         c = classes[cls]
-        n = self._split(max((f() for f in self.tail_bytes), default=0), self._loan_bytes, cls, slots)
+        n = self._split(max((f() for f in self.tail_bytes), default=0), self._loan_bytes, cls, slots,
+                        self._largest(_profiled_tokens(self.ctx.options)))
         if slots(c) - n < self.prefill:
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): class {c.name} lends {slots(c)} cache "
                              f"slots, {n} of them its tail ({n * c.unit_bytes} bytes): the rest cannot stage a "
@@ -1396,10 +1427,11 @@ class TieredStore:
         classes = list(self.classes.values())
         return {c: max(0, min(int(n * share), slots(classes[c]) - self.prefill)) for c, share in self._shares().items()}
 
-    def _split(self, buffers: int, loan: int, cls: int, slots: Callable[[SlotClass], int]) -> int:
+    def _split(self, buffers: int, loan: int, cls: int, slots: Callable[[SlotClass], int], big: int = 0) -> int:
         """The tail's n slots in class `cls` for the passes' `buffers` and the `loan`'s bytes: with a whole-expert
         tail, the buffers in class `cls`'s slots (the passes' views are one range: `tail_view`) and the loan in
-        theirs past them and its other classes' last m (`_down`)."""
+        theirs past them (all of them: `_gu_loan`) and its other classes' last m (`_down`), one of those ranges at
+        least `big` bytes (the step's largest allocation: `loan_largest`)."""
         classes = list(self.classes.values())
         unit = classes[cls].unit_bytes
         n = -(-(buffers + loan) // unit)
@@ -1407,7 +1439,10 @@ class TieredStore:
             return n
         per = unit + sum(share * classes[c].unit_bytes for c, share in self._shares().items())
         n = max(-(-buffers // unit), -(-(buffers + loan) // int(per)))
-        while n * unit + sum(m * classes[c].unit_bytes for c, m in self._down(n, slots).items()) < buffers + loan:
+        while n < slots(classes[cls]):
+            down = [m * classes[c].unit_bytes for c, m in self._down(n, slots).items()]
+            if n * unit + sum(down) >= buffers + loan and max([n * unit - buffers, *down]) >= big:
+                break
             n += 1
         return n
 

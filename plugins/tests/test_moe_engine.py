@@ -1556,6 +1556,49 @@ def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy):
             engine.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_loan_takes_its_margin_its_tapered_fixed_bytes_and_a_range_its_largest_allocation_fits(gpu_moe_wide):
+    """The 32K borrow (docs/dev/v1-glm.md §13, step 7): `moe.loan_margin` scales the lent peak, `moe.loan_taper` takes
+    the fixed bytes whole up to its first token count and down to LOAN_SLACK at its second, and under a whole-expert
+    tail `moe.loan_largest` sizes the tail so one loan range holds that share of a step's peak — the gate/up range is
+    all the tail's gate/up slots past the passes' buffers. Lent steps serve the resident store's outputs."""
+    from holon_std.tiered.store import LOAN_SLACK, _profiled_tokens
+
+    file, prompts, want = gpu_moe_wide
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+            "moe.loan_fixed_mib": 64, "moe.loan_margin": 1.2, "moe.loan_taper": "64,192", "moe.loan_largest": 0.9}
+    engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts)
+    store = engine.ctx.shared_objects[KEY]
+    tokens, align = _profiled_tokens(engine.ctx.options), store._align
+    peak = store._peak_per_token * tokens
+    assert store._loan_bytes == -(-(int(peak * 1.2) + LOAN_SLACK) // align) * align       # (256 tokens: past 192)
+    share = [store._loan_per_token * at for at in (64, 128, 192)]
+    assert [store._step_loan_bytes(at) for at in (64, 128, 192)] == [
+        -(-(int(s) + f) // align) * align for s, f in zip(share, (64 << 20, 32 << 20, LOAN_SLACK), strict=True)]
+    cls, _ = store.tail                          # a largest allocation past every range the loan's sizing gives
+    classes, cap = list(store.classes.values()), (lambda c: c.cap)
+    buffers, loan = max(f() for f in store.tail_bytes), store._loan_bytes
+    plain, n = store._split(buffers, loan, cls, cap), store._split(buffers, loan, cls, cap, 2 * loan)
+    ranges = [n * classes[cls].unit_bytes - buffers, *(m * classes[c].unit_bytes for c, m in store._down(n).items())]
+    assert n > plain and max(ranges) >= 2 * loan, (plain, n, ranges, loan)
+    steps, use = [], store._loan.use_ranges
+
+    def recorded(ranges):
+        cls, n = store._step_tail
+        unit = list(store.classes.values())[cls].unit_bytes
+        buffers = max(f(store.step_tokens) for f in store.tail_bytes)
+        steps.append((max(len(r) for r in ranges), store._largest(store.step_tokens),
+                      store._step_gu_loan == n * unit - buffers))
+        return use(ranges)
+    store._loan.use_ranges = recorded
+    assert _served(engine, prompts) == want
+    assert steps and all(big >= need > 0 and whole for big, need, whole in steps), steps
+    assert store.whole_tail and store.loan_overflows == 0
+    engine.close()
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
