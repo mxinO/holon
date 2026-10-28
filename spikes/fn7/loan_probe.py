@@ -1,6 +1,7 @@
 """FN §21.12: the step-peak loan (`moe.lend_peak`) on a deployment: the loan's bytes and the profile's peaks, then per lending step the pool's
 segments, live bytes and the overflow past the range (the bench's warm-up, then prompts of `LENS` tokens). Usage: loan_probe.py <model> '<flags>'
-<requests.json> [max_model_len]."""
+<requests.json> [max_model_len]. Debug only: it reads the pool's `MemPool.snapshot()`, which on torch 2.11 corrupts the host heap
+(kernels.expert_io's `ActivationLoan` docstring); never call it on a serving path."""
 import json
 import os
 import pathlib

@@ -159,7 +159,9 @@ class MoeTiers:
 class ActivationLoan:
     """`activation_loan@1`: a MemPool of torch's caching allocator whose segments the native module's pluggable
     allocator cuts from the range `use` names — a new pool at each `use` (the last one's segments go back with it), so
-    a step starts from an empty range; `held` is the current pool's live bytes."""
+    a step starts from an empty range; `held`, after `release`, the bytes of its segments still out (a block alive
+    keeps its segment). Never `MemPool.snapshot()`: on torch 2.11 it corrupts the host heap (a glibc abort in a later,
+    unrelated allocation, about once per thousand calls; GLM step 7's engine restarts)."""
 
     def __init__(self, modules: Modules, ctx) -> None:
         self.lib = modules(ctx.fingerprint.sm)
@@ -176,12 +178,12 @@ class ActivationLoan:
         return torch.cuda.use_mem_pool(self.pool, self.index)
 
     def release(self) -> None:
-        """The pool's segments back (none alive: `held`), the range free for the next `use`."""
+        """The pool's segments back (all but those a live block keeps: `held`), the range free for the next `use`."""
         self.pool = None
 
     def held(self) -> int:
-        return 0 if self.pool is None else sum(b["size"] for seg in self.pool.snapshot() for b in seg["blocks"]
-                                               if b["state"] == "active_allocated")
+        """After `release`: the bytes of the pool's segments still out (0: nothing outlived the use)."""
+        return self.lib.loan_live_bytes()
 
 
 class Plugin:

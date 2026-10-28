@@ -3,7 +3,10 @@
 same (dequantized) weights (docs/dev/m02-moe.md, step 1)."""
 import contextlib
 import json
+import os
 import pathlib
+import subprocess
+import sys
 import types
 import warnings
 from unittest import mock
@@ -1015,6 +1018,43 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     assert kept
     kept.clear()
     engine.close()                                  # (the loan's range free for the next engine)
+
+
+_LENT_STEPS = """
+import sys
+import torch
+from holon.api import SamplingParams
+from holon.core.engine import Engine, EngineConfig
+engine = Engine(EngineConfig(model=sys.argv[1], device="cuda", dtype=torch.bfloat16, page_size=16, max_seqs=4,
+                             max_step_tokens=256, max_model_len=512, host_memory=1 << 27, plugin_options={
+                                 "moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+                                 "moe.lend_peak": "on"}))
+loan, uses = engine.ctx.shared_objects["std.moe.offload"]._loan, []
+use = loan.use
+loan.use = lambda r: (uses.append(r.numel()), use(r))[1]
+g = torch.Generator().manual_seed(0)
+for _ in range(int(sys.argv[2])):
+    n = int(torch.randint(40, 250, (1,), generator=g))
+    engine.generate([torch.randint(0, 512, (n,), generator=g).tolist()], SamplingParams(temperature=0.0, max_tokens=1))
+assert len(uses) >= int(sys.argv[2]), len(uses)
+"""
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_lent_steps_leave_the_host_heap_whole(gpu_moe, tmp_path):
+    """A process serving 600 lent steps under glibc's heap checks (every Python object on glibc's heap, freed memory
+    poisoned) exits cleanly. The loan's `held` was torch's `MemPool.snapshot()`, which on torch 2.11 corrupts the host
+    heap: a glibc abort in a later, unrelated allocation within a few hundred steps (GLM step 7's engine restarts,
+    about one a thousand requests); it is now the native loan's bytes still out after `release`."""
+    file, _, _ = gpu_moe
+    script = tmp_path / "lent.py"
+    script.write_text(_LENT_STEPS)
+    env = os.environ | {"PYTHONMALLOC": "malloc", "MALLOC_CHECK_": "3", "MALLOC_PERTURB_": "165",
+                        "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)}
+    run = subprocess.run([sys.executable, str(script), str(file), "600"], env=env, capture_output=True, text=True,
+                         timeout=1200)
+    assert run.returncode == 0, run.stderr[-3000:]
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
