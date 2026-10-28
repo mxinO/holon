@@ -154,7 +154,9 @@ then `staging` slots, then cache slots.
   takes `part` and exactly one of `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q =
   ⌈min(n[r], F) / parts⌉ (a pipelined pass's fetch, part by part) or q = `size` (an SSD round); and `runs`, one per role
   (landing rows). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as they are in `out` (a
-  pipelined pass computes each part's entries into one `out`).
+  pipelined pass computes each part's entries into one `out`); an instance with `sparse = True` also takes
+  `sparse=True`, a call whose live entries are few (one part of a pass, docs/dev/v1-glm.md D8g): the same rows,
+  its cost its live entries' (the activations of the others not quantized).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
   src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits

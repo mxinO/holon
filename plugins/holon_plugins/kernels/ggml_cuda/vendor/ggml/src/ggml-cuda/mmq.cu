@@ -144,7 +144,8 @@ void ggml_cuda_mul_mat_q(
         const float * x_scale, const int64_t ids_slots, int32_t * ids_errors,
         const bool glu, const float * gate_scale, const float * up_scale, // Holon: glu, dst out/2 rows (mmq.cuh)
         const int64_t ids_j_tokens, // Holon: D2's batched-decode rule, the caller's (kernels.ggml_cuda IDS_J_TOKENS)
-        const float glu_limit) { // Holon: glu's clamp (docs/dev/v1-glm.md D6)
+        const float glu_limit, // Holon: glu's clamp (docs/dev/v1-glm.md D6)
+        const bool sparse) { // Holon: the live pairs' rows only (mmq.cuh)
     GGML_ASSERT(        src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_BF16); // Holon: bf16 activations,
     GGML_ASSERT(        dst->type  == GGML_TYPE_F32 || (dst->type == GGML_TYPE_BF16 && !ids)); // bf16 out (dense)
     GGML_ASSERT(!x_scale || (!ids && src0->type == GGML_TYPE_NVFP4)); // Holon: NVFP4's scale2 (dense)
@@ -347,10 +348,12 @@ void ggml_cuda_mul_mat_q(
             }
         } else if (dedup_bcast) {
             quantize_scatter_mmq_q8_1_cuda(src1->data, src1->type, ids_src1.get(), src1_q8_1.get(), src0->type, ne10,
-                                    /*stride_token=*/s12, ne10_padded, ne12, ne11_flat, n_expert_used, stream);
+                                    /*stride_token=*/s12, ne10_padded, ne12, ne11_flat, n_expert_used, stream,
+                                    sparse ? expert_bounds.get() + n_z : nullptr); // Holon: the live count
         } else {
             quantize_mmq_q8_1_cuda(src1->data, src1->type, ids_src1.get(), src1_q8_1.get(), src0->type, ne10, s11, s12, s13,
-                                   ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream);
+                                   ne10_padded, ne11_flat, ne12_flat, ne13_flat, stream,
+                                   sparse ? expert_bounds.get() + n_z : nullptr); // Holon: the live count
         }
         CUDA_CHECK(cudaGetLastError());
     }

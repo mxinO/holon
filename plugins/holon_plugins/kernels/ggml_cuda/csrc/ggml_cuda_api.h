@@ -112,7 +112,7 @@ void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int6
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
                        int64_t slots, int32_t * errors, int swiglu, float glu_limit, const float * gate_scale,
                        const float * up_scale, int64_t ids_j_tokens, void * workspace, size_t workspace_bytes,
-                       void * stream);
+                       void * stream, int sparse = 0); // sparse: only the live pairs' rows quantized (D8g)
 // Whether mmq with ids can fuse SwiGLU into its store for a merged gate/up stack of `out` rows of `type` at `prec` here
 // (every tile width's config: MMA layout, no fallback, whole row tiles, room for the exchange).
 int holon_ggml_mmq_glu(int type, int prec, int64_t out);

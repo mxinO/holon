@@ -91,7 +91,7 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
              const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0,
              const std::optional<at::Tensor> & errors = std::nullopt,
              const std::optional<at::Tensor> & xq = std::nullopt, int64_t ids_j_tokens = INT64_MAX,
-             int64_t null_slots = 0, double glu_limit = 0.0) {
+             int64_t null_slots = 0, double glu_limit = 0.0, bool sparse = false) {
     const c10::cuda::CUDAGuard guard(x.device());
     TORCH_CHECK(x.dim() == 3 && ids.dim() == 2 && y.dim() == 3, "x, ids, y: 3, 2 and 3 dimensions");
     const int64_t tokens = ids.size(0), k = ids.size(1), rows = x.size(1), in = x.size(2), out_y = y.size(2);
@@ -124,7 +124,8 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
                           ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), slots,
                           errors ? errors->data_ptr<int32_t>() : nullptr, swiglu, float(glu_limit),
                           scale(gate_scale, x, n, "gate_scale"),
-                          scale(up_scale, x, n, "up_scale"), ids_j_tokens, ws.data_ptr(), ws.numel(), stream());
+                          scale(up_scale, x, n, "up_scale"), ids_j_tokens, ws.data_ptr(), ws.numel(), stream(),
+                          sparse ? 1 : 0);
     }
 }
 
@@ -223,27 +224,28 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     // `ids_j_tokens`: D2's batched-decode rule (the plugin's IDS_J_TOKENS); upstream's (J against the tokens) without
     m.def("mmq_id", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
                        at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
-                       int64_t ids_j_tokens) {
+                       int64_t ids_j_tokens, bool sparse) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
         TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
                     "errors: one int32 on x's device");
         experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots, errors, std::nullopt,
-                ids_j_tokens);
+                ids_j_tokens, 0, 0.0, sparse);
     }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
-       py::arg("slots") = 0, py::arg("errors") = py::none(), py::arg("ids_j_tokens") = INT64_MAX);
+       py::arg("slots") = 0, py::arg("errors") = py::none(), py::arg("ids_j_tokens") = INT64_MAX,
+       py::arg("sparse") = false);
     m.def("mmq_id_glu", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
                            at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
                            const std::optional<at::Tensor> & gate_scale, const std::optional<at::Tensor> & up_scale,
-                           int64_t ids_j_tokens, double glu_limit) {
+                           int64_t ids_j_tokens, double glu_limit, bool sparse) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
         TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
                     "errors: one int32 on x's device");
         TORCH_CHECK(!gate_scale == !up_scale, "gate_scale and up_scale: both or neither");
         experts(false, type, prec, w, x, ids, y, true, gate_scale, up_scale, ws, slots, errors, std::nullopt,
-                ids_j_tokens, 0, glu_limit);
+                ids_j_tokens, 0, glu_limit, sparse);
     }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
        py::arg("slots"), py::arg("errors"), py::arg("gate_scale"), py::arg("up_scale"),
-       py::arg("ids_j_tokens") = INT64_MAX, py::arg("glu_limit") = 0.0);
+       py::arg("ids_j_tokens") = INT64_MAX, py::arg("glu_limit") = 0.0, py::arg("sparse") = false);
     m.def("mmq_glu", [](int64_t device, int64_t type, int64_t prec, int64_t out) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_mmq_glu(type, prec, out) != 0;

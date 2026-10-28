@@ -386,10 +386,12 @@ class MoE(nn.Module):
         if out_y is None:
             out_y = torch.empty(tokens, k, self._down.out_y, device=part.device)
 
+        sparse = {"sparse": True} if getattr(self._store, "sparse_parts", lambda: False)() else {}
+
         def run(i: int) -> None:
             mine = part == i
-            h = self._gate_up(xin, torch.where(mine, gate_up, -1), out_h, scratch)
-            self._down(h, torch.where(mine, down, -1), out_y, scratch)
+            h = self._gate_up(xin, torch.where(mine, gate_up, -1), out_h, scratch, **sparse)
+            self._down(h, torch.where(mine, down, -1), out_y, scratch, **sparse)
         run(-1)
         for i in range(len(landed)):
             landed[i]()

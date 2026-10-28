@@ -215,6 +215,11 @@ class Offload(nn.Module):
                                               kinds=kinds)
         return slots
 
+    def sparse_parts(self) -> bool:
+        """A pipelined pass's parts are sparse calls (`ArenaExperts.forward`'s `sparse`): in a step whose gathers go
+        beside the compute (docs/dev/v1-glm.md D8g), each part's entries a few of the pass's."""
+        return self.store._beside
+
     def pipelines(self, tokens: int) -> int:
         """The store's fetch parts of a pass of `tokens` (more than one: the pass pipelines, it never splits)."""
         return self.store.pipelines(tokens)
@@ -303,12 +308,14 @@ class ArenaExperts(nn.Module):
         return self._kernel
 
     def forward(self, x, slots: torch.Tensor, out: torch.Tensor | None = None,
-                scratch: torch.Tensor | None = None) -> torch.Tensor:
+                scratch: torch.Tensor | None = None, sparse: bool = False) -> torch.Tensor:
         """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels); D10's
-        buffers where the kernel takes them."""
+        buffers where the kernel takes them; `sparse`: one part of a pass, its live entries few (where the kernel
+        takes it: `linear_experts_arena@1`'s optional `sparse`)."""
         arena = self.cls.slots()
+        extra = {"sparse": True} if sparse and getattr(self._kernel, "sparse", False) else {}
         return self._kernel(x, {"blocks": arena.view(len(arena), self.out, -1)}, slots,
-                            **passed(self._kernel, out=out, scratch=scratch))
+                            **passed(self._kernel, out=out, scratch=scratch), **extra)
 
 
 def _extents(stack: ExpertLinear) -> list[Extent]:

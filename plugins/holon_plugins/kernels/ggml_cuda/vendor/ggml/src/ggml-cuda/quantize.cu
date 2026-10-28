@@ -480,7 +480,8 @@ template <mmq_q8_1_ds_layout ds_layout, bool scatter>
 static __global__ void quantize_mmq_q8_1(
         const void * __restrict__ x, const bool x_bf16, const int32_t * __restrict__ ids, void * __restrict__ vy,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
-        const int64_t ne0, const int ne1, const int ne2, const int n_expert_used) {
+        const int64_t ne0, const int ne1, const int ne2, const int n_expert_used,
+        const int32_t * __restrict__ live) { // Holon: compact rows from *live on are dead pairs: skipped (D8g)
 
     constexpr int vals_per_scale = ds_layout == MMQ_Q8_1_DS_LAYOUT_D2S6 ? 64 : 32;
     constexpr int vals_per_sum   = ds_layout == MMQ_Q8_1_DS_LAYOUT_D2S6 ? 16 : 32;
@@ -493,6 +494,19 @@ static __global__ void quantize_mmq_q8_1(
 
     const int64_t i00 = i0;
     ggml_cuda_pdl_sync();
+    if (live) {                                       // Holon: a sparse call (D8g): its live pairs' rows only
+        if constexpr (scatter) {                      // (block-uniform: every thread of a block has its token)
+            bool any = false;
+            for (int slot = 0; slot < n_expert_used; ++slot) {
+                any = any || ids[(int64_t) blockIdx.x * n_expert_used + slot] < *live;
+            }
+            if (!any) {
+                return;
+            }
+        } else if ((int) blockIdx.x >= *live) {
+            return;
+        }
+    }
 
     int64_t base_idx;
     if constexpr (scatter) {
@@ -548,6 +562,9 @@ static __global__ void quantize_mmq_q8_1(
         int64_t ib;
         if constexpr (scatter) {
             const int64_t i = ids[(int64_t) blockIdx.x * n_expert_used + slot];
+            if (live && i >= *live) {                 // Holon: a dead pair's row (D8g)
+                continue;
+            }
             ib = k_block*ne1 + i;
         } else {
             const int64_t ib0 = blockIdx.z*((int64_t)gridDim.x*gridDim.y*blockDim.x/QK8_1); // first block of channel
@@ -596,7 +613,8 @@ void quantize_row_q8_1_cuda(
 void quantize_mmq_q8_1_cuda(
         const void * x, const ggml_type type_x, const int32_t * ids, void * vy, const ggml_type type_src0,
         const int64_t ne00, const int64_t s01, const int64_t s02, const int64_t s03,
-        const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3, cudaStream_t stream) {
+        const int64_t ne0, const int64_t ne1, const int64_t ne2, const int64_t ne3, cudaStream_t stream,
+        const int32_t * live) {
     GGML_ASSERT(ne00 % 4 == 0);
     GGML_ASSERT(ne0 % QK8_1_MMQ == 0);
     const bool x_bf16 = is_bf16(type_x);
@@ -609,15 +627,15 @@ void quantize_mmq_q8_1_cuda(
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, false>
-                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0);
+                <<<num_blocks, block_size, 0, stream>>>(x, x_bf16, ids, vy, ne00, s01, s02, s03, ne0, ne1, ne2, /*n_expert_used=*/0, live);
             break;
         default:
             GGML_ABORT("fatal error");
@@ -629,7 +647,8 @@ void quantize_mmq_q8_1_cuda(
 void quantize_scatter_mmq_q8_1_cuda(
         const void * x, const ggml_type type_x, const int32_t * ids_src1_inv, void * vy, const ggml_type type_src0,
         const int64_t ne00, const int64_t stride_token, const int64_t ne0,
-        const int64_t n_tokens, const int64_t nrows_dst, const int n_expert_used, cudaStream_t stream) {
+        const int64_t n_tokens, const int64_t nrows_dst, const int n_expert_used, cudaStream_t stream,
+        const int32_t * live) {
     GGML_ASSERT(ne00 % 4 == 0);
     GGML_ASSERT(ne0 % QK8_1_MMQ == 0);
     const bool x_bf16 = is_bf16(type_x);
@@ -641,15 +660,15 @@ void quantize_scatter_mmq_q8_1_cuda(
     switch (mmq_get_q8_1_ds_layout(type_src0)) {
         case MMQ_Q8_1_DS_LAYOUT_D4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
             break;
         case MMQ_Q8_1_DS_LAYOUT_DS4:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_DS4, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
             break;
         case MMQ_Q8_1_DS_LAYOUT_D2S6:
             quantize_mmq_q8_1<MMQ_Q8_1_DS_LAYOUT_D2S6, true><<<num_blocks, block_size, 0, stream>>>(
-                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used);
+                x, x_bf16, ids_src1_inv, vy, ne00, /*s01=*/0, /*s02=*/stride_token, /*s03=*/0, ne0, /*ne1=*/(int) nrows_dst, /*ne2=*/1, n_expert_used, live);
             break;
         default:
             GGML_ABORT("fatal error");

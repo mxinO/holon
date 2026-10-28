@@ -1843,7 +1843,8 @@ void ggml_cuda_mul_mat_q(
         const float * x_scale = nullptr, int64_t ids_slots = INT64_MAX, int32_t * ids_errors = nullptr,
         bool glu = false, const float * gate_scale = nullptr, const float * up_scale = nullptr, // Holon: glu (D4)
         int64_t ids_j_tokens = INT64_MAX, // Holon: J against the tokens up to this many (D2); upstream: always
-        float glu_limit = 0.0f); // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/dev/v1-glm.md D6)
+        float glu_limit = 0.0f, // Holon: glu's clamp, silu(min(gate, L)) * clamp(up, -L, L) (docs/dev/v1-glm.md D6)
+        bool sparse = false); // Holon: with ids, quantize only the live pairs' rows (one part of a pass: D8g)
 
 bool ggml_cuda_should_use_mmq(enum ggml_type type, int cc, int64_t ne11, int64_t n_experts);
 

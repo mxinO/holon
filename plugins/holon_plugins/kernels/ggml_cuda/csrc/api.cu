@@ -463,14 +463,14 @@ void holon_ggml_mmq_id(int type, int prec, const void * w, int64_t experts, int6
                        int x_bf16, int64_t rows_per_token, const int32_t * ids, int64_t tokens, int64_t k, float * y,
                        int64_t slots, int32_t * errors, int swiglu, float glu_limit, const float * gate_scale,
                        const float * up_scale, int64_t ids_j_tokens, void * workspace, size_t workspace_bytes,
-                       void * stream) {
+                       void * stream, int sparse) {
     call_context c(stream, workspace, workspace_bytes);
     const ggml_tensor src0 = experts_view((ggml_type) type, w, experts, out, in, 0, out);
     const ggml_tensor src1 = tensor3(act(x_bf16), x, in, rows_per_token, tokens);
     const ggml_tensor ids_t = matrix(GGML_TYPE_I32, ids, k, tokens);
     ggml_tensor dst = with_prec(tensor3(GGML_TYPE_F32, y, swiglu ? out/2 : out, k, tokens), prec);
     ggml_cuda_mul_mat_q(c.ctx, &src0, &src1, &ids_t, &dst, nullptr, slots, errors, swiglu, gate_scale, up_scale,
-                        ids_j_tokens, glu_limit);
+                        ids_j_tokens, glu_limit, sparse != 0);
 }
 
 int holon_ggml_mmq_glu(int type, int prec, int64_t out) {

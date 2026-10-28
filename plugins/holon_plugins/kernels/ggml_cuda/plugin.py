@@ -623,8 +623,10 @@ class LinearExperts(_Matmul):
         buf = scratch if scratch is not None else torch.empty(nbytes, dtype=torch.uint8, device=device)
         return buf[:nbytes].view(torch.float32)[:rows * self.top_k * self.out].view(rows, self.top_k, self.out)
 
+    sparse = True                          # `sparse=True`: mmq quantizes only the live entries' rows (std.moe.kernels)
+
     def __call__(self, x, parts: dict[str, torch.Tensor], ids: torch.Tensor, *, out: torch.Tensor | None = None,
-                 scratch: torch.Tensor | None = None) -> torch.Tensor:
+                 scratch: torch.Tensor | None = None, sparse: bool = False) -> torch.Tensor:
         xq = None
         if not isinstance(x, torch.Tensor):            # a prepared handle: ours (maybe stale: then x), or another's
             xq, x = self._prepared(x) if isinstance(x, Prepared) else None, x.x
@@ -662,16 +664,16 @@ class LinearExperts(_Matmul):
             w, xs = self._mmq_blocks(parts).view(-1, blocks.shape[-1]), self._mmq_input(xs, self.f32)
             if not self.swiglu:
                 self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, ys, ws, self.slots, self.errors,
-                                self.ids_j_tokens)
+                                self.ids_j_tokens, sparse)
                 if up_scale is not None:
                     self._scale_slots(ys, up_scale, ids_c)
                 continue
             if self.glu_store:
                 self.lib.mmq_id_glu(self.type, self.prec, w, xs, ids_c, ys, ws, self.slots, self.errors,
-                                    gate_scale, up_scale, self.ids_j_tokens, glu_limit=self.limit)
+                                    gate_scale, up_scale, self.ids_j_tokens, glu_limit=self.limit, sparse=sparse)
                 continue
             self.lib.mmq_id(self.type, self.prec, w, xs, ids_c, gate_up[:len(ids_c)], ws, self.slots,
-                            self.errors, self.ids_j_tokens)
+                            self.errors, self.ids_j_tokens, sparse)
             self._swiglu(gate_up[:len(ids_c)], ys, gate_scale, up_scale, ids_c)
         return y
 

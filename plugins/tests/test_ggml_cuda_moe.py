@@ -732,20 +732,25 @@ def test_mmvq_skips_an_arenas_null_slots(ctx, stage, glu):
     assert {p for p, n in kernel.calls.items() if n} == {"mmvq/q8_1"}, kernel.calls
 
 
+@pytest.mark.parametrize("calls", ["dense", "sparse", "sparse_fused"])
 @pytest.mark.parametrize("glu", ["none", "swiglu"])
 @pytest.mark.parametrize("stage", sorted(STAGES))
-def test_entries_split_across_calls_compose_the_one_call(ctx, stage, glu):
+def test_entries_split_across_calls_compose_the_one_call(ctx, stage, glu, calls):
     """A pipelined pass (FN step 7): an entry's id −1 is skipped on purpose — mmq's id helper lists it last without a
     range error, mmvq leaves its rows, our SwiGLU after an unfused mmq leaves them too —, so calls over a partition of a
     pass's entries, each with the others' ids −1, write into one `out` exactly the one call's rows (mmq at 300 tokens,
-    a 1-token and an mmvq-limit tail)."""
+    a 1-token and an mmvq-limit tail). `sparse` calls (docs/dev/v1-glm.md D8g: mmq quantizes only the live entries'
+    rows) compose it too — with our SwiGLU, and with SwiGLU in mmq's store where the stack has it."""
     k, out, rows = STAGES[stage]
     s = stack("q4_k", EP, out, k, seed=51)
     facts = {"layout": "ggml.q4_k/gguf.native", "experts": EP, "in": k, "out": out, "top_k": K,
              "rows_per_token": rows, "glu": glu, "act_dtype": "bfloat16", "out_dtype": "float32", "act_quant": "a8",
              "slots": EP + K}
     kernel = ctx.select_kernel("linear_experts_arena@1", site="l0", **facts).impl(ctx, **facts)
-    kernel.glu_store = False                                     # (swiglu: mmq's gate/up, then our SwiGLU)
+    if calls == "sparse_fused" and not kernel.glu_store:
+        pytest.skip("no SwiGLU in mmq's store for this stack")
+    kernel.glu_store = calls == "sparse_fused"                   # (swiglu: mmq's gate/up, then our SwiGLU)
+    sparse = {"sparse": True} if calls != "dense" else {}
     parts = {"blocks": torch.cat([s.parts["blocks"], torch.zeros_like(s.parts["blocks"][:K])])}
     for tokens in (300, 1, kernel.mmvq_tokens):
         x, ids = placed_inputs(stage, tokens, seed=52)
@@ -754,7 +759,7 @@ def test_entries_split_across_calls_compose_the_one_call(ctx, stage, glu):
         got = torch.full_like(want, torch.nan)
         kernel.errors.zero_()
         for i in range(-1, 3):
-            kernel(x, parts, torch.where(part == i, ids, -1), out=got)
+            kernel(x, parts, torch.where(part == i, ids, -1), out=got, **sparse)
         assert torch.equal(got, want) and not int(kernel.errors), f"T={tokens}"
 
 
