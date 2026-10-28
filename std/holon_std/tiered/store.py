@@ -39,6 +39,7 @@ import json
 import math
 import os
 import pathlib
+import sys
 from collections.abc import Callable
 
 import numpy as np
@@ -55,6 +56,7 @@ ALIGN = 4096                                 # each class's arena starts at a mu
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
+PROFILES = pathlib.Path(__file__).parent / "profiles"   # shipped routing profiles (docs/dev/v1-auto-config.md D4)
 POLICY = "placement.lfu@1"                   # F11, the default where the RAM tier holds every expert (D10, §13)
 LOAN_MARGIN, LOAN_SLACK = 2.0, 20 << 20      # a lent activation peak's room for the caching allocator's segments:
 # a MemPool in use keeps its freed segments (torch releases a private pool's cache only when no one uses it), so a
@@ -447,7 +449,7 @@ class TieredStore:
             while True:
                 budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes),
                                  floors)
-                seed = self.policy.seed(self._profile_counts(), budget)
+                seed = self.policy.seed(self._profile_counts, budget)
                 short = {c.name: self.prefill for c in classes if budget.taken[c.name] < self.prefill
                          and c.name not in floors and c.cap >= self.prefill and c.name in lenders}
                 if not (can_lend and staging < self.prefill and short):
@@ -464,7 +466,7 @@ class TieredStore:
         if keep and not self.lending and self._loan is not None:    # a staging layout: the step-peak loan reserved in
             keep = self._own_bytes(loan=True)                       # its own tail, the cache that much smaller
             budget = _Budget(self, size - keep - sum(c.bytes(0) for c in classes) - self._align * len(classes), floors)
-            seed = self.policy.seed(self._profile_counts(), budget)
+            seed = self.policy.seed(self._profile_counts, budget)
         self._own_tail = (size - keep, keep) if keep and not self.lending else None
         self.stage = self.stages[classes[0].staging]
         self.arena.view(torch.uint8, (size,)).zero_()         # the null slots; no slot left holding garbage
@@ -531,7 +533,7 @@ class TieredStore:
         vram, used = set(seed), dict.fromkeys(self.classes, 0)
         host, owner = np.full(self.residency.host.shape, -1, dtype=np.int32), np.full(tuple(self.owner.shape), -1,
                                                                                         dtype=np.int32)
-        for g, i in _Budget.f2(self._profile_counts()):
+        for g, i in _Budget.f2(self._profile_counts):
             role = self.groups[groups[g]]
             if (g, i) in vram or any(used[c.name] >= c.held for c in role.values()):
                 continue
@@ -884,29 +886,46 @@ class TieredStore:
         paths = {e.path for c in self.classes.values() for *_, extents in c.pieces for e in extents}
         return sorted([os.path.basename(p), os.path.getsize(p)] for p in paths)
 
+    @functools.cached_property
     def _profile_counts(self) -> np.ndarray:
-        """`profile`'s routing counts by group: a JSON file `{"checkpoint": …, "layers": {"<group>": [count per
-        item]}}` beside the checkpoint (its name relative to the checkpoint's directory, so plans record no host path),
-        refused unless it was counted on this checkpoint's files (or some of them: a profile of the target serves a
-        deployment whose auxiliary model, an MTP head, adds its own file and group); groups it does not name count
-        zero."""
+        """The routing counts that seed the cache, by group (docs/dev/v1-auto-config.md D4): from `profile`'s JSON
+        file `{"checkpoint": …, "layers": {"<group>": [count per item]}}` beside the checkpoint (its name relative to
+        the checkpoint's directory, so plans record no host path), else from a profile shipped in PROFILES, else none
+        (a cold cache). A profile counts only if it was counted on this checkpoint's files (or some of them: a profile
+        of the target serves a deployment whose auxiliary model, an MTP head, adds its own file and group); groups it
+        does not name count zero. It only seeds the cache, so one that does not fit is warned about, never fatal."""
         counts = np.zeros(self.residency.host.shape[:2])
-        if not self._profile:
-            return counts
         name = pathlib.PurePath(self._profile)
-        if name.is_absolute() or ".." in name.parts:
-            raise ValueError(f"{self.name}: profile {self._profile!r}: a name relative to the checkpoint's directory")
-        data = json.loads((self.profile_dir / name).read_text())
-        files = data.get("checkpoint") or []
-        if not files or any(f not in self.checkpoint for f in files):
-            raise ValueError(f"{self.name}: profile {self._profile} was counted on {data.get('checkpoint')}, not on "
-                             f"this checkpoint {self.checkpoint} (`holon_tools profile` writes one per file)")
-        for group, row in data["layers"].items():
-            if int(group) not in self._order or len(row) != self.items:
-                raise ValueError(f"{self.name}: profile {self._profile}: group {group} with {len(row)} counts; the "
-                                 f"groups are {sorted(self._order)} of {self.items} items")
-            counts[self._order[int(group)]] = row
+        named = [self.profile_dir / name] if self._profile and not name.is_absolute() and ".." not in name.parts else []
+        if self._profile and not named:
+            print(f"holon: {self.name}: routing profile {self._profile} not used (a name relative to the checkpoint's "
+                  "directory)", file=sys.stderr)
+        for path in named + sorted(PROFILES.glob("*.json")):
+            try:
+                data = json.loads(path.read_text())
+                files = data.get("checkpoint") or []
+                if not files or not all(any(_same(f, c) for c in self.checkpoint) for f in files):
+                    raise ValueError(f"counted on {files}, not on this checkpoint {self.checkpoint}")
+                rows = {self._order[int(g)]: np.asarray(row, dtype=np.float64) for g, row in data["layers"].items()}
+                if any(r.shape != (self.items,) or (r < 0).any() for r in rows.values()):
+                    raise ValueError(f"not {self.items} counts per group")
+            except (OSError, ValueError, KeyError, TypeError) as e:
+                if path in named:
+                    print(f"holon: {self.name}: routing profile {self._profile} not used ({e})", file=sys.stderr)
+                continue
+            for g, row in rows.items():
+                counts[g] = row
+            print(f"holon: {self.name}: routing profile {'shipped ' * (path not in named)}{path.name}", file=sys.stderr)
+            return counts
+        print(f"holon: {self.name}: no routing profile for this checkpoint: the cache starts cold", file=sys.stderr)
         return counts
+
+
+def _same(a: list, b: list) -> bool:
+    """Whether a profile's `[file name, bytes]` is a checkpoint's: the same size, and the same name where both are a
+    hub cache's content hashes (a local copy under another name matches by size: a profile only seeds the cache)."""
+    hashes = all(len(x[0]) == 64 and all(c in "0123456789abcdef" for c in x[0]) for x in (a, b))
+    return a[1] == b[1] and (a[0] == b[0] or not hashes)
 
 
 class _Budget:

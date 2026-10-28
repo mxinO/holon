@@ -9,7 +9,7 @@ import types
 import numpy as np
 import pytest
 import torch
-from holon.api import BlockRecord, Payload
+from holon.api import BlockRecord, OutOfUnits, Payload
 from holon.core import platform
 from holon.core.memory import Ledger
 from holon_judge.deferred import Deferred
@@ -24,7 +24,7 @@ class _Done:
 
 
 def _bare(admit: str = "publish", pages: int = 6, payloads: int = 3, stall: int = 0, wide: bool = False,
-          stream=None, max_seqs: int = 1, host_memory: int = 1 << 20):
+          stream=None, max_seqs: int = 1, host_memory: int = 1 << 20, left: int | None = None):
     """A host level over one 2-segment page pool and one payload pool (`wide`: and one of twice its unit), room for
     `pages` blocks and `payloads` units of the first payload pool's size; its copy streams from `stream`."""
     ledger = Ledger(torch.device("cpu"), host_memory=host_memory)
@@ -45,7 +45,7 @@ def _bare(admit: str = "publish", pages: int = 6, payloads: int = 3, stall: int 
         stream=stream or (lambda: platform.Stream(torch.device("cpu"))),
         host_pool=lambda name, *, unit_bytes, segments, units, mapped=False: ledger.plugin_pool(
             name, unit_bytes=unit_bytes, segments=segments, min_units=units, pref_units=units, device="host",
-            mapped=mapped, late=True)))
+            mapped=mapped, late=True), host_left=lambda: left))
     return tier, kv, ckpt
 
 
@@ -108,8 +108,13 @@ def test_attach_refuses_a_payload_level_below_the_payloads_in_flight():
     # host memory is a deployment's: the refusal names the flag and the bytes the host level takes
     tier, _, _ = _bare()
     need = sum(p.capacity * p.unit_bytes for p in tier.host.values())
-    with pytest.raises(RuntimeError, match=rf"launch with --host-memory {need}\b"):
+    with pytest.raises(OutOfUnits, match=rf"launch with --host-memory {need}\b"):     # kind "memory": no retries
         _bare(host_memory=need - 1)
+    # `holon serve` fits the level to the host memory left (docs/dev/v1-auto-config.md D1): smaller, split by its
+    # shares; below its floor (a payload unit per request slot and one more) refused as "memory" too
+    assert {k: p.capacity for k, p in _bare(left=360)[0].host.items()} == {"kv": 4, "plugin.ckpt": 2}
+    with pytest.raises(OutOfUnits, match="too small for the loads in flight"):
+        _bare(left=200)
 
 
 def test_page_loads_take_the_lane_and_payload_loads_do_not():

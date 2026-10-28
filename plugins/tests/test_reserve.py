@@ -28,8 +28,8 @@ def engine(tmp_path_factory):
     path = save(tiny_hf(HEADS, seed=1, dim=DIM), tmp_path_factory.mktemp("tiny_qwen3_5_reserve"))
     peaks, measure, sub = [], platform.peak_memory, fla.SUB_TOKENS
 
-    def recorded(device, fn):
-        peaks.append(measure(device, fn))
+    def recorded(device, fn, out=None):
+        peaks.append(measure(device, fn, out))
         return peaks[-1]
     platform.peak_memory, fla.SUB_TOKENS = recorded, 64
     try:

@@ -252,7 +252,7 @@ def _served(engine, prompts) -> tuple[list, dict]:
     return engine.generate(prompts, GREEDY), [(got[r].token, got[r].top_ids, got[r].top) for r in rids]
 
 
-def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path):
+def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_path, capsys):
     """docs/dev/v1-offload.md D4, D5, F1, F5a: with `moe.store = std.moe.offload@1` the experts stay in the file's map
     and
     in pinned host pools (filled from its extents), classes by (role, type, shape) — here gate/up Q8_0 and down
@@ -261,7 +261,9 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     The static policy caches whole experts, F2's warm start: item 0, 1, … of every layer, or a profile's hottest; a
     layer's distinct misses never pass its staging slots, and a step that did would stop the engine. The adaptive
     policies (the default F11, F4, F2–F3's two-phase swaps through the copy stream) serve the same outputs at a
-    quarter of the experts while they move them; F11's residency, step by step, is its replay oracle's (L1 parity)."""
+    quarter of the experts while they move them; F11's residency, step by step, is its replay oracle's (L1 parity).
+    A profile that cannot seed the cache (a host path, another file's) is warned about and the cache starts cold
+    (docs/dev/v1-auto-config.md D4)."""
     import json as json_
 
     from holon_judge.placement import parity, route_dump
@@ -318,9 +320,10 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         elif cached:
             assert resident[:, :per_layer[1]].all()
         assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
-    with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
-        _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
-                                                           "moe.placement.profile": str(profile)})
+    capsys.readouterr()
+    _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                       "moe.placement.profile": str(profile)})
+    assert "not used (a name relative to the checkpoint's directory)" in capsys.readouterr().err   # no host path
     store.stage = store.stage[:, :store.peak_misses - 1].contiguous()       # as if staging had been too small
     for p in prompts:
         engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)
@@ -343,9 +346,10 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     (tmp_path / "other").mkdir()
     other, _ = _gguf_and_dense(checkpoint, tmp_path / "other", Q.Q4_0)
     other = other.rename(tmp_path / other.name)                     # another quant beside it in the blob directory
-    with pytest.raises(ValueError, match="was counted on"):
-        _engine(other, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
-                                                            "moe.placement.profile": "moe-a.profile.json"})
+    _engine(other, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                        "moe.placement.profile": "moe-a.profile.json"})
+    err = capsys.readouterr().err
+    assert "not used (counted on" in err and "the cache starts cold" in err
     for policy in ("", "placement.lru@1", "placement.profile_decay@1"):
         engine = _engine(link, host_memory=1 << 24, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
@@ -995,8 +999,8 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     file, prompts, want = gpu_moe
     peaks, measure = [], platform.peak_memory
 
-    def peak_memory(device, fn):
-        peaks.append(measure(device, fn))
+    def peak_memory(device, fn, out=None):
+        peaks.append(measure(device, fn, out))
         return peaks[-1]
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on"}
     with mock.patch.object(platform, "peak_memory", peak_memory):

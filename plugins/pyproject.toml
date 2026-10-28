@@ -11,6 +11,7 @@ dependencies = [                  # std units are reached through Ref, never imp
     "transformers",               # the models' bundles (tokenizers; pinned by holonlm-std)
     "fastapi", "uvicorn",         # frontends.http (anyio and pydantic come with fastapi)
     "xgrammar==0.2.8",            # grammar.xgrammar (Apache-2.0; needs apache-tvm-ffi >= 0.1.11)
+    "huggingface-hub",            # models.qwen4_exp's MTP pack, once published (pinned by holonlm-std)
 ]
 
 [project.entry-points."holon.plugins"]
