@@ -899,6 +899,50 @@ it).
     late worker), `cuda_event_on_generic`, `readback_unwaited`,
     `readahead_wait_after_tiered`, `readahead_slot_reused`.
 
+**D8h — Step 7: a layer's misses gathered once a step, not once a pass (the 32K timeline's lever; design for the
+panel, not built).** *Why, measured* (nsys of one 32K mode (ii) prompt step, RTX 5090, the borrow options; D8g's first
+build, one stage front part): main computes 9.16 s of the 11.78 s window and waits 2.45 s on copies — one wait a call,
+30-37 ms, right after part −1 — and 0.13 s on the host; the copy engines move ≈ 150 GB at ≈ 48 GB/s (PCIe 5 H2D).
+A 32K step runs two passes of 16,384 rows a layer (`ggml_cuda.pass_rows`'s most; 84 calls for 42 layers), and the
+second pass gathers the layer's misses into staging again: its first pass's staged pieces are gone. Before D8g the
+same doubling ran as SM gathers on main (4.37 s of 13.14 s). Front parts of `rounds_q` cut the waits to 1.36 s but
+cost as much in per-part passes (each a 16K-row `quantize_mmq_q8_1`, ≈ 0.9 ms; quantize 0.31 → 1.21 s).
+- **Ordering: the passes are back to back.** `std.moe.units`' `_forward` splits a layer's rows into passes inside that
+  layer's forward (router and expert passes per pass, then the combine); no other layer runs between a layer's
+  passes. So a layer's staged pieces need to live only across its own passes: **no VRAM beyond today's** — a stage
+  step's lent staging is already sized by a layer's most missing pieces over the step (`Lent._want`), not a pass's.
+- **The change.** In an eager staging step under exclusive tiers whose layer forward has more than one pass, the
+  layer routes every pass first (the router per CHUNK or per pass, as today), then makes **one** resolve and tier op
+  over all the step's rows of the layer (`ids [T, k]`, T = the step's tokens: the union of the passes' routes), one
+  readback, one set of front parts and SSD rounds (D8g's `_Beside`); then the passes compute in order: pass 1 part −1,
+  then each part as it lands (its rows only), then pass 2 at once — every piece landed during pass 1 — with one call
+  over all its entries (no parts: no per-part quantize). The combine and its buffers stay per pass (D10's buffers are
+  reused, pass after pass, as today).
+- **Routing.** The union is what one resolve over all rows misses: at most the layer's experts (`prefill` = every
+  item), which the staging (a pass's worth, `prefill`) holds. The bits are the same: each pass's rows meet the same
+  kernels at the same pass size; only the slots' placement changes (D8g's exactness tests, a two-pass step added).
+  Pass 2's routes are computed before pass 1's compute: its `ids` and weights (≈ 1 MB) and, where the router prepares
+  the gate/up input for a whole pass (its `pass_rows` ≥ 16,384), that q8_1 input (≈ 75 MB at hidden 4,096) live across
+  pass 1 — measured by the startup profile, the loan follows. (Else the input is the rows themselves: nothing more.)
+- **Fences.** D8g's F1-F5 and `computed_ssd` unchanged, per layer instead of per pass (F3b: rounds only, where steps
+  have one pass). New: pass 2's call reads slots that pass 1's parts filled — main waited every part (F2) before
+  pass 2 is enqueued, in stream order; the moves (F4) after the last part's wait, before pass 2: an admission copies
+  a staged piece out without overwriting it, and a demoted victim is not routed by any of the layer's rows (the
+  resolve saw them all). Plants: `pass_two_before_landed` (pass 2 enqueued before the last part's wait: stale
+  staging under late copies), `union_one_pass` (the resolve over pass 1's rows only: pass 2's extra misses unstaged,
+  the resolve's SHORT or wrong bits), plus D8g's under a two-pass step.
+- **Interactions.** The RAM-holds-all ring: unchanged (its passes read ring slots filled a layer ahead). SSD rounds:
+  one set a layer over the union — pass 2 no longer re-reads the SSD misses pass 1 read (today it does, unless the
+  read-ahead had them): drive bytes fall too. Read-ahead: its set waited once a layer (G3-m1, before `tiered`).
+  Rounds steps (below 8K) have one pass: unchanged. Decode: unchanged.
+- **Predicted 32K prefill** (mode (ii)): copies ≈ 150 → ≈ 75-80 GB, ≈ 1.6 s at 48 GB/s, under pass 1's compute
+  (part −1 and the parts: ≈ 65-130 ms a layer against ≈ 20-40 ms of copy); pass 2 waits nothing. Main ≈ 9.0-9.2 s of
+  compute plus ≈ 0.1 s of host waits: **≈ 9.3-9.8 s** (11.76 today; Holon / Maya ≈ 1.0-1.06), the drive co-critical
+  (8.3 s busy today, less by pass 2's re-reads). 1K and 4K unchanged (one pass).
+- **No core lines**: `std.moe.units` (route every pass first; compute the passes over one resolve), the offload store
+  and `std.tiered`'s resolver. Only exclusive layouts' staging steps of more than one pass (mode (ii)'s 32K); every
+  lock advances byte-identical.
+
 **D8r — Step 7: the post-prompt refill. Pending a measured spike (C's review, the coordinator's call): not designed
 further until it clears.** C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
 drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes
