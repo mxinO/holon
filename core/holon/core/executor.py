@@ -237,16 +237,18 @@ class Executor:
     def slack(self, ledger: Ledger, free: int, peak: int, out: dict) -> int:
         """`memory_fraction` 0 (docs/dev/v1-auto-config.md D2): today's 10% of the free memory, unless a fill pool
         would stay short of its preference there; then what the allocator reserved past the peak (`out`) and a reserve
-        for clients that grow later (1 GiB on a card a display or another process shares), at most those 10%."""
+        for clients that grow later (1 GiB on a card a display or another process shares, 256 MiB on one it does not
+        or where NVML cannot tell), at most those 10%."""
         pools = [p for p in ledger.pools.values() if not p.host]
-        sizes = ledger._sizes(pools, max(0, int(free * 0.9) - peak))
+        sizes = ledger.sizes(pools, max(0, int(free * 0.9) - peak))
         short = [p for p in pools if p.fill and sizes[p.name] < p.pref_units]
         shared = platform.gpu_shared(self.device) if short else ""
         reserve = (1 << 30 if shared else 256 << 20) if short else free
         slack = min(free - int(free * 0.9), out.get("overshoot", 0) + reserve)
+        card = shared or ("headless" if shared == "" else "unknown without NVML; --memory-fraction F sets a share")
         self.memory_note = (f"free {free / 2**30:.2f} − peak {peak / 2**30:.2f} − slack {slack / 2**30:.2f} GiB ("
                             + (f"allocator {out.get('overshoot', 0) / 2**30:.2f} + reserve {reserve / 2**30:.2f}, "
-                               f"{shared or 'headless'})" if short else "10%: no cache short of its preference)"))
+                               f"{card})" if short else "10%: no cache short of its preference)"))
         return slack
 
     def _profile_plan(self, tokens: int = 0) -> BatchPlan:

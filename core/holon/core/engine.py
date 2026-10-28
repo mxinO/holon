@@ -12,7 +12,6 @@ minimum pools → capture the decode graphs.
 from __future__ import annotations
 
 import collections
-import contextlib
 import dataclasses
 import functools
 import gc
@@ -133,13 +132,6 @@ class _Target:
 
 class Engine:
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
-        # One Holon at a time pins host memory (`holon serve` holds the lock from its reading of the RAM itself).
-        with contextlib.ExitStack() as pinning:
-            if cfg.host_memory and not cfg.clamp_context:
-                pinning.enter_context(platform.pin_lock(lambda s: print(f"holon: {s}", file=sys.stderr, flush=True)))
-            self._build(cfg, plugins, pinning)
-
-    def _build(self, cfg: EngineConfig, plugins: PluginSet | None, pinning: contextlib.ExitStack) -> None:
         cfg = dataclasses.replace(cfg)             # its own copy: the clamp may lower max_model_len
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
@@ -263,7 +255,6 @@ class Engine:
         if self.tier is not None:                        # after the final materialize, before graph capture
             self.state.index.restore(self.tier.attach(self._tier_ctx()))
             self.state.index.tier = self.tier
-        pinning.close()                                  # every host pool is pinned
         for pool in self.ledger.pools.values():          # fresh segments, so they show the allocator setting
             if pool.buffer is not None and not pool.host:   # (a plugin pool may get no units)
                 platform.check_expandable(pool.buffer)

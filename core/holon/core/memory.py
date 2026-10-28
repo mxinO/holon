@@ -236,10 +236,13 @@ class Ledger:
         units = max(min_units, min(pref_units, left // unit_bytes))    # as many as the budget allows
         if units * unit_bytes > left:
             del self.pools[name]
+            short = min_units * unit_bytes - left
             raise OutOfUnits(f"host memory {self.host_memory / 2**30:.3f} GiB too small: {name} needs {min_units} "
                              f"units ({min_units * unit_bytes / 2**30:.3f} GiB), {left / 2**30:.3f} GiB left"
                              + "".join(f"; {p.name} holds {p.capacity} units "
-                                       f"({p.capacity * p.unit_bytes / 2**30:.3f} GiB)" for p in held))
+                                       f"({p.capacity * p.unit_bytes / 2**30:.3f} GiB)" for p in held)
+                             + f". Short by {short / 2**30:.1f} GiB at least: free that much RAM, or --host-memory "
+                             f"{self.host_memory + short} or more starts anyway (pinning past what is free may swap)")
         try:
             pool._set(units)              # allocated once, now, for the engine's lifetime
         except BaseException:
@@ -282,7 +285,7 @@ class Ledger:
         if budget_bytes is None:
             sizes = {p.name: p.min_units for p in pools}
         else:
-            sizes = self._sizes(pools, budget_bytes)
+            sizes = self.sizes(pools, budget_bytes)
         short = [f"{p.name} ({sizes[p.name]} < {p.min_units} units)" for p in pools if sizes[p.name] < p.min_units]
         if short:
             raise OutOfUnits(f"memory budget {budget_bytes / 2**30:.3f} GiB too small: {', '.join(short)}")
@@ -291,7 +294,7 @@ class Ledger:
         for fn in self.after_materialize:
             fn()
 
-    def _sizes(self, pools: list[Pool], budget: int) -> dict[str, int]:
+    def sizes(self, pools: list[Pool], budget: int) -> dict[str, int]:
         fixed = [p for p in pools if p.pref_units is not None and not p.fill]
         fills = sorted((p for p in pools if p.fill), key=lambda p: -p.priority)     # stable: in request order
         paged = [p for p in pools if p.tokens_per_unit is not None]

@@ -1,14 +1,11 @@
 """Device abstraction (design §8). The only place in the core allowed to touch `torch.cuda` (invariant 6)."""
 from __future__ import annotations
 
-import contextlib
-import fcntl
 import mmap
 import os
 import pathlib
 import re
-import time
-from collections.abc import Callable, Iterator, Sequence
+from collections.abc import Callable, Sequence
 
 import torch
 
@@ -109,9 +106,10 @@ def peak_memory(device: torch.device, fn: Callable[[], object], out: dict | None
     return peak
 
 
-def gpu_shared(device: torch.device) -> str:
-    """Why other clients may grow on `device` after the start ("" if none seen, or without NVML, as on arm64): it drives
-    a display, or a process visible in this PID namespace, not this engine nor its parent, holds memory on it."""
+def gpu_shared(device: torch.device) -> str | None:
+    """Why other clients may grow on `device` after the start ("" if none seen; None: unknown, without NVML as on
+    arm64): it drives a display, or a process visible in this PID namespace, not this engine nor its parent, holds
+    memory on it."""
     try:
         import pynvml
         pynvml.nvmlInit()
@@ -120,8 +118,8 @@ def gpu_shared(device: torch.device) -> str:
             return "drives a display"
         pids = {p.pid for f in (pynvml.nvmlDeviceGetComputeRunningProcesses,
                                 pynvml.nvmlDeviceGetGraphicsRunningProcesses) for p in f(gpu)}
-    except Exception:  # noqa: BLE001 — no NVML or no answer: nothing seen
-        return ""
+    except Exception:  # noqa: BLE001 — no NVML or no answer
+        return None
     others = sorted(p for p in pids - {os.getpid(), os.getppid()} if os.path.exists(f"/proc/{p}"))
     return f"processes {others} use it" if others else ""
 
@@ -135,54 +133,27 @@ def host_ram(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> tuple[int, 
     available, total, why, groups = info["MemAvailable"], info["MemTotal"], "meminfo", read(f"{proc}/self/cgroup")
     if ":memory:" in groups:
         return available, total, "meminfo; cgroup v1 limits not read: --host-memory sets them"
-    root = pathlib.Path(cgroup)
+    root, found = pathlib.Path(cgroup), (available, total, why)
     path = root / next((ln[3:].lstrip("/") for ln in groups.splitlines() if ln.startswith("0::")), "")
-    for d in (path if path.is_dir() else root, *path.parents):   # a container's own cgroup is its mount's root
-        if (limits := [int(v) for f in ("max", "high") if (v := read(d / f"memory.{f}").strip()) not in ("", "max")]):
-            stat = {k: int(v) for k, v in (ln.split() for ln in read(d / "memory.stat").splitlines())}
-            free = min(limits) - int(read(d / "memory.current")) + sum(stat.get(k, 0) * s for k, s in (
-                ("active_file", 1), ("inactive_file", 1), ("file_dirty", -1), ("file_writeback", -1)))
-            available, total, why = min(available, max(0, free)), min(total, *limits), f"cgroup /{d.relative_to(root)}"
-        if d == root:
-            return available, total, why
-    return available, total, why
+    try:
+        for d in (path if path.is_dir() else root, *path.parents):   # a container's own cgroup is its mount's root
+            if limits := [int(v) for f in ("max", "high") if (v := read(d / f"memory.{f}").strip()) not in ("", "max")]:
+                stat = {k: int(v) for k, v in (ln.split() for ln in read(d / "memory.stat").splitlines())}
+                free = min(limits) - int(read(d / "memory.current")) + sum(stat.get(k, 0) * s for k, s in (
+                    ("active_file", 1), ("inactive_file", 1), ("file_dirty", -1), ("file_writeback", -1)))
+                binds = free < found[0]
+                found = (max(0, min(found[0], free)), min(found[1], *limits),
+                         f"cgroup /{d.relative_to(root)}" if binds else found[2])
+            if d == root:
+                break
+    except (OSError, ValueError) as e:             # unreadable: what meminfo says, and why
+        return available, total, f"meminfo; cgroup not read ({e}): --host-memory sets a limit"
+    return found
 
 
 def host_headroom(total: int) -> int:
     """Host memory kept free of pinned pools: what grows after the start (worker processes, the frontend, a desktop)."""
     return max(6 << 30, total // 20)
-
-
-@contextlib.contextmanager
-def pin_lock(say: Callable[[str], None], path: str = "/tmp/holon-host-memory.lock", wait: float = 900.0
-             ) -> Iterator[None]:
-    """The host-wide lock under which one Holon process at a time reads the RAM and pins host memory, so a second
-    start's reading sees the first one's pins; never fails a start (a lock not taken, or held past `wait` seconds by
-    another, is warned about)."""
-    try:
-        try:
-            fd = os.open(path, os.O_RDONLY)      # never O_CREAT on another user's file in sticky /tmp
-        except FileNotFoundError:
-            fd = os.open(path, os.O_RDONLY | os.O_CREAT | os.O_EXCL, 0o666)
-            os.fchmod(fd, 0o666)                 # past the umask: every user's starts share it
-    except OSError as e:
-        say(f"WARNING: no host-memory lock ({e}): a concurrent Holon start may pin past the headroom")
-        yield
-        return
-    try:
-        for waited in range(int(wait) + 1):
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if not waited:
-                    say(f"waiting for another Holon start to pin its host memory ({path})")
-                time.sleep(1)
-        else:
-            say(f"WARNING: another Holon start held {path} for {wait:.0f} s: going on without it")
-        yield
-    finally:
-        os.close(fd)
 
 
 def reserved_growth(device: torch.device, fn: Callable[[], object], copies: int = 1) -> int:

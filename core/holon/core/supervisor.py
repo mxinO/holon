@@ -108,14 +108,14 @@ class Supervisor:
 
     def __init__(self, history: Sequence[Any], policy: Policy | None = None,
                  target: Callable[..., None] = engine_main, memory_only: Mapping[int, str] | None = None,
-                 admit: Callable[[dict[str, Any]], str | None] | None = None) -> None:
+                 admit: Callable[[Any, dict | None], contextlib.AbstractContextManager] | None = None) -> None:
         """`memory_only`: history entries rolled back to only after a start fails for memory (a spill), with what to
-        say then. `admit`: asked before each restart with the first start's ready report; a reason refuses the restart
-        as a memory failure."""
+        say then. `admit(config, the entry's last ready report or None)`: the context each restart runs in, yielding
+        the config to start (a StartFailed refuses it)."""
         if not history:
             raise ValueError("the config history is empty")
         self.history, self.policy, self._target = list(history), policy or Policy(), target
-        self.memory_only, self._admit, self._first_ready = memory_only or {}, admit, None
+        self.memory_only, self._admit, self._reports = memory_only or {}, admit, {}
         self.version = len(self.history) - 1            # the history entry the engine runs
         self._engine: EngineProcess | None = None       # None while (re)starting
         self._ready = asyncio.Event()                   # set while an engine serves, or once given up
@@ -355,10 +355,10 @@ class Supervisor:
             begin = time.monotonic()
             config, lock = self.history[self.version]
             try:
-                if self._first_ready is not None and self._admit and (why := self._admit(self._first_ready)):
-                    raise StartFailed("memory", why)
-                engine = await asyncio.wait_for(EngineProcess.start(config, self._target, lock),
-                                                self.policy.start_timeout)
+                with self._admit(config, self._reports.get(self.version)) if self._admit and self._start_s else \
+                        contextlib.nullcontext(config) as config:
+                    engine = await asyncio.wait_for(EngineProcess.start(config, self._target, lock),
+                                                    self.policy.start_timeout)
             except (RuntimeError, TimeoutError) as e:
                 failed += 1
                 kind = e.kind if isinstance(e, StartFailed) else "error"
@@ -370,7 +370,7 @@ class Supervisor:
                                       f"(last: {str(e) or 'start timed out'})")
                 continue
             self._start_s.append(time.monotonic() - begin)
-            self._first_ready = self._first_ready or engine.client.ready
+            self._reports[self.version] = engine.client.ready
             self._up_since = time.monotonic()
             self._engine = engine
             self._ready.set()
