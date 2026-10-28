@@ -703,7 +703,7 @@ A third-party kernel is wrapped as a kernel plugin only if **all** hold; otherwi
    pinned in `KernelSpec.config` (from the model's lock, else a deterministic default). JIT caches (FlashInfer, Triton)
    are pre-built at install time and their directories are declared, so the sandbox can mount them read-only.
 
-Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `spikes/s*/README.md`):
+Adopted kernels, decided by the M0 spikes (evidence and raw numbers in `docs/dev/spikes/s*/README.md`):
 
 - **Attention** (spike S1, FlashInfer 0.6.12; sm_86 and sm_120):
   - prefill: FlashInfer FA2 paged prefill;
@@ -1504,12 +1504,13 @@ holon/           (repository root)
                    frontends/{http}/  policies/  drafters/  verifiers/  grammar/
   plans/           <model_id>/<class>/<n>.lock     # lock history per (model, fingerprint class) (§4.4)
   judge/           holon_judge/  goldens/  snapshots/  traces/dev/   # holdout stored outside the repo (judge only)
+                   accuracy scripts (consistency, cover, exact, tasks/)
   tools/           holon_tools/                    # impact, propagate, tune (lock history tooling)
   supervisor/      holon_supervisor/
-  bench/           trace replay, baselines (separate pinned venvs)
-  evidence/        evidence records (command, fingerprint, plan_id, raw numbers)
+  bench/           trace replay, baselines (separate pinned venvs), perf scripts
   workspace/       (gitignored) agent variants — optional layer
-  docs/
+  local/           (gitignored) experiments, one-off spikes, scratch records
+  docs/            dev/ (development records), dev/evidence/ (records the docs cite), dev/spikes/ (spikes they cite)
 ```
 
 ---

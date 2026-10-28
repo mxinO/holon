@@ -330,7 +330,8 @@ def report(args) -> None:
               "serve": args.serve, "commit": git("rev-parse", "HEAD"), "method": __doc__.split("Usage")[0].strip(),
               "prompt": {"system": SYSTEM, "user": "<the schema's JSON text>"}, "precompile": precompiled,
               "passes": passes}
-    out = ROOT / "evidence" / f"conformance_{args.name}_{gpu}_{date}.json"
+    out = ROOT / "local" / "evidence" / f"conformance_{args.name}_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     print(out)
 

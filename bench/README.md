@@ -101,9 +101,10 @@ taken before release step 7 drew each turn at its own offset, so their corpus pr
   step reporting delay. Warmup (every session's first turn at t=0, 16 output tokens, other prompt tokens so nothing
   is cached for the measured run) is excluded.
 - **ABBA**: every round runs each backend once in a fresh process (model load, warmup, all traces), in reverse order on odd rounds; rounds ≥ 2.
-- Evidence: `evidence/bench_<workload>_<gpu-class>_<date>.json` with the command, commit, GPU class, baseline
-  commits and package versions, engine configs and KV capacities, per-request rows and summaries. Raw per-step
-  timings and worker logs stay in `bench/.out/` (gitignored).
+- Evidence: `local/evidence/bench_<workload>_<gpu-class>_<date>.json` (`--evidence-dir`; gitignored) with the command,
+  commit, GPU class, baseline commits and package versions, engine configs and KV capacities, per-request rows and
+  summaries; a record a document cites moves to `docs/dev/evidence/`. Raw per-step timings and worker logs stay in
+  `bench/.out/` (gitignored).
 
 ## Smokes per change and per merge (docs/dev/release.md §22)
 
@@ -148,7 +149,7 @@ L=plans/<model id>/<class>/cu130-torch2.11/<n>.lock
 python bench/bars.py --name qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L --rounds 3
 python bench/run.py --name release-qwen3-8b-q4_k_m --gpu 0 --model <file.gguf> --lock $L \
     --backends holon llamaserver --corpus judge/prompts/v1.jsonl --traces bench/traces/decode_b1.jsonl
-python bench/report.py evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
+python bench/report.py docs/dev/evidence/bars_release-*_rtx-5090_*.json      # Markdown tables linking their records
 ```
 
 ## Agent demo (release design D7)
@@ -165,7 +166,7 @@ first.
 ```bash
 holon serve unsloth/Qwen3.8-27B-GGUF                 # the card's 27B lock
 python bench/demo/run.py --server http://127.0.0.1:8000 --gpu-class rtx-5080 --runs 3 \
-    --out evidence/demo_rtx-5080_<date>.json
+    --out local/evidence/demo_rtx-5080_<date>.json
 ```
 
 `demo/pi_run.py` is a report-only test with the pi coding agent instead (OpenAI chat completions, through
@@ -176,8 +177,8 @@ own tests (`demo/workloads_task/`). `--report` adds the speed and endpoint summa
 
 ```bash
 python bench/demo/pi_run.py --server http://127.0.0.1:8000 --gpu-class rtx-5090 --pi <prefix>/node_modules/.bin/pi \
-    --task demo --runs 3 --out evidence/agent_test_pi_rtx-5090_<date>.json
-python bench/demo/pi_run.py --report evidence/agent_test_pi_rtx-5090_<date>.json
+    --task demo --runs 3 --out local/evidence/agent_test_pi_rtx-5090_<date>.json
+python bench/demo/pi_run.py --report local/evidence/agent_test_pi_rtx-5090_<date>.json
 ```
 
 ## Reproduce
@@ -201,7 +202,7 @@ rounds are meant to have the GPU to themselves (check `nvidia-smi` first).
 
 Holon at commit 826e467 (E4): **eager, depth 0** — no CUDA graphs, no overlap — against mini-sglang's defaults, so
 the gap is expected: these are baseline numbers for the harness, not a verdict on the design. 2 ABAB rounds each,
-GPU idle before every run; pooled over rounds. Evidence: `evidence/bench_{decode,agent,cpu_step}_rtx-a5000_2026-10-07.json`.
+GPU idle before every run; pooled over rounds. Evidence: `docs/dev/evidence/bench_{decode,agent,cpu_step}_rtx-a5000_2026-10-07.json`.
 
 **Decode throughput, Qwen3-8B bf16, prompt 256 + output 256** (acceptance §3.4-2: within 10% of mini-sglang)
 

@@ -20,7 +20,7 @@ MACHINE = [r"\b(?:EPYC|Xeon|Threadripper|Ryzen)\b", r"\bCore\(TM\)", r"\bZen ?[1
            r"\b[1-9]\d{3}X(?:3D)?\b", r"\bi[3579]-\d{4,5}[A-Z]{0,2}\b", r"\bLinux \d+\.\d{2,}"]
 # Upstream files (public, pinned by SHA256SUMS or a commit) can match the patterns; our patches on them are checked.
 VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/", "plugins/holon_plugins/kernels/ggml_cpu/vendor/",
-            "spikes/s2_gguf/third_party/")
+            "docs/dev/spikes/s2_gguf/third_party/")
 SELF = "scripts/ci/check_private.py"         # its patterns name what they look for
 
 

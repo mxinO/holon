@@ -117,7 +117,7 @@ Global acceptance for every milestone ≥ M0.1:
 | S5 Golden | HF fp32 recording on CPU (or `device_map` over GPUs) for 8B; noise floor HF bf16 vs fp32 on frozen prompts | τ and KL/ΔPPL budgets calibrated |
 | S6 CPU handshake | stream-memop flags (`cuStreamWriteValue`/`WaitValue`) + persistent native CPU worker inside a FULL graph; `quiesce()` + double-buffered resolver map under depth 1 (learning from FreeToken's `cpu_executor`) | per-step overhead measured on a desktop host; seam confirmed before the ABI freezes |
 
-**Spike outcomes (2026-10-07; details in `spikes/s*/README.md`, design §5.6, §7.4, §10.3):**
+**Spike outcomes (2026-10-07; details in `docs/dev/spikes/s*/README.md`, design §5.6, §7.4, §10.3):**
 
 | Spike | Outcome |
 |---|---|
@@ -229,7 +229,7 @@ H (propagate, tune) → I (supervisor) → tuned default locks for each class.
 
 ### 3.6 Status (2026-10-08): acceptance met
 
-Measured on Qwen3-8B bf16 unless noted, with the final M0 core (ee12f42) unless noted; records in `evidence/` and
+Measured on Qwen3-8B bf16 unless noted, with the final M0 core (ee12f42) unless noted; records in `docs/dev/evidence/` and
 `judge/results/`, locks in `plans/`.
 
 | # | Result |
@@ -255,7 +255,7 @@ Carried into M0.1 and later:
   profiling (the largest prefill); the same step ran cleanly on another rtx-4090 node and in two earlier runs, so it
   was taken as a node fault. A recurrence would point at the kernel (an out-of-bounds access) instead.
 - The two agent-trace records at ee12f42 carry `-dirty`: an earlier run in the same worktree had rewritten a tracked
-  evidence file (no code changed); `bench/run.py` now ignores `evidence/` when judging dirtiness.
+  evidence file (no code changed); `bench/run.py` now ignores `docs/dev/evidence/` when judging dirtiness.
 - Prefix eviction in O(1): an ordered set of evictable leaves (eviction now scans from the LRU end, which stays
   cheap while unused leaves sit there; long contexts with many pinned blocks would make the scan long).
 
@@ -285,7 +285,7 @@ tok/s vs llama.cpp (`llama-server`) on the same card and quant recorded.
 
 ### 4.1 Status (2026-10-08): acceptance met
 
-Design and evidence: `docs/dev/m01-gguf.md` (rev 3.1); records in `evidence/` and `judge/results/`, locks in `plans/`.
+Design and evidence: `docs/dev/m01-gguf.md` (rev 3.1); records in `docs/dev/evidence/` and `judge/results/`, locks in `plans/`.
 Qwen3-8B, unsloth `Qwen3-8B-GGUF` Q4_K_M and UD-IQ3_XXS. Built differently from the work list above, by decision
 in the design: the GGUF file is self-contained (no HF base model or config), there is no `dialects/ggml` (the
 kernels read the stored blocks, `gguf.native`; gguf-py dequantizes for the judge and L0), and references never
@@ -331,7 +331,7 @@ are M0.6. Design: `docs/dev/m02-moe.md` (D1, D7, D8).
 
 ### 5.1 Status (2026-10-09): acceptance met
 
-Design and evidence: `docs/dev/m02-moe.md` (rev 5 and its implementation review); records in `evidence/` and
+Design and evidence: `docs/dev/m02-moe.md` (rev 5 and its implementation review); records in `docs/dev/evidence/` and
 `judge/results/`, locks in `plans/`. Qwen3-30B-A3B, unsloth `Qwen3-30B-A3B-GGUF` UD-IQ3_XXS and Q4_K_M; the bf16
 HF checkpoint on an RTX PRO 6000. Built differently from the work list above, by decision in the design: the MoE is
 its own package (`std.moe`: `moe_topk@1`, `linear_experts@1` with a layout fact, `moe_combine@1`), the expert path
@@ -340,12 +340,12 @@ runs in f32 between the stacks with an f32 router (D3), and dense bf16 stacks ru
 | # | Result |
 |---|---|
 | 1 | `models/qwen3_moe` copied from qwen3 (`derived_from`): ~25 changed recipe lines (the `std.moe` `Ref` and its facts, five expert weight rules). Core diff: the stacking weight rule only (`WeightRule.stack`, 42 lines in `build.py`/`model.py`). Qwen3-8B locks re-propagated — bf16 on rtx-a5000 and rtx-4090, GGUF on rtx-5080 and rtx-a5000: snapshot traces byte-identical, L2 passing, only the core's, `kernels.flashinfer`'s and (GGUF) `kernels.ggml_cuda`'s source pins changed; approved (the rtx-a5000 locks were then removed: lock classes are rtx-4090 and rtx-5080, design §4.4) |
-| 2 | L0 for the MoE ops (`linear_experts` per type, path and `glu`; `moe_topk`; `moe_combine`; our SwiGLU; the padding plant) with the dense kernels' and `kernels.triton_experts`' (`evidence/l0_m02_2026-10-09.json`): at the final code sm_86 and sm_120a (RTX 5080) 221 passed each, memcheck 0 errors on both; sm_89 219 passed (4d2cfa2, before the last tests were added); the RTX PRO 6000 (sm_120a, 188 SMs) 216 passed at d8c26c2. The router precision test passes at the fp32 budget, and a bf16 router and TF32 fail it |
+| 2 | L0 for the MoE ops (`linear_experts` per type, path and `glu`; `moe_topk`; `moe_combine`; our SwiGLU; the padding plant) with the dense kernels' and `kernels.triton_experts`' (`docs/dev/evidence/l0_m02_2026-10-09.json`): at the final code sm_86 and sm_120a (RTX 5080) 221 passed each, memcheck 0 errors on both; sm_89 219 passed (4d2cfa2, before the last tests were added); the RTX PRO 6000 (sm_120a, 188 SMs) 216 passed at d8c26c2. The router precision test passes at the fp32 budget, and a bf16 router and TF32 fail it |
 | 3 | Gate: every tensor of both files ≤ 0.5 NMSE per expert (worst 0.092 UD-IQ3_XXS, 0.0094 Q4_K_M), routers exact. Tier A (fp32 CPU, production GGUF source): KL p99 1.8e-5 / 2.2e-5 under the 1e-4 sanity ceiling; its 7 plants fail (renormalisation off in one layer at 3.94× the floor's KL p99 against a predicted 1.5–3×: the layer's expert output shrinks by its top-8 mass; δ unchanged). Tier B on the A5000 at the final engine code (c07efdc; floors: the D3-mirroring bf16 block with q8_1 per path) passes prefill and decode for both files, every expert call on the floor's path; also on the RTX 5080 (UD-IQ3_XXS, 4d2cfa2). Wrong type, stale q8_1 (dcf8902) and the up-first merge (8157e92) fail; the rare stale plant passes the decode run (1.07×, as reported). Quantization error vs the bf16 checkpoint: Q4_K_M KL p50 1.0e-3, top-1 95.9%, ΔPPL +1.0%; UD-IQ3_XXS 2.8e-3, 93.2%, +3.0% |
 | 4 | Snapshot trace run-identical over 3 fresh engines (UD-IQ3_XXS on rtx-5080, Q4_K_M on rtx-a5000). Graphs vs eager (`bounded --graphs-vs-eager`) passes at decode batches 3, 5, 12 and 20 for both files; the padding plant fails exactly where the padded bucket's expert path is mmq (batches 12 and 20, and batch 5 for UD-IQ3_XXS on sm_86) and passes on mmvq, as predicted |
 | 5 | RTX 5080, UD-IQ3_XXS, 16K contexts at `max_seqs` 32: 18.6K KV tokens at `memory_fraction` 0.9, the class's deployment setting (a 16K prompt served); 20.8K at 0.98 (22.1K at `max_seqs` 16), where prompt-logprob steps run out of memory (below). The bars and the serving runs used 0.98 (no prompt logprobs). In-process vs llama-bench (median of repetitions 2–5): pp512 / tg128 1.11× / 0.97× (8199 / 240.2 t/s; bar 5970 / 199) on the 5080 (4d2cfa2); Q4_K_M 1.02× / 1.01× on the 4090 (63941b4) and 1.10× / 1.02× on the A5000 (UD-IQ3_XXS 1.04× / 1.00×; dcf8902). Serving vs `llama-server` on the 5080: TPOT 4.21 vs 4.26 ms at batch 1 and 10.1 vs 11.6 ms at batch 8, lower TTFT; agent trace TTFT / TPOT p50 62 / 4.9 ms vs 209 / 6.0 ms (`llama-server` has no KV admission control: at Holon's KV size it runs 3 slots, its queue holding the rest) |
 | 6 | GGUF locks: UD-IQ3_XXS on rtx-5080 (`max_seqs` 32, `max_step_tokens` 2048, `max_model_len` 16384), Q4_K_M on rtx-4090; tuned to Triton paged decode, L2 passing (an rtx-a5000 Q4_K_M lock was also written and then removed with the lock-class decision) |
-| 7 | The bf16 HF checkpoint on an RTX PRO 6000 (sm_120, 96 GB; c21762a): it loads through the stacking rule, and the structural test finds every expert equal to the checkpoint's (two swapped experts: 6 mismatches; `evidence/structure_qwen3-30b-a3b_rtx-pro-6000_2026-10-09.json`). L2 against its fp32 golden passes (KL p99 3.32e-2 vs the D3 bf16 floor's 3.42e-2, itself below the pure-HF floor's 4.37e-2, as predicted); the stack off by one, gate/up swapped and renormalisation ignored fail. The M0.1 chat set reads correct (facts, code, Chinese, a tool call). `kernels.triton_experts` L0 passes on sm_86 and sm_120a (row 2) |
+| 7 | The bf16 HF checkpoint on an RTX PRO 6000 (sm_120, 96 GB; c21762a): it loads through the stacking rule, and the structural test finds every expert equal to the checkpoint's (two swapped experts: 6 mismatches; `docs/dev/evidence/structure_qwen3-30b-a3b_rtx-pro-6000_2026-10-09.json`). L2 against its fp32 golden passes (KL p99 3.32e-2 vs the D3 bf16 floor's 3.42e-2, itself below the pure-HF floor's 4.37e-2, as predicted); the stack off by one, gate/up swapped and renormalisation ignored fail. The M0.1 chat set reads correct (facts, code, Chinese, a tool call). `kernels.triton_experts` L0 passes on sm_86 and sm_120a (row 2) |
 
 Found on the way:
 - `kernels.flashinfer`'s fixed 128 MiB workspace overflowed for Qwen3-30B-A3B (4 KV heads) on the 128-SM RTX 4090:
@@ -386,7 +386,7 @@ designed state seams, all general.
 ### 6.1 Status (2026-10-12): acceptance met
 
 Design and evidence: `docs/dev/m03-qwen38.md` (rev 3 and its implementation review, re-reviewed clean) and
-`docs/dev/m03-in-step-snapshot.md` (in-step checkpoints, reviewed); records in `evidence/` and `judge/results/`, locks in
+`docs/dev/m03-in-step-snapshot.md` (in-step checkpoints, reviewed); records in `docs/dev/evidence/` and `judge/results/`, locks in
 `plans/`. Qwen3.8-27B, unsloth `Qwen3.8-27B-GGUF` UD-IQ3_S and UD-Q4_K_M; the bf16 HF checkpoint on an RTX PRO 6000.
 Results are at the commit in their names; the final verdicts at the paired ΔPPL guard (65a82cb) and later.
 
@@ -440,7 +440,7 @@ Acceptance:
 ### 7.1 Status (2026-10-13): acceptance met (Gate A: MTP, n-gram; Gate B: DFlash2)
 
 Design and evidence: `docs/dev/m04-spec.md` (rev 3, reviewed clean; §10 is Gate A's status with every result, decision
-and deviation); records `evidence/bench_m04nat-*` (natural text), `fit_m04-*`, `judge/results/` (bounded, L0-drafter,
+and deviation); records `docs/dev/evidence/bench_m04nat-*` (natural text), `fit_m04-*`, `judge/results/` (bounded, L0-drafter,
 snapshot); locks in `plans/`. The scope moved from this section's first draft: MTP from the target checkpoint itself
 (no separate MTP GGUF), DFlash2 added, `checkpoint_slots` dropped for GDN replay, the CPU lookup drafter and the
 cost-model policy deferred.
@@ -484,7 +484,7 @@ Schema keywords); `tool_choice: "auto"` stays unconstrained unless a tool is str
 ### 8.1 Status (2026-10-14): acceptance met, one recorded shortfall
 
 Design and evidence: `docs/dev/m05-grammar.md` (rev 5, reviewed clean; §11 is the build record with every result,
-deviation and the panel round after step 5); records `evidence/conformance_*`, `gate_cost_*`, `gate_sizing_*`,
+deviation and the panel round after step 5); records `docs/dev/evidence/conformance_*`, `gate_cost_*`, `gate_sizing_*`,
 `round_trips_*`, `constrained_bounded_*`, `claude_code_session_*`.
 
 | # | Result |
@@ -513,7 +513,7 @@ glue in one launch), the mmvq/mmq crossover per class and shape, mixed prefill/d
 ### 8a.1 Status (2026-10-15): acceptance met
 
 Design and evidence: `docs/dev/m07-perf.md` (rev 3.3, reviewed clean; §11–§16 as built per step, §17 the close: the close
-panel's findings, the propagation, acceptance and deviations); records `evidence/m07-step*_*`, `bench_m07-step4-*`,
+panel's findings, the propagation, acceptance and deviations); records `docs/dev/evidence/m07-step*_*`, `bench_m07-step4-*`,
 `m07-close_aa_*`, `propagate_m07-close_*`.
 
 | # | Result |
@@ -547,7 +547,7 @@ the benchmark suite, the agent demo, the clean install. Publishing (step 11) wai
 ### 8b.1 Status (2026-10-16): ready for the owner's go, after the lead's final panel review
 
 Design and evidence: `docs/dev/release.md` (rev 3.2, reviewed clean; §13–§19 as built per step); records
-`evidence/release7_*`, `bench_release*`, `bars_release*`, `release8_clock_*`, `agent_demo_*`, `release10_*`.
+`docs/dev/evidence/release7_*`, `bench_release*`, `bars_release*`, `release8_clock_*`, `agent_demo_*`, `release10_*`.
 
 | # | Acceptance (release §1) | Result |
 |---|---|---|
@@ -582,7 +582,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 | S6 spike | CPU handshake inside a FULL graph on a desktop host | seam does not hold → redesign the graph/CPU seam before the core ABI freezes |
 | M0 | decode + mixed-trace TTFT/TPOT vs mini-sglang; CPU/step vs nano-vllm; core LOC | < 0.9× after two weeks of perf work, or core > 6k → move per-token input prep to GPU kernels and cut core scope before continuing |
 | M0.2 | core changes needed for MoE; approvals per week from propagation | > 1 core ABI change, or > 3 approvals/week → abstraction or machinery is wrong; simplify |
-| ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/dev/release.md` §4.0; record `evidence/legibility_pilot_2026-10-14.json`) | — |
+| ~~Before the release freezes the ABI~~ — **retired by the owner (2026-10-14)** | legibility benchmark (agent cost to add a model vs a mini-sglang fork). An exploratory 1 + 1 pilot passed on both sides at ≈ 1.4–1.8× Holon's cost (one run each, within noise); Holon's advantage is isolation (no shared code touched), not agent cost per model (`docs/dev/release.md` §4.0; record `docs/dev/evidence/legibility_pilot_2026-10-14.json`) | — |
 | Any | propagation sweep time; approvals/day | > 30 min or > 1/day → async propagation (design §4.6 trigger) |
 | M0.1 / M0.2 / M0.3 | GGUF decode **and prefill** tok/s vs llama.cpp on the same card and quant (RTX 5080), dense and MoE | < 0.8× on either after a perf pass → fix the GGUF kernel path (ported i-quant `mmq` or own Triton kernels for the slow types) before adding features |
 | v1 offload | MoE larger than VRAM, same file and card: decode tok/s vs Strata on Qwen3.8-Flash-Next (RTX 5080 / 5090), vs Project Maya on GLM-5.3-Flash (RTX 5090), vs FreeToken and llama.cpp on the development vehicle Qwen3-30B-A3B (RTX 5080) (`docs/dev/v1-offload.md` §1) | < 0.8× → rework the offload path before adding features |
@@ -608,7 +608,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 
   **X status (2026-10-18): closed, acceptance met with the recorded shortfall** (FreeToken prefill at 4K / 32K).
   Design and evidence: `docs/dev/v1-offload.md` (rev 4.5, panel-clean; §13 step 0's measurements and decisions, §14 the
-  build record per step, "Step 8, part 2" the close); records `evidence/x0_*` … `x7_heldout_*`,
+  build record per step, "Step 8, part 2" the close); records `docs/dev/evidence/x0_*` … `x7_heldout_*`,
   `x8_close_rtx-5080_2026-10-18.json`.
 
   | # | Result |
@@ -632,7 +632,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 
   **K status (2026-10-20): closed, acceptance met** (3a's SSD cells beside decoders by the owner's option 2).
   Design and record: `docs/dev/v1-kv-tiers.md` (rev 8.5, panel-clean; §13 the build record per step, the panels'
-  reviews, "Owner decisions", "Close (2026-10-20)"); records `evidence/k0_*` … `k6_close_propagation_2026-10-20.json`.
+  reviews, "Owner decisions", "Close (2026-10-20)"); records `docs/dev/evidence/k0_*` … `k6_close_propagation_2026-10-20.json`.
 
   | # | Result |
   |---|---|
@@ -651,7 +651,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 
   **FN status (2026-10-24): closed, every gated row at or above its bar.** Design and record:
   `docs/dev/v1-flash-next.md` (§17–§21 the build and speed record, §22 the close, §23 the last speed round); records
-  `evidence/fn*`, the close in `evidence/fn_close_final_2026-10-24.json`. The branch was replayed onto `main` to drop a
+  `docs/dev/evidence/fn*`, the close in `docs/dev/evidence/fn_close_final_2026-10-24.json`. The branch was replayed onto `main` to drop a
   private name from one merge message: the old → new SHA map is kept with the development archive.
 
   | # | Result |

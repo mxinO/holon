@@ -2,7 +2,7 @@
 
 Status: **revision 3.1, implemented; acceptance met** (2026-10-08, plan §4.1). Revisions 1 and 2 were challenged by
 three reviewers (architecture/API, kernels/performance, numerics/judge); every finding is resolved below or deferred
-in §8. Scope: plan §4. Builds on design §5.1, §5.4–5.6 and spike S2 (`spikes/s2_gguf/README.md`).
+in §8. Scope: plan §4. Builds on design §5.1, §5.4–5.6 and spike S2 (`docs/dev/spikes/s2_gguf/README.md`).
 
 ## 1. Goal and acceptance
 

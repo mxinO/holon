@@ -336,7 +336,7 @@ def main() -> None:
     ap.add_argument("--temperature", type=float, default=0.0, help="sample at this temperature (default: greedy)")
     ap.add_argument("--blocking-sync", action="store_true", help="CUDA waits sleep (for CPU time per step)")
     ap.add_argument("--corpus", help="JSONL prompt set whose token ids prompts are cut from (default: uniform ids)")
-    ap.add_argument("--evidence-dir", default=str(ROOT / "evidence"))
+    ap.add_argument("--evidence-dir", default=str(ROOT / "local" / "evidence"))
     args = ap.parse_args()
     args.arms = dict(arm.split("=", 1) if "=" in arm else (arm, "") for arm in args.arm)
     for label, flags in args.arms.items():
@@ -419,8 +419,8 @@ def main() -> None:
         prev = a
     traces = {pathlib.Path(p).stem: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()[:16]
               for p in args.traces}
-    # Records written by earlier runs (evidence/) do not make the code dirty; anything else is listed.
-    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!evidence").splitlines()
+    # Records kept in docs/dev/evidence/ do not make the code dirty; anything else is listed.
+    dirty = git("status", "--porcelain", "--untracked-files=no", "--", ".", ":!docs/dev/evidence").splitlines()
     commit = git("rev-parse", "HEAD") + ("-dirty" if dirty else "")
     record = {"workload": args.name, "date": date, "command": " ".join(["python bench/run.py", *argv]),
               "commit": commit, **({"dirty": dirty} if dirty else {}), "gpu_class": gpu,
@@ -436,6 +436,7 @@ def main() -> None:
                              .hexdigest()[:16]}} if args.corpus else {}), "backends": infos,
               "summary": summary, "runs": runs}
     out = pathlib.Path(args.evidence_dir) / f"bench_{args.name}_{gpu}_{date}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(record, indent=1, default=str)
     text = re.sub(r"\[\s+([^\[\]{}]*?)\s+\]", lambda m: "[" + re.sub(r"\s+", " ", m[1]) + "]", text)  # rows on one line
     out.write_text(text + "\n")

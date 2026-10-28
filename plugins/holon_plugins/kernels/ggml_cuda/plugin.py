@@ -129,16 +129,16 @@ POOL_ALIGN = 256                # csrc/api.cu's workspace pool: its base, and ea
 # The types whose merged gate/up runs mmvq's fused gate (qlinear_glu, docs/dev/m07-perf.md D6, §13.4, §17): where
 # bench/glu_sweep.py found it faster per call than the matmul and FlashInfer's silu_and_mul at the locks' gate/up
 # shapes on the RTX 5080 and 4090 by more than a sweep's noise, and within 0.4% on the 5090
-# (evidence/m07-step2_glu-sweep_<class>), and the step-level A/B kept it (the 8B rows). Q5_K (+0.6 / +1.5 / −0.3%,
-# within noise, no L2 of its own) composes, as do most i-quants and Q3_K, which ran it 1–10% slower.
+# (docs/dev/evidence/m07-step2_glu-sweep_<class>), and the step-level A/B kept it (the 8B rows). Q5_K (+0.6 / +1.5 /
+# −0.3%, within noise, no L2 of its own) composes, as do most i-quants and Q3_K, which ran it 1–10% slower.
 GLU_TYPES = frozenset({"q4_k", "nvfp4"})
 # The crossover per shape (docs/dev/m07-perf.md D2): (GPU class, ggml type, in, out, mmq's activation mode) -> mmvq up
 # to
 # this many rows, mmq above, where repeated graph-timed sweeps (bench/qmm_sweep.py) found mmq faster per call by at
 # least 3% and by more than 3 sd at every graphed row the entry moves (4, 7, 8), and the entries save at least 1% of
 # some lock's decode or verify step (ten sweeps of the 27B's shapes). mmq writes bf16 itself (D4), so the table is
-# the sweeps' no-cast column (evidence/m07-step1_d2-no-cast_<class>_2026-10-14.json). Pinned by this plugin's `src`;
-# every other shape keeps llama.cpp's rule.
+# the sweeps' no-cast column (docs/dev/evidence/m07-step1_d2-no-cast_<class>_2026-10-14.json). Pinned by this
+# plugin's `src`; every other shape keeps llama.cpp's rule.
 CROSSOVER: dict[tuple[str, str, int, int, str], int] = {
     ("rtx-5080", "iq1_s", 5120, 17408, "q8_1"): 7,
     ("rtx-5080", "iq2_s", 17408, 5120, "q8_1"): 7,

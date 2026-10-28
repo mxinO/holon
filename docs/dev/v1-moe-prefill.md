@@ -27,7 +27,7 @@ gate").
 **The shortfall.** Holon's prefill trails FreeToken 0.92× / 0.88× at 4K / 32K on the RTX 5080's natural-fit offload
 rows. FreeToken's all-resident prefill runs 1.6–2.0× Holon's on the RTX 5090.
 
-**Step 0** is `spikes/moe_prefill/README.md` (`evidence/moe_prefill_rtx-a5000_2026-10-18.json`). It ran Qwen3-30B-A3B
+**Step 0** is `spikes/moe_prefill/README.md` (`docs/dev/evidence/moe_prefill_rtx-a5000_2026-10-18.json`). It ran Qwen3-30B-A3B
 Q4_K_M all-resident on one RTX A5000, with nsys per component, a per-call GEMM bench, and a source study of FreeToken's
 and llama.cpp's prefill GEMMs. Its bar-card half ran on 2026-10-18 (§2.1–§2.2).
 
@@ -105,8 +105,8 @@ before any code. Every bar is measured by §5.2's method.
 
 | # | Item | Verdict | Owner decision | Evidence |
 |---|---|---|---|---|
-| 1 | The 5080 shortfall rows against FreeToken gated | **met** | O2 (the gated arm; closed at step 4) | at the re-pinned lock 1.850 / 1.136 / 1.005× at 1K / 4K / 32K; llama.cpp rows ≥ 2.51× (step 4); the gated arm 4.8% slower than the default at 32K (§7.1 steps 4–5; `evidence/mp5_close_2026-10-20.json`, `evidence/mp4_bars_rtx-5080_2026-10-19.json`) |
-| 2 | All-resident, 5090 | **met** | O2 | 1.029 / 1.008 / 1.016× FreeToken gated; llama-server 1.78 / 2.36 / 1.45× (step 4); T6 leaves them 0.9998× (step 5; `evidence/mp4_bars_rtx-5090_2026-10-19.json`) |
+| 1 | The 5080 shortfall rows against FreeToken gated | **met** | O2 (the gated arm; closed at step 4) | at the re-pinned lock 1.850 / 1.136 / 1.005× at 1K / 4K / 32K; llama.cpp rows ≥ 2.51× (step 4); the gated arm 4.8% slower than the default at 32K (§7.1 steps 4–5; `docs/dev/evidence/mp5_close_2026-10-20.json`, `docs/dev/evidence/mp4_bars_rtx-5080_2026-10-19.json`) |
+| 2 | All-resident, 5090 | **met** | O2 | 1.029 / 1.008 / 1.016× FreeToken gated; llama-server 1.78 / 2.36 / 1.45× (step 4); T6 leaves them 0.9998× (step 5; `docs/dev/evidence/mp4_bars_rtx-5090_2026-10-19.json`) |
 | 3 | FreeToken's arms | **met** | O2 | gated at the lock's step budget, the default reported (5090 32K 0.950×, 5080 32K 0.959×) |
 | 4 | Exactness | **met** | — | D1, D2, D4 bitwise (`prompt_logprobs` identity at every step, sm_86 / 89 / 120; §10 L3-4; T6); D3′ and D5 bounded: L2 passing on all 18 locks (step 5); L0 on every lock type × SM |
 | 5 | Decode keeps its bits and its speed | **accepted deviation** | O5 (routing, not cost; the six-prompt geomean); O3 (the 4090 lock at 2,048) | bits: graphs-vs-eager and mmvq untouched (steps 2–3); 5090 `holon_tg` within (step 4); 5080 offload six prompts 0.969 ± 2.6% / 1.008 ± 2.2% / 1.006 ± 0.6% (single 1.005 / 0.992 / 1.001), pooled 0.994 ± 1.2%, the code at main's numerics 1.000×; the 4090 lock's B32 / B64 below by the KV cliff (O3) |
@@ -229,7 +229,7 @@ is 8,192.
 
 ### 2.2 Step 0 on the bar cards: measured (2026-10-18)
 
-Records: `evidence/mp0_prefill_rtx-5090_2026-10-18.json`, `mp0_prefill_rtx-5080_…`, `mp0_prefill_rtx-a5000_…`,
+Records: `docs/dev/evidence/mp0_prefill_rtx-5090_2026-10-18.json`, `mp0_prefill_rtx-5080_…`, `mp0_prefill_rtx-a5000_…`,
 `mp0_kv_rtx-4090_…`, `mp0_kv_rtx-3090_…` (code at main's `b5b1e7f`; the commit adds docs and spikes only). Both bar
 desktops held their clocks (5090 p10 / p50 2,587–2,602 / 2,632–2,647 MHz; 5080 2,760 / 2,760). Time to the first
 token, medians of the fixed prompt set over 2 rounds (10 / 10 / 6 per cell); "×" is FreeToken's time over Holon's.
@@ -799,7 +799,7 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   - Identity (`spikes/moe_prefill/identity.py`) on the A5000, the resident 30B and the natural-fit offload flags:
     main's and the branch's prompt-logprob hashes are identical at 1,027 and 4,096 tokens, each run-identical ×2.
     The branch's resident pass is 4,096 tokens, main's 512.
-  - On the cluster (records `evidence/mp2_checks_<class>_2026-10-18.json`):
+  - On the cluster (records `docs/dev/evidence/mp2_checks_<class>_2026-10-18.json`):
     - L0: sm_89 (RTX 4090) 135 passed; sm_120 (RTX 5090) 131 passed, and (RTX 5080) 131 passed.
     - Memcheck: 0 errors on both SMs.
     - Identity, main against the branch: resident on the 4090 and the 5090; the natural fit and the capped fit with
@@ -935,8 +935,8 @@ The panel reviews this revision before step 1, the code at step 4, and again at 
   (331 tests: the two new types, D2–D4's and 3b's tests). ≈ +5% at the medians, inside the host's run-to-run spread
   (56 s on main).
 
-**Step 4 (the bars, 2026-10-19).** Records: `evidence/mp4_bars_rtx-5090_2026-10-19.json`,
-`evidence/mp4_bars_rtx-5080_2026-10-19.json`. The step-4 tree is `22717b3` (the code of `fed13f1`: D0–D2, D3′, D4, D5,
+**Step 4 (the bars, 2026-10-19).** Records: `docs/dev/evidence/mp4_bars_rtx-5090_2026-10-19.json`,
+`docs/dev/evidence/mp4_bars_rtx-5080_2026-10-19.json`. The step-4 tree is `22717b3` (the code of `fed13f1`: D0–D2, D3′, D4, D5,
 D9–D11 and the panels' fixes); main is `b5b1e7f`.
 - **Method** (§5.2): one engine process per arm and round; an untimed warm-up over the set's shapes on prompts of its
   own; the fixed prompt set (5 / 5 / 3 at 1K / 4K / 32K); 6 balanced rounds (ABCD, DCBA, …) of main, the step-4 tree,
@@ -978,7 +978,7 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
     4K row misses the tolerance by 0.05 pp** (sd < 0.001). The re-fill's down split is not the cause: at main's split
     (3,229 / 1,618 / 1,618) the row is 0.9891×. Diagnosed below (the decode split): neither the cache nor the code;
     the row's single prompt measures the bounded items' routing.
-- **The decode split** (the lead's 2×2 on the 5080, one session; `evidence/mp4_decode_split_rtx-5080_2026-10-19.json`):
+- **The decode split** (the lead's 2×2 on the 5080, one session; `docs/dev/evidence/mp4_decode_split_rtx-5080_2026-10-19.json`):
   - Main's code cannot start at the re-fill's counts (they hold 15 MB more than main's fill), so the 2×2 has three
     cells. At main's counts the step-4 code decodes 0.990× main at 4K, and the re-fill gains it back 0.45%: the cache
     share is not the loss.
@@ -1003,7 +1003,7 @@ D9–D11 and the panels' fixes); main is `b5b1e7f`.
   - Allocator counters zero in steady state on every timed prompt of every Holon arm, both cards.
 - **sm_89:** blocked at step 4; the gate ran after it and passes (§10 L3-4).
 
-**Step 5 (the close, 2026-10-20).** Records: `evidence/mp5_close_2026-10-20.json` (every class). The code the locks
+**Step 5 (the close, 2026-10-20).** Records: `docs/dev/evidence/mp5_close_2026-10-20.json` (every class). The code the locks
 pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq instances) and FN's qembedding commit.
 - **Checks at the tree.**
   - L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`) and memcheck: sm_86 (3090 and A5000) 305 passed, sm_89 (4090) 316,
@@ -1194,7 +1194,7 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     - no host sync in `Lent`.
   - **Memcheck** (sm_86, passed buffers of exactly their sizes added): 0 errors, at both commits.
   - **Identity** (`identity.py run --config natural`, 30B Q4_K_M, A5000; 1,027 / 4,096 tokens;
-    `evidence/mp3b_identity_rtx-a5000_2026-10-18.json`):
+    `docs/dev/evidence/mp3b_identity_rtx-a5000_2026-10-18.json`):
     - main (`b5b1e7f`), the branch, and the branch with `moe.ring_lend=tail` (tail 366 gate/up slots, 4 ring steps)
       all give `3a7308bf…` / `e7670f73…`, each run-identical ×2, at both commits of the step.
     - The branch with `tail` under the plant gives `ed55a19a…` / `1e8e5ecf…`: the plant fired 695 times in 2 ring
@@ -1242,7 +1242,7 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
     `dequantize_row_q2_0` and a later gguf-py's `Q2_0` define it. Convert and get_rows match it bit for bit (B-dev4).
   - IQ1_M has no fp16 d of its own: `random_blocks` writes the realistic d into the top nibbles of its four uint16
     scales (random bytes there would make about one block in 32 an inf or NaN scale).
-- **Checks** (sm_86, RTX A5000; `evidence/mp3c_checks_rtx-a5000_2026-10-18.json`; run on the tree committed as
+- **Checks** (sm_86, RTX A5000; `docs/dev/evidence/mp3c_checks_rtx-a5000_2026-10-18.json`; run on the tree committed as
   `d4e11f4`, which differs from it in docstrings only):
   - L0, `test_ggml_cuda.py` + `test_ggml_cuda_moe.py`: **294 passed, 8 skipped in 336 s** (before, at `7cd24de`:
     266 passed, 8 skipped in 292 s). The 28 new cases are the two types in every `sorted(TYPES)` test (dense
@@ -1337,7 +1337,7 @@ pin is `c281d8c`: the step-4 code, T6 (§10, the lead's decision 1: its own mmq 
 FN's routed down projections are 640 wide (I = 640; Q2_0 and IQ4_NL). `kernels.ggml_cuda` served only `in % 256 == 0`
 on `qlinear` and `linear_experts`; this lands before step 5's propagation round (D8). With it, `e1bb84f` carries FN's
 `6b05ed0` (qembedding rows of whole blocks narrower than 256, cherry-picked).
-Records: the sm_89 rows in `evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
+Records: the sm_89 rows in `docs/dev/evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
 
 | Item | Done | Result |
 |---|---|---|
@@ -1356,8 +1356,8 @@ Records: the sm_89 rows in `evidence/mp3_sm89_rtx-4090_2026-10-19.json` (`t6`).
 
 ### Building: the step-3 panel's code review (2026-10-19; A, B, C) and step 3d
 
-Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-10-19.json`,
-`evidence/mp3_bdec_2026-10-19.json`.
+Records: `docs/dev/evidence/mp3d_rtx-5080_2026-10-19.json`, `docs/dev/evidence/mp3d_rtx-5090_2026-10-19.json`,
+`docs/dev/evidence/mp3_bdec_2026-10-19.json`.
 
 | # | Finding | Disposition |
 |---|---|---|
@@ -1368,7 +1368,7 @@ Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-
 | B5 | iq1_m / q2_0 in `PASS_PROVEN` on sm_89 and sm_120 before their L0 | sm_120: the 5080's L0 at the final tree runs them (`PLACED` per SM), passed. sm_89: a hard gate before step 5, with A1 (L3-4): passed |
 | B6 | std.moe's expert-store members are undocumented | listed in `Resident`'s docstring; `pass_buffers` None means the pass allocates |
 | C | Step 4 on the 5090: 6 balanced ABBA rounds for rows within 3% of their bar; short kernels timed in a graph or over ≥ 100 launches, checked against nsys; acceptance 5's offload decode rows on the re-filled lock against main's lock | §5.2 and acceptance 5 |
-| C | Commit B-dec's evidence | `evidence/mp3_bdec_2026-10-19.json` (per call on the 5090, 5080 and A5000; batched decode on the 5090 and 5080) |
+| C | Commit B-dec's evidence | `docs/dev/evidence/mp3_bdec_2026-10-19.json` (per call on the 5090, 5080 and A5000; batched decode on the 5090 and 5080) |
 | C | Re-run the sm_120 L0 and identity at the final tree | the 5080 at `fed13f1`: L0 308 passed, memcheck 0 errors; identity below (step 3d) |
 | C-M2 | Confirm L3-2b's mechanism with the allocator's counters | `prefill.py` records each timed prompt's `num_alloc_retries`, `num_device_alloc`, `num_device_free` deltas. **All zero in steady state** on the final tree (5080 natural fit, 1K / 4K / 32K, 5 rounds; the 16 GB lock, UD-IQ3_XXS at its flags, 1K / 4K / 16K) — and on the tree with the cost (`a9a0333`) too. So the mechanism is not allocator traffic; it stays unexplained (GPU kernel time unchanged, idle time between kernels grown, cured by the id workspace's placement). **Closed** (the panel's C): the allocator hypothesis is ruled out; the residual is recorded as an unexplained host-path effect of where a call's id maps and activations live |
 | A1 | sm_89 has no step-3 record | hard gate before step 5 (L3-4): passed |
@@ -1399,7 +1399,7 @@ Records: `evidence/mp3d_rtx-5080_2026-10-19.json`, `evidence/mp3d_rtx-5090_2026-
 
 ### Building: the lead's decisions after step 3 (2026-10-19)
 
-Records: `evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisects, the fits, the final tree's checks).
+Records: `docs/dev/evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisects, the fits, the final tree's checks).
 
 | # | Decision | Done | Result |
 |---|---|---|---|
@@ -1408,7 +1408,7 @@ Records: `evidence/mp3_followup_rtx-5080_2026-10-19.json` (every A/B, the bisect
 | L3-2b | Find the cost: bisected on the 5080 (4K prompts, 10 per arm, 5 interleaved rounds; each arm against D4 without D3) | 3c alone 0.9999×; step 3 with 3b's kernels.ggml_cuda `plugin.py` swapped for 3c's 0.9998×, with 3b's std / tiered / policy files swapped instead 0.9971×: the cost is in kernels.ggml_cuda's D10. Host time was not it: mmvq calls skipping D10's work (`e076f00`, an L0 check fails without it), a ring step counting held slots as the rounds pick them (`a815981`) and host caches for D10's helpers (2 → 0.4 ms of host time per 4K prompt on the A5000) left 0.9979×. The persistent id workspace back at `pass_rows` (3b had sized it for decode, so a 4,096-row call took its id maps and q8_1 activations from the caller's scratch, shared by gate/up and down, or a fresh buffer) gave 1.0000× | `c0fe9c2`: one persistent id workspace per `in` at `pass_rows` again; D10's `scratch` holds gate/up's f32 output only (none under D4's store); `1f535e8` drops the host caches. **Against D4 without D3, 5 rounds, the fixed prompt set: 0.9999 / 0.9997 / 1.0000× at 1K / 4K / 32K (sd ≤ 0.0008), within ±0.05%**; the final tree at 4K: 1.0000× (sd 0.0002). The mechanism (why a shared or fresh buffer costs 0.2%) is not isolated; GPU kernel time was unchanged on the A5000's nsys, the idle time between kernels grew |
 | L3-2c | The final tree's checks (`1f535e8`; the L3-2a revert after it changes no bits and, on these stacks, no memory) | sm_86: 618 passed (the kernel, MoE, tiered, offload and judge suites); sm_120 (5080): L0 308 passed, memcheck 0 errors | `prompt_logprobs` hashes equal to the D5 tree's (sm_86 resident and natural; 5080 natural and capped F5b), so D4, 3b, 3c and the fixes stay bitwise. The 5080's natural fill: 3,217 / 1,688 / 1,529 cache slots (52.36%, the D5 tree's and 6 + 6 slots under the step-3 tree's; the lock's 3,236 / 1,618 / 1,618 hold 52.7%). Acceptance 6: against the step-2 tree's fill in the same session (3,223 / 1,694) the cost is D5's 6 + 6 slots, inside its ≈ 9-expert budget; against the lock's counts, filled by `fit.py`'s default configuration, it is 19 gate/up slots: step 5's re-fill settles it. Step 3b's tail check (one round each): every borrowing step a ring step with `ring_ok`, no `SHORT`; the tail is gate/up's last 209 slots (the passes' `out`s only now); prefill 337.4 / 6,278 ms (`tail`) against 336.3 / 6,280 (`coldest`); miss bytes per decode token 120.6 / 57.4 against 121.3 / 58.6 MB. The 5090 (queued) did not run: its resident rows had shown no cost beyond 1 sd |
 | L3-3 | O2 to the owner; the bar stays; step 4 measures | — | — |
-| L3-4 | Retry the 4090 for B-dev5's sm_89 L0 (IQ1_M, Q2_0) and C5's per-call A/B; with the panel's A1, the sm_89 record | ran on an RTX 4090 (2026-10-19) at the step-4 tree (`52853e1`); `evidence/mp3_sm89_rtx-4090_2026-10-19.json` | **The gate passes.** L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`, `PLACED` per SM: iq1_m and q2_0 included) 306 passed, 9 skipped; memcheck 0 errors; `prompt_logprobs` identity, the D3 tree (`9aa70e3`) against the step-4 tree, run-identical ×2, equal on the 4090 MXFP4 lock's flags (pass 2,048) and the Q4_K_M resident flags (4,096): D4, D3′, 3b and 3c stay bitwise on sm_89 too (NVFP4's scale2 epilogue: by L0). **C5** (per call, time over main's, T = 16–64, 3 rounds): J against T up to 16 is mixed on sm_89 (q4_k gate/up 1.05–1.09× at T = 17–48; mxfp4, iq3_xxs, iq2_xxs 0.63–0.95× at T ≥ 32), so sm_89 keeps 64 (B-dec). As shipped every type is 1.000–1.025× except **IQ2_S, 1.25–1.37× at T = 16–32** (FN's type, no lock's; its kernels' registers and stack equal main's; not isolated). **Batched decode** (holon_tg, depth 1,024, tokens/s over main's): the Q4_K_M lock 0.959 / 0.944 / 0.959× at B16 / 32 / 64 (4 rounds, sd ≤ 0.0005); the MXFP4 lock 0.996 / 0.993× (B16 / 32). Split (2 rounds each): step 1, whose CUDA is main's, is already 1.001 / 0.951 / 0.977×: B32 / B64 need 36.9K / 73.7K tokens of KV, above the lock's ≈ 26K pool, and `pass_rows`' workspace takes ≈ 1K of it (P13: 26,736 → 25,776); with `ggml_cuda.pass_rows = 512` step 1 is 1.000 / 1.000 / 0.999×. At 512, the step-4 code at main's numerics (the probe of §7.1) is 0.992 / 0.997 / 0.997×, at its own 0.981 / 0.969 / 0.995×. So: P13's KV cost where the batch overflows the pool, routing (as on the 5080's offload row), and ≤ 0.8% of code at B16. For the record: D4's fused store off 0.960 / 0.930 / 0.973×; the D3 tree 0.968 / 0.931 / 0.931×. The lock's `ggml_cuda.pass_rows` is step 5's re-fill to set (512 or 2,048 gives the KV back) |
+| L3-4 | Retry the 4090 for B-dev5's sm_89 L0 (IQ1_M, Q2_0) and C5's per-call A/B; with the panel's A1, the sm_89 record | ran on an RTX 4090 (2026-10-19) at the step-4 tree (`52853e1`); `docs/dev/evidence/mp3_sm89_rtx-4090_2026-10-19.json` | **The gate passes.** L0 (`test_ggml_cuda_moe.py` + `test_ggml_cuda.py`, `PLACED` per SM: iq1_m and q2_0 included) 306 passed, 9 skipped; memcheck 0 errors; `prompt_logprobs` identity, the D3 tree (`9aa70e3`) against the step-4 tree, run-identical ×2, equal on the 4090 MXFP4 lock's flags (pass 2,048) and the Q4_K_M resident flags (4,096): D4, D3′, 3b and 3c stay bitwise on sm_89 too (NVFP4's scale2 epilogue: by L0). **C5** (per call, time over main's, T = 16–64, 3 rounds): J against T up to 16 is mixed on sm_89 (q4_k gate/up 1.05–1.09× at T = 17–48; mxfp4, iq3_xxs, iq2_xxs 0.63–0.95× at T ≥ 32), so sm_89 keeps 64 (B-dec). As shipped every type is 1.000–1.025× except **IQ2_S, 1.25–1.37× at T = 16–32** (FN's type, no lock's; its kernels' registers and stack equal main's; not isolated). **Batched decode** (holon_tg, depth 1,024, tokens/s over main's): the Q4_K_M lock 0.959 / 0.944 / 0.959× at B16 / 32 / 64 (4 rounds, sd ≤ 0.0005); the MXFP4 lock 0.996 / 0.993× (B16 / 32). Split (2 rounds each): step 1, whose CUDA is main's, is already 1.001 / 0.951 / 0.977×: B32 / B64 need 36.9K / 73.7K tokens of KV, above the lock's ≈ 26K pool, and `pass_rows`' workspace takes ≈ 1K of it (P13: 26,736 → 25,776); with `ggml_cuda.pass_rows = 512` step 1 is 1.000 / 1.000 / 0.999×. At 512, the step-4 code at main's numerics (the probe of §7.1) is 0.992 / 0.997 / 0.997×, at its own 0.981 / 0.969 / 0.995×. So: P13's KV cost where the batch overflows the pool, routing (as on the 5080's offload row), and ≤ 0.8% of code at B16. For the record: D4's fused store off 0.960 / 0.930 / 0.973×; the D3 tree 0.968 / 0.931 / 0.931×. The lock's `ggml_cuda.pass_rows` is step 5's re-fill to set (512 or 2,048 gives the KV back) |
 
 ### Building: the panel's code review of steps 0–2 (2026-10-18; dispositions)
 

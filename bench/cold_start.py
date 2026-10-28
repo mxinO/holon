@@ -8,7 +8,7 @@ cache gained — FlashInfer's modules and the GGUF extension must gain nothing.
 
 Usage (from the repository root, inside Holon's .venv):
   python bench/cold_start.py --gpu 2 --caches /tmp/caches <model>... [--flags "<serve flags of model 1>" ...]
-                             [--out evidence/cold_start_<class>_<date>.json]
+                             [--out local/evidence/cold_start_<class>_<date>.json]
 """
 from __future__ import annotations
 
