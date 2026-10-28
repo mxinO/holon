@@ -1,0 +1,98 @@
+{
+ "date": "2026-10-28",
+ "doc": "docs/dev/v1-glm.md \u00a713 (step 7: the capped mode (ii) table with D8g, sparse parts and D8h)",
+ "card": "RTX 5090 desktop, the job step capped at 64 GiB (cgroup v2, enforced), the hygiene wrap",
+ "config": {
+  "holon": "03f60387 (D8g with STAGE_PARTS 6, sparse parts, D8h) at the borrow flags (moe.loan_margin 1.12, moe.loan_taper 8192,32768, moe.loan_largest 0.55), moe.copy_beside on",
+  "maya": "default and checkpoints-off (ckpt0) arms, 50 GB RAM tier",
+  "workload": "D11: a warm-up round, then 3 rounds of 8 x 1K, 8 x 4K, 8 x 32K prompts, 256 tokens each",
+  "reference": "Maya's default arm; at 32K the faster of its two",
+  "ratio": "per round, Holon's median over a cell's 8 requests over the reference's; the median of the 3 rounds"
+ },
+ "ratio_to_maya": {
+  "prefill": {
+   "1k": 0.956,
+   "4k": 1.062,
+   "32k": 0.97
+  },
+  "decode": {
+   "1k": 0.932,
+   "4k": 0.859,
+   "32k": 0.687
+  }
+ },
+ "per_round": {
+  "prefill": {
+   "1k": [
+    0.958,
+    0.952,
+    0.956
+   ],
+   "4k": [
+    1.062,
+    1.062,
+    1.062
+   ],
+   "32k": [
+    0.97,
+    0.98,
+    0.932
+   ]
+  },
+  "decode": {
+   "1k": [
+    0.962,
+    0.92,
+    0.932
+   ],
+   "4k": [
+    0.859,
+    0.894,
+    0.834
+   ],
+   "32k": [
+    0.761,
+    0.68,
+    0.687
+   ]
+  }
+ },
+ "tok_s_median": {
+  "maya_default_64g": {
+   "prefill_tok_s": {
+    "1k": 269.1,
+    "4k": 762.0,
+    "32k": 2432.2
+   },
+   "decode_tok_s": {
+    "1k": 24.5,
+    "4k": 22.6,
+    "32k": 24.4
+   }
+  },
+  "maya_ckpt0_64g": {
+   "prefill_tok_s": {
+    "1k": 269.8,
+    "4k": 760.9,
+    "32k": 3238.1
+   },
+   "decode_tok_s": {
+    "1k": 23.9,
+    "4k": 22.4,
+    "32k": 20.8
+   }
+  },
+  "holon_mode2_d8h": {
+   "prefill_tok_s": {
+    "1k": 257.7,
+    "4k": 809.4,
+    "32k": 3140.1
+   },
+   "decode_tok_s": {
+    "1k": 22.9,
+    "4k": 19.4,
+    "32k": 16.8
+   }
+  }
+ }
+}
