@@ -746,12 +746,13 @@ routed set, and the 32K decode's 79 MB a token.
   attributed.
 
 **D8g — Step 7: exclusive tiers' gathers beside the compute, by copy engines (D8p rev 2's parts, on D8w and D8s; the
-coordinator's lever after the 32K timeline). Design, for review by A, B and C before it is built.** *Why, measured*
-(nsys of one prompt step at mode (ii)'s flags with the borrow options, RTX 5090; `local` timeline scripts, §13 step 7):
+coordinator's lever after the 32K timeline). Design rev 2: A's G-M1-M3, B's B-D8g-M1 and C's points applied (panel
+reviews at c9a518af); for their re-review, not yet built.** *Why, measured* (nsys of one prompt step at mode (ii)'s
+flags with the borrow options, RTX 5090; §13 step 7):
 
 | Prompt | Main stream | Gathers on main (`k_fetch_roles`) | Waits on SSD rounds (`k_wait`) | The rest (compute) | Prompt SSD GiB / the drive's time at 2.3 GiB/s |
 |---|---|---|---|---|---|
-| 1K | 5.05 s | 1.50 s | 2.92 s | 0.62 s | 8.75 / ≈ 3.7 s |
+| 1K | 5.05 s | 1.50 s | 2.92 s | 0.62 s | 8.75 / ≈ 3.8 s |
 | 4K | 6.00 s | 1.71 s | 2.55 s | 1.69 s | 11.9 / ≈ 5.0 s |
 | 32K | 13.20 s | **4.26 s** (RAM misses 2.12, read-ahead hits 2.14) | 0.01 s | 8.88 s | 20.2 / ≈ 8.6 s |
 
@@ -760,54 +761,96 @@ gather of an exclusive call runs on the main stream between its layer's compute:
 65536), no pipelined parts (`_parts` = 1 when exclusive), no rounds (gated below 8K); mode (i) moves the same bytes
 through its ring beside the compute and prefills 32K in 9.47 s. Below 8K a step is drive-bound, and D8s's rounds idle
 the drive too: round r + 1 is signalled only when the main stream reaches it, after round r's gather and compute.
-- **The change.** In an eager prompt step under exclusive tiers, a layer call's gathers run on the store's gather
-  stream by copy engines, in parts, the main stream computing part −1 (the resident rows) and then each part once its
-  copies land: the RAM misses and the read-ahead hits in stage mode (≥ 8K tokens, every miss its own staging slot);
-  in rounds (below 8K) the hits' and RAM's parts through a doubled fixed set, and each SSD round's landing rows → slots
-  too. **Landing rows double** (2 × A_od, ping-pong by round): round r + 1 is signalled when round r lands, not when
-  main reaches it, so the drive reads while the GPU gathers and computes.
-- **Copy engines, not SMs.** An SM gather beside stream-k mmq — which holds every SM for the pass — waits for the
-  pass to drain, so it would not overlap; copy-engine DMA does. The lists are on the device (the tier op writes
-  them), so a call reads them back: after the tier op the call's RAM and hit lists (counts and (unit, slot) pairs,
-  ≤ 2 × F int32 a role) are copied into one of two pinned readback buffers (by call parity) and the host waits that
-  event — one host sync a layer call, the CPU's lead lost there (the GPU idles ≈ 0.1 ms a call, ≈ 10 ms a 32K step)
-  — then issues each part's `cudaMemcpyBatchAsync` (`kernels.expert_io`'s `copy_batch`, extended to the landing
-  rows' runs: a copy per extent). An SSD round's copies are issued once the host sees the I/O worker's completion word
-  for it (a host wait, not the device's `k_wait`). Providers without `copy_batch` keep today's main-stream gathers.
-- **Fences — the `torch.Event` rule.** Every fence is a `torch.Event` (generic), recorded and waited on generic
-  `torch.Stream`s and `torch.accelerator.current_stream()`, never a `torch.cuda.Event` (a generic stream's
-  `wait_event` ignores one in torch 2.11: item 2's no-op fences; `check_events.py` guards it), and a stream waits
-  only on an event recorded in this step (an earlier one is moot: the step's join). The fences:
-  F1 `tiered` (main, after the tier op: the host's readback wait, and the gather stream's `wait_event` before any
-  copy — so a call's copies follow the previous call's compute and the admissions its tier op waited);
-  F2 `landed[p]` (gather stream, after part p's copies: main waits it before part p's pass);
-  F3 `computed[p]` (main, after part p's pass: the gather stream waits it before part p + 2's copies into the same
-  half of a doubled fixed set — rounds only; stage mode never reuses a slot within a call);
-  F4 the moves wait the last `landed` (admissions read staged slots), then the moves stream waits main (as today);
-  F5 the landing rows: round r + 2 reads into round r's half only after round r's copies landed (the gather stream's
-  `landed` for that round, waited by the host before signalling the I/O worker);
-  F6 a readback buffer is rewritten two calls later, after the host waited that call's F1 (host order).
-  The loan's ranges are never a copy's destination (D8w's `_in_loan` assertion stays).
-- **Slots.** Stage mode: unchanged. Rounds: the hits' and RAM's fixed set doubles (2 × `rounds_q` a class), the
-  landing rows double (2 × A_od, host pinned memory, ≈ 2 × 32 × 7 MiB a role); `rounds_able` asks lend room for
-  2 × (2q + a). `Lent`, the loan and `test_reserve.py`'s tiny-GLM cases count them.
-- **Plants** (each failing the GPU tiny model's exclusive bitwise tests or `_bytes_exact`): `gather_part_unwaited`
-  (part p computed without waiting F2), `round_half_reused_early` (F3 dropped: part p + 2 copied over part p before
-  its pass), `readback_parity_stale` (a call's copies from the other buffer), `landing_half_reused_early` (F5 dropped),
-  `moves_before_gathers` (F4 dropped), and `cuda_event_on_generic` (F2 as a CUDA-typed event: the delayed-producer
-  test fails with it).
-- **Exactness.** Copies and placement only: the exclusive bitwise tests (stage and rounds, F10 and F11) with the
-  gathers beside, `_bytes_exact`, every slot held once.
-- **Predicted** (the bench's cells, mode (ii)): **32K prefill** 12.9 → ≈ 9.5–10.3 s (the gathers' ≈ 75 GB a step
-  at ≥ 20 GB/s by copy engine fits under 9.5 s of compute; mode (i)'s rate the bound): **0.767 → ≈ 0.97–1.05**.
-  **1K prefill** is drive-bound (the drive ≈ 82% busy today): with the gathers beside and the drive never idle,
-  4.45 → ≈ 3.7–3.9 s: **0.880 → ≈ 1.0–1.06**. **4K prefill**, its drive already ≈ 95% busy: ≈ +3–5% (1.028 →
-  ≈ 1.06). Decode is unchanged (its steps are graphed: no parts).
-- **Locks.** Exclusive layouts only (mode (ii)'s overrides; no lock): every RAM-holds-all lock, GLM's mode (i) ones
-  included, must advance byte-identical. **No core lines.**
+- **The change.** In an eager prompt step under exclusive tiers a layer call's gathers run beside the compute by copy
+  engines, in parts; the main stream computes part −1 (the resident rows) and then each part once its copies landed.
+  Two variants, each measured on its own (B-D8g-m2: a marginal one is dropped): **stage** (≥ 8K tokens, every miss
+  its own staging slot) moves the RAM misses and the read-ahead hits; **rounds** (below 8K) moves the hits' and RAM's
+  parts through a doubled fixed set and each SSD round's landing rows → slots through a doubled SSD set, the landing
+  rows doubled (ping-pong) so the drive reads round r + 1 while round r is copied and computed. Refused (an error)
+  under graph capture (`torch.cuda.is_current_stream_capturing()`) and in any but an eager prompt step: a graph would
+  bake in one call's host-built lists; decode keeps `moe_tiers@2`'s main-stream gathers (A G-m2).
+- **The copies go through `expert_prefetch@1`, the contract** (B-D8g-M1): the store selects, per class, two more
+  instances with the fact `copy = "dma"` — `parts` (the hits and RAM parts) and `rounds` (the SSD rounds), each on
+  its own provider stream, so an SSD round's copies never queue behind a RAM part's (A G-M2's deadlock) — and
+  issues each part as `start(key, fetch, n, src, dst[, runs])` then `wait(key)`. `expert_prefetch@1` gains `runs`
+  as an optional argument, the additive form `expert_fetch@1` took for D8f: it stays @1, `kernels.expert_io`'s
+  `copy_batch` learns the landing rows' runs inside the provider (a copy per extent). `start` makes its copies follow
+  everything enqueued on the current stream when it is called, so **the order the host calls `start` in is the
+  fence**: a part's copies are started only after the work they must follow is enqueued (record before wait, by
+  construction). The provider's CUDA-typed events stay inside it; the store never sees them. A provider that serves
+  no `copy = "dma"` instance gets no D8g: today's gathers and today's fences, unchanged (A G-m3).
+- **The lists, read back** (A G-M3). After the tier op the store copies into one of two pinned readback buffers (by
+  call parity) every list the host's copies need, per class: the RAM list (unit, slot) and `n_ram`; the read-ahead
+  hits (row, slot) and `n_hit`; the SSD list (row, slot), `n_ssd` and its pieces (`io_rows`); and records `tiered`.
+  The landing rows' runs are not read back: a row's runs are a function of its piece alone (each extent's aligned
+  superset at the next aligned offset, the I/O worker's rule), so the store keeps them per piece at materialize, from
+  the descriptors (a test asserts them equal to the worker's for every piece of the tiny models). **Part −1 (the
+  resident rows' pass) is enqueued before the host waits `tiered`** (C m2), so the GPU computes while the lists come
+  back: ≈ 0.1–0.3 ms of host latency a call, ≈ 10–30 ms a 32K step (≈ 100 calls), 4–13 ms at 1K (42 calls).
+- **The SSD rounds without host waits** (A G-M1, B-D8g-m1, C m2). The host never polls the I/O word; every round is
+  signalled and waited on the device, on a control stream of the store's (`torch.Stream`), in stream order, so no wait
+  can see a stale DONE: each layer call binds **two on-demand I/O slots**, one a landing half (the I/O worker's
+  `bind`, as today's one). Round 0's rows and signal go on the main stream right after the tier op, before `tiered`
+  is recorded. The control stream, once `tiered` is waited: round 1's rows and signal (its half is free: the previous
+  call's copies from it are earlier in the same stream order); then per round r: `wait` on half r mod 2's slot (the
+  device's `k_wait`, timeout and FAILED / ABANDONED into `errors` as today), the round's copies (`rounds.start`, after
+  the compute of the round that last used that SSD half is enqueued: the host calls it in that order), `rounds.wait`,
+  then round r + 2's rows and signal on the same half — the I/O worker gets its next request when the half's copies
+  have landed, with no host in the loop. The main stream waits a generic `torch.Event` the control stream records
+  after `rounds.wait` (`expert_prefetch@1` keys are waited once). Landing half h holds rows h·A … h·A + A − 1: the
+  store offsets round r's rows by (r mod 2)·A when it writes them (`round_rows`), the tier op's own `j mod A`
+  unchanged; the read-ahead sets move to rows 2A + (g mod DEPTH)·A_ra, disjoint from both halves. No device wait is
+  left on the main stream for a request the host signals after `tiered`: there is none (asserted in the rounds path).
+- **Fences — the `torch.Event` rule.** The store's own fences are generic `torch.Event`s recorded and waited on
+  generic `torch.Stream`s and `torch.accelerator.current_stream()`, never `torch.cuda.Event`s (a generic stream's
+  `wait_event` ignores one in torch 2.11: item 2's no-op fences; `check_events.py` guards it); a stream waits only on
+  an event recorded in this step, and every `wait_event` is enqueued after its `record` (A G-M2). The fences:
+  F1 `tiered` (main, after the tier op and the readback copy): the host's wait, and the control stream's
+  `wait_event` before its first signal — so every copy follows the previous call's compute, admissions and the tier
+  op; F2 a part's `wait(key)` (provider) or the control stream's round event (store), enqueued on main before the
+  part's pass; F3 slot-half reuse: a part's `start` is called only after the pass of the part that last used its half
+  of the fixed set (hits / RAM halves alternate; SSD halves alternate) is enqueued — rounds only; stage mode's slots
+  are each used once a call; F4 the moves after the last part's F2 (admissions read staged slots), the moves stream
+  waiting main as today; F5 landing-half reuse: round r + 2's signal follows round r's copies on the control stream
+  (stream order); F6 a readback buffer is rewritten two calls later, after the host waited that call's `tiered`, and
+  no closure keeps a view of it past its call. The loan's ranges are never a copy's destination (D8w's `_in_loan`).
+- **Slots.** Stage mode: unchanged. Rounds: the hits' and RAM's fixed set and the SSD set double — `Lent.fixed` =
+  2q + 2a (from q + a), `rounds_able` asks lend room for 2 × (2q + 2a) = 4q + 4a past the tails (A G-M3: rev 1's
+  "2 × (2q + a)" was wrong), the landing pool 2A + DEPTH·A_ra rows; `Lent`, the loan and `test_reserve.py`'s tiny-GLM
+  cases change together. C's cost: +64 slots a class lent at 1K, ≈ +0.3–0.55 GiB of reads.
+- **Read-ahead below 8K is not in D8g.** Measured (C-m2's probe, §13 step 7): from 512 tokens it read 25% more at 1K
+  (+2.2 GiB, ≈ +0.9 s of drive) — more than the layer-boundary gaps (≈ 0.2–0.4 s at 1K) it would fill.
+- **Plants**, each run under the delayed-producer harness (a sleep on the producer's stream before its work) with
+  its condition shown to occur (A G-m1): `gather_part_unwaited` (F2 dropped; ≥ 2 parts a half), `round_half_reused_early`
+  (F3 dropped: a part started over its half before the previous user's pass), `ssd_half_reused_early` (the SSD
+  halves, ≥ 3 SSD rounds), `landing_half_reused_early` (F5: round r + 2 signalled before round r's copies),
+  `readahead_slot_reused` (stage mode across calls: a read-ahead hit's slot copied over before its part's pass — C m3),
+  `moves_before_gathers` (F4; admissions in a rounds step), `readback_parity_stale` (a call's copies from the other
+  buffer), `fence_waits_unrecorded` (F3's wait enqueued before its record — A G-M2), `io_word_stale` (a round's
+  copies after a stale DONE: the round's wait on the other half's slot — A G-M1), `cuda_event_on_generic` (F2 as a
+  CUDA-typed event).
+- **Exactness.** Copies and placement only: the exclusive bitwise tests (stage and rounds, F10 and F11) with D8g on,
+  `_bytes_exact`, every slot held once; mode (i)'s and FN's DMA ring locks must advance byte-identical (`runs` is
+  additive; their copies take none).
+- **Predicted** (the bench's cells, mode (ii)): **32K prefill** 12.9 → ≈ 9.0–10.3 s (copy engines at ≈ 45–55 GB/s
+  move the ≈ 75 GB in ≈ 1.5–1.7 s, under ≈ 8.0–8.9 s of compute; the drive, 8.6 s, becomes co-critical — the A/B
+  records its busy share): **0.767 → ≈ 0.97–1.05**. **1K prefill**: the drive's floor is 3.8 s (8.75 GiB at 2.3
+  GiB/s); the layer boundaries keep ≈ 5–10 ms a layer idle (≈ 0.2–0.4 s: no read-ahead below 8K) and the doubled sets
+  lend ≈ 0.3–0.55 GiB more: ≈ 4.0–4.4 s, **0.880 → ≈ 0.89–0.98** (C m1). **4K prefill** (its drive ≈ 95% busy):
+  **1.028 → ≈ 1.06**. Decode unchanged (graphed steps).
+- **Locks.** Exclusive layouts only, every edit gated on `store.exclusive` (mode (ii)'s overrides; no lock); every
+  RAM-holds-all lock, GLM's mode (i) ones and FN's DMA ones included, must advance byte-identical. **No core lines.**
 
-**D8r — Step 7: the post-prompt refill (the coordinator's second lever after the 32K timeline; design, for the panel
-with D8g's fixes, built after D8g).** *Why, measured* (the per-piece probe at mode (ii)'s flags with the borrow options,
+**D8r — Step 7: the post-prompt refill. Pending a measured spike (C's review, the coordinator's call): not designed
+further until it clears.** C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
+drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes
+alone, **1.05** with one ≤ 1 MiB refill read in flight when a demand read arrives, **0.90** with 4 MiB; 4K 1.05 / 1.03 /
+1.00, 1K 1.03 / 1.02 / 0.99 — the 1.20 below used one slope across contexts. Unmodelled: slot competition with the
+decode's admissions, parking's RAM-displaced pieces, the copies' cost. **The spike:** a throttled refill in
+`spikes/glm7/after_record.py` (one ≤ 1 MiB read in flight, paused while any demand round is pending, landing in the
+returned tail slots by copy engine), timed on the bench's 8 × 32K requests beside the I/O worker's demand-latency
+histogram; **a design only if 32K decode gains ≥ 5% and 1K / 4K lose ≤ 1%**. (The first draft follows.)
+*The first draft (2026-10-28, for the panel with D8g's fixes, built after D8g).* *Why, measured* (the per-piece probe at mode (ii)'s flags with the borrow options,
 the bench's 24 requests): a 32K prompt displaces 10.7 GiB of pieces to the SSD (7.5 GiB of them from VRAM: the tail's
 experts and the staging's lends) and its decode then reads **59% of its SSD bytes re-reading them** (184 MB a token
 over tokens 1-32, 0.68 of it displaced; 39 MB over 33-256, 0.53), while the drive is busy only ≈ 40% of decode

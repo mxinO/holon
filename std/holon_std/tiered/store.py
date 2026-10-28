@@ -145,7 +145,7 @@ class TieredStore:
         # bytes whole up to `full` tokens, falling linearly to LOAN_SLACK at `zero` (a large step's fixed costs fit its
         # share: GLM's 32K steps overflowed nothing with no fixed bytes, its 2K ones 768 MiB). `loan_largest`
         # (`moe.loan_largest`): under a whole-expert tail one loan range holds this share of a step's peak (its largest
-        # allocation must fit a range: GLM's residual streams are 0.52 of its peak; 0: no such need)
+        # allocation must fit a range: its share measured on the model, docs/dev/v1-glm.md §13 step 7; 0: no such need)
         loan_margin = LOAN_MARGIN if loan_margin is None else loan_margin
         if loan_margin < 1.0 or not 0.0 <= loan_largest <= 1.0:
             raise ValueError(f"{name}: moe.loan_margin {loan_margin} (at least 1) or moe.loan_largest {loan_largest} "
