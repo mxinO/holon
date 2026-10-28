@@ -19,8 +19,10 @@ this client as each verify window's tokens reach stdout (`--eos-ids 999999`, an 
 request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `holon` = Holon's
 `Engine` in process (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
-`holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
-reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
+`holon serve`'s, with `--auto` the values `holon serve` derives where no flag gives them: the host budget, the GPU
+slack, a tier fitted to the RAM; without it the engine's own defaults), and an arm's `env` its environment. Arms
+are interleaved: every round runs each arm once, in reverse order on odd rounds, each after checking that the GPU is
+idle; peak VRAM is sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
         [--contexts 1024 4096 32768] [--ctx 33792] [--corpus v1|fn] [--spans 0 1 2] [--server <llama-server>] \\
@@ -299,12 +301,20 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
 
     import torch
     from holon.api import SamplingParams
-    from holon.core.cli import engine_config, engine_flags
-    from holon.core.engine import Engine
+    from holon.core.cli import engine_flags, engine_settings, host_budget
+    from holon.core.engine import Engine, EngineConfig
 
+    # `--auto` in an arm's flags: the values `holon serve` derives (docs/dev/v1-auto-config.md P2) where no flag gives
+    # them: the host budget, the GPU slack, a tier fitted to the RAM; otherwise the engine's own defaults.
+    words = shlex.split(a.flags)
     flags = argparse.ArgumentParser()
-    engine_flags(flags)
-    cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
+    engine_flags(flags, given_only=True)
+    given = engine_settings(flags.parse_args([w for w in words if w != "--auto"]))
+    if "--auto" in words:
+        budget = host_budget(given)
+        given = {"clamp_context": True, "memory_fraction": 0.0} | (
+            {"host_memory": budget} if budget is not None else {}) | given
+    cfg = EngineConfig(model=a.model, **{k: v for k, v in given.items() if v != "auto"})   # the context: --ctx
     engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=a.ctx, prefix_cache=False))
     store, seen = engine.ctx.shared_objects.get("std.moe.offload"), {"hits": 0, "routed": 0}
     if store is not None:                   # an offload deployment: the decode rows' routed experts found resident

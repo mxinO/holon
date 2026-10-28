@@ -1,9 +1,9 @@
 # v1 — Auto config: `holon serve <model>` with no hand-set numbers
 
-Status: **design, rev 3 (2026-10-28), being built on this branch.** Rev 2 answered the three-reviewer panel on
-rev 1 (`ba2d2fcb`): A for correctness, B for architecture, C for performance and UX. Rev 3 answers their re-reviews of
-rev 2 (`97fe7271`) and takes the coordinator's shape decisions. Every finding is answered in §11; the owner's
-questions are in §10.
+Status: **rev 3 (2026-10-28), built on this branch; the locks are not propagated yet (§5).** Rev 2 answered the
+three-reviewer panel on rev 1 (`ba2d2fcb`): A for correctness, B for architecture, C for performance and UX. Rev 3
+answers their re-reviews of rev 2 (`97fe7271`) and takes the coordinator's shape decisions. Every finding is answered
+in §11; the owner's questions are in §10.
 
 The owner's request (2026-10-28): "I see in the readme, we require users to manually set the --host-memory? that is
 not good, we should have default config and auto tune, easy to use is important, we might need a auto tune library
@@ -53,11 +53,12 @@ else cites `file:line` at `de1f0d28`.
   - it is unplanned and hidden from the flags (`cli.py:52`);
   - it is set only by `holon serve` (`cli.py:115`) and off in-process (`engine.py:73`).
 
-  It now also lets the state tier take less than its option asks. `memory_fraction=None` gates itself: only `holon
-  serve` passes None. The host budget is taken in the CLI and reaches the engine as a plain `host_memory` int.
-  In-process engines (propagate, tune, the judge, pytest) keep 0 and 0.9 and never read the live RAM.
-  - The bench's automatic arms opt in with `--auto` (A-R2-M2, C-N2). It sets `clamp_context`, leaves
-    `memory_fraction` unset, and takes the host budget the way `holon serve` does.
+  It now also lets the state tier take less than its option asks. `memory_fraction=0` gates itself: only `holon
+  serve` passes 0 (a `float | None` field would change a listed ABI type, a major bump). The host budget is taken in
+  the CLI and reaches the engine as a plain `host_memory` int. In-process engines (propagate, tune, the judge, pytest)
+  keep 0 and 0.9 and never read the live RAM.
+  - The bench's automatic arms opt in with `--auto` (A-R2-M2, C-N2). It sets `clamp_context` and `memory_fraction`
+    0, and takes the host budget the way `holon serve` does.
 - **P3. Host values once per session.** The host budget, the spill and the tier's size are computed once, when the
   server first starts, and kept across crash restarts (B-R7). VRAM is re-measured at every start, because it must fit
   the card as it is then. The `(name, value, why)` start line is a log format, nothing more.
@@ -110,7 +111,7 @@ headroom  = max(6 GiB, 5% of min(MemTotal, the lowest limit))
 - **Opening it.** The file is opened read-only, without `O_CREAT`, when it exists. Under `fs.protected_regular`,
   opening another user's file in sticky `/tmp` with `O_CREAT` fails. Otherwise it is created with `O_EXCL`, then
   `fchmod` 0666 against the umask (B-R4, A-R2).
-- **It never blocks a start.** Any failure to lock is a warning. A wait over 600 s warns and goes on.
+- **It never fails a start.** Any failure to lock is a warning. A wait over 900 s warns and goes on.
 - **Starts on one host queue behind each other**, for as long as a build takes (minutes for Flash-Next's first start).
 - **Docker.** Two containers without memory limits do not share `/tmp`, so they still race. The README notes it.
 
@@ -169,7 +170,7 @@ size-checked. Anything else keeps today's VRAM check (`cli.py:214`).
 
 ### D2. GPU memory: the slack is measured where the cache is short
 
-`memory_fraction: float | None`. `holon serve` passes None unless the flag is given.
+`memory_fraction` 0 derives. `holon serve` passes 0 unless the flag is given.
 
 ```
 budget(0.9) = int(free × 0.9) − peak                                  # today's
@@ -237,9 +238,10 @@ reserve = 1 GiB if the card drives a display or a process outside Holon holds me
   checks:
   - the identity is shaped `^[A-Za-z0-9._+-]+@[0-9a-f]{16}$`;
   - `~/.cache/holon/sources/<identity>/` holds the file.
-- **Making it.** Otherwise the CLI asks installed plugins in name order through an optional hook,
-  `make_source(identity, directory) -> path | None`. None means "not mine"; a `ValueError` carries the reason it is
-  unavailable.
+- **Making it.** The CLI asks the model plugin, then the plugins declaring the lock's options (the same owners as
+  `spill`), through an optional hook, `make_source(identity, directory) -> path | None`. The hook finds the file in
+  `directory` or makes it there. None means "not mine"; a `ValueError` carries the reason it is unavailable. The
+  failure memo is the plugin's.
 - **When it fails, no speculation.** Both lock entries get `max_draft_tokens 0`, with the warning: "<key> unavailable
   (<reason>): speculation off". The reason comes from the plugin, which states the cost: ≈ 30% slower decode on
   Qwen3.8-Flash-Next, *est.* (C-N5).
@@ -268,7 +270,7 @@ Unchanged from rev 2:
 ### D6. The auto-tune seam
 
 **The seam is two things the code has after this design:**
-- (a) an unset or `auto` value means "derive": `--max-model-len auto`, `memory_fraction=None`, and the CLI's host
+- (a) an unset or `auto` value means "derive": `--max-model-len auto`, `memory_fraction=0`, and the CLI's host
   budget;
 - (b) `serve_history`'s layering of defaults, lock and flags, where a per-machine record would slot in between the
   lock and the flags.
@@ -284,16 +286,24 @@ Unchanged from rev 2:
 
 ## 4. Core impact (invariant 5; `check_core_loc.py`: 5019 / 6000 before)
 
-| Change | Where | Code lines (*est.*) |
+As built, `check_core_loc.py` counts **+218 → 5237 / 6000**, against rev 3's estimate of ≈ 115:
+
+| Change | Where | Code lines |
 |---|---|---|
-| `host_memory()` (meminfo + cgroup v2), `pin_lock()`, `gpu_shared()`, overshoot in `peak_memory` | `platform` | 40 |
-| `memory_fraction: float \| None`, `__post_init__`, `TierCtx.host_left`, the in-process pin lock, the start line | `engine.py` | 12 |
-| the slack rule with the fill-pool test | `executor.py` | 8 |
-| the budget; the `flock` until ready; `admit`; the history `[defaults?, lock + spill, lock]` with the spill hooks; the lock sources with the fallback; the refusal's guidance; the size guard | `cli.py` | 40 |
-| memory-only entries, `admit`, each failure printed | `supervisor.py` | 8 |
-| `host_bytes` in the ready report | `plans.py` | 1 |
-| `OutOfUnits` exported; `Spills`, `MakesSources`; `TierCtx.host_left` | `holon.api` | 6 |
-| **total** | | **≈ 115** |
+| `host_ram()` (meminfo + cgroup v2), `host_headroom()`, `pin_lock()` with its bounded wait, `gpu_shared()`, the overshoot in `peak_memory` | `platform` | 64 |
+| `memory_fraction` 0, `TierCtx.host_left`, the in-process pin lock (an `ExitStack` around `_build`, so a failed build releases it), the GPU start line | `engine.py` | 14 |
+| the slack rule with the fill-pool test | `executor.py` | 16 |
+| the budget; the `flock` until ready; `admit`; the history `[defaults?, lock + spill, lock]`; `fit_lock` (sources, spills, notes); `source_file`; the refusal's four hints and the same-repository search; `checkpoint_bytes`; the size guard | `cli.py` | 100 |
+| memory-only entries with their notes, `admit`, each failure printed | `supervisor.py` | 13 |
+| `host_bytes` in the ready report and the ledger | `plans.py`, `memory.py` | 2 |
+| `OutOfUnits`; `Spills`, `MakesSources`; `TierCtx.host_left` | `holon.api` | 6 |
+
+The estimate left out the coordinator's later asks:
+- the refusal's hints and the same-repository search (≈ 22);
+- restart admission and the memory-only spill entry (≈ 20);
+- the pin lock's open sequence and bounded wait (≈ 20);
+- the shared-GPU test (≈ 13);
+- the cgroup reader (≈ 20).
 
 - The ABI gains only additions, so the bump is minor (1.5 → 1.6).
 - `nvidia-ml-py` becomes core's fifth dependency (B-R1).
@@ -435,7 +445,7 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 | A-R2 the tier's `except Exception` | **Fixed:** narrowed to `OutOfUnits`, re-raised as `OutOfUnits` |
 | A-R2 the speculation-off fallback on both entries | **Fixed** (D5) |
 | A-R2 / C-N1 "shared" counts Holon's own processes; PID namespaces; arm64 | **Fixed** (D2): own PID and parent excluded, only visible PIDs, no NVML → headless with a log line; §9.1 asserts `headless` |
-| B-R1 core lines | **Taken:** ≈ 115 (§4); `nvidia-ml-py` named |
+| B-R1 core lines | **Taken in shape;** as built +218 with the later asks (§4); `nvidia-ml-py` named |
 | B-R2 cgroup v2 only | **Taken:** v1 logs and falls back to `MemAvailable` |
 | B-R3 storage in the plugin; offer unless `hdd` / `network` | **Taken** (D1 step 2) |
 | B-R4 reading and `flock` in the CLI | **Taken:** no IPC carry; the budget is a plain int in every entry |

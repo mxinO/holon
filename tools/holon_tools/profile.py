@@ -6,6 +6,7 @@ checkpoint's stem): the `moe.placement.profile` option's value."""
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import pathlib
 
@@ -34,6 +35,21 @@ def profile(config: EngineConfig, prompts: list[list[int]], max_tokens: int) -> 
 def default_name(checkpoint: pathlib.Path) -> str:
     """`<stem>.profile.json`: two files' profiles in one directory (a hub cache's blobs) do not share a name."""
     return f"{checkpoint.stem}.profile.json"
+
+
+def ship(path: pathlib.Path) -> pathlib.Path:
+    """Import the profile at `path` into std's shipped profiles (`holon_std.tiered.store.PROFILES`), named by the
+    checkpoint it was counted on: the same bytes, after checking it is one."""
+    from holon_std.tiered.store import PROFILES
+
+    data = json.loads(path.read_text())
+    if not data.get("checkpoint") or not all(isinstance(r, list) for r in data.get("layers", {}).values()):
+        raise SystemExit(f"{path}: not a routing profile (`checkpoint` and `layers`)")
+    key = hashlib.sha256(json.dumps(sorted(data["checkpoint"])).encode()).hexdigest()[:16]
+    out = PROFILES / f"{key}-{path.name}"
+    PROFILES.mkdir(exist_ok=True)
+    out.write_bytes(path.read_bytes())
+    return out
 
 
 def write(directory: pathlib.Path, name: str, counts: dict) -> pathlib.Path:

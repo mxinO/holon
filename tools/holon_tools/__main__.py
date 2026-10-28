@@ -32,7 +32,7 @@ import torch
 from holon.api import Lock, parse_versioned
 from holon.core import plans, platform
 from holon.core.assembly import resolve_model
-from holon.core.cli import engine_config, engine_flags
+from holon.core.cli import engine_config, engine_flags, engine_settings, layered
 from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import PluginSet, discover
 from holon_judge.golden import resolve_model as checkpoint_dir
@@ -185,9 +185,18 @@ def _tune(a: argparse.Namespace) -> int:
 
 
 def _profile(a: argparse.Namespace) -> int:
-    model = checkpoint_dir(a.model)
-    counts, directory = profile.profile(engine_config(str(model), a),
-                                        [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
+    if a.ship:
+        print(f"shipped {profile.ship(pathlib.Path(a.model))}")
+        return 0
+    model = str(checkpoint_dir(a.model))
+    flags = {k: v for k, v in engine_settings(a).items() if k != "max_model_len" or v != "auto"}
+    found = None if a.no_lock else plans.nearest_class(
+        a.plans, plans.history_id(a.plans, resolve_model(PluginSet(discover()), EngineConfig(model))[0].identity()),
+        platform.fingerprint(torch.device(flags.get("device", "cuda"))))
+    if found is not None:
+        print(f"from {found[2]}, under the flags given")
+    config = EngineConfig(model=model, **layered(plans.lock_overrides(found[0]) if found else {}, flags))
+    counts, directory = profile.profile(config, [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
     name = a.name or profile.default_name(pathlib.Path(model))
     print(f"wrote {profile.write(directory, name, counts)}: moe.placement.profile={name}")
     return 0
@@ -240,7 +249,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set whose generations are counted")
     f.add_argument("--max-tokens", type=int, default=64, help="greedy tokens generated per prompt")
     f.add_argument("--name", help="the profile's file name, beside the checkpoint (default: <stem>.profile.json)")
-    engine_flags(f)
+    f.add_argument("--plans", default="plans", help="the lock histories: the engine settings start from the model's "
+                                                     "lock for this card (or the nearest class's)")
+    f.add_argument("--no-lock", action="store_true", help="the engine flags alone")
+    f.add_argument("--ship", action="store_true", help="<model> is a profile file: import it into std's shipped "
+                                                       "profiles, which `holon serve` seeds from without one beside "
+                                                       "the checkpoint (docs/dev/v1-auto-config.md D4)")
+    engine_flags(f, given_only=True)
     f.set_defaults(run=_profile)
 
     a = ap.parse_args(argv)
