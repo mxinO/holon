@@ -41,8 +41,8 @@ BUFFERS = 2                                   # the ring's halves: layer l strea
 ROUNDS = 4                                    # `lend` calls of a ring step, 1…ROUNDS (one suffices for staging)
 SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
 ROUND_SLOTS = 32                              # D8s: a round's RAM (and read-ahead) slots a class
-STAGE_PARTS = 3                               # D8g: a stage call's front parts (each a pass more: its quantize; at 32K
-#                                               a part of a rounds_q took ≈ 0.9 ms of compute, docs/dev/v1-glm.md D8g)
+STAGE_PARTS = 6                               # D8g: a stage call's front parts (the 32K sweep with sparse parts, RTX
+#                                               5090: 1 11.70 s, 2 11.28, 3 11.21-11.29, 6 11.07, 12 11.11; D8g)
 PSEUDO = -(1 << 20)                           # D8s: a rounds step's stage entry i is PSEUDO − i until its part's slot
 
 

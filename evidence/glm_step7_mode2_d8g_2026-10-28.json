@@ -1,0 +1,162 @@
+{
+ "date": "2026-10-28",
+ "doc": "docs/dev/v1-glm.md \u00a713 (step 7: the capped mode (ii) table with D8g)",
+ "card": "RTX 5090 desktop, the job step capped at 64 GiB (cgroup v2, enforced), the hygiene wrap",
+ "config": {
+  "holon": "336445be (D8g's first build: one stage front part, no sparse parts, no D8h) at the borrow flags (moe.loan_margin 1.12, moe.loan_taper 8192,32768, moe.loan_largest 0.55); arms moe.copy_beside off and on",
+  "maya": "default and checkpoints-off (ckpt0) arms, 50 GB RAM tier",
+  "workload": "D11: a warm-up round, then 3 rounds of 8 x 1K, 8 x 4K, 8 x 32K prompts, 256 tokens each",
+  "reference": "Maya's default arm; at 32K the faster of its two",
+  "ratio": "per round, Holon's median over a cell's 8 requests over the reference's; the median of the 3 rounds"
+ },
+ "ratio_to_maya": {
+  "holon_mode2_d8g_off": {
+   "prefill": {
+    "1k": 0.899,
+    "4k": 1.032,
+    "32k": 0.771
+   },
+   "decode": {
+    "1k": 0.961,
+    "4k": 0.918,
+    "32k": 0.782
+   }
+  },
+  "holon_mode2_d8g_on": {
+   "prefill": {
+    "1k": 0.98,
+    "4k": 1.06,
+    "32k": 0.85
+   },
+   "decode": {
+    "1k": 0.963,
+    "4k": 0.918,
+    "32k": 0.786
+   }
+  }
+ },
+ "per_round": {
+  "holon_mode2_d8g_off": {
+   "prefill": {
+    "1k": [
+     0.899,
+     0.902,
+     0.881
+    ],
+    "4k": [
+     1.039,
+     1.032,
+     1.021
+    ],
+    "32k": [
+     0.771,
+     0.779,
+     0.752
+    ]
+   },
+   "decode": {
+    "1k": [
+     0.964,
+     0.961,
+     0.961
+    ],
+    "4k": [
+     0.853,
+     0.919,
+     0.918
+    ],
+    "32k": [
+     0.799,
+     0.772,
+     0.782
+    ]
+   }
+  },
+  "holon_mode2_d8g_on": {
+   "prefill": {
+    "1k": [
+     0.98,
+     0.981,
+     0.96
+    ],
+    "4k": [
+     1.067,
+     1.06,
+     1.057
+    ],
+    "32k": [
+     0.845,
+     0.85,
+     0.85
+    ]
+   },
+   "decode": {
+    "1k": [
+     0.968,
+     0.963,
+     0.956
+    ],
+    "4k": [
+     0.856,
+     0.918,
+     0.92
+    ],
+    "32k": [
+     0.801,
+     0.769,
+     0.786
+    ]
+   }
+  }
+ },
+ "tok_s_median": {
+  "maya_default_64g": {
+   "prefill_tok_s": {
+    "1k": 262.9,
+    "4k": 759.8,
+    "32k": 2433.4
+   },
+   "decode_tok_s": {
+    "1k": 23.8,
+    "4k": 21.2,
+    "32k": 21.0
+   }
+  },
+  "maya_ckpt0_64g": {
+   "prefill_tok_s": {
+    "1k": 266.9,
+    "4k": 757.5,
+    "32k": 3288.0
+   },
+   "decode_tok_s": {
+    "1k": 23.4,
+    "4k": 22.1,
+    "32k": 21.1
+   }
+  },
+  "holon_mode2_d8g_off": {
+   "prefill_tok_s": {
+    "1k": 236.5,
+    "4k": 783.6,
+    "32k": 2535.1
+   },
+   "decode_tok_s": {
+    "1k": 22.9,
+    "4k": 19.4,
+    "32k": 16.8
+   }
+  },
+  "holon_mode2_d8g_on": {
+   "prefill_tok_s": {
+    "1k": 257.2,
+    "4k": 805.0,
+    "32k": 2784.6
+   },
+   "decode_tok_s": {
+    "1k": 23.0,
+    "4k": 19.4,
+    "32k": 16.8
+   }
+  }
+ }
+}
