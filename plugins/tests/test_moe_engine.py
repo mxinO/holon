@@ -1229,8 +1229,10 @@ def test_a_loan_overflow_is_counted_and_said_once(gpu_moe, capsys):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache, kept", [("*=0.7", "own tail"), ("*=0.5", "reserved")])
+@pytest.mark.parametrize("cache, kept", [("*=0.72", "own tail"), ("*=0.5", "reserved")])
 def test_a_loan_the_layout_cannot_lend_stays_reserved(gpu_moe, capsys, cache, kept):
+    # (a cache of 23 a class keeps its own tail at tails of 14-15 slots, this loan's 14: one slot of room for a peak
+    # the profile measures larger in a long-running process; 22 a class, at 13-14, ran out at 15 in the full suite)
     """`moe.lend_peak` where the layout cannot lend (decided at build, never refused at a launch): a cache too small to
     lend a prompt step's staging keeps the loan in its own tail (the pool's last bytes, the cache that much smaller),
     each large step's activations allocated at its end; a tail class too small to hold the loan beside a pass's

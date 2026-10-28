@@ -1935,24 +1935,39 @@ def pending_victims(stamped: bool = True, ns: int = 20_000_000) -> Iterator[coll
 @contextlib.contextmanager
 def parking_late(waited: bool = True, ns: int = 20_000_000) -> Iterator[collections.Counter]:
     """Step 1's parking fence (C S1-M2) under a forced delay: each step's parking copies (lent slots into RAM units, on
-    the store's copy stream) start after a sleep; with `waited` the step's first resolve waits for them as built,
-    without (`parking_unwaited`) it does not, so the step's staging overwrites a lent slot before its copy read it.
+    the store's copy stream) start after a sleep and the step's first resolve waits for them as built; without
+    `waited` (`parking_unwaited`) nothing waits for them, and they run after the step's last layer — its staging has
+    overwritten the lent slots before the copies read them (deferred, not slept: a sleep the main stream outlasted
+    let them read the slots intact, the plant passing in a long suite run).
     Yields its counts: `delayed` parkings."""
     from holon_std.tiered import store as tiered
 
-    copy, wait, fired = tiered.TieredStore._copy_parked, tiered.TieredStore.wait_parked, collections.Counter()
+    copy, wait, done = tiered.TieredStore._copy_parked, tiered.TieredStore.wait_parked, tiered.TieredStore.layer_done
+    fired, deferred = collections.Counter(), []
 
     def late(self, *a, **kw):
         if a[1].is_cuda:
+            fired["delayed"] += 1
+            if not waited:
+                deferred.append((a, kw))
+                return None
             with self.fetch_stream():
                 torch.cuda._sleep(ns)
-            fired["delayed"] += 1
         return copy(self, *a, **kw)
 
     def unwaited(self):
         self._parked = None
+
+    def last(self, g):
+        done(self, g)
+        if deferred and g == len(self._order) - 1:          # the step's staging all enqueued: the copies after it
+            for a, kw in deferred:
+                copy(self, *a, **kw)
+            deferred.clear()
+            self._parked = None
     with mock.patch.object(tiered.TieredStore, "_copy_parked", late), \
-            mock.patch.object(tiered.TieredStore, "wait_parked", wait if waited else unwaited):
+            mock.patch.object(tiered.TieredStore, "wait_parked", wait if waited else unwaited), \
+            mock.patch.object(tiered.TieredStore, "layer_done", last):
         yield fired
     print(f"plant parking-late (waited {waited}) fired: {dict(fired)}", file=sys.stderr)
 
