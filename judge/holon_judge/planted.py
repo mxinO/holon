@@ -2229,20 +2229,36 @@ def round_rows_shared() -> Iterator[collections.Counter]:
 
 @contextlib.contextmanager
 def io_word_stale() -> Iterator[collections.Counter]:
-    """D8g: a round's copies after the other landing half's answer (its `k_wait` on the wrong slot)."""
+    """D8g: a round's wait on its slot's word before the round's request (rounds r ≥ 2: their rows and signal moved
+    after the wait): the wait passes on round r − 2's answer, the copies read the half before round r landed."""
     from holon_std.tiered.resolver import _Beside
 
     fired = collections.Counter()
 
+    def next_round(f):
+        def run(self, r):
+            if r < 2 or r >= self.n_rounds:
+                return f(self, r)
+            self.held = getattr(self, "held", set()) | {r}
+            self.signalled.add(r)
+        return run
+
     def ssd(f):
         def run(self, r):
-            io, slots = self.store.io, self.resolver.io_slots
-            wait = io.wait
+            if r not in getattr(self, "held", ()):
+                return f(self, r)
             fired["rounds"] += 1
-            with mock.patch.object(io, "wait", lambda slot: wait(slots[1 - slots.index(slot)])):
+            io = self.store.io
+            wait = io.wait
+
+            def stale(slot):                     # the wait, then the request it should have followed
+                wait(slot)
+                self.store.round_rows(r, half=r % 2)
+                io.signal(slot)
+            with mock.patch.object(io, "wait", stale):
                 return f(self, r)
         return run
-    with _beside_patched({(_Beside, "ssd"): ssd}, fired):
+    with _beside_patched({(_Beside, "next_round"): next_round, (_Beside, "ssd"): ssd}, fired):
         yield fired
 
 
@@ -2275,6 +2291,7 @@ def readback_unwaited() -> Iterator[collections.Counter]:
     def lists(f):
         def run(self, tiered):
             fired["calls"] += 1
+            self._unread = False
             return {k: v.numpy().copy() for k, v in self._readback.items()}
         return run
     with _beside_patched({(TieredStore, "read_lists"): lists}, fired):

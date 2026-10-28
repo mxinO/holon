@@ -1713,14 +1713,14 @@ def gpu_moe_wide_one(gpu_moe_wide):
 @contextlib.contextmanager
 def _beside_delayed(late: str, ns: int = 10_000_000):
     """D8g's delayed-producer harness: `late` "copies" (each copy's provider stream sleeps first), "producers" (and
-    each SSD request and read-ahead set: the worker sees it late), "worker" (each read-ahead set's signal on a stream
-    of its own after a sleep, its wait after it: the worker reads it late, as a busy one does) or "readers" (main
-    before each part's
-    pass: its slots' readers late, for the fences that guard their reuse)."""
+    each SSD request and read-ahead set: the worker sees it late), "worker" (each eager signal of the I/O worker on a
+    stream of its own after a sleep, a wait on its slot after it: the worker reads late, as a busy one does) or
+    "readers" (main before each part's pass: its slots' readers late, for the fences that guard their reuse)."""
     from holon_std.tiered.resolver import _Beside
     from holon_std.tiered.store import TieredStore
 
     copy, rows, ahead, land = _Beside.copy, TieredStore.round_rows, TieredStore.read_ahead, _Beside.land
+    launch = TieredStore.before_launch
 
     def late_copy(self, inst, *a):
         with torch.cuda.stream(inst.stream):
@@ -1738,35 +1738,32 @@ def _beside_delayed(late: str, ns: int = 10_000_000):
         torch.cuda._sleep(ns)
     side, signalled, patched = torch.cuda.Stream(), {}, []
 
-    def worker_ahead(self, g):                   # (a wait on a slot follows its deferred signal: the word's protocol)
-        io = self.io
-        if not patched:
-            wait = io.wait
+    def late_worker(self, step):                 # (on the engine's I/O worker, once: graphs' signals as they are)
+        io = self.io if self.exclusive else None
+        if io is not None and io not in patched:
+            signal, wait = io.signal, io.wait
 
-            def waiting(slot):
-                if slot in signalled:
+            def deferred(slot):
+                if torch.cuda.is_current_stream_capturing():
+                    return signal(slot)
+                side.wait_stream(torch.cuda.current_stream())
+                with torch.cuda.stream(side):
+                    torch.cuda._sleep(ns)
+                    signal(slot)
+                    signalled[slot] = torch.cuda.Event()
+                    signalled[slot].record()
+
+            def waiting(slot):                   # (a wait follows its slot's deferred signal: the word's protocol)
+                if slot in signalled and not torch.cuda.is_current_stream_capturing():
                     torch.cuda.current_stream().wait_event(signalled.pop(slot))
                 wait(slot)
-            io.wait = waiting
+            io.signal, io.wait = deferred, waiting
             patched.append(io)
-        signal = io.signal
-
-        def deferred(slot):
-            side.wait_stream(torch.cuda.current_stream())
-            with torch.cuda.stream(side):
-                torch.cuda._sleep(ns)
-                signal(slot)
-                signalled[slot] = torch.cuda.Event()
-                signalled[slot].record()
-        io.signal = deferred
-        try:
-            return ahead(self, g)
-        finally:
-            del io.signal
+        return launch(self, step)
     with contextlib.ExitStack() as stack:
-        stack.callback(lambda: [delattr(io, "wait") for io in patched])
+        stack.callback(lambda: [(delattr(io, "signal"), delattr(io, "wait")) for io in patched])
         patches = {"copies": [(_Beside, "copy", late_copy)], "readers": [(_Beside, "land", late_land)],
-                   "worker": [(TieredStore, "read_ahead", worker_ahead)],
+                   "worker": [(TieredStore, "before_launch", late_worker)],
                    "producers": [(_Beside, "copy", late_copy), (TieredStore, "round_rows", late_request(rows)),
                                  (TieredStore, "read_ahead", late_request(ahead))]}[late]
         for cls, name, f in patches:
@@ -1779,7 +1776,7 @@ _BESIDE += [("stage", None, "worker", 1), ("stage", None, "copies", 4)]       # 
 _BESIDE += [("rounds", p, late, 1) for p, late in (
     ("worker_late", "producers"), ("gather_part_unwaited", "copies"), ("round_set_reused_early", "readers"),
     ("ssd_set_reused_early", "readers"), ("fence_waits_unrecorded", "readers"), ("landing_half_reused_early", "copies"),
-    ("round_rows_shared", "producers"), ("io_word_stale", "producers"), ("cuda_event_on_generic", "copies"),
+    ("round_rows_shared", "producers"), ("io_word_stale", "worker"), ("cuda_event_on_generic", "copies"),
     ("readback_unwaited", "producers"))]
 _BESIDE += [("stage", p, late, 1) for p, late in (("readahead_wait_after_tiered", "worker"),
                                                  ("readahead_slot_reused", "copies"))]
@@ -1812,7 +1809,7 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
         fresh = self.parts is None
         parts = load(self)
         if fresh:
-            calls.append((self.rounds, len(self.front), self.n_rounds))
+            calls.append((self.rounds, len(self.front), self.n_rounds, int(self.lists["n_hit"].max())))
         return parts
     below = tiered_store.ROUNDS_BELOW if variant == "rounds" else 0
     with (mock.patch.object(_Beside, "load", spy), mock.patch.object(tiered_store, "ROUNDS_BELOW", below),
@@ -1821,20 +1818,21 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
         engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=seqs, plugin_options=opts)
         store = engine.ctx.shared_objects[KEY]
         store.read_ahead_tokens = 8
-        try:
-            ok = _served(engine, prompts) == want and _bytes_exact(store) == 0
-        except Exception as e:                   # (a plant the store refuses, a wait timed out, lists unread)
-            assert plant not in (None, "worker_late"), e
-            ok = False
+        try:                                     # (each plant fails by its outputs or bytes — not by a wait's timeout
+            same, wrong, failed = _served(engine, prompts) == want, _bytes_exact(store), None     # or a refusal —, but
+        except IndexError as e:                  # readback_unwaited's lists, another call's, may index past a table)
+            same, wrong, failed = False, -1, e
         engine.close()
+    assert failed is None or plant == "readback_unwaited", failed
     if plant in (None, "worker_late"):
-        assert calls and all(r == (variant == "rounds") for r, _, _ in calls), calls
-        fronts, rounds = max(f for _, f, _ in calls), max(n for _, _, n in calls)
-        assert ok and fronts >= (2 if variant == "rounds" else 1) and rounds >= (3 if seqs == 1 else 1), (fronts,
-                                                                                                      rounds)
+        assert calls and all(r == (variant == "rounds") for r, *_ in calls), calls
+        fronts, rounds, hits = (max(c[i] for c in calls) for i in (1, 2, 3))
+        assert same and not wrong, (same, wrong)
+        assert fronts >= (2 if variant == "rounds" else 1) and rounds >= (3 if seqs == 1 else 1), (fronts, rounds)
         assert plant is None or fired["deferred"], fired
+        assert late != "worker" or hits, calls        # (the late worker delayed read-ahead hits)
     else:
-        assert any(fired.values()) and not ok, (plant, fired, ok)
+        assert any(fired.values()) and not (same and not wrong), (plant, fired, same, wrong)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

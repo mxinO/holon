@@ -870,23 +870,31 @@ it).
     2,048 prompt tokens or more: 4K) go through the front parts as the RAM misses do.
   - **One readback buffer, copied out:** the host copies the lists into its own arrays after waiting `tiered` and
     before the next call's readback is enqueued, so F6's parity is moot (its plant `readback_parity_stale` became
-    `readback_unwaited`: the lists taken without the wait).
+    `readback_unwaited`: the lists taken without the wait); `read_back` refuses to run over lists the host never
+    took (A's code review m4). F1 stays a device edge, though the host's wait on `tiered` precedes every control-stream
+    op, so dropping it alone fails nothing (A's `control_untiered` plant passed; not kept).
   - **The landing rows' runs** for the copy-engine copies are the store's (`_runs`, from the descriptors; a test
     asserts them equal to the I/O worker's for every piece of the two-down-class model), passed to
     `expert_prefetch@1`'s `start(..., runs)` (`kernels.expert_io`'s `copy_batch`, a copy per extent).
-  - **F4** (the moves after the last part's wait) holds by construction but has no plant: no call of a D8g step moved
-    anything in the tests (F11 at one sequence, F10 at four: its admissions go to spares), so a plant moving them
-    early could not be shown to occur.
+  - **F4** (the moves after the last part's wait) holds by construction but has no plant (A's code review m2): no
+    call of a D8g step moved anything in any configuration tried — F10 and F11, caches of 0.4-0.75, a tail or the
+    coldest lent, four sequences with decode rows beside the prompts and a decode of 120 tokens first. A lending step
+    leaves no empty slot (`Lent.begin` takes the empty stacks; a tail step releases F10's spares) and lends the
+    coldest residents, so F11's victims are the hottest and no decode miss is strictly hotter; a plant moving the
+    moves early cannot be shown to occur.
   - **The switch:** `moe.copy_beside` (`on`, `stage`, `rounds`, `off`; provisional, the A/B's: a variant it drops goes
     with it). The second landing half costs pinned host memory (A rows a role): three tests' 128 MiB host budgets went
     to 256 MiB.
   - **Plants** (`test_gathers_beside_the_compute_hold_their_fences`, the delayed-producer harness `_beside_delayed`:
     late copies, late requests, a late worker — a read-ahead's signal on a stream of its own after a sleep, its wait
     after it — or late readers; `worker_late` defers round 0's request past round 1's rows): each clean run exact under
-    every delay (rounds: ≥ 2 front parts and ≥ 3 SSD rounds a call; stage: one front part, ≥ 3 rounds; and four
-    sequences, steps with decode rows), and every plant caught where its condition occurred — `gather_part_unwaited`,
+    every delay (rounds: ≥ 2 front parts and ≥ 3 SSD rounds a call; stage: one front part, ≥ 3 rounds; the late
+    worker's with read-ahead hits; and four sequences, steps with decode rows), and every plant caught where its
+    condition occurred, by its outputs or its bytes, never by a wait's timeout or a refusal (A's code review m1;
+    `readback_unwaited`'s stale lists may also index past a table) — `gather_part_unwaited`,
     `round_set_reused_early`, `ssd_set_reused_early`, `fence_waits_unrecorded`, `landing_half_reused_early`,
-    `round_rows_shared`, `io_word_stale`, `cuda_event_on_generic`, `readback_unwaited`,
+    `round_rows_shared`, `io_word_stale` (a round's wait before its own request, on the half's last answer, under the
+    late worker), `cuda_event_on_generic`, `readback_unwaited`,
     `readahead_wait_after_tiered`, `readahead_slot_reused`.
 
 **D8r — Step 7: the post-prompt refill. Pending a measured spike (C's review, the coordinator's call): not designed

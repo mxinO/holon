@@ -456,7 +456,7 @@ class _Beside:
         self.keys = [[] for _ in self.front]
         self.events, self.computed, self.signalled, self.waited = {}, {}, {0}, set()
         control = s.control_stream()
-        control.wait_event(self.tiered)          # F1
+        self.follow(control)
         with control:
             for p in range(len(self.front) if not self.rounds else min(1, len(self.front))):
                 self.start(p)
@@ -472,6 +472,11 @@ class _Beside:
         if not self.parts:
             self.finish()
         return self.parts
+
+    def follow(self, control) -> None:
+        """F1: the control stream follows `tiered` (the tier op, round 0's request, the read-ahead's wait) — a device
+        edge, though the host has waited `tiered` before issuing any control work (`read_lists`)."""
+        control.wait_event(self.tiered)
 
     def start(self, p: int) -> None:
         """Front part p's copies on each class's `parts` instance, after the current stream's work."""

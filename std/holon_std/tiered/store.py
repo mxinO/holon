@@ -173,6 +173,7 @@ class TieredStore:
         self.halves = 1                          # the on-demand landing halves (two under D8g: ping-pong)
         self._beside = False                     # this step's gathers go beside the compute (D8g)
         self._readback: dict[str, torch.Tensor] | None = None
+        self._unread = False                     # a call's lists read back, not yet taken by the host
         self._keys = 0                           # D8g's copy keys, one per start
         self._runs_host: dict[str, np.ndarray] = {}
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
@@ -668,6 +669,7 @@ class TieredStore:
         self.stage.copy_(self.top_k + torch.arange(self.stage.shape[1]).clamp(max=self.stage_slots - 1)
                          .expand(self.roles, -1))
         self._mode, self.lent, self._parts, self._rounds, self._beside = None, None, 1, False, False
+        self._unread = False
         self.limits.copy_(torch.tensor([[c.size for _, c in sorted(self.groups[g].items())] for g in groups]))
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
@@ -742,8 +744,12 @@ class TieredStore:
         (`tiered`); the host takes them after waiting it (`_Beside`), before the next call's copy is enqueued."""
         names = {"fetch": fetch, "n_ram": self.n_ram, "hit": self.hit, "n_hit": self.n_hit, "ssd": self.ssd,
                  "n_ssd": self.n_ssd, "io_rows": self.io_rows}
+        if self._unread:                        # (one buffer: the last call's lists taken first)
+            raise RuntimeError(f"{self.name}: a call's lists read back over the last call's, which the host never took "
+                               "(D8g: each call's parts are known before the next call's tier op)")
         if self._readback is None:
             self._readback = {k: torch.empty(v.shape, dtype=v.dtype, pin_memory=True) for k, v in names.items()}
+        self._unread = True
         for k, v in names.items():
             self._readback[k].copy_(v, non_blocking=True)
         tiered = torch.Event(device=self.ctx.device)
@@ -768,6 +774,7 @@ class TieredStore:
     def read_lists(self, tiered: torch.Event) -> dict[str, np.ndarray]:
         """D8g: the lists `read_back` copied, once `tiered` has passed (the host waits it), as the host's own."""
         tiered.synchronize()
+        self._unread = False
         return {k: v.numpy().copy() for k, v in self._readback.items()}
 
     def copy_key(self) -> int:
