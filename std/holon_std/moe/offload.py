@@ -215,6 +215,24 @@ class Offload(nn.Module):
                                               kinds=kinds)
         return slots
 
+    def gathers_once(self, tokens: int) -> bool:
+        """Docs/dev/v1-glm.md D8h: the layer's misses gathered once for a step of `tokens` rows, not once a pass — an
+        eager staging step whose gathers go beside the compute (D8g's stage mode) of more than one pass, every pass
+        pipelined, its staging able to hold the union (`prefill` ≥ min(items, top_k · tokens), A-m1)."""
+        s = self.store
+        return (not self._aux and s._beside and not s._rounds and tokens > self.pass_tokens(tokens)
+                and s.prefill >= min(s.items, s.top_k * tokens) and self._cpu is None
+                and all(takes_buffers(x.kernel) for x in self._stacks))
+
+    def route_union(self, ids: torch.Tensor, x: torch.Tensor):
+        """`route_pipelined` over every row of the step (`gathers_once`): (slots [R, T, k], part [T, k], landed); where
+        the resolve fetched them at once (not beside the compute), every entry part −1 and no part to land."""
+        self._pending = None
+        out = self._resolver(ids, 0, kinds=self._kinds(len(ids)), parts=2)
+        if len(out) == 3:
+            return out
+        return out[0], torch.full(ids.shape, -1, dtype=torch.int64, device=ids.device), []
+
     def sparse_parts(self) -> bool:
         """A pipelined pass's parts are sparse calls (`ArenaExperts.forward`'s `sparse`): in a step whose gathers go
         beside the compute (docs/dev/v1-glm.md D8g), each part's entries a few of the pass's."""

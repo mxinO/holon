@@ -359,7 +359,7 @@ class MoE(nn.Module):
         return weights, ids, x[:, None]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self._forward(x, None)
+        return self._forward_union(x, None) if self._union(x) else self._forward(x, None)
 
     joins = True                             # add_residual takes a `join` (std.ffn.sum@1's side stream)
 
@@ -368,11 +368,15 @@ class MoE(nn.Module):
         the composition (the ffn unit interface's optional member, std.blocks.prenorm). `join()`, given, runs just
         before `residual` is first read (a residual computed on another stream joins there, std.ffn.sum@1)."""
         if not hasattr(self._combine, "add"):
-            y = self._forward(x, None)
+            y = self._forward_union(x, None) if self._union(x) else self._forward(x, None)
             if join is not None:
                 join()
             return residual + y
-        return self._forward(x, residual, join)
+        return self._forward_union(x, residual, join) if self._union(x) else self._forward(x, residual, join)
+
+    def _union(self, x: torch.Tensor) -> bool:
+        """The store gathers this layer's misses once for the step's passes (docs/dev/v1-glm.md D8h)."""
+        return bool(getattr(self._store, "gathers_once", lambda tokens: False)(x.shape[0]))
 
     def _parts(self, xin, gate_up, down, part, landed, out_h, out_y, scratch) -> torch.Tensor:
         """A pipelined pass: the entries of part −1 (resident pieces, null slots) first, then each part's as its
@@ -443,6 +447,47 @@ class MoE(nn.Module):
                     join = None
                 self._combine.add(y, weights, residual[a:b], out[a:b])
         if join is not None:                          # no pass read the residual (no tokens): joined all the same
+            join()
+        self._store.finish()
+        return out
+
+    def _forward_union(self, x: torch.Tensor, residual: torch.Tensor | None, join=None) -> torch.Tensor:
+        """`_forward` where the store gathers the layer's misses once for the step (docs/dev/v1-glm.md D8h): every
+        pass's routes first, one resolve over all the step's rows (their union of misses, by parts beside the
+        compute), then pass 1 part by part as its parts land and every later pass at once (all landed by then). A
+        later pass's gate/up input is its rows themselves, re-quantized by its call: no pass's prepared input
+        outlives the pass routed after it (the shared q8_1 workspace is the router's last write)."""
+        out, tokens = torch.empty_like(x), x.shape[0]
+        size, full = self._store.pass_tokens(tokens), tokens // CHUNK * CHUNK
+        passes = [(a, min(a + size, full)) for a in range(0, full, size)] + [(full, tokens)] * (full < tokens)
+        routes = []
+        for n, (a, b) in enumerate(passes):
+            xc = x[a:b]
+            step = b - a if (b - a) % CHUNK == 0 and b - a <= self._route_rows else CHUNK
+            rs = [self._route(xc[c:c + step]) for c in range(0, b - a, step)]
+            if len(rs) == 1:
+                weights, ids, xin = rs[0]
+            else:
+                weights, ids = (torch.cat(t) for t in zip(*(r[:2] for r in rs), strict=True))
+                xin = xc[:, None]
+            ids, weights = self._store.transform(ids, weights, a)
+            routes.append((a, b, weights, ids, xin if n == 0 else xc[:, None]))
+        (gate_up, down), part, landed = self._store.route_union(torch.cat([r[3] for r in routes]), x)
+        for n, (a, b, weights, _, xin) in enumerate(routes):
+            out_h, out_y, scratch = self._store.pass_buffers(b - a) or (
+                None, None, pass_scratch((self._gate_up, self._down), b - a, x.device))
+            if n == 0:                                # (every part landed by its end: main waited each)
+                y = self._parts(xin, gate_up[a:b], down[a:b], part[a:b], landed, out_h, out_y, scratch)
+            else:
+                y = self._down(self._gate_up(xin, gate_up[a:b], out_h, scratch), down[a:b], out_y, scratch)
+            if residual is None:
+                self._combine(y, weights, out[a:b])
+            else:
+                if join is not None:
+                    join()
+                    join = None
+                self._combine.add(y, weights, residual[a:b], out[a:b])
+        if join is not None:
             join()
         self._store.finish()
         return out

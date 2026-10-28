@@ -2351,6 +2351,24 @@ def readahead_slot_reused() -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def union_one_pass() -> Iterator[collections.Counter]:
+    """D8h: a layer's one resolve over its first pass's rows only (the later passes' ids −1 there): their misses
+    outside the first pass's are never staged, their entries read what the resolve left them."""
+    from holon_std.moe.offload import Offload
+
+    union, fired = Offload.route_union, collections.Counter()
+
+    def planted(self, ids, x):
+        size = self.pass_tokens(len(ids))
+        if len(ids) > size:
+            fired["layers"] += 1
+            ids = torch.where(torch.arange(len(ids), device=ids.device)[:, None] < size, ids, -1)
+        return union(self, ids, x)
+    with mock.patch.object(Offload, "route_union", planted):
+        yield fired
+
+
+@contextlib.contextmanager
 def spare_lent_outside_tail() -> Iterator[collections.Counter]:
     """D8s (C): a staging step's lending (calls ≥ 1, not the tail's) given a spare's slots — the first lent expert of
     each layer with a spare holds it. Output-invisible (a spare's bytes are its owner's): judged by the count of spare
@@ -3045,7 +3063,7 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "round_rows_shared": round_rows_shared, "io_word_stale": io_word_stale,
     "cuda_event_on_generic": cuda_event_on_generic,
     "readback_unwaited": readback_unwaited, "readahead_wait_after_tiered": readahead_wait_after_tiered,
-    "readahead_slot_reused": readahead_slot_reused,
+    "readahead_slot_reused": readahead_slot_reused, "union_one_pass": union_one_pass,
     # The CPU's share of the misses (F5b; bounded L2 with placement frozen, run-identical with adaptive placement on)
     "cpu-wait-skipped": cpu_wait_skipped, "cpu-gate-up-order": cpu_gate_up_order,
     # QSA's selection (docs/dev/v1-flash-next.md §6.3): L2 on v1-long, and the decode-divergence gate

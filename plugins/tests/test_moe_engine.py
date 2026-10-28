@@ -1,6 +1,7 @@
 """Qwen3-MoE end to end on the CPU (test-only reference kernels) against an independent oracle: a tiny random HF
 `Qwen3MoeForCausalLM`, written as a GGUF with quantized expert stacks, must serve what transformers computes on the
 same (dequantized) weights (docs/dev/m02-moe.md, step 1)."""
+import collections
 import contextlib
 import json
 import os
@@ -1835,22 +1836,141 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
         assert any(fired.values()) and not (same and not wrong), (plant, fired, same, wrong)
 
 
+@pytest.fixture(scope="module")
+def gpu_moe_long(gpu_moe_wide):
+    """`gpu_moe_wide` with prompts of two passes and more (steps of 1,024 rows, passes of 512 on this model's
+    types), the resident store's outputs at one and four sequences."""
+    file, _, _ = gpu_moe_wide
+    gen = torch.Generator().manual_seed(9)
+    prompts = [torch.randint(0, 512, (n,), generator=gen).tolist() for n in (1300, 40, 1100, 7)]
+    long = {"max_step_tokens": 1024, "max_model_len": 2048}
+    want = {}
+    for seqs in (1, 4):
+        engine = _gpu_engine(file, max_seqs=seqs, **long)
+        want[seqs] = _served(engine, prompts)
+        engine.close()
+    return file, prompts, want, long
+
+
+_UNION = [(p, s, None) for p in ("placement.promote@1", "") for s in (1, 4)]
+_UNION += [("placement.promote@1", 1, plant) for plant in ("union_one_pass", "gather_part_unwaited")]
+
+
+@pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
+@pytest.mark.parametrize("policy, seqs, plant", _UNION)
+def test_a_layer_gathers_its_misses_once_for_its_passes(gpu_moe_long, policy, seqs, plant):
+    """D8h (docs/dev/v1-glm.md): a staging step of more than one pass, its gathers beside the compute (D8g's stage
+    mode, here from any size), resolves each layer once over all its rows — one union of misses, one set of parts —,
+    pass 1 computing part by part, the later passes at once; the resident store's outputs and every piece's bytes,
+    under F10 and F11, at one sequence and at four (decode rows beside a prompt of two passes). Planted, the resolve
+    over the first pass's rows only (`union_one_pass`) and the parts unwaited under late copies
+    (`gather_part_unwaited`) each fail on bits."""
+    from holon_judge import planted
+    from holon_std.moe.offload import Offload
+    from holon_std.tiered import store as tiered_store
+    from holon_std.tiered.resolver import _Beside
+
+    file, prompts, want, long = gpu_moe_long
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.1", "moe.placement": policy,
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    union, load, calls = Offload.route_union, _Beside.load, collections.Counter()
+
+    def spy_union(self, ids, x):
+        calls["union"] += 1
+        calls["rows"] = max(calls["rows"], len(ids))
+        return union(self, ids, x)
+
+    def spy_load(self):
+        if self.parts is None:
+            calls["moves"] += int(self.store.n_moves[self.resolver.group % 2].max())   # (a sync: a test's)
+        return load(self)
+    with (mock.patch.object(Offload, "route_union", spy_union), mock.patch.object(_Beside, "load", spy_load),
+          mock.patch.object(tiered_store, "ROUNDS_BELOW", 0),
+          _beside_delayed("copies") if plant else contextlib.nullcontext(),
+          planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired):
+        engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=seqs, plugin_options=opts, **long)
+        store = engine.ctx.shared_objects[KEY]
+        ok = _served(engine, prompts) == want[seqs] and _bytes_exact(store) == 0
+        engine.close()
+    assert calls["union"] and calls["rows"] > 512, calls
+    assert ok == (plant is None) and (plant is None or any(fired.values())), (plant, ok, fired)
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("layout", ["ram", "full_step"])
+def test_a_union_of_a_steps_rows_resolves_as_its_passes_do(gpu_moe_long, layout):
+    """D8h's union outside its gate: `ram` (B's D8h-m2) forces it on a RAM-holds-all layout (a streaming ring and
+    the union resolved at once: every entry part −1) — the resident store's bits; `full_step` (A's D8h-m4) resolves
+    and places one union of a 32,768-row step's 32,768 × k entries under exclusive tiers — the resident store's
+    bits and every piece's bytes."""
+    from holon_std.moe.offload import Offload
+    from holon_std.tiered import store as tiered_store
+
+    file, prompts, want, long = gpu_moe_long
+    rows, union = [], Offload.route_union
+    spy = mock.patch.object(Offload, "route_union", lambda self, ids, x: rows.append(len(ids)) or union(self, ids, x))
+    if layout == "ram":
+        opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ring_tokens": 512}
+        with spy, mock.patch.object(Offload, "gathers_once", lambda self, tokens: tokens > self.pass_tokens(tokens)):
+            engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=1, plugin_options=opts, **long)
+            assert _served(engine, prompts) == want[1]
+            engine.close()
+        assert rows and max(rows) > 512, rows
+        return
+    big = {"max_step_tokens": 32768, "max_model_len": 33792}
+    prompt = [torch.randint(0, 512, (32768,), generator=torch.Generator().manual_seed(4)).tolist()]
+    resident = _gpu_engine(file, max_seqs=1, **big)
+    ref = _served(resident, prompt)
+    resident.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.cache": "*=0.75", "moe.ram": "*=0.1",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    with spy, mock.patch.object(tiered_store, "ROUNDS_BELOW", 0):     # (the coldest lent: a 32K step's loan past
+        #                                                                  this model's tail)
+        engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=1, plugin_options=opts, **big)
+        assert _served(engine, prompt) == ref and _bytes_exact(engine.ctx.shared_objects[KEY]) == 0
+        engine.close()
+    assert max(rows) == 32768, rows
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("passes", ["one", "two"])
+def test_exclusive_tier_steps_fit_the_profiled_reserve(request, passes):
     """Step 1's review C S1-m2 (test_reserve.py's rule under exclusive tiers, docs/dev/v1-glm.md D9): with the loan
     required, each step's peak beyond what was allocated before it is at most the profiled reserve plus the step's
     own activation loan — staged prompt steps of a full width and a tail, and a prompt's chunks beside decode rows (a
-    step with a decode row never reads ahead: docs/dev/v1-glm.md D8f)."""
+    step with a decode row never reads ahead: docs/dev/v1-glm.md D8f); and (`two`, B's D8h-m1) steps of two passes
+    whose layers gather once (D8h: every pass's routes held across the first pass)."""
     from holon.core import platform
+    from holon_std.moe.offload import Offload
+    from holon_std.tiered import store as tiered_store
 
-    file, _, _ = gpu_moe
+    two, unions, union = passes == "two", [], Offload.route_union
+    file, _, _ = request.getfixturevalue("gpu_moe_wide" if two else "gpu_moe")     # (wide: a loan beside 2 passes)
+    long = {"max_step_tokens": 1024, "max_model_len": 2048} if two else {}
+    stack = contextlib.ExitStack()
+    if two:                                          # (D8g's stage mode from any size: steps of two passes gather once)
+        stack.enter_context(mock.patch.object(tiered_store, "ROUNDS_BELOW", 0))
+        stack.enter_context(mock.patch.object(Offload, "route_union",
+                                              lambda self, ids, x: unions.append(len(ids)) or union(self, ids, x)))
     peaks, measure = [], platform.peak_memory
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    with mock.patch.object(platform, "peak_memory", lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
-        engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=opts)
-    store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
+    with stack, mock.patch.object(platform, "peak_memory",
+                                  lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
+        engine = _gpu_engine(file, host_memory=1 << (29 if two else 28), plugin_options=opts, **long)
+        store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
+        _reserve_steps(engine, store, reserve, gen, 1300 if two else 300)
+    assert two == bool(unions) and all(n > 512 for n in unions), unions
+    engine.close()
+
+
+def _reserve_steps(engine, store, reserve, gen, prompt) -> None:
+    """`test_exclusive_tier_steps_fit_the_profiled_reserve`'s steps: two decoding rows, then a prompt of `prompt`
+    tokens beside them; each step's peak within the reserve and its own loan."""
     store.read_ahead_tokens, hooks, ahead = 8, engine.executor._before, []
 
     def launched(step, launch=store.before_launch):  # each step: (a decode row, read ahead) — never both (C S1-m3)
@@ -1859,7 +1979,7 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
         return out
     hooks[hooks.index(store.before_launch)] = launched
     params = SamplingParams(temperature=0.0, max_tokens=8, ignore_eos=True)
-    for n in (40, 40, 300):                          # two decoding rows, then a prompt beside them
+    for n in (40, 40, prompt):                       # two decoding rows, then a prompt beside them
         engine.add(torch.randint(0, 512, (n,), generator=gen).tolist(), params)
         if n == 40:
             engine.step()
@@ -1875,7 +1995,6 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(gpu_moe):
         assert took <= reserve + store._step_loan, (took, reserve, store._step_loan)
     assert store.exclusive and any(loans) and store.borrowed["stage"], (loans, store.borrowed)
     assert (False, True) in ahead and (True, True) not in ahead and (True, False) in ahead, ahead
-    engine.close()
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

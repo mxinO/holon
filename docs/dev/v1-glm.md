@@ -899,8 +899,8 @@ it).
     late worker), `cuda_event_on_generic`, `readback_unwaited`,
     `readahead_wait_after_tiered`, `readahead_slot_reused`.
 
-**D8h — Step 7: a layer's misses gathered once a step, not once a pass (the 32K timeline's lever; design for the
-panel, not built).** *Why, measured* (nsys of one 32K mode (ii) prompt step, RTX 5090, the borrow options; D8g's first
+**D8h — Step 7: a layer's misses gathered once a step, not once a pass (the 32K timeline's lever; cleared by A, B and
+C with their points; built — as built: the last bullet).** *Why, measured* (nsys of one 32K mode (ii) prompt step, RTX 5090, the borrow options; D8g's first
 build, one stage front part): main computes 9.16 s of the 11.78 s window and waits 2.45 s on copies — one wait a call,
 30-37 ms, right after part −1 — and 0.13 s on the host; the copy engines move ≈ 150 GB at ≈ 48 GB/s (PCIe 5 H2D).
 A 32K step runs two passes of 16,384 rows a layer (`ggml_cuda.pass_rows`'s most; 84 calls for 42 layers), and the
@@ -921,9 +921,10 @@ cost as much in per-part passes (each a 16K-row `quantize_mmq_q8_1`, ≈ 0.9 ms;
 - **Routing.** The union is what one resolve over all rows misses: at most the layer's experts (`prefill` = every
   item), which the staging (a pass's worth, `prefill`) holds. The bits are the same: each pass's rows meet the same
   kernels at the same pass size; only the slots' placement changes (D8g's exactness tests, a two-pass step added).
-  Pass 2's routes are computed before pass 1's compute: its `ids` and weights (≈ 1 MB) and, where the router prepares
-  the gate/up input for a whole pass (its `pass_rows` ≥ 16,384), that q8_1 input (≈ 75 MB at hidden 4,096) live across
-  pass 1 — measured by the startup profile, the loan follows. (Else the input is the rows themselves: nothing more.)
+  Pass 2's routes are computed before pass 1's compute: only its `ids` and weights (≈ 1 MB) live across pass 1. Its
+  gate/up input is its rows themselves, re-quantized by its own call (≈ 0.04 s a 32K step), never the shared q8_1
+  workspace, which the router's last write owns (C, A-m2; `route_prepare` prepares only on the mmvq path, so there
+  was no 75 MB held input — and B's D8h-m1, the profile missing it, is moot).
 - **Fences.** D8g's F1-F5 and `computed_ssd` unchanged, per layer instead of per pass (F3b: rounds only, where steps
   have one pass). New: pass 2's call reads slots that pass 1's parts filled — main waited every part (F2) before
   pass 2 is enqueued, in stream order; the moves (F4) after the last part's wait, before pass 2: an admission copies
@@ -942,6 +943,21 @@ cost as much in per-part passes (each a 16K-row `quantize_mmq_q8_1`, ≈ 0.9 ms;
 - **No core lines**: `std.moe.units` (route every pass first; compute the passes over one resolve), the offload store
   and `std.tiered`'s resolver. Only exclusive layouts' staging steps of more than one pass (mode (ii)'s 32K); every
   lock advances byte-identical.
+- **As built.** The gate is the offload unit's predicate `gathers_once(tokens)` (B-M): an exclusive staging step whose
+  gathers go beside the compute (D8g's stage mode), more than one pass, no CPU share, every stack taking D10's buffers,
+  and `prefill` ≥ min(items, top_k · tokens) (A-m1: else misses past the stage list would alias its last slot) — then
+  `std.moe.units`' `_forward_union` runs, `_forward` textually unchanged (its callers choose). `route_union` resolves
+  the step's rows once; where that resolve fetched at once (not beside the compute) every entry is part −1. Tests:
+  the resident store's bits and every piece's bytes under F10 and F11, at one and four sequences (decode rows beside a
+  two-pass prompt), and its plants `union_one_pass` and D8g's `gather_part_unwaited` under late copies, each failing
+  on bits (`test_a_layer_gathers_its_misses_once_for_its_passes`); the union forced on a RAM-holds-all layout (B-m2)
+  and one 32,768-row step's 32,768 × k entries resolved and placed at once (A-m4)
+  (`test_a_union_of_a_steps_rows_resolves_as_its_passes_do`); the profiled reserve over two-pass steps
+  (`test_exclusive_tier_steps_fit_the_profiled_reserve[two]`, B's D8h-m1). **A-m3's moves:** no call of a two-pass
+  step moved anything under F10 or F11, at one sequence or four (as D8g's F4 note: a lending step leaves no empty slot
+  and lends the coldest), so `victim_scope_pass_one` cannot be shown to occur and was not built; the union's scope —
+  every row of the step — is what the resolve sees by construction. Predicted 32K prefill (C): ≈ 9.5-9.9 s, Holon /
+  Maya ≈ 1.0-1.04; after it the next 32K lever is the drive's bytes, not copies.
 
 **D8r — Step 7: the post-prompt refill. Pending a measured spike (C's review, the coordinator's call): not designed
 further until it clears.** C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
