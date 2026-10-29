@@ -49,7 +49,8 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize("sources", ["staging", "ring"])
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
                                            (64, "prefill"), (6, "overflow"), (64, "narrow"), (6, "exclusive"),
-                                           (12, "mixed exclusive")])
+                                           (12, "mixed exclusive"), (6, "exclusive budget"),
+                                           (12, "mixed exclusive budget")])
 def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, kinds):  # noqa: F811
     """Every output and write: slots, the fetch list (staged misses by id, then the promoted into their slots), counts,
     misses, the map, the empty slots left, the state (stamps, clock, spares), the delta log after the records already
@@ -59,15 +60,21 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     from the least recently routed resident; a prefill chunk changes nothing but @1's; the CPU's share (F5b) comes from
     the misses left after promoting. Under exclusive tiers (the policy's `exclusive` flag, docs/dev/v1-glm.md D8a) a
     refilled spare's owner stays mapped and is logged `(group, SPARE, b)`, an owner taking its spare back
-    `(group, OWN, b)`: `moe_tiers@2` places them."""
-    resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E)
+    `(group, OWN, b)`: `moe_tiers@2` places them. With the `budget` fact 1 (docs/dev/v1-glm.md D8t; a third of the
+    experts SSD-only here): the spares' owners, then every SSD miss by first entry, then the one RAM miss used most
+    recently before the call's stamp (two or more with different stamps), within the empty slots and spares."""
+    budget = 1 if "budget" in kinds else None
+    resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E,
+                     **({} if budget is None else {"budget": budget}))
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)
     exclusive = "exclusive" in kinds
-    if kinds in ("decode", "overflow", "narrow", "exclusive"):
+    if kinds in ("decode", "overflow", "narrow", "exclusive", "exclusive budget"):
         case["kinds"][:] = DECODE
     elif kinds == "prefill":
         case["kinds"][:] = PREFILL
+    if budget is not None:                             # SSD-only experts: no host unit in any role
+        case["host"][torch.arange(E) % 3 == 0] = -1
     state, stage = _state(case, steady, tokens), _stage(case, E, ring)
     state["exclusive"][0] = int(exclusive)
     if kinds == "narrow":
@@ -75,7 +82,7 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     plan, jobs = _share(tokens, device, kinds == "mixed")
     want = reference.moe_resolve_promote(case["ids"], case["kinds"], case["residency"], case["host"], case["limits"],
                                          E, state["last"], state["clock"], state["spare"], 3, case["ring"], stage,
-                                         case["empty"], int(case["n_empty"][0]), plan.cpu(), exclusive)
+                                         case["empty"], int(case["n_empty"][0]), plan.cpu(), exclusive, budget=budget)
     overflow = kinds == "overflow" and bool(want["records"])
     capacity = 2 + (len(want["records"]) - 1 if overflow else E)
     delta, n_delta = _log(capacity, 2, device)
@@ -103,6 +110,19 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     assert int(n_delta[0]) == 2 + len(records) and torch.equal(delta[2:2 + len(records)].cpu(), records[:capacity - 2])
     assert int(errors[0]) == (2 if overflow else 0)                       # OVERFLOW
     # the contract's own terms, on the oracle
+    if budget is not None:
+        promoted = [a for _, a, _ in want["records"] if a >= 0]
+        before = {int(o) - 1 for o in state["spare"][:, 0] if o > 0}
+        missing = (case["residency"] < 0).all(-1)
+        ram = [a for a in promoted if (case["host"][a] >= 0).all() and a not in before]
+        assert len(ram) <= budget                                           # one RAM promotion at most
+        routed = set(case["ids"][(case["kinds"] == DECODE)[:, None] & (case["ids"] >= 0)].tolist())
+        cands = [e for e in routed if missing[e] and (case["host"][e] >= 0).all() and e not in before]
+        assert tokens < 12 or len({int(state["last"][e]) for e in cands}) > 1   # (recency decides at 12 tokens)
+        if ram:
+            assert ram[0] == min(cands, key=lambda e: (-int(state["last"][e]), e))
+        ssd = [a for a in promoted if not (case["host"][a] >= 0).all()]
+        assert promoted[:len(ssd)] == ssd or set(promoted) & before          # SSD misses before the RAM one
     decode = kinds != "prefill"
     assert kinds != "narrow" or (want["n_fetch"] > 16).all()
     if not decode:
@@ -125,7 +145,8 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         #                                       the spare it owns)
         held = held if (held >= 0).all() else spare[spare[:, 0] == a + 1][0, 1:]
         for r in range(ROLES):
-            row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == case["host"][a, r]).nonzero()
+            src = int(case["host"][a, r]) if case["host"][a, r] >= 0 else -2 - a       # (SSD-only: −2 − a)
+            row = (want["fetch"][r, 0, :int(want["n_fetch"][r])] == src).nonzero()
             assert want["fetch"][r, 1, row].item() == held[r] if len(row) else want["n_fetch"][r] > len(stage[r])
 
 
@@ -226,7 +247,8 @@ def _routes(engine):
 def _parity(store, trace) -> int | None:
     """The first step whose residency or empty slots differ from the replay oracle's (None: none); and the host mirror
     is the device's map but for the spares' owners, which it maps at their spares' slots."""
-    want = reference.replay(trace["seed"], trace["steps"], store.class_table)
+    want = reference.replay(trace["seed"], trace["steps"], store.class_table,
+                            budget=store.policy.resolve_facts.get("budget"))
     device, host = store.residency.device.cpu().numpy(), store.residency.host.copy()
     for g, rows in enumerate(store.state["spare"].cpu().numpy()):
         for o, *slots in rows[rows[:, 0] > 0]:

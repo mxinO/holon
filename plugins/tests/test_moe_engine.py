@@ -1418,6 +1418,7 @@ def test_a_keep_never_takes_a_unit_whose_demotion_is_pending(gpu_moe):
     RAM's coldest forced onto those experts at every call and the demotions late, the store serves the resident
     store's bits; with the stamps dropped (`keep_into_pending_demotion`) keeps land on such units and it does not."""
     from holon_judge.planted import keep_into_pending_demotion, pending_victims
+    from holon_plugins.placement.promote import plugin as promote
 
     file, prompts, _ = gpu_moe
     params = SamplingParams(temperature=0.0, max_tokens=48, ignore_eos=True)
@@ -1426,8 +1427,8 @@ def test_a_keep_never_takes_a_unit_whose_demotion_is_pending(gpu_moe):
     resident.close()
     opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ring_tokens": 512,
             "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    for plant in (pending_victims, keep_into_pending_demotion):
-        with plant() as fired:
+    for plant in (pending_victims, keep_into_pending_demotion):          # (admitting every miss: the most demotions)
+        with plant() as fired, mock.patch.object(promote, "BUDGET", None):
             engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts, cuda_graphs=False)
             got = engine.generate(prompts, params)
             wrong = _bytes_exact(engine.ctx.shared_objects[KEY])
@@ -1435,6 +1436,54 @@ def test_a_keep_never_takes_a_unit_whose_demotion_is_pending(gpu_moe):
         stamped = plant is pending_victims
         assert fired["forced"] and (fired["keeps_on_pending"] == 0) == stamped, dict(fired)
         assert (wrong == 0) == stamped and (got == want or not stamped), wrong
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("plant", [None, "demotion_before_gather"])
+def test_a_calls_demotions_follow_the_next_calls_gathers(gpu_moe, plant):
+    """D8t (docs/dev/v1-glm.md): under F10 a call's demotions are enqueued after the next call's gathers (no longer
+    under them), its table's `moved` after them; a call of the same layer next (mixed steps of 1,024 rows in passes
+    of 512) enqueues them first, and the step's last call at its join. The store serves the resident store's streams
+    and every piece's bytes. Demotions before the call's own gathers (`demotion_before_gather`: a RAM-sourced
+    admission staged from its victim's bytes) leave wrong bytes. (A same-layer call after one with demotions cannot
+    occur — decode rows never span a policy's passes, D4, and a drafter's sub-steps join at their last layer — so
+    the guard is defensive and has no plant.)"""
+    from holon_judge import planted
+
+    file, prompts, _ = gpu_moe
+    prompts = prompts + [torch.randint(0, 400, (900,), generator=torch.Generator().manual_seed(5)).tolist()]
+    params = SamplingParams(temperature=0.0, max_tokens=24, ignore_eos=True)
+    base = {"max_step_tokens": 1024, "max_model_len": 2048, "chunk_with_decode": 1, "cuda_graphs": False}
+    resident = _gpu_engine(file, **base)
+    want = resident.generate(prompts, params)
+    resident.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "ggml_cuda.pass_rows": 512,
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    with getattr(planted, plant)() if plant else contextlib.nullcontext() as fired:
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=opts, **base)
+        store = engine.ctx.shared_objects[KEY]
+        same, tier_op = [], store.resolvers[0].__class__._tier_op
+
+        def counted(self, ids, kinds, fetch, n):  # a same-layer call (its pending table its own)
+            pending = self.store.pending_demotions
+            same.append(pending is not None and pending[0] == self.group)
+            return tier_op(self, ids, kinds, fetch, n)
+        rids = {engine.add(p, params): i for i, p in enumerate(prompts)}
+        got, wrong, seen = [[] for _ in rids], 0, 0
+        with mock.patch.object(store.resolvers[0].__class__, "_tier_op", counted) if plant is None else \
+                contextlib.nullcontext():
+            while engine.has_work():
+                for d in engine.step():
+                    got[rids[d.rid]] += d.token_ids
+                if plant and sum(fired.values()) > seen:     # the bytes right after a planted step (before a later
+                    seen = sum(fired.values())                # eviction hides them)
+                    wrong += _bytes_exact(store)
+        wrong += _bytes_exact(store)
+        engine.close()
+    if plant is None:
+        assert got == want and wrong == 0 and any(same), (wrong, sum(same))
+    else:
+        assert seen and wrong, (plant, dict(fired))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

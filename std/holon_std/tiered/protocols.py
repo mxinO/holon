@@ -25,6 +25,7 @@ class PlacementPolicy(Protocol):
     """Built with the store's group shape (`items`, `roles`: keyword arguments after the Ref's own)."""
 
     resolve_variant: str | None   # the resolve contract its device state needs; None: `moe_resolve@1`
+    resolve_facts: dict           # (optional) facts its resolve contract takes beyond the store's (F10's `budget`)
     device_owned: bool            # the device's resolver owns the whole cache: the host seeds it, never edits it
     heat: str | None              # (optional) the device state an exclusive RAM tier ranks experts by (D10: "hotter")
     exclusive_flag: str | None    # (optional) a device state [1] int32 the store sets to 1 under exclusive tiers: its

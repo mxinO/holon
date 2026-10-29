@@ -29,6 +29,7 @@ class DeviceResolver:
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
         site = f"std.tiered[{store.name}]"
         op = store.policy.resolve_variant or RESOLVE
+        facts |= getattr(store.policy, "resolve_facts", {})       # its contract's own facts (F10's `budget`: D8t)
         self.resolve = ctx.select_kernel(op, site=site, **facts).impl(ctx, **facts)
         self._fetch = []
         for c in classes:
@@ -171,9 +172,12 @@ class DeviceResolver:
         return finish
 
     def _tier_op(self, ids: torch.Tensor, kinds: torch.Tensor, fetch: torch.Tensor, n: torch.Tensor) -> None:
-        """`moe_tiers@2` on the call (the last calls' moves fenced first where they run beside it)."""
+        """`moe_tiers@2` on the call (the last calls' moves fenced first where they run beside it; a deferred call's
+        demotions in this call's table enqueued first: a same-group call next, D8t A's M1)."""
         store, g = self.store, self.group
         moves, n_moves = store.moves[g % 2], store.n_moves[g % 2]
+        if store.pending_demotions is not None and store.pending_demotions[0] % 2 == g % 2:
+            store.flush_demotions()
         if store.moves_async:                    # the last call's admissions read the staging slots this one fills;
             main = torch.accelerator.current_stream(ids.device)          # the call before it, this table (`moves`)
             for key, event in (("admitted", store.admitted), (g % 2, store.moved[g % 2])):
@@ -187,8 +191,10 @@ class DeviceResolver:
 
     def _moves(self, ids: torch.Tensor) -> None:
         """The call's demotions and admitted moves, after its gathers: on the main stream, or beside it on the store's
-        moves stream (admissions first) under a policy with spares."""
+        moves stream (admissions first) under a policy with spares — its demotions deferred past the next call's
+        gathers (docs/dev/v1-glm.md D8t: they no longer run under them), the last call's enqueued now."""
         store, g = self.store, self.group
+        store.flush_demotions()                  # the last call's demotions, after this call's gathers
         moves, n_moves = store.moves[g % 2], store.n_moves[g % 2]
         moving = zip(self.classes, self._fetch, strict=True)
         if not store.moves_async:
@@ -205,10 +211,7 @@ class DeviceResolver:
                 gather(moves[r, 2:4], n_moves[r, 1:2], c.slots(), c.slots(), **beside[r])
             store.admitted.record()              # (the current stream: this one)
             store.recorded.add("admitted")
-            for r, (c, gather) in enumerate(moving):
-                gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units(), **beside[r])
-            store.moved[g % 2].record()
-            store.recorded.add(g % 2)
+        store.pending_demotions = (g, moving, beside)
 
     def _rounds(self, ids: torch.Tensor, kinds: torch.Tensor, slots: torch.Tensor, fetch: torch.Tensor,
                 n: torch.Tensor):

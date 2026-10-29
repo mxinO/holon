@@ -177,6 +177,8 @@ class TieredStore:
         self._keys = 0                           # D8g's copy keys, one per start
         self._runs_host: dict[str, np.ndarray] = {}
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
+        self.pending_demotions = None                   # a call's demotions not yet enqueued (D8t): (group, its
+        #                                                 classes' gathers, their keywords): the next call enqueues them
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
@@ -1142,8 +1144,24 @@ class TieredStore:
         """Layer g's ring and stage tables for the step (at its first pass)."""
         return self.lent.sources(g) if self.lent is not None else (self.ring[g], self.stage)
 
+    def flush_demotions(self) -> None:
+        """The deferred call's demotions (D8t) on the moves stream after the work enqueued so far on the current one,
+        its table's `moved` recorded after them (the call two on waits it before its tier op rewrites the table)."""
+        if self.pending_demotions is None:
+            return
+        g, moving, beside = self.pending_demotions
+        self.pending_demotions = None
+        moves, n_moves, stream = self.moves[g % 2], self.n_moves[g % 2], self.moves_stream()
+        stream.wait_stream(torch.accelerator.current_stream(self.ctx.device))
+        with stream:
+            for r, (c, gather) in enumerate(moving):
+                gather(moves[r, 0:2], n_moves[r, 0:1], c.slots(), c.units(), **beside[r])
+            self.moved[g % 2].record()
+        self.recorded.add(g % 2)
+
     def layer_done(self, g: int) -> None:
         if self.exclusive and self.moves_async and g == len(self._order) - 1:      # the step's moves joined back
+            self.flush_demotions()               # (the step's last call's, at the join: D8t A's M1)
             torch.accelerator.current_stream(self.ctx.device).wait_stream(self.moves_stream())
         if self._ahead and g + DEPTH < self.borrowing_groups:     # the layer two on: its set, now its readers ran
             self.read_ahead(g + DEPTH)
@@ -1395,6 +1413,9 @@ class TieredStore:
             self._started = False
             return
         self._started = early
+        if self.pending_demotions is not None:  # every call's demotions enqueued by its step's join (D8t)
+            raise RuntimeError(f"{self.name}: a call's demotions outlived its step (none may enter the next one, or "
+                               "a graph's capture)")
         if self.exclusive:
             self.recorded.clear()
         if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go

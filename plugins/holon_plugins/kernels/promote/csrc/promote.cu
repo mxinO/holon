@@ -47,12 +47,14 @@ __device__ inline bool cached(const Layer & L, int e, int roles, int lo) {
 __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, Layer L,
                           int32_t * __restrict__ routed, int32_t * __restrict__ errors, int32_t * __restrict__ delta,
                           int32_t * __restrict__ n_delta, int cap, int group, int32_t * __restrict__ out, int tokens,
-                          int k, int experts, int roles, int staging, const int32_t * __restrict__ exclusive) {
+                          int k, int experts, int roles, int staging, const int32_t * __restrict__ exclusive,
+                          const int32_t * __restrict__ host, int budget) {
     extern __shared__ int32_t shared[];
     int32_t * first = shared;                          // [E]: its first DECODE entry (INT_MAX: none)
     int32_t * live = first + experts;                  // [E]: routed by a live entry
     int32_t * key = live + experts;                    // [E]: a candidate's first entry
     int32_t * order = key + experts;                   // [E]: the candidates, by first entry
+    int32_t * prev = order + experts;                  // [E]: `last` before this call's stamp (the budget's order)
     __shared__ int has_decode, n_cand, from[MAX_SPARES];
     const int tid = threadIdx.x, entries = tokens * k, lo = k + staging;
     for (int e = tid; e < experts; e += blockDim.x) {
@@ -93,6 +95,7 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
         for (int r = 0; r < roles; ++r) {
             missing = missing && L.residency[e * roles + r] < 0;
         }
+        prev[e] = L.last[e];
         if (first[e] != INT_MAX) {
             L.last[e] = now;
         }
@@ -119,7 +122,57 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
         for (int s = 0; s < n_spare; ++s) {
             present += L.spare[s * (1 + roles)] > 0;
         }
-        const int n_prom = min(n_cand, n_empty + present);
+        int n_sel = n_cand;
+        if (budget >= 0) {                             // D8t: the spares' owners, the SSD misses by first entry, then
+            int n = 0;                                 // at most `budget` RAM misses by `last` before the stamp, most
+            int32_t * sel = key;                       // recent first, ties by id (key[] is free: reused as the list)
+            for (int i = 0; i < n_cand; ++i) {
+                for (int x = 0; x < n_spare; ++x) {
+                    if (L.spare[x * (1 + roles)] == order[i] + 1) {
+                        sel[n++] = order[i];
+                    }
+                }
+            }
+            const int owners = n;
+            for (int i = 0; i < n_cand; ++i) {
+                const int e = order[i];
+                bool owner = false, ram = true;
+                for (int x = 0; x < owners; ++x) {
+                    owner = owner || sel[x] == e;
+                }
+                for (int r = 0; r < roles; ++r) {
+                    ram = ram && host[e * roles + r] >= 0;
+                }
+                if (!owner && !ram) {
+                    sel[n++] = e;
+                }
+            }
+            for (int b = 0; b < budget; ++b) {         // the next most recent RAM miss not yet taken
+                int best = -1;
+                for (int i = 0; i < n_cand; ++i) {
+                    const int e = order[i];
+                    bool taken = false, ram = true;
+                    for (int x = 0; x < n; ++x) {
+                        taken = taken || sel[x] == e;
+                    }
+                    for (int r = 0; r < roles; ++r) {
+                        ram = ram && host[e * roles + r] >= 0;
+                    }
+                    if (!taken && ram && (best < 0 || prev[e] > prev[best] || (prev[e] == prev[best] && e < best))) {
+                        best = e;
+                    }
+                }
+                if (best < 0) {
+                    break;
+                }
+                sel[n++] = best;
+            }
+            for (int i = 0; i < n; ++i) {
+                order[i] = sel[i];
+            }
+            n_sel = n;
+        }
+        const int n_prom = min(n_sel, n_empty + present);
         for (int s = 0; s < n_spare; ++s) {
             from[s] = 0;                               // used by an owner (1) or another (2)
         }
@@ -298,7 +351,8 @@ cudaStream_t stream() { return at::cuda::getCurrentCUDAStream().stream(); }
 void promote(const at::Tensor & ids, const at::Tensor & kinds, at::Tensor & residency, const at::Tensor & limits,
              const at::Tensor & empty, at::Tensor & n_empty, at::Tensor & routed, at::Tensor & errors,
              at::Tensor & delta, at::Tensor & n_delta, int64_t group, at::Tensor & last, at::Tensor & clock,
-             at::Tensor & spare, at::Tensor & out, int64_t staging, const at::Tensor & exclusive) {
+             at::Tensor & spare, at::Tensor & out, int64_t staging, const at::Tensor & exclusive,
+             const at::Tensor & host, int64_t budget) {
     const c10::cuda::CUDAGuard guard(ids.device());
     TORCH_CHECK(ids.is_cuda() && ids.dim() == 2 && delta.dim() == 2, "ids [T, k] on CUDA, delta [D, 3]");
     const int64_t tokens = ids.size(0), k = ids.size(1), experts = residency.size(0);
@@ -310,11 +364,13 @@ void promote(const at::Tensor & ids, const at::Tensor & kinds, at::Tensor & resi
     check(n_delta, ids, at::kInt, {1}, "n_delta");
     check(out, ids, at::kInt, {1 + experts}, "out");
     check(exclusive, ids, at::kInt, {1}, "exclusive");
+    check(host, ids, at::kInt, {experts, residency.size(1)}, "host");
     const Layer L = layer(ids, residency, limits, empty, n_empty, last, clock, spare);
-    k_promote<<<1, THREADS, 4 * experts * sizeof(int32_t), stream()>>>(
+    k_promote<<<1, THREADS, 5 * experts * sizeof(int32_t), stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), L, routed.data_ptr<int32_t>(), errors.data_ptr<int32_t>(),
         delta.data_ptr<int32_t>(), n_delta.data_ptr<int32_t>(), int(delta.size(0)), int(group), out.data_ptr<int32_t>(),
-        int(tokens), int(k), int(experts), int(residency.size(1)), int(staging), exclusive.data_ptr<int32_t>());
+        int(tokens), int(k), int(experts), int(residency.size(1)), int(staging), exclusive.data_ptr<int32_t>(),
+        host.data_ptr<int32_t>(), int(budget));
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

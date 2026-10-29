@@ -2068,6 +2068,31 @@ def loan_wait_unrecorded() -> contextlib.AbstractContextManager[collections.Coun
 
 
 @contextlib.contextmanager
+def demotion_before_gather() -> Iterator[collections.Counter]:
+    """D8t (docs/dev/v1-glm.md): each call's demotions enqueued on the main stream right after its tier op — before
+    its gathers, which read a RAM-sourced admission's units the call gives its victim — and never again: the admitted
+    expert is staged from its victim's bytes. Yields its counts: `early` calls."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    tier_op, moves, fired = DeviceResolver._tier_op, DeviceResolver._moves, collections.Counter()
+
+    def early(self, ids, kinds, fetch, n):
+        tier_op(self, ids, kinds, fetch, n)
+        store, g = self.store, self.group
+        if store.moves_async:
+            for r, (c, gather) in enumerate(zip(self.classes, self._fetch, strict=True)):
+                gather(store.moves[g % 2][r, 0:2], store.n_moves[g % 2][r, 0:1], c.slots(), c.units())
+            fired["early"] += 1
+
+    def without(self, ids):
+        moves(self, ids)
+        self.store.pending_demotions = None      # (enqueued already)
+    with mock.patch.object(DeviceResolver, "_tier_op", early), mock.patch.object(DeviceResolver, "_moves", without):
+        yield fired
+    print(f"plant demotion-before-gather fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def parking_unwaited() -> Iterator[collections.Counter]:
     """Step 1's parking copies late and not waited for (`parking_late`)."""
     with parking_late(waited=False) as fired:

@@ -17,12 +17,13 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 OP, RESOLVE = "moe_resolve.promote", "moe_resolve@1"
-SHARED_BYTES = 48 << 10                     # the promotion CTA's four [E] tables, beside its static words
+SHARED_BYTES = 48 << 10                     # the promotion CTA's five [E] tables, beside its static words
 
 
 class Resolve:
-    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
+    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int, budget: int | None = None) -> None:
         self.lib, self.experts, self.top_k, self.staging = extension.load(ctx.fingerprint.sm), experts, top_k, staging
+        self.budget = -1 if budget is None else budget          # (−1: the fact absent, every miss as F10 had it)
         facts = {"experts": experts, "top_k": top_k, "roles": roles, "staging": staging}
         self.resolve = ctx.select_kernel(RESOLVE, site="kernels.promote", **facts).impl(ctx, **facts)
 
@@ -30,7 +31,7 @@ class Resolve:
                  errors, delta, n_delta, group, plan, jobs, last, clock, spare, exclusive):
         out = torch.empty(1 + self.experts, dtype=torch.int32, device=ids.device)   # the promoted, in order
         self.lib.promote(ids, kinds, residency, limits, empty, n_empty, routed, errors, delta, n_delta, group, last,
-                         clock, spare, out, self.staging, exclusive)
+                         clock, spare, out, self.staging, exclusive, host, self.budget)
         slots, fetch, n_fetch, cpu = self.resolve(ids, kinds, residency, host, limits, counts, routed, ring, stage,
                                                   empty, n_empty, misses, errors, delta, n_delta, group, plan, jobs)
         self.lib.settle(out, residency, host, limits, empty, n_empty, fetch, n_fetch, misses, last, clock, spare,
@@ -73,7 +74,7 @@ class Resolve:
 class Plugin:
     def register(self, regs) -> None:
         def supports(f) -> bool:
-            return 4 * f["experts"] * 4 + 64 <= SHARED_BYTES
+            return 5 * f["experts"] * 4 + 64 <= SHARED_BYTES
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.promote", impl=Resolve,
                                         requires=Constraint(sms=frozenset(extension.ARCHS)), supports=supports,
                                         props=frozenset({"graph_safe", "deterministic"}), priority=10))

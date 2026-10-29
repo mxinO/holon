@@ -11,10 +11,14 @@ A call with a routed (not dropped) entry of a `DECODE` row, in this order:
 1. Stamp: the clock advances by one; every expert a `DECODE` entry routes takes it as `last`.
 2. Promote: candidates are experts routed by a `DECODE` row and missing in every role of the map (a ring piece counts
    as missing), in the order of their first `DECODE` entry (token, then rank); the first min(candidates, the layer's
-   empty slots + its spares) are promoted. A promoted owner of a spare takes its own spare back (no record: the host
-   still maps it there); the others, in order, take the layer's empty slots from the top (record `(group, a, −2 − j)`),
-   then the spares no promoted expert owns, in entry order (record `(group, a, o)`, o the spare's owner: a took o's
-   slots). A spare taken is absent.
+   empty slots + its spares) are promoted. With the optional fact `budget` (docs/dev/v1-glm.md D8t; absent: the rule
+   above) the promoted are, in this order and then the first min(that, empty slots + spares) of them: the
+   candidates owning a spare (taking it back costs no copy: never counted), those not in the read host tier — SSD
+   misses under exclusive tiers, every role's `host` unit −1 — by first entry, and at most `budget` of the rest
+   (RAM misses) by their `last` before this call's stamp, most recent first, ties by expert id. A promoted owner of a
+   spare takes its own spare back (no record: the host still maps it there); the others, in order, take the layer's
+   empty slots from the top (record `(group, a, −2 − j)`), then the spares no promoted expert owns, in entry order
+   (record `(group, a, o)`, o the spare's owner: a took o's slots). A spare taken is absent.
 3. Resolve: `moe_resolve@1` over the map after the promotions — a promoted expert is resident, so its entries read
    its new slot; the CPU's share (F5b) is taken from the misses left —; then each promoted expert but an owner is
    fetched straight into its slots, its fetch entries after the call's staged misses (staged misses by expert id, then
@@ -54,7 +58,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
                         limits: torch.Tensor, staging: int, last: torch.Tensor, clock: torch.Tensor,
                         spare: torch.Tensor, group: int, ring: torch.Tensor | None = None,
                         stage: torch.Tensor | None = None, empty: torch.Tensor | None = None, n_empty: int = 0,
-                        plan: torch.Tensor | None = None, exclusive: bool = False) -> dict:
+                        plan: torch.Tensor | None = None, exclusive: bool = False, budget: int | None = None) -> dict:
     """One call: `slots [R, T, k]`, `fetch [R, 2, F]` (−1 past n_fetch), `n_fetch [R]`, `counts [E]` (this call's
     increments), `routed [E]` (the experts it saw routed), `errors` (bits), and the state after it: `residency`,
     `last`, `clock`, `spare`, `n_empty`, the delta `records`. `ring` defaults to none, `stage` to the staging
@@ -94,6 +98,7 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
         assert not held & free and not held & mapped, f"spare {s}'s slots also empty or mapped"
     if decode.any():
         seen[sorted(needed)] |= 2                                       # the victims' scope
+        before_stamp = last.clone()
         clock += 1                                                      # 1. stamp
         last[counts > 0] = clock
         first = {}
@@ -101,8 +106,13 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
             first.setdefault(int(routed[a, j]), a * k + j)
         present = [s for s in range(len(spare)) if int(spare[s, 0]) > 0]   # 2. promote
         cands = sorted((e for e in first if (after[e] < 0).all()), key=first.get)
-        promoted = cands[:n_empty + len(present)]
         owner = {int(spare[s, 0]) - 1: s for s in present}
+        if budget is not None:                                          # D8t: owners, SSD misses, `budget` RAM ones
+            rest = [e for e in cands if e not in owner]
+            ram = [e for e in rest if (host[e] >= 0).all()]
+            cands = [e for e in cands if e in owner] + [e for e in rest if e not in ram] + \
+                sorted(ram, key=lambda e: (-int(before_stamp[e]), e))[:budget]
+        promoted = cands[:n_empty + len(present)]
         used = {owner[a] for a in promoted if a in owner}
         for a in promoted:
             if a in owner:
@@ -222,7 +232,8 @@ def lend(need, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tenso
     return picked
 
 
-def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = None, spares: int = SPARES) -> list[dict]:
+def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = None, spares: int = SPARES,
+           budget: int | None = None) -> list[dict]:
     """The L1 parity oracle: F10's residency [G, E] (whole experts) and empty slots per layer [G] after each step of a
     trace, from the seeded residency. A step holds, per layer, the experts its `DECODE` entries route in the order of
     their first entry (`order`: G lists, empty for a layer without decode rows), and `lends` (None: the step borrowed
@@ -231,7 +242,9 @@ def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = Non
     The M6 replay's `promote_on_fetch` — misses in route order take the spares, the boundary evicts the least recently
     routed, one per spare taken, keeping a resident, none in a complete layer — with the device's terms: the spares set
     up at a layer's first decode step's boundary (M6 set them up at the seed from the profile's coldest), empty slots
-    (taken before other spares), and spares returning to their owners."""
+    (taken before other spares), and spares returning to their owners; with `budget` (the contract's fact, an
+    inclusive layout's misses all in RAM): the spares' owners, then at most `budget` others by their stamp before the
+    step's, most recent first, ties by expert id."""
     res = seed.astype(bool).copy()
     groups, experts = res.shape
     last = np.zeros(res.shape, dtype=np.int32)
@@ -251,10 +264,15 @@ def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = Non
         for g, order in enumerate(step["order"]):
             if not len(order):
                 continue
+            before = last[g].copy()
             clock[g] += 1
             last[g, list(order)] = clock[g]
             present = [s for s, o in enumerate(owners[g]) if o >= 0]
-            promoted = [e for e in order if not res[g, e]][:empty[g] + len(present)]
+            cands = [e for e in order if not res[g, e]]
+            if budget is not None:
+                rest = [e for e in cands if e not in owners[g]]
+                cands = [e for e in cands if e in owners[g]] + sorted(rest, key=lambda e: (-before[e], e))[:budget]
+            promoted = cands[:empty[g] + len(present)]
             used = {owners[g].index(a) for a in promoted if a in owners[g]}
             free = [s for s in present if s not in used]
             for a in promoted:
