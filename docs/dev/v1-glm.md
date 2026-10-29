@@ -1102,6 +1102,25 @@ tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD 
 - **Scope.** Exclusive tiers only (`moe_tiers@2` binds nowhere else; no committed lock runs `placement.promote`: no
   lock moves); no core lines. Lever 1 moves which experts sit in VRAM, never a step's bytes (the exclusive bitwise
   tests against the resident store); the replay's hit rate re-checked on the bench's requests before the table.
+- **As built (A's re-check of rev 2 folded in).**
+  - *Lever 1* (2c49da20): as above; `k_promote` keeps each candidate's pre-stamp `last` in shared memory (A's m2; the
+    oracle test's 12-token case has RAM candidates of distinct stamps); SSD misses first by first entry, then the RAM
+    miss, within the empty slots and spares (m3); the policy reaches its contract through std.tiered's optional
+    `resolve_facts`. The replay oracle carries the budget (the end-to-end parity test runs it); the stamps test runs
+    the admit-all arm (its plant needs every miss's demotion).
+  - *Lever 1b* (2c49da20): a call's demotions are enqueued by the next call after its gathers, `moved` after them;
+    a call whose table is the pending one's enqueues them before its tier op (A's M1 (1): the simpler choice); the
+    step's last call at its join, and a step start refuses any left (M1 (2), so no capture holds one).
+    `demotion_before_gather` (a RAM-sourced admission staged from its victim's bytes) is caught by bytes. **No
+    same-group plant:** a same-layer call after one with demotions cannot occur — decode rows never span a device
+    policy's passes (the store refuses, D4) and a drafter's sub-steps join at their last layer — so a plant there
+    cannot fail; the guard is defensive.
+  - *Lever 2* (fa2ec322): the tier op lists its call's displaceable experts once (heat, index) and each
+    displacement takes the list's coldest by (heat, index), striking it — the oracle's sequential placement exactly,
+    with no K and no fallback (the list holds them all: A's m1 moot), no racing claims (so no `victim_search_racy`
+    to plant); 1,024 threads. Checked against the oracle with the layer's RAM experts equally cold and run to run.
+  - *Not built yet:* `kernels.promote`'s fused promote + resolve + settle (B-M2; ≈ 0.4-0.5 ms of the 0.88 its two
+    launches take), pending the A/B of the three above.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
