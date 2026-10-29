@@ -561,7 +561,7 @@ step 7, `docs/dev/evidence/glm_step7_mode2_d8l_2026-10-29.json`):
 - **Decode** trails, most at 32K: the first 32 tokens after a long prompt re-read experts the prompt displaced, and
   each token carries tier bookkeeping Maya's does not; both are being worked on.
 - **Maya's CPU lane is not its lead:** with it off (`MAYA_GLM_CPU_LANE=0`) Maya decodes at 0.99 / 1.01 / 1.00 of its
-  default; Holon computes every expert on the GPU.
+  default (`docs/dev/evidence/glm_step7_mode2_d8k_2026-10-28.json`); Holon computes every expert on the GPU.
 
 ### Qwen3-30B-A3B offload on the RTX 5080
 
