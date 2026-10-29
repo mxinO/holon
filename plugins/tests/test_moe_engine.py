@@ -1487,6 +1487,53 @@ def test_a_calls_demotions_follow_the_next_calls_gathers(gpu_moe, plant):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("plant", [None, "demotion_table_rewritten"])
+def test_a_layers_next_call_enqueues_its_last_calls_demotions_first(gpu_moe, plant):
+    """D8t (A's M1, m1): a layer called twice in a row with decode rows (a drafter's sub-steps on an auxiliary group;
+    here layer 1's routed experts run twice every decode step, the first result dropped): the first call's
+    promotions refill its spares, their demotions deferred; the second call, of the same move table, enqueues them
+    before its tier op rewrites the table. The streams are the resident store's and every piece's bytes the file's,
+    read right after each step; with that flush dropped (`demotion_table_rewritten`) the first call's demotions copy
+    the second call's list and its victims' RAM units are left stale (RAM with free units: the victims demoted)."""
+    from holon_judge import planted
+
+    file, prompts, _ = gpu_moe
+    params = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
+    resident = _gpu_engine(file, cuda_graphs=False)
+    want = resident.generate(prompts, params)
+    resident.close()
+    opts = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.75",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    with getattr(planted, plant)() if plant else contextlib.nullcontext() as fired:
+        engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=opts, cuda_graphs=False)
+        store, moe = engine.ctx.shared_objects[KEY], engine.executor.model.layers[1].ffn
+        forward, flushed = moe._forward, []
+
+        def twice(x, residual=None, join=None):  # (decode steps: every row a decode row)
+            if x.shape[0] <= len(prompts):
+                forward(x, None, None)
+            return forward(x, residual, join)
+        moe._forward = twice
+        flush = store.flush_demotions
+
+        def counted():
+            flushed.append(store.pending_demotions is not None and store.pending_demotions[0] == 1)
+            return flush()
+        store.flush_demotions = counted
+        rids = {engine.add(p, params): i for i, p in enumerate(prompts)}
+        got, wrong = [[] for _ in rids], 0
+        while engine.has_work():
+            for d in engine.step():
+                got[rids[d.rid]] += d.token_ids
+            wrong += _bytes_exact(store)                     # right after each step (a later eviction hides them)
+        engine.close()
+    if plant is None:
+        assert got == want and wrong == 0 and sum(flushed) > 1, (wrong, sum(flushed))
+    else:
+        assert fired["rewritten"] and wrong, (dict(fired), wrong)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_stores_fence_orders_a_delayed_producer():
     """The fence std's stores use (`torch.Event` on `torch.accelerator`'s streams; scripts/ci/check_events.py): a
     consumer stream waiting on the event of a producer stream that writes late reads the producer's bytes — the

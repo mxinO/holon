@@ -859,6 +859,9 @@ class TieredStore:
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
         self._parked = None                     # no step's parking event outlives it (A's D8l-m2: a failed step's)
+        if self.pending_demotions is not None:  # a step that ended before its map's last layer (an auxiliary group
+            self.flush_demotions()              # skipped): its demotions and their join before this step's work
+            torch.accelerator.current_stream(self.ctx.device).wait_stream(self.moves_stream())   # (D8t, A's m2)
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True

@@ -2093,6 +2093,29 @@ def demotion_before_gather() -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def demotion_table_rewritten() -> Iterator[collections.Counter]:
+    """D8t (A's M1, m1): a call's deferred demotions not enqueued before the next call of its table's parity
+    rewrites the table (consecutive calls of one layer: a drafter's sub-steps, decode rows across a pass): they copy
+    the later call's list, the victims' RAM units left stale. Yields its counts: `rewritten` calls."""
+    from holon_std.tiered.resolver import DeviceResolver
+
+    tier_op, fired = DeviceResolver._tier_op, collections.Counter()
+
+    def unflushed(self, ids, kinds, fetch, n):
+        store, pending = self.store, self.store.pending_demotions
+        if pending is not None and pending[0] % 2 == self.group % 2:
+            store.pending_demotions = None       # (hidden from the call's flush, then back: enqueued after it)
+            tier_op(self, ids, kinds, fetch, n)
+            store.pending_demotions = pending
+            fired["rewritten"] += 1
+            return None
+        return tier_op(self, ids, kinds, fetch, n)
+    with mock.patch.object(DeviceResolver, "_tier_op", unflushed):
+        yield fired
+    print(f"plant demotion-table-rewritten fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def parking_unwaited() -> Iterator[collections.Counter]:
     """Step 1's parking copies late and not waited for (`parking_late`)."""
     with parking_late(waited=False) as fired:

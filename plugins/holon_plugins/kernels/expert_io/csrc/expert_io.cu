@@ -1475,8 +1475,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           pybind11::arg("io"), pybind11::arg("moves"), pybind11::arg("n_moves"), pybind11::arg("ssd"),
           pybind11::arg("n_ssd"), pybind11::arg("n_ram"), pybind11::arg("rows"), pybind11::arg("ahead"),
           pybind11::arg("hit"), pybind11::arg("n_hit"), pybind11::arg("stamp") = pybind11::none(),
-          pybind11::arg("clock"), pybind11::arg("list_heat") = pybind11::none(),
-          pybind11::arg("list_index") = pybind11::none() = pybind11::none());
+          pybind11::arg("clock") = pybind11::none(), pybind11::arg("list_heat") = pybind11::none(),
+          pybind11::arg("list_index") = pybind11::none());
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream (`runs`: "
