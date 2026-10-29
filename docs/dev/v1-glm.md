@@ -1039,43 +1039,69 @@ MB (47.0 → 45.3 ms).
   host on the main stream's queued work (a 0.5 s kernel ahead of it: a 0.56 s call), though its text says no host
   sync — an early start's cost, not a correctness question (open).
 
-**D8t — Step 7: the decode token's tiering overhead (design for the panel, not built; the coordinator's levers
-after the decode timeline).** *Why, measured* (nsys over decode tokens 33-96 of a third 32K prompt, one RTX 5090,
-mode (ii) at 8,192-row passes against mode (i)'s lock, both graphed: GPU kernel ms a token): compute ≈ 14 in both;
-the RAM hits' gathers on the main stream (`k_fetch_roles`, ≈ 595 MB a token, 87 experts) 15.6 against mode (i)'s
-12.8; the SSD's waits (`k_wait`) 17.1 (≈ 5 depth-1 reads a token at 2.96 ms each: Maya's own 5.2 reads and 16.4 ms a
-token); the tier ops 3.3 (`k_tiers` 2.4, `k_settle` 0.5, `k_promote` 0.35, against mode (i)'s `k_resolve` 0.44);
-GPU total 51.0 against 27.2; beside them the copy stream busy 19.0 ms a token (168 `k_fetch` launches: the
+**D8t — Step 7: the decode token's tiering overhead (rev 2 after A, B and C: design, not built; the coordinator's
+levers after the decode timeline).** *Why, measured* (nsys over decode tokens 33-96 of a third 32K prompt, one RTX
+5090, mode (ii) at 8,192-row passes against mode (i)'s lock, both graphed: GPU kernel ms a token): compute ≈ 14 in
+both; the RAM hits' gathers on the main stream (`k_fetch_roles`, ≈ 595 MB a token, 87 experts) 15.6 against mode
+(i)'s 12.8; the SSD's waits (`k_wait`) 17.1 (≈ 5 depth-1 reads a token at 2.96 ms each: Maya's own 5.2 reads and 16.4
+ms a token); the tier ops 3.3 (`k_tiers` 2.4, `k_settle` 0.5, `k_promote` 0.35, against mode (i)'s `k_resolve`
+0.44); GPU total 51.0 against 27.2; beside them the copy stream busy 19.0 ms a token (168 `k_fetch` launches: the
 promotions' demotions). **The host's turnaround is not a lever:** the three event syncs a token are mode (i)'s too,
-and the GPU never idles in either window (span 50.6 ms a token against 51.0 busy; mode (i) 25.9 against 27.2): the
-"≈ 4 ms" compared the steady GPU time with the 1-256 average, whose tokens 1-32 re-read the prompt's displaced pieces
-(D8l, D8k's passes); tokens 33-256 run at 48.5 ms (D8k's probe). Two levers remain.
-- **1. A promotion budget (F10's admissions).** Every steady decode token promotes ≈ 78 experts (532 MiB) into VRAM,
-  all of them that token's misses (F10 promotes on fetch into a layer's 3 spares; each refill demotes the layer's
-  least recent to RAM on the copy stream), against Maya's ≈ 45. Replayed on the 8,192-row recording's decode routes
-  (per layer, VRAM capacity as recorded, tokens 33-): admitting at most one miss a layer a token (the most used so
-  far) keeps the hit rate (1K 0.720 / 0.625 against admit-all's 0.725 / 0.616 on two requests; 32K 0.612 / 0.573
-  against 0.603 / 0.536) with 34-39 promotions a token instead of 92-156 (−60-75% of the bytes); admitting on a second
-  miss within 4 tokens cuts to ≈ 20 but loses up to 0.027 of hit rate at 1K. **Predicted:** the copy stream's 19 ms →
-  ≈ 7-8 ms, the gathers' contention 2.8 → ≈ 1 ms, `k_settle` / `k_promote` and the admissions inside `k_tiers` about
-  halved: ≈ −2.5 ms a token. What remains is scheduled after each layer's gathers (the copy stream waits the layer's
-  gather event before its demotions): ≈ −0.5 ms more. Policy: the budget a resolve-contract parameter of
-  `placement.promote` (an option, `moe.promote_budget`, default today's 3 = unlimited spares), its choice by use count
-  the contract's existing `last` / heat state; no core lines.
-- **2. Fewer, wider tier launches.** `k_tiers` (58 µs a call), `k_promote` (8 µs) and `k_settle` (13 µs) are
-  one-CTA kernels serial on the main stream, 3 a layer; `k_tiers`' cost is its admissions' victim searches (a
-  block-wide reduction over the layer's 288 experts each). Fold settle into the tier op (one launch a layer), and
-  run the victim search a warp per admission over more CTAs. **Predicted:** 3.3 → ≈ 1.0 ms a token (mode (i)'s
-  resolve-only step costs 0.44); with lever 1's fewer admissions, ≈ 0.8.
-- **Together:** steady decode ≈ 48.5 → ≈ 44 ms a token at 32K (≈ +10%), the same absolute gain at 1K and 4K (their
-  steady tokens carry the same tier work: 1K's measured average 45.7 ms against Maya's 42.6). The 32K average over
-  1-256 adds D8l's −1.8 ms and stays above Maya's by tokens 1-32's re-reads.
-- **Scope and checks.** Exclusive tiers only (mode (i)'s inclusive layout runs resolve only); no core lines. Plants
-  where the order changes: `demotion_before_gather` (the copy stream's demotions not waiting the layer's gather event:
-  a gathered staging slot overwritten — the moves' existing bytes check), `settle_folded_early` (the folded settle
-  before the tier op's records: a stale map). Lever 1 moves which experts sit in VRAM, not any bytes a step computes:
-  the resident store's bits as every placement change; the replay's hit rate is checked on the bench's requests
-  before the table.
+and the GPU never idles in either window (span 50.6 ms a token against 51.0 busy; mode (i) 25.9 against 27.2);
+tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD reads by origin).
+- **1. A promotion budget on RAM → VRAM promotions (F10's admissions; C-M1, B-M1, A-m2).**
+  - *Measured:* every steady token promotes ≈ 78 experts (532 MiB), all of them that token's misses (F10 promotes on
+    fetch into a layer's empty slots and 3 spares; each spare's refill demotes the layer's least recent to RAM on the
+    copy stream); Maya counts ≈ 45.
+  - *The rule:* a layer admits every SSD miss as today (exempt: a non-admitted one would be read from the drive
+    again at its next use, ≈ 3 ms), and at most **one RAM miss a token** — the most recently used before this token
+    by the contract's own `last` stamp (no new state), ties by expert id; an owner retaking its own spare (an OWN
+    record, no fetch) does not count. The cap sits in `k_promote` after `last` and `routed` are written (recency and
+    the victims' scope unchanged); a non-admitted RAM miss is gathered as any miss, and the spares' refill refills
+    what the cap let through.
+  - *Where it lives (B-M1):* `placement.promote` passes `budget = 1` as F10's rule through an additive `budget` fact on
+    its own `moe_resolve.promote@1`, given only when set: absent is today's rule (empty slots plus 3 spares — not
+    "3"). No store option; an admit-all arm, where a comparison needs it, is a test-only constructor argument. A
+    measured deviation from Maya's promote-on-fetch, recorded with this replay as its evidence.
+  - *The replay* (three tiers, exclusive, per layer, VRAM and RAM as recorded at decode token 33 of the 8,192-row
+    recording; today's rule replayed reproduces the recording's 72 / 83 / 79 promotions and its hit rates): VRAM hit
+    1K 0.730 → 0.726, 4K 0.681 → 0.680, 32K 0.698 → 0.702; **SSD reads a token unchanged** (4.52 → 4.53, 5.45 → 5.46,
+    7.90 → 7.92); promotions 72 / 83 / 79 → 38 / 42 / 42 a token (MiB 489 / 566 / 540 → 255 / 282 / 287). A use count
+    instead of recency would keep 0.004 more hit rate at 32K; not worth new state.
+  - *Predicted* (C's contention model, item 2's 170 → 203 µs a gather call beside the moves, compute 17.6 → 18.7 ms at
+    equal calls): the copy stream's work about halves, 19 → ≈ 10 ms; the gathers ≈ −1.4 ms, compute ≈ −0.55, promote
+    and settle ≈ −0.2: **≈ −2.1 ms a token**.
+- **1b. The demotions after the next layer's gather (A-M2).** Today a call's demotions already follow its own
+  gathers (`_tiers`' `finish`, then `_moves`); what contends is them running under the *next* layer's gather. Layer
+  g's demotions are enqueued after layer g + 1's gather event is recorded (the enqueue moves into layer g + 1's call),
+  `moved[g % 2]` recorded after them (main's wait at layer g + 2 covers them), at most one call's demotions pending at
+  any tier op (asserted; the stamps' window as today). The hazard is their target RAM units, which a RAM-sourced
+  admission of the same call gathers from: plant `demotion_before_gather` (a demotion before that gather: the
+  admitted expert's staged bytes wrong — the moves' bytes check), made to bite by order. *Predicted* ≈ −0.3 to −0.5
+  ms.
+- **2. The tier ops (A-M1, B-M2, C-m2).**
+  - *Profiled first* (`clock64` per phase, the A5000 on GLM mode (ii)-like flags, cycles a call): the admission records
+    51% (≈ 118k), the keeps and reads 38% (≈ 88k), the freed-units sweep 8% (≈ 19k), the flags 2%. Both large phases
+    are `place()`: each call of it (a SPARE record's victim, a kept SSD read: ≈ 2-4 a call) scans every RAM unit of
+    its classes (≈ 7.5k, a block-wide double-precision argmin through the owner's heat) — ≈ 40-50k cycles each.
+  - *The change, deterministic (A's form):* rank RAM's candidates once a call, per class signature, by (heat, group,
+    id) — a single-block pass keeping the k coldest, k the call's records plus its SSD misses (≤ 8), over all 1,024
+    threads — then the existing sequential pass in record order consumes them through one cursor a signature (the
+    keeps continuing from the same cursors): the oracle's placement exactly, no multi-CTA race. The freed-units sweep
+    walks the call's own freed list. Plant `victim_search_racy` (claims by atomics: must fail the tier oracle);
+    checked against the oracle bitwise on placement with forced ties (equal heats) and more admissions than free
+    units, and run-to-run identity (the locks' snapshot traces pin placement).
+  - *Settle stays in its plugin (B-M2):* `kernels.promote` fuses its own promote, resolve and settle into one launch
+    (as `kernels.expert_io`'s `moe_resolve.lfu@1` admits inside its resolve); `moe_tiers` learns nothing of promote's
+    state; the unfused composite stays the oracle. Plant `settle_folded_early` (the fused settle before its own
+    resolve's records), biting by order.
+  - *Predicted:* `k_tiers` ≈ 58 → ≈ 15 µs a call on the RTX 5090 (one scan instead of ≈ 4), the fused promote
+    ≈ 21 → ≈ 12 µs: **3.3 → ≈ 1.1 ms a token**, ≈ 0.9 with lever 1's fewer records.
+- **Together:** ≈ −4.6 to −5.0 ms a token: 32K steady ≈ 48.5 → ≈ 44, 1K ≈ 45.7 → ≈ 41 (Maya 42.6); the 32K average
+  over 1-256 (55.7 at 8,192, D8l −1.8) ≈ 49 against Maya's 47.3 — tokens 1-32 remain (§13's split).
+- **Scope.** Exclusive tiers only (`moe_tiers@2` binds nowhere else; no committed lock runs `placement.promote`: no
+  lock moves); no core lines. Lever 1 moves which experts sit in VRAM, never a step's bytes (the exclusive bitwise
+  tests against the resident store); the replay's hit rate re-checked on the bench's requests before the table.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
@@ -2057,6 +2083,7 @@ the I/O worker's counters (`io_stats`), nsys over 16 decode tokens after a 1K pr
 | The 32K loan, by allocation site (torch's memory history over one 32K step, RTX 5090) against Maya's | Tail 7.91 GiB at 16,384-row passes (the passes' D10 buffers 3.57, the loan 4.34 = the profile's peak 3.85 × 1.12 + 20 MiB, rounding ≈ 5 MiB), 6.42 at 8,192 (buffers 1.78); the step's measured peak 3.56 GiB (0.78 of the loan is margin and the profile's excess): the mHC residual streams 2,048 MiB (f32), FlashInfer 352, ggml_cuda's scratch 296, the mHC mix 256, DSA 608, its select 64. Maya borrows 6,519 MB at 32K (activations 5,168 sized for a 32K chunk — R f32 as ours, its MoE window of T pairs —, prestage 1,153, staging and scratch 182: `glm_prefill.cu`'s `chunk_bytes`), lends 603 experts a 32K prompt, all into RAM over 546 of its coldest. The tail had been quoted at 10.7 GiB from the borrow era |
 | The capped mode (ii) table with D8k (as before, 5 rounds; bdd86267; `docs/dev/evidence/glm_step7_mode2_d8k_2026-10-28.json`, both reductions per cell) | Against Maya's default arm, the records' median (the mean in parentheses where they differ by more than 2 points): 8,192-row passes prefill 0.965 / 1.063 / **1.302**, decode **0.982 (0.935)** / 0.881 / 0.826; 16,384 1.29 and 0.800 at 32K, 4,096 1.232 and 0.848. Maya's no-checkpoint arm (the D8h table) prefills 32K at 3,239 tok/s: ×0.98. **Maya's CPU lane is not its decode lead** (`MAYA_GLM_CPU_LANE=0`, the owner's check): decode 0.990 / 1.010 / 1.004 of its default, its VRAM hit unchanged (70.5 → 70.3% at 32K), RAM fetches 73.7 → 92.9 a token, disk 5.2 → 4.9 reads; the lane takes 18.5 experts and 7 ms a token when on. Memory at the 64 GiB cap: Maya's RAM tier in the page cache (anon 2.0, file 60.8 GiB), Holon's pinned (anon 54.9, file 9.0 GiB) |
 | The steady decode token's breakdown (nsys over tokens 33-96 of a third 32K prompt, RTX 5090, mode (ii) at 8,192-row passes against the RTX 5090 lock's mode (i), both graphed; GPU ms a token) | Compute ≈ 14 in both; the RAM hits' gathers 15.6 against 12.8 (≈ 595 MB, the copy stream's demotions contending); the SSD waits 17.1 (≈ 5 depth-1 reads at 2.96 ms: Maya's 5.2 reads, 16.4 ms); the tier ops 3.3 against 0.44; the copy stream busy 19.0 ms (168 `k_fetch` a token); GPU 51.0 against 27.2, never idle (no host turnaround: tokens 33-256 run at 48.5 ms, 1-32 at 106). A 32K early start costs 23-28 ms of host time (≈ 1,800 launches; the first 85), `_unmap` 2-7 ms a call: neither a lever. **D8t** takes the two that are (a promotion budget, fewer tier launches) |
+| Decode tokens 1-32's SSD reads by origin (the per-piece probe at 8,192-row passes before D8l, the bench's 24 requests; MB a token) | 32K 163.8: (a) lent and not parked 78.8 (48%), (b) RAM's pushed to the SSD in the prompt 26.9 (16%), (c) SSD-only before the prompt 57.7 (35%), (d) evicted in the decode 0.4 — the prompt lends 1,368 experts (437 parked) against Maya's 603. 4K 84.6: 27.6 / 2.1 / 54.2 / 0.7; 1K 67.5: 15.5 / 1.9 / 49.1 / 1.0 (the context's own first reads, (c), dominate below 32K). D8l parks (a); the split on its build follows |
 
 ### Step 6 (the illegal address first; the bench and the deployment follow)
 
