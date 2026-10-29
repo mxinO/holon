@@ -540,6 +540,29 @@ Caveats:
   drafter), with which it decoded faster than its exact arms when first measured (`docs/dev/v1-flash-next.md` §13);
   the close did not measure Holon against them.
 
+### GLM-5.3-Flash against Project Maya (in progress)
+
+GLM-5.3-Flash's Maya-S IQ2_XXS file (91 GB) on one RTX 5090 with the job's RAM capped at 64 GiB, so most experts
+live in RAM and on the NVMe SSD (exclusive tiers), measured during GLM's milestone (not yet a lock), with
+`bench/offload_ctx.py`: batch 1, natural-text prompts of 1K, 4K or 32K tokens, then 256 greedy tokens; 8 prompts per
+context in each of 5 rounds after a warm-up, every arm a fresh process, the page cache evicted before each.
+Project Maya v1.1.27 runs its default settings. A cell is the median over rounds of each round's median request;
+where the mean over requests differs by more than 2 points it is in parentheses (slow requests are real latency).
+Holon's advantage in tokens per second, above 1 when Holon is faster ([docs/dev/v1-glm.md](docs/dev/v1-glm.md) §13
+step 7, `docs/dev/evidence/glm_step7_mode2_d8l_2026-10-29.json`):
+
+| row | 1K / 4K / 32K |
+|---|---|
+| decode | 0.988 (0.934) / 0.933 / 0.843 |
+| prefill | 0.964 / 1.021 / 1.259 |
+
+- **Prefill at 32K** is ×1.26 against Maya as shipped; with its conversation checkpoints off it prefills 32K at
+  3,239 tok/s, against which Holon's 3,059 tok/s is ×0.94.
+- **Decode** trails, most at 32K: the first 32 tokens after a long prompt re-read experts the prompt displaced, and
+  each token carries tier bookkeeping Maya's does not; both are being worked on.
+- **Maya's CPU lane is not its lead:** with it off (`MAYA_GLM_CPU_LANE=0`) Maya decodes at 0.99 / 1.01 / 1.00 of its
+  default; Holon computes every expert on the GPU.
+
 ### Qwen3-30B-A3B offload on the RTX 5080
 
 The RTX 5080's Qwen3-30B-A3B Q4_K_M lock (about half the experts cached: 52.7% at the offload milestone's close)

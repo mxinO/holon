@@ -1,0 +1,295 @@
+{
+ "date": "2026-10-29",
+ "doc": "docs/dev/v1-glm.md \u00a713 (step 7: D8l's capped table at mode (ii)'s 8,192-row deployment; README's GLM rows)",
+ "card": "rtx-5090",
+ "commit": "b01fa72d02da87f008d78bb532dacfaa1dff7709",
+ "config": {
+  "holon": "b01fa72d (D8l) against bdd86267 (before it), mode (ii) deployment flags: --max-step-tokens 32768 --memory-fraction 0.99 --host-memory 59000000000, moe.store std.moe.offload@1, exclusive tiers (pinned RAM 0.6238, the GGUF on the SSD), placement.promote, ggml_cuda.pass_rows 8,192, moe.lend_peak require (loan_margin 1.12, loan_taper 8192,32768, loan_largest 0.55, loan_fixed_mib 1024), moe.copy_beside on, moe.read_ahead 135, moe.ram_heat 0.999",
+  "maya": "v1.1.27, its default arm (MAYA_GLM_RAM_GB 50; checkpoints on), the same file",
+  "workload": "D11: a warm-up round, then 5 rounds of 8 x 1K, 8 x 4K, 8 x 32K natural-text prompts, 256 greedy tokens each (EOS ignored), every arm a fresh process",
+  "reference": "Maya default arm; its no-checkpoint arm (MAYA_GLM_CKPT_EVERY=0, the D8h table) prefills 32K at 3,239 tok/s",
+  "memory": "the job step capped at 64 GiB (cgroup v2), the hygiene wrap (the GGUF and Maya pack evicted before each arm)"
+ },
+ "method": "per round, an arm's median over a cell's 8 requests over the reference's; the median of the rounds",
+ "method_mean": "the same with each round's mean over the cell's requests (slow requests weigh in)",
+ "ratio_to_maya": {
+  "holon_d8k_8192": {
+   "prefill": {
+    "1k": 0.973,
+    "4k": 1.068,
+    "32k": 1.297
+   },
+   "decode": {
+    "1k": 0.971,
+    "4k": 0.907,
+    "32k": 0.792
+   }
+  },
+  "holon_d8l_8192": {
+   "prefill": {
+    "1k": 0.964,
+    "4k": 1.021,
+    "32k": 1.259
+   },
+   "decode": {
+    "1k": 0.988,
+    "4k": 0.933,
+    "32k": 0.843
+   }
+  }
+ },
+ "ratio_to_maya_mean": {
+  "holon_d8k_8192": {
+   "prefill": {
+    "1k": 0.976,
+    "4k": 1.068,
+    "32k": 1.289
+   },
+   "decode": {
+    "1k": 0.919,
+    "4k": 0.903,
+    "32k": 0.797
+   }
+  },
+  "holon_d8l_8192": {
+   "prefill": {
+    "1k": 0.97,
+    "4k": 1.022,
+    "32k": 1.257
+   },
+   "decode": {
+    "1k": 0.934,
+    "4k": 0.931,
+    "32k": 0.844
+   }
+  }
+ },
+ "per_round": {
+  "holon_d8k_8192": {
+   "prefill": {
+    "1k": [
+     0.957,
+     0.978,
+     0.954,
+     0.979,
+     0.973
+    ],
+    "4k": [
+     1.068,
+     1.079,
+     1.066,
+     1.078,
+     1.061
+    ],
+    "32k": [
+     1.297,
+     1.298,
+     1.264,
+     1.305,
+     1.258
+    ]
+   },
+   "decode": {
+    "1k": [
+     0.931,
+     0.971,
+     0.955,
+     0.985,
+     0.982
+    ],
+    "4k": [
+     0.914,
+     0.906,
+     0.921,
+     0.907,
+     0.874
+    ],
+    "32k": [
+     0.76,
+     0.796,
+     0.792,
+     0.781,
+     0.838
+    ]
+   }
+  },
+  "holon_d8l_8192": {
+   "prefill": {
+    "1k": [
+     0.946,
+     0.968,
+     0.942,
+     0.969,
+     0.964
+    ],
+    "4k": [
+     1.021,
+     1.034,
+     1.02,
+     1.033,
+     1.018
+    ],
+    "32k": [
+     1.259,
+     1.267,
+     1.243,
+     1.275,
+     1.257
+    ]
+   },
+   "decode": {
+    "1k": [
+     0.945,
+     0.988,
+     0.971,
+     1.001,
+     0.998
+    ],
+    "4k": [
+     0.939,
+     0.932,
+     0.945,
+     0.933,
+     0.89
+    ],
+    "32k": [
+     0.809,
+     0.848,
+     0.843,
+     0.828,
+     0.891
+    ]
+   }
+  }
+ },
+ "tok_s_median": {
+  "maya_default_64g": {
+   "prefill_tok_s": {
+    "1k": 263.9,
+    "4k": 756.8,
+    "32k": 2428.7
+   },
+   "decode_tok_s": {
+    "1k": 23.6,
+    "4k": 21.2,
+    "32k": 21.8
+   }
+  },
+  "holon_d8k_8192": {
+   "prefill_tok_s": {
+    "1k": 257.1,
+    "4k": 807.1,
+    "32k": 3145.1
+   },
+   "decode_tok_s": {
+    "1k": 22.9,
+    "4k": 19.3,
+    "32k": 17.3
+   }
+  },
+  "holon_d8l_8192": {
+   "prefill_tok_s": {
+    "1k": 254.5,
+    "4k": 773.2,
+    "32k": 3058.6
+   },
+   "decode_tok_s": {
+    "1k": 23.3,
+    "4k": 19.8,
+    "32k": 18.4
+   }
+  }
+ },
+ "tok_s_rounds_range": {
+  "maya_default_64g": {
+   "prefill_tok_s": {
+    "1k": [
+     262.7,
+     269.1
+    ],
+    "4k": [
+     748.5,
+     759.9
+    ],
+    "32k": [
+     2409.9,
+     2452.5
+    ]
+   },
+   "decode_tok_s": {
+    "1k": [
+     23.3,
+     24.7
+    ],
+    "4k": [
+     21.0,
+     22.1
+    ],
+    "32k": [
+     20.5,
+     22.7
+    ]
+   }
+  },
+  "holon_d8k_8192": {
+   "prefill_tok_s": {
+    "1k": [
+     256.6,
+     257.6
+    ],
+    "4k": [
+     806.2,
+     808.1
+    ],
+    "32k": [
+     3055.2,
+     3150.9
+    ]
+   },
+   "decode_tok_s": {
+    "1k": [
+     22.9,
+     23.0
+    ],
+    "4k": [
+     19.3,
+     19.4
+    ],
+    "32k": [
+     17.2,
+     17.3
+    ]
+   }
+  },
+  "holon_d8l_8192": {
+   "prefill_tok_s": {
+    "1k": [
+     253.5,
+     254.7
+    ],
+    "4k": [
+     772.1,
+     774.1
+    ],
+    "32k": [
+     3048.6,
+     3076.0
+    ]
+   },
+   "decode_tok_s": {
+    "1k": [
+     23.2,
+     23.3
+    ],
+    "4k": [
+     19.7,
+     19.9
+    ],
+    "32k": [
+     18.3,
+     18.4
+    ]
+   }
+  }
+ }
+}
