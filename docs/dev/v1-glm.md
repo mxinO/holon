@@ -1039,6 +1039,44 @@ MB (47.0 → 45.3 ms).
   host on the main stream's queued work (a 0.5 s kernel ahead of it: a 0.56 s call), though its text says no host
   sync — an early start's cost, not a correctness question (open).
 
+**D8t — Step 7: the decode token's tiering overhead (design for the panel, not built; the coordinator's levers
+after the decode timeline).** *Why, measured* (nsys over decode tokens 33-96 of a third 32K prompt, one RTX 5090,
+mode (ii) at 8,192-row passes against mode (i)'s lock, both graphed: GPU kernel ms a token): compute ≈ 14 in both;
+the RAM hits' gathers on the main stream (`k_fetch_roles`, ≈ 595 MB a token, 87 experts) 15.6 against mode (i)'s
+12.8; the SSD's waits (`k_wait`) 17.1 (≈ 5 depth-1 reads a token at 2.96 ms each: Maya's own 5.2 reads and 16.4 ms a
+token); the tier ops 3.3 (`k_tiers` 2.4, `k_settle` 0.5, `k_promote` 0.35, against mode (i)'s `k_resolve` 0.44);
+GPU total 51.0 against 27.2; beside them the copy stream busy 19.0 ms a token (168 `k_fetch` launches: the
+promotions' demotions). **The host's turnaround is not a lever:** the three event syncs a token are mode (i)'s too,
+and the GPU never idles in either window (span 50.6 ms a token against 51.0 busy; mode (i) 25.9 against 27.2): the
+"≈ 4 ms" compared the steady GPU time with the 1-256 average, whose tokens 1-32 re-read the prompt's displaced pieces
+(D8l, D8k's passes); tokens 33-256 run at 48.5 ms (D8k's probe). Two levers remain.
+- **1. A promotion budget (F10's admissions).** Every steady decode token promotes ≈ 78 experts (532 MiB) into VRAM,
+  all of them that token's misses (F10 promotes on fetch into a layer's 3 spares; each refill demotes the layer's
+  least recent to RAM on the copy stream), against Maya's ≈ 45. Replayed on the 8,192-row recording's decode routes
+  (per layer, VRAM capacity as recorded, tokens 33-): admitting at most one miss a layer a token (the most used so
+  far) keeps the hit rate (1K 0.720 / 0.625 against admit-all's 0.725 / 0.616 on two requests; 32K 0.612 / 0.573
+  against 0.603 / 0.536) with 34-39 promotions a token instead of 92-156 (−60-75% of the bytes); admitting on a second
+  miss within 4 tokens cuts to ≈ 20 but loses up to 0.027 of hit rate at 1K. **Predicted:** the copy stream's 19 ms →
+  ≈ 7-8 ms, the gathers' contention 2.8 → ≈ 1 ms, `k_settle` / `k_promote` and the admissions inside `k_tiers` about
+  halved: ≈ −2.5 ms a token. What remains is scheduled after each layer's gathers (the copy stream waits the layer's
+  gather event before its demotions): ≈ −0.5 ms more. Policy: the budget a resolve-contract parameter of
+  `placement.promote` (an option, `moe.promote_budget`, default today's 3 = unlimited spares), its choice by use count
+  the contract's existing `last` / heat state; no core lines.
+- **2. Fewer, wider tier launches.** `k_tiers` (58 µs a call), `k_promote` (8 µs) and `k_settle` (13 µs) are
+  one-CTA kernels serial on the main stream, 3 a layer; `k_tiers`' cost is its admissions' victim searches (a
+  block-wide reduction over the layer's 288 experts each). Fold settle into the tier op (one launch a layer), and
+  run the victim search a warp per admission over more CTAs. **Predicted:** 3.3 → ≈ 1.0 ms a token (mode (i)'s
+  resolve-only step costs 0.44); with lever 1's fewer admissions, ≈ 0.8.
+- **Together:** steady decode ≈ 48.5 → ≈ 44 ms a token at 32K (≈ +10%), the same absolute gain at 1K and 4K (their
+  steady tokens carry the same tier work: 1K's measured average 45.7 ms against Maya's 42.6). The 32K average over
+  1-256 adds D8l's −1.8 ms and stays above Maya's by tokens 1-32's re-reads.
+- **Scope and checks.** Exclusive tiers only (mode (i)'s inclusive layout runs resolve only); no core lines. Plants
+  where the order changes: `demotion_before_gather` (the copy stream's demotions not waiting the layer's gather event:
+  a gathered staging slot overwritten — the moves' existing bytes check), `settle_folded_early` (the folded settle
+  before the tier op's records: a stale map). Lever 1 moves which experts sit in VRAM, not any bytes a step computes:
+  the resident store's bits as every placement change; the replay's hit rate is checked on the bench's requests
+  before the table.
+
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
 drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes
