@@ -166,13 +166,20 @@ class MoePatchRows:
 class MoeTiers:
     def __init__(self, modules: Modules, ctx, *, experts: int, top_k: int, roles: int) -> None:
         self.lib = modules(ctx.fingerprint.sm)
+        self.scratch = None                    # (D8t: the call's displaceable experts, made at the first call)
 
     def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
                  owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp=None,
                  clock=None) -> None:
+        n = residency.shape[0] * residency.shape[1]
+        if self.scratch is None or len(self.scratch[1]) != n:
+            if torch.cuda.is_current_stream_capturing():
+                raise RuntimeError("moe_tiers@2: the first call of a layout in a graph's capture (its scratch)")
+            self.scratch = (torch.empty(n, dtype=torch.float64, device=ids.device),
+                            torch.empty(n, dtype=torch.int32, device=ids.device))
         self.lib.tiers(ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
                        owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp,
-                       clock)
+                       clock, *self.scratch)
 
 
 class ActivationLoan:

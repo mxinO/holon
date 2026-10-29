@@ -566,7 +566,7 @@ def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
 @pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("policy", ["lfu", ""])
 @pytest.mark.parametrize("tokens, free, ahead", [(1, 0, False), (6, 3, False), (12, 0, True), (40, 20, False),
-                                                 (40, 20, True)])
+                                                 (40, 20, True), (6, 0, False)])
 def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     """`moe_tiers@2` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
@@ -577,7 +577,10 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, never kept — with
     decode rows and free RAM units beside it (docs/dev/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3). With heat,
     units stamped by the previous call (a third of them) are never displaced, the call's demotions stamp theirs and the
-    clock advances (docs/dev/v1-glm.md §13 step 7: moves beside the next calls)."""
+    clock advances (docs/dev/v1-glm.md §13 step 7: moves beside the next calls). The layer's RAM experts all equally
+    cold (6 tokens, no free unit: more placements than free units, each displacement a tie by index) on the call's
+    displaceable list (D8t),
+    and the CUDA call run twice: identical."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -597,6 +600,9 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
         fetch, n_fetch = reference.moe_resolve(ids, kinds, residency, t["host"][layer], limits, E, stage=stage)[1:3]
         records, after = [], residency
     t["residency"][layer] = after
+    if tokens == 6 and not free and policy:             # RAM's experts of the layer all equally cold: ties by index
+        ram = (after == -1).all(-1) & (t["host"][layer] >= 0).all(-1)
+        t["heat"][layer][ram] = t["heat"][layer].min() - 1
     heat = t["heat"] if policy else None
     rows = 3
     sets = torch.full((experts,), -1, dtype=torch.int32)
@@ -622,6 +628,7 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     n_ssd, n_ram, n_hit = (torch.zeros(ROLES, dtype=torch.int32, device=device) for _ in range(3))
     hit = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
     dev_stamps = [x.clone().to(device) for x in stamps or ()]
+    again = {n: v.clone() for n, v in dev.items()} | {"stamps": [x.clone() for x in dev_stamps]}
     tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
           torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
                                                                          device=device),
@@ -638,6 +645,20 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
     for r in range(ROLES):
         assert torch.equal(dev["fetch"][r, :, :int(n_ram[r])].cpu(), want["fetch"][r, :, :int(n_ram[r])])
         assert torch.equal(ssd[r, :, :int(n_ssd[r])].cpu(), want["ssd"][r, :, :int(n_ssd[r])])
+    if tokens == 6 and not free and policy:             # (a tie was taken: one of the equally cold displaced)
+        assert int(((t["residency"] == -1).all(-1) & (want["residency"] == -2).all(-1)).sum()) > 0
+    if device == "cuda":                                # run to run: the same placement
+        out2 = [torch.zeros_like(x) for x in (io, moves, n_moves, ssd, n_ssd, n_ram)]
+        hit2, n_hit2 = torch.full_like(hit, -1), torch.zeros_like(n_hit)
+        tiers(again["ids"], again["kinds"], layer, again["fetch"], again["n_fetch"], again["stage"], again["delta"],
+              torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
+                                                                             device=device),
+              again["residency"], again["host"], again["piece"], again["classes"], again["owner"], again["capacity"],
+              again["heat"] if policy else None, *out2, rows, sets.to(device) if ahead else None, hit2, n_hit2,
+              *again["stamps"])
+        for name in ("residency", "host", "owner"):
+            assert torch.equal(again[name], dev[name]), name
+        assert torch.equal(out2[2], n_moves) and torch.equal(out2[1], moves) and torch.equal(out2[0], io)
         assert torch.equal(hit[r, :, :int(n_hit[r])].cpu(), want["hit"][r, :, :int(n_hit[r])])
     for r in range(ROLES):
         assert io[r, 0, 0] == len(want["io"][r]) and io[r, 1:1 + len(want["io"][r])].cpu().tolist() == \
