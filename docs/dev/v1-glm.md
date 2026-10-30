@@ -1213,6 +1213,45 @@ the joint tail's experts chosen coldest. The fixed term's trim (`moe.loan_fixed_
 then (b)'s bytes. Predicted after (a) + (c): 32K decode 0.909 → ≈ 0.94; after (b)'s read-ahead, 1K prefill ≈ 0.97-1.00
 on the slower-drive node.
 
+**Cleared for build (A, B and C, D8u rev), their points folded in.**
+- **(b)** *Width* a store constant, `NARROW_READ_AHEAD` = 6 (4 replays alike: B-m1), from `NARROW_READ_AHEAD_TOKENS`
+  = 512 prompt tokens up to the full read-ahead's 2,048. *One pick rule* for both widths (B-m1, A-m2): the set's
+  hottest by (−heat, id), deterministic on the device, heat the store's (`moe.ram_heat`, else the policy's state; with
+  neither, all equal: lowest ids, today's rule); its rows in id order, so at GLM's A_ra (135 ≥ a layer's ≈ 34
+  SSD-only) the full read-ahead reads and lands as before. *Signal* (A-m1): layer g + 1's set is signalled at layer
+  g's start — `layer_done(g − 1)` signals g − 1 + DEPTH, enqueued on main after layer g − 1's hits landed (main waited
+  them before its compute) into region (g + 1) mod 2, the one g − 1 used —, as today's two-ahead; G3-m1's wait before
+  `tiered` stays. *Mixed steps*: no read-ahead with a decode or verify row (D8f). *The first MoE layer* (C-m3): its set
+  and the next are signalled in `begin()`, which a tail step runs at its early start (before the dense layers 0-2: their
+  time is the drive's too); a prompt step without a loan runs it at its first resolve. The rounds' hit parts follow
+  the step's width (`hits`), not A_ra. *Predicted* (C): +5-8% at 1K, 0.916 → ≈ 0.96-0.99, 0.964 → ≈ 1.01-1.04.
+  **As built:** `NARROW_READ_AHEAD` and `NARROW_READ_AHEAD_TOKENS` in `std.tiered`'s store, `read_ahead`'s one
+  pick for both widths, the rounds' hit parts by the step's width; the test (`test_moe_engine.py`) reads ahead a tiny
+  model's prompt steps at width 2 against a heat with ties and checks each layer's set is its hottest by (−heat, id),
+  rows in id order, the streams the resident store's — before the change no step below the full size read ahead.
+- **(a)** *The layout* (A-M1): the gate/up tail is the pass buffers, then the staging, then the loan; `tail_view`
+  returns the buffers' slots only; each down tail is its staging, then the loan's ranges; the staging ends on a whole
+  slot at or below the loan's first touched slot. Per-step sizing keeps the staging at every lent step size, asserted
+  at `before_launch` (the clip never binds). *Sizing* (C-m1): per class from the worst step's allocation trace replayed
+  through the ranges past the staging (smallest range first), zero overflow asserted — n ≈ 1,210-1,240, not 1,192
+  (the IQ3_XXS down class ≈ 110 MiB short at 1,192). *Fence* (C-m2): a staging gather into a tail slot on the
+  copy-engine stream follows that slot's parking copy — transitively: main waits the parking event in `activations`
+  (D8l) before the step's first tier op, and the gather stream waits `tiered`, recorded on main after it; plant
+  `staging_before_parked` (the first staging copy issued before the parking event: the bytes check). *Guards* (B-m3):
+  the build's own-tail refusal and `test_reserve.py`'s tiny-GLM cases count the staging; a forced-small-arena case
+  refuses or serves without overflow. *Plants*: `buffers_over_staging` (`tail_view` with the staging's slots),
+  `staging_over_loan` (a staging slot at the boundary slot), `staging_outside_tail` (a tail step's staging lend,
+  counted, asserted 0).
+- **(c)** (A-m3, B-m2): each swap of a tail slot's hot expert a over the class's coldest resident b is logged as an
+  admission's record `(g, a, b)`, its copies in D8w's compaction pass and fences — no third movement path. All in
+  `begin()`, before the parking event: b parked (or dropped) from its slot, a's slot copied into b's, the map edited on
+  the device before the first resolve; a's old slot is the tail's. F10's spares and reserved slots are never targets;
+  the coldest by (heat, group, id), "hotter" strict. Plant `coldest_swap_unlogged`.
+- **After the build:** A's code review, then the A/B — (b) on both node classes where they can be had, (a) + (c) on
+  32K decode. **Measurement only, later:** C's empty reserve (the tail's k coldest slots left empty at rest, arms k =
+  150 / 300 over the bench's whole mix) and the 1K bytes' origin split (C's suspects in order: in-prompt victims, a
+  hotter SSD-only set at rest, the read-ahead's own waste, read amplification).
+
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
 drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes

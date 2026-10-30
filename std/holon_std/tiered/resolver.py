@@ -228,7 +228,7 @@ class DeviceResolver:
         store.io.signal(self.io_slot)
         q, a = store.rounds_q, store.landing_rows
         most = min(store.items, store.top_k * len(ids))
-        hits = -(-store.ahead_rows // q) if store._ahead else 0
+        hits = -(-store._ahead_width // q) if store._ahead else 0   # (the step's width: D8u's narrow below 2K)
         ram, ssd = -(-most // q), -(-most // a)
         lists = [(store.hit, store.n_hit, 0, q, 0)] if store._ahead else []
         lists += [(fetch, store.n_ram, hits, q, 0), (store.ssd, store.n_ssd, hits + ram, a, q)]

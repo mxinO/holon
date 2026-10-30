@@ -58,6 +58,9 @@ ROUNDS_BELOW = 8192                          # D8s: steps of fewer prompt tokens
 ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (v1-glm.md D8f)
 DEPTH = 2                                    # layers read ahead (D8f): layer g + DEPTH's set at layer g's end
 READ_AHEAD_TOKENS = 2048                     # a prompt step reads ahead from this many prompt tokens (D8f)
+NARROW_READ_AHEAD = 6                        # D8u: below READ_AHEAD_TOKENS a prompt step reads ahead a layer's hottest
+NARROW_READ_AHEAD_TOKENS = 512               # 6 (≈ 41 MiB of GLM: the drive's ≈ 10 ms idle at a layer's boundary;
+#                                              4 replay alike), from this many prompt tokens
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
@@ -177,6 +180,7 @@ class TieredStore:
         self._keys = 0                           # D8g's copy keys, one per start
         self._runs_host: dict[str, np.ndarray] = {}
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
+        self.narrow_ahead_tokens, self._ahead_width = NARROW_READ_AHEAD_TOKENS, 0   # (D8u: narrow below; its width)
         self.pending_demotions = None                   # a call's demotions not yet enqueued (D8t): (group, its
         #                                                 classes' gathers, their keywords): the next call enqueues them
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
@@ -714,12 +718,17 @@ class TieredStore:
         return self.ahead_pool.device_view(torch.int32, shape) if device else self.ahead_pool.view(torch.int32, shape)
 
     def read_ahead(self, g: int) -> None:
-        """Layer g's read-ahead (docs/dev/v1-glm.md D8f), on the current stream: the first A_ra of its SSD-only set,
-        lowest ids first, into its set's rows (its map `ahead_map[g]`), requested, signalled."""
+        """Layer g's read-ahead (docs/dev/v1-glm.md D8f, D8u), on the current stream: the step's width (A_ra, or
+        NARROW_READ_AHEAD below READ_AHEAD_TOKENS) of its SSD-only set, hottest first by the store's heat
+        (`moe.ram_heat`, else the policy's; without one, all equal), ties by id, into its set's rows in id order (its
+        map `ahead_map[g]`), requested, signalled."""
         a, base = self.ahead_rows, self.ahead_base(g)
         only = (self.residency.device[g] == -2).all(-1)                            # [E]
-        rank = only.int().cumsum(0) - 1
-        take = only & (rank < a)
+        heat = self.heat[g].double() if self.heat is not None else torch.zeros(only.shape, device=only.device)
+        order = torch.sort(torch.where(only, -heat, math.inf), stable=True).indices  # hottest first, ties by id
+        hot = torch.empty_like(order).scatter_(0, order, torch.arange(len(order), device=order.device))
+        take = only & (hot < self._ahead_width)
+        rank = take.int().cumsum(0) - 1
         self.ahead_map[g].copy_(torch.where(take, base + rank, -1))
         view = self.ahead_view()[g % DEPTH]                                        # [roles, 1 + A_ra, 3]
         at = torch.where(take, 1 + rank, a + 1).long()                             # (+ a sink row past the view)
@@ -889,8 +898,13 @@ class TieredStore:
             at += q
         prompt = int(sum(q for q, d in zip(step.n_query.tolist(), decode, strict=True) if not d))
         # a prompt step of READ_AHEAD_TOKENS with no decode or verify row reads its SSD-only sets ahead (D8f: a decode
-        # row's keep would land a read-ahead piece's RAM unit unread)
-        self._ahead = self.exclusive and prompt >= self.read_ahead_tokens and not any(decode)
+        # row's keep would land a read-ahead piece's RAM unit unread); from NARROW_READ_AHEAD_TOKENS, each set's
+        # hottest NARROW_READ_AHEAD only (D8u: the drive's idle at a layer's boundary, not a layer's whole set)
+        self._ahead = self.exclusive and prompt >= min(self.narrow_ahead_tokens, self.read_ahead_tokens) and \
+            not any(decode)
+        if self._ahead:
+            self._ahead_width = self.ahead_rows if prompt >= self.read_ahead_tokens else \
+                min(NARROW_READ_AHEAD, self.ahead_rows)
         if not (self.lending and self.policy.device_owned):
             self._mode = None
         elif prompt and self.ring_tokens and prompt >= self.ring_tokens:
