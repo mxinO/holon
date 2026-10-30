@@ -1253,6 +1253,36 @@ on the slower-drive node.
   `begin()`, before the parking event: b parked (or dropped) from its slot, a's slot copied into b's, the map edited on
   the device before the first resolve; a's old slot is the tail's. F10's spares and reserved slots are never targets;
   the coldest by (heat, group, id), "hotter" strict. Plant `coldest_swap_unlogged`.
+- **(a) and (c) as built.** *Sizing:* `_split(..., stage=True)` grows n until every class's tail holds its
+  staging and leaves the loan ranges (`_loan_room`: per class, the slots past the buffers' and the staging's) that
+  hold the loan's bytes with one range at least the largest allocation; a class's staging, `_stage_need`, is a layer's
+  misses with the class's cache spread evenly over its layers (its reserved slots and the tail out) — at the GLM 32K
+  step ≈ 236 a class against the measured needs 172 / 212 / 206 (the reserved slots a tail step releases cover the
+  busiest layer's excess); past it a step lends the rest outside, counted (`staging_lent`). It applies to steps of
+  ROUNDS_BELOW tokens and more (`_stages_in_tail`: stage mode; D8s's rounds below it are served by the empty and
+  released slots, as before), and to the startup's tail at the profiled step, so a step's own n never passes the
+  layout's (refused if it would: A-M1's clip). *Deviation (C-m1):* not sized by replaying the worst step's allocation
+  trace — as D8w agreed (2026-10-27), the core hands the store only the profile's peak; the per-class ranges are sized
+  by bytes (each class's room past its staging, one range ≥ the largest allocation) and zero overflow is asserted on
+  real steps: the probe's 32K steps and `test_a_tail_holding_its_staging_refuses_or_serves_without_overflow`.
+  *Layout:* `_step_stage` per class [lo, hi), `_step_loan_from` each loan range's first slot; `tail_view` returns the
+  buffers' slots only; `activations` hands out each down range from `_step_loan_from` and refuses a step whose
+  staging reaches past it (`staging_over_loan`: refused as the loan is handed out, before any write). `Lent` puts the
+  tail's staging first in its pool (`_pool`), then the empty slots and the lent experts' outside it, and counts a tail
+  step's staging lends in `staging_lent`. *Fence (C-m2):* transitive, as stated; the plant `staging_before_parked`
+  defers those holders' parking copies on the host to the first layer's end, outside the step's event: their RAM
+  units take the staged bytes (the bytes check at each staging step's end). *(c):* `_coldest` after `lend_tail`'s pick,
+  per class signature, holders hottest first against residents outside every tail coldest first (heat, group, id),
+  while strictly hotter, never a spare's owner; the compaction then includes the tail's own class, so a kept holder's
+  pieces move into the swapped-in residents' freed slots on D8w's pass and fences. *Deviation (A-m3, B-m2):* no
+  `(g, a, b)` record — the swap is the compaction's relocation, which logs none because the host mirror adopts an
+  exclusive step's map and empty stacks (D8w as built); `coldest_swap_unlogged` therefore cannot be built, and its
+  place is `coldest_swap_unrelocated` (the tail class left out of the compaction: a kept holder stays mapped at slots
+  the step overwrites, wrong bits). *Test:* `test_a_tail_step_stages_inside_its_tail_and_lends_its_coldest`
+  (`gpu_moe_wide`, stage mode from 32 tokens, a heat spread): the layout per step, `staging_lent` 0, swaps made, the
+  resident store's streams and every piece's bytes at each staging step's end; its plants `buffers_over_staging`,
+  `staging_before_parked`, `coldest_swap_unrelocated` (wrong), `staging_over_loan` (refused),
+  `staging_outside_tail` (lent outside, counted).
 - **After the build:** A's code review, then the A/B — (b) on both node classes where they can be had, (a) + (c) on
   32K decode. **Measurement only, later:** C's empty reserve (the tail's k coldest slots left empty at rest, arms k =
   150 / 300 over the bench's whole mix) and the 1K bytes' origin split (C's suspects in order: in-prompt victims, a
