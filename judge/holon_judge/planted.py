@@ -2068,6 +2068,156 @@ def loan_wait_unrecorded() -> contextlib.AbstractContextManager[collections.Coun
 
 
 @contextlib.contextmanager
+def _d8x(kind: str) -> Iterator[collections.Counter]:
+    """D8x (docs/dev/v1-glm.md): a short prompt step's lent experts parked in the idle read-ahead rows, then moved
+    into RAM over its coldest by the store's thread, chunk by chunk. Each plant breaks one rule; where the bug needs
+    the thread late, its copies are held (`gate`) until the plant's moment, or the engine's shutdown:
+    "superset_runs" (`parked_row_superset_runs`: a parked row's runs the I/O worker's aligned ones, not its piece as a
+    slot holds it: the hits' bits), "hit_early" (`row_hit_before_parked`: the slot → row copies after the step's last
+    layer, after its hits read the rows), "unmapped" (`row_move_before_unmapped`: the victims stay mapped to the units
+    the thread fills: their bytes), "unjoined" (`row_mapped_before_copied`: a chunk mapped without waiting its copies,
+    the thread held: the bytes), "reused" (`row_reused_before_moved`: the next short prompt maps the last one's chunks
+    without waiting their copies — every chunk left to it (the lag past any step) and the thread held until that
+    step's commit, so it copies rows the new parking rewrote: the bytes), "unfinished" (`row_reused_before_mapped`:
+    the next short prompt joins the thread but neither maps the last move's chunks nor resets the row map — the old
+    parked experts hit rows the new parking took: the bits), "named" (`reserved_unit_named`: the parked expert's
+    `host_units` name its reserved unit from phase 1, the thread held: the residency check, the bits), "promoted"
+    (`row_moved_after_promoted`: phase 3 maps an expert routed into another tier meanwhile: the residency check).
+    Yields its counts: `fired`; held by the caller ("unjoined", "named"), the thread goes on at `fired.release()`
+    (after the caller's check of the step its bug shows in)."""
+    import threading
+
+    from holon_std.tiered import move as moves
+    from holon_std.tiered import store as tiered
+
+    cls_, fired, gates, every = tiered.TieredStore, collections.Counter(), {}, threading.Event()
+    copy, wait, commit, shutdown = cls_._move_copy, cls_._move_wait, cls_.after_commit, cls_.shutdown
+    park_rows, done, due, reserve = cls_._park_rows, cls_.layer_done, cls_._move_due, cls_._reserve
+    patches, deferred, stale, opening, unjoined = [], [], {}, [], []
+
+    def gate(m) -> threading.Event:              # a move's gate
+        return gates.setdefault(id(m), threading.Event())
+
+    def held(self, m, entries):                  # the thread's copies of a move, held until its gate opens
+        while not (gate(m).wait(0.01) or every.is_set()):
+            pass
+        return copy(self, m, entries)
+
+    def opened(self):
+        every.set()
+        return shutdown(self)
+    if kind in ("unjoined", "reused", "named"):
+        patches += [mock.patch.object(cls_, "_move_copy", held), mock.patch.object(cls_, "shutdown", opened)]
+    fired.release = lambda: [gate(m).set() for m in unjoined]
+    if kind == "superset_runs":
+        def superset(desc):
+            fired["superset"] += 1
+            return tiered._runs(desc)
+        patches.append(mock.patch.object(tiered, "_canonical", superset))
+    elif kind == "hit_early":
+        def late(self, *a):
+            self._fetch_lists = lambda lists: deferred.append(lists)
+            try:
+                park_rows(self, *a)
+            finally:
+                del self._fetch_lists
+            fired["deferred"] += 1
+
+        def last(self, g):
+            if deferred and g == len(self._order) - 1:      # the copies after the step's hits, before its move
+                for lists in deferred:
+                    for name, fetch, count, dst in lists:
+                        self._class_fetch[name](fetch, count, self.classes[name].slots(), dst)
+                deferred.clear()
+            done(self, g)
+        patches += [mock.patch.object(cls_, "_park_rows", late), mock.patch.object(cls_, "layer_done", last)]
+    elif kind == "unmapped":
+        def kept(self, victim):
+            fired["kept"] += 1
+        patches.append(mock.patch.object(cls_, "_displace", kept))
+    elif kind == "unjoined":
+        def unwaited(self, m, chunks):
+            fired["unjoined"] += 1
+            self._mover.entries(m)               # (the map needs them)
+            unjoined.append(m)
+        patches.append(mock.patch.object(cls_, "_move_wait", unwaited))
+    elif kind == "reused":
+        def finishing(self, launch, every=False):
+            if every and self._move is not None:
+                opening.append((launch, self._move))
+            return due(self, launch, every)
+
+        def finish(self, m, chunks):
+            if chunks is not None:
+                return wait(self, m, chunks)
+            fired["unjoined"] += 1
+            self._mover.entries(m)
+            return None
+
+        def opened_after(self, step, telemetry):  # a move's copies go on once the step that reused its rows ran
+            commit(self, step, telemetry)
+            for launch, m in opening:
+                if step.step >= launch:
+                    gate(m).set()
+        patches += [mock.patch.object(moves, "LAG", 1 << 30), mock.patch.object(cls_, "_move_due", finishing),
+                    mock.patch.object(cls_, "_move_wait", finish),
+                    mock.patch.object(cls_, "after_commit", opened_after)]
+    elif kind == "unfinished":
+        patches.append(mock.patch.object(moves, "LAG", 1 << 30))       # (every chunk left to the next short prompt)
+
+        def forget(self, launch, every=False):
+            m = self._move
+            if not (every and m is not None):
+                return due(self, launch, every)
+            self._mover.wait(m)
+            stale[id(self)] = self.ahead_map.clone()
+            self._move = None
+            fired["forgotten"] += 1
+            return None
+
+        def unreset(self, *a):
+            if (old := stale.pop(id(self), None)) is not None:
+                self.ahead_map.copy_(torch.where(self.ahead_map >= 0, self.ahead_map, old))
+            return park_rows(self, *a)
+        patches += [mock.patch.object(cls_, "_move_due", forget), mock.patch.object(cls_, "_park_rows", unreset)]
+    elif kind == "named":
+        def named(self, moving, to):
+            reserve(self, moving, to)
+            host = self.host_units.view(-1, self.roles)
+            host.copy_(torch.where(moving[:, None], to, host))
+            fired["named"] += 1
+
+        def first(self, m, chunks):
+            gate(m).set()
+            return wait(self, m, chunks)
+        patches += [mock.patch.object(cls_, "_reserve", named), mock.patch.object(cls_, "_move_wait", first)]
+    elif kind == "promoted":
+        def mapped(now, own):
+            fired["promoted"] += 1
+            return own.all(1)
+        patches.append(mock.patch.object(cls_, "_still_parked", staticmethod(mapped)))
+    with contextlib.ExitStack() as stack:
+        for patch in patches:
+            stack.enter_context(patch)
+        try:
+            yield fired
+        finally:
+            every.set()
+    print(f"plant d8x ({kind}) fired: {dict(fired)}", file=sys.stderr)
+
+
+D8X_PLANTS = {"parked_row_superset_runs": "superset_runs", "row_hit_before_parked": "hit_early",
+              "row_move_before_unmapped": "unmapped", "row_mapped_before_copied": "unjoined",
+              "row_reused_before_moved": "reused", "row_reused_before_mapped": "unfinished",
+              "reserved_unit_named": "named", "row_moved_after_promoted": "promoted"}
+
+
+def d8x_plant(name: str) -> contextlib.AbstractContextManager[collections.Counter]:
+    """One of D8x's plants by name (`D8X_PLANTS`, `_d8x`)."""
+    return _d8x(D8X_PLANTS[name])
+
+
+@contextlib.contextmanager
 def demotion_before_gather() -> Iterator[collections.Counter]:
     """D8t (docs/dev/v1-glm.md): each call's demotions enqueued on the main stream right after its tier op — before
     its gathers, which read a RAM-sourced admission's units the call gives its victim — and never again: the admitted

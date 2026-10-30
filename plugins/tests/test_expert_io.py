@@ -360,6 +360,12 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, dst)
     assert torch.equal(dst.cpu(), want)
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
+    wide = torch.randint(0, 256, (K + staging + 30, unit + 4096), dtype=torch.uint8, generator=g)   # (D8x: rows
+    want = reference.expert_fetch(units, n, data, wide.clone())                # wider than a unit, landing rows)
+    rows = wide.to(device)
+    fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, rows)
+    assert torch.equal(rows.cpu(), want) and torch.equal(want[K + 29, :unit], data[2])
+    assert torch.equal(want[K + 29, unit:], wide[K + 29, unit:])
     if hasattr(fetch_, "gather_roles"):         # both roles in one launch: each its own list, units and slots
         dst2 = torch.randint(0, 256, (K + staging + 30, unit + 16), dtype=torch.uint8, generator=g)
         data2 = torch.randint(0, 256, (10, unit + 16), dtype=torch.uint8, generator=g)

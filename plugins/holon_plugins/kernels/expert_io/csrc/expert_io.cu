@@ -433,15 +433,16 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
 }
 
 // Every CTA walks every fetched unit; its threads move UNROLL 16-byte words each per trip, all loads before all
-// stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory).
+// stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory). A unit is
+// `words` words; the destination's rows `dst_words` (at least `words`: wider rows, a unit at each one's start).
 template <int UNROLL>
 __global__ void k_fetch(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const uint4 * __restrict__ src,
-                        uint4 * __restrict__ dst, int64_t words, int staging) {
+                        uint4 * __restrict__ dst, int64_t words, int64_t dst_words, int staging) {
     const int count = min(*n, staging);
     const int64_t stride = int64_t(gridDim.x) * blockDim.x * UNROLL;
     for (int b = 0; b < count; ++b) {
         const uint4 * __restrict__ s = src + int64_t(fetch[b]) * words;
-        uint4 * __restrict__ d = dst + int64_t(fetch[staging + b]) * words;
+        uint4 * __restrict__ d = dst + int64_t(fetch[staging + b]) * dst_words;
         for (int64_t base = int64_t(blockIdx.x) * blockDim.x * UNROLL + threadIdx.x; base < words;
              base += stride) {
             uint4 v[UNROLL];
@@ -1136,8 +1137,9 @@ void patch(at::Tensor & y, const at::Tensor & rows, const at::Tensor & cpu) {
 
 void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, int64_t beside) {
     const c10::cuda::CUDAGuard guard(dst.device());
-    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && dst.size(1) % 16 == 0,
-                "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
+    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) >= src.size(1) && src.size(1) % 16 == 0 &&
+                    dst.size(1) % 16 == 0,
+                "src [U, unit], dst [S, unit] (or [S, row] of wider rows) with unit and row multiples of 16 bytes");
     TORCH_CHECK(fetch.dim() == 2 && fetch.size(0) == 2, "fetch [2, staging]");
     check(fetch, dst, at::kInt, {2, fetch.size(1)}, "fetch");
     check(n, dst, at::kInt, {1}, "n");
@@ -1150,11 +1152,11 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     auto * to = reinterpret_cast<uint4 *>(dst.data_ptr());
     TORCH_CHECK(beside >= 0, "beside: a CTA count, or 0");
     if (beside) {                                      // beside other work: on `beside` CTAs, many reads in flight
-        k_fetch<BESIDE_UNROLL><<<int(beside), FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
-                                                                          int(fetch.size(1)));
+        k_fetch<BESIDE_UNROLL><<<int(beside), FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
+                                                                          dst.size(1) / 16, int(fetch.size(1)));
     } else {
-        k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
-                                                                         int(fetch.size(1)));
+        k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
+                                                                         dst.size(1) / 16, int(fetch.size(1)));
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -1435,5 +1437,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
               gather_roles(fetch.unsqueeze(0), n, {src}, {dst}, FETCH_CTAS, 0, 1, 0, {runs});
           }, "expert_fetch@1 from landing rows: dst[fetch[1, i]] = the extents runs[fetch[0, i]] name in src[fetch[0, i]]");
     m.def("fetch", &gather, "expert_fetch@1 (beside > 0: on that many CTAs, beside other work — expert_prefetch@1's "
-          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging)");
+          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging) (a wider dst row: "
+          "its first unit bytes)");
 }

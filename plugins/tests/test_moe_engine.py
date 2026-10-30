@@ -1574,22 +1574,26 @@ def test_a_stores_fence_orders_a_delayed_producer():
     assert bool((y == 7).all())
 
 
-def _bytes_exact(store) -> int:
+def _bytes_exact(store, cache: dict | None = None) -> int:
     """Exclusive tiers: how many pieces' RAM units or VRAM slots do not hold the bytes the file has for the piece the
-    map names there (an idle engine; `_ram_units_hold_their_pieces` asserts the RAM half)."""
+    map names there (an idle engine; `_ram_units_hold_their_pieces` asserts the RAM half); `cache`: the file's bytes
+    kept by piece across calls."""
     from holon_std.tiered import files
     from holon_std.tiered.store import _offsets
 
     torch.cuda.synchronize()
     res, host, wrong = store.residency.device.cpu().numpy(), store.host_units.cpu().numpy(), 0
+    cache = {} if cache is None else cache
     for g, classes in enumerate(store.layer_classes):
         for i in range(store.items):
             for r, c in enumerate(classes):
                 if res[g, i, r] < -1:
                     continue
-                want = np.empty(c.unit_bytes, dtype=np.uint8)
-                piece = c.pieces[store._piece_index(c, g, i, r)][3]
-                files.read([(e, want[o:o + e.nbytes]) for e, o in _offsets(piece)])
+                n = store._piece_index(c, g, i, r)
+                if (c.name, n) not in cache:
+                    cache[c.name, n] = want = np.empty(c.unit_bytes, dtype=np.uint8)
+                    files.read([(e, want[o:o + e.nbytes]) for e, o in _offsets(c.pieces[n][3])])
+                want = cache[c.name, n]
                 got = c.host_view()[int(host[g, i, r])].numpy() if res[g, i, r] == -1 else \
                     c.slots()[int(res[g, i, r])].cpu().numpy()
                 wrong += not np.array_equal(got[:c.unit_bytes], want)
@@ -1599,14 +1603,21 @@ def _bytes_exact(store) -> int:
 def _held_once(store) -> None:
     """Exclusive tiers: every expert in one tier — a RAM unit's piece exactly where the map says (tier code −1), never
     beside a VRAM copy; each RAM unit owned once, by the piece whose host unit it is (no copy a promotion that raced a
-    demotion could leave twice: Maya's duplicate-copy GC, step 7)."""
+    demotion could leave twice: Maya's duplicate-copy GC, step 7) — or reserved for a parked expert whose D8x move
+    has not mapped it yet (`reservations`), which no piece's host unit names (A's D8x2-M1; the expert may have been
+    routed into another tier meanwhile: phase 3 frees the unit then)."""
     res, host = store.residency.device.cpu().numpy(), store.host_units.cpu().numpy()
     assert ((res == -1) == (host >= 0)).all() and ((res >= 0).all(-1) == (res >= 0).any(-1)).all()
+    reserved = {(k, u): item for k, u, item in store.reservations()}
     for k, c in enumerate(store.classes.values()):        # each RAM unit holds one piece, the one the map says
         owner = store.owner[k].cpu().numpy()
-        g, e = np.divmod(owner[owner >= 0], store.items)
+        units = [u for u in np.flatnonzero(owner >= 0) if (k, u) not in reserved]
+        g, e = np.divmod(owner[units], store.items)
         role = [next(r for r, x in store.groups[store.layers[gg]].items() if x is c) for gg in g]
-        assert len(set(owner[owner >= 0])) == len(g) and (host[g, e, role] == np.flatnonzero(owner >= 0)).all()
+        assert len(set(owner[owner >= 0])) == np.count_nonzero(owner >= 0) and (host[g, e, role] == units).all()
+        named = {int(host[gg, ee, rr]) for gg in range(len(store.layers)) for ee in range(store.items)
+                 for rr, x in store.groups[store.layers[gg]].items() if x is c}
+        assert all(owner[u] == item and u not in named for (kk, u), item in reserved.items() if kk == k)
 
 def _slots_held(store) -> torch.Tensor:
     """Each layer's cache slots per role between steps: mapped, empty, a policy's spares' — conserved (none leaks)."""
@@ -1998,7 +2009,9 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
         store.read_ahead_tokens = 8
         try:                                     # (each plant fails by its outputs or bytes — not by a wait's timeout
             same, wrong, failed = _served(engine, prompts) == want, _bytes_exact(store), None     # or a refusal —, but
-        except IndexError as e:                  # readback_unwaited's lists, another call's, may index past a table)
+        except (IndexError, RuntimeError) as e:  # readback_unwaited's lists, another call's, may index past a table,
+            if not isinstance(e, IndexError) and "outside src or dst" not in str(e):     # or a copy refuse them)
+                raise
             same, wrong, failed = False, -1, e
         engine.close()
     assert failed is None or plant == "readback_unwaited", failed
@@ -2376,6 +2389,68 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
         assert plant is None or fired["delayed"] and fired["filled"]
     else:
         assert fired["delayed"] and fired["filled"] and wrong, plant
+
+
+@pytest.fixture(scope="module")
+def gpu_moe_wide_fresh(gpu_moe_wide):
+    """Two fresh prompts for `gpu_moe_wide`, each long enough to lend, and the resident store's greedy streams of each
+    served alone (a prompt step of its own, then its decode)."""
+    file, _, _ = gpu_moe_wide
+    gen = torch.Generator().manual_seed(3)
+    fresh = [torch.randint(0, 512, (n,), generator=gen).tolist() for n in (256, 250)]
+    engine = _gpu_engine(file)
+    want = [engine.generate([p], GREEDY) for p in fresh]
+    engine.close()
+    return fresh, want
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+@pytest.mark.parametrize("plant", [None, "parked_row_superset_runs", "row_hit_before_parked",
+                                   "row_move_before_unmapped", "row_mapped_before_copied", "row_reused_before_moved",
+                                   "row_reused_before_mapped", "reserved_unit_named", "row_moved_after_promoted"])
+def test_a_short_prompt_parks_its_lent_experts_in_the_read_ahead_rows(gpu_moe_wide, gpu_moe_wide_fresh, mode2, plant):
+    """D8x (docs/dev/v1-glm.md), under the deployment's terms: a short prompt step (no decode row, below the read-ahead
+    steps' size: every prompt step here) parks the lent experts RAM has no free unit for in the idle read-ahead rows —
+    its later layers hit them there —; at its end each is paired with RAM's coldest of its classes, whose units it
+    reserves; the thread copies the rows into them in chunks (4 here: several a prompt), chunk i mapped at launch
+    (step + lag + i), the next short prompt mapping every chunk left first. Checked after every step: the bits are the
+    resident store's, every piece the map names holds its bytes, each tier holds an expert once (a reservation
+    accepted as such), no cache slot is lost; experts were parked, moved, and some routed meanwhile (reconciled). Each
+    of D8x's plants breaks one rule and is caught (`holon_judge.planted._d8x`)."""
+    from holon_judge.planted import d8x_plant
+
+    file, prompts, want = gpu_moe_wide
+    with d8x_plant(plant) if plant else contextlib.nullcontext(collections.Counter()) as fired:
+        engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=mode2(**{"moe.ram": "*=0.25"}))   # (RAM full)
+        store, step, bad, cache, slots = engine.ctx.shared_objects[KEY], engine.step, collections.Counter(), {}, []
+        store.move_chunk = 2
+        heat = torch.rand(store.ram_heat.shape, generator=torch.Generator().manual_seed(0))   # RAM's heat spread (a
+        store.ram_heat.copy_(heat * 8)                     # lent expert hotter than RAM's coldest: no profile here)
+
+        def checked():
+            out = step()
+            bad["bytes"] += _bytes_exact(store, cache)
+            getattr(fired, "release", lambda: None)()        # (a held thread goes on once the bytes were checked)
+            try:
+                _held_once(store)
+            except AssertionError:
+                bad["held"] += 1
+            slots.append(_slots_held(store).sum(0))
+            bad["slots"] += not torch.equal(slots[-1], slots[0])
+            return out
+        engine.step = checked
+        got = _served(engine, prompts)
+        assert int((store.state["spare"][..., 0] > 0).sum()) > 0            # again: F10's spares set up
+        got = got if got != want else _served(engine, prompts)
+        fresh, streams = gpu_moe_wide_fresh                 # a prompt step alone, its decode during its move
+        same = got == want and [engine.generate([p], GREEDY) for p in fresh] == streams
+        counts, stats = store.move_counts.tolist(), dict(store.move_stats)
+        engine.close()
+    if plant is None:
+        assert same and not +bad, bad
+        assert counts[0] > counts[1] > 0 and counts[2] > 0 and counts[3] > 0 and stats["moves"], (counts, stats)
+    else:
+        assert sum(fired.values()) and (not same or +bad), (plant, dict(fired), bad)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")

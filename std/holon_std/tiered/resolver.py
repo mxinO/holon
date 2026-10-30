@@ -157,8 +157,9 @@ class DeviceResolver:
             self._gather(fetch, store.n_ram)
 
         def finish() -> None:
-            if store._ahead:                     # read ahead: its set signalled two layers back (or at step start)
-                store.wait_ahead(g)
+            if store.hits:                       # read ahead: its set signalled two layers back (or at step start);
+                if store._ahead:                 # parked (D8x): ready by the parking event main waited
+                    store.wait_ahead(g)
                 self._gather(store.hit, store.n_hit, landed=True, part=None)
             for r in range(rounds):
                 if r:
@@ -187,7 +188,7 @@ class DeviceResolver:
                       store.n_delta[g:g + 1], store.residency.device, store.host_units, store.piece,
                       store.classes32, store.owner, store.capacity, store.heat, store.io_rows, moves,
                       n_moves, store.ssd, store.n_ssd, store.n_ram, store.landing_rows,
-                      store.ahead_map[g] if store._ahead else None, store.hit, store.n_hit, **store.tier_stamps)
+                      store.ahead_map[g] if store.hits else None, store.hit, store.n_hit, **store.tier_stamps)
 
     def _moves(self, ids: torch.Tensor) -> None:
         """The call's demotions and admitted moves, after its gathers: on the main stream, or beside it on the store's
@@ -228,15 +229,15 @@ class DeviceResolver:
         store.io.signal(self.io_slot)
         q, a = store.rounds_q, store.landing_rows
         most = min(store.items, store.top_k * len(ids))
-        hits = -(-store.ahead_rows // q) if store._ahead else 0
+        hits = -(-store.hit_most // q) if store.hits else 0
         ram, ssd = -(-most // q), -(-most // a)
-        lists = [(store.hit, store.n_hit, 0, q, 0)] if store._ahead else []
+        lists = [(store.hit, store.n_hit, 0, q, 0)] if store.hits else []
         lists += [(fetch, store.n_ram, hits, q, 0), (store.ssd, store.n_ssd, hits + ram, a, q)]
         slots, part = self._place_rounds(lists, slots)
         landed = []
         for p in range(hits):
             def hit(p=p):
-                if p == 0:                       # read ahead: its set signalled two layers back (or at step start)
+                if p == 0 and store._ahead:      # read ahead: its set signalled two layers back (or at step start)
                     store.wait_ahead(g)
                 self._gather(store.hit, store.n_hit, landed=True, part=p, size=q)
             landed.append(hit)
@@ -322,7 +323,7 @@ class DeviceResolver:
         else:                                    # STAGE_PARTS front parts over the hits, then the RAM misses
             size = (-(-(c_hit + c_ram) // ring.STAGE_PARTS)).clamp(min=q)
             first_ram, off_ram, first_ssd = 0, c_hit, -(-(c_hit + c_ram) // size)
-        lists = [(store.hit, store.n_hit, 0, size, 0, 0)] if store._ahead else []
+        lists = [(store.hit, store.n_hit, 0, size, 0, 0)] if store.hits else []
         lists += [(fetch, store.n_ram, first_ram, size, 0, off_ram), (store.ssd, store.n_ssd, first_ssd, a, q, 0)]
         if rounds:
             slots, part = self._place_rounds(lists, slots)
@@ -453,7 +454,7 @@ class _Beside:
         self.lists = s.read_lists(self.tiered)
         q, a = s.rounds_q, s.landing_rows
         n_hit, n_ram, n_ssd = (int(self.lists[k].max()) for k in ("n_hit", "n_ram", "n_ssd"))
-        n_hit = n_hit if s._ahead else 0          # (kind, first entry, past its last) per front part
+        n_hit = n_hit if s.hits else 0            # (kind, first entry, past its last) per front part
         if self.rounds:
             self.front = [[("hit", p, p + q)] for p in range(0, n_hit, q)] + \
                 [[("ram", p, p + q)] for p in range(0, n_ram, q)]
@@ -498,7 +499,7 @@ class _Beside:
                     continue
                 if kind == "hit":                # landing rows: each row's piece from its read-ahead request
                     src, _ = s.landing_view(c.name, device=False)
-                    runs = s.landing_runs(c.name, at[0], s.ahead_pieces(g, r, at[0]))
+                    runs = s.landing_runs(c.name, at[0], s.ahead_pieces(g, r, at[0]), parked=s._rows)
                 else:
                     src, runs = c.host_view(), None
                 self.keys[p].append(self.copy(s.copies[c.name][0], at, src, c, runs))

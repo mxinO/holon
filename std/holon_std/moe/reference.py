@@ -465,12 +465,12 @@ class ActivationLoan:
 def expert_fetch(fetch: torch.Tensor, n: int, src: torch.Tensor, dst: torch.Tensor,
                  runs: torch.Tensor | None = None) -> torch.Tensor:
     """The `expert_fetch@1` oracle: `dst` with units `src[fetch[0, i]]` in slots `fetch[1, i]` for i < min(n,
-    staging); with `runs [U, X, 2]` (landing rows, docs/dev/v1-glm.md D8f) the slot gets row `fetch[0, i]`'s extents
-    `(offset, nbytes)` back to back."""
+    staging) (a wider `dst` row: its first unit bytes, docs/dev/v1-glm.md D8x); with `runs [U, X, 2]` (landing rows,
+    D8f) the slot gets row `fetch[0, i]`'s extents `(offset, nbytes)` back to back."""
     out = dst.clone()
     for unit, slot in fetch[:, :n].T.tolist():
         if runs is None:
-            out[slot] = src[unit].to(out.device)
+            out[slot, :src.shape[1]] = src[unit].to(out.device)
             continue
         at = 0
         for off, nbytes in runs[unit].tolist():

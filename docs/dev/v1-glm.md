@@ -1305,7 +1305,7 @@ prompt's routes at 0.5-4× the median RAM heat, the same victim counts): the 1K 
 across the band. *Test:* `test_rams_heat_counts_a_steps_prompt_only_routes_once` (under the deployment's terms).
 
 **D8x — Step 7: a short prompt parks its lent experts in the idle read-ahead rows (C's second 1K lever; rev 2 after
-A, B and C: design for A's re-check, not built).** *Why, replayed* (the D8t recording, the bench's 1K prompts): a 1K
+A, B and C, A's re-check's two rules folded in; built, `std/holon_std/tiered/move.py` and the store's D8x section).** *Why, replayed* (the D8t recording, the bench's 1K prompts): a 1K
 prompt lends ≈ 225 experts, parks them over RAM's coldest, and reads 1.26 GiB of the ≈ 216 it pushed to the SSD back
 itself (of its 9.18 GB from the SSD) — any victim choice is read back ≈ 80-88% at 1K, where a prompt routes almost every
 expert. Below READ_AHEAD_TOKENS the read-ahead's host rows are idle (DEPTH × A_ra = 2 × 135 rows a role, pinned and
@@ -1325,43 +1325,66 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
   runs). Plant `parked_row_superset_runs` (a parked row gathered with its piece's superset runs: wrong bytes).
 - **The move, deterministic and per step (A-M3, C-m1).** Hottest parked first by (heat, group, id), each against RAM's
   coldest of its classes by (heat, group, id), strictly colder, in the order the parking used (A's m4):
-  1. *At the prompt step's end* (its last layer's join, on main, eager): the victims unmapped (their pieces SSD-only),
-     each victim's unit reserved for its parked expert (owner set; the expert stays SSD-only: not free, not
-     displaceable), an event recorded.
+  1. *At the prompt step's end* (its last layer's join, on main, eager): the victims unmapped (their pieces SSD-only,
+     their `host_units` cleared), each victim's unit reserved for its parked expert **in `owner` only** — the parked
+     expert's `host_units` stay −1 until its chunk is mapped, or the resolve would take it as RAM-held and gather it
+     from a unit the thread is still filling (A's D8x2-M1) —, an event recorded after the table's copy to the host.
   2. *The move thread* waits that event, then copies row → unit in fixed chunks (C: ≈ 50 experts, one decode token's
      worth), hottest first, publishing each chunk with a release store of its done flag.
-  3. *At the start of step (prompt end + 1 + i)* chunk i is mapped (the store acquires its flag, joining the thread
-     for it if late — a host wait, counted): each expert to its unit, its row released — by a small eager kernel on
-     main before the step's graph launch, never inside a capture (exclusive tiers refuse host edits; A's m1, B).
+  3. *At launch (prompt step + 2 + i)* chunk i is mapped (the store acquires its flag, joining the thread for it if
+     late — a host wait, counted): each expert to its unit, its row released — by a small eager kernel on main before
+     the step's graph launch, never inside a capture (exclusive tiers refuse host edits; A's m1, B; no move holds
+     reservations at a capture: graphs are captured once, at startup, after `after_materialize` dropped any — std
+     cannot ask torch.cuda whether a capture runs, so that is structural, not asserted). *As built:* + 2, not + 1 (`move.LAG`): with overlap, launch + 1 is made
+     before the prompt step's device work ends, so no copy can have begun by then and every chunk 0 would join.
   Placement then depends on the step count only: run-identical. The parked experts' SSD-only window is ≈ one token a
-  chunk.
+  chunk. Every owner ↔ host check accepts a reservation (`owner[u]` = p while no piece's `host_units` names u: the
+  tests' `_held_once` through the store's `reservations()`); no kernel reads `owner` as "p holds u" (`moe_tiers@2`'s
+  free-unit search takes `owner` −1, its displacements and `_park`'s take RAM-resident experts by `host_units`, its
+  OWN record frees by `host_units`).
 - **An expert routed during the move (A-M2, C-M1).** A parked expert routed before its chunk's phase 3 is an ordinary
   SSD miss (read into the on-demand landing halves, never the rows). F10 may admit it to VRAM, or the keep rule keep it
   in RAM: phase 3 maps an expert only if it is still SSD-only and still holds its reservation; otherwise it frees the
-  reserved unit (owner −1) and releases the row. The tier op's keep skips an expert holding a reservation (one flag
-  test before `place()`). Plant `row_moved_after_promoted` (phase 3 maps an expert decode admitted: two tiers at once,
+  reserved unit (owner −1) and releases the row. *As built:* the keep does not skip a reserved expert — the reconcile
+  already frees the reserved unit of one kept elsewhere, and the skip would change `moe_tiers@2` (a flag no table
+  carries) for no byte. Plant `row_moved_after_promoted` (phase 3 maps an expert decode admitted: two tiers at once,
   the residency check and the bytes).
-- **The rows' reuse, failed steps (A's m3).** A step that would park into the rows, or read ahead into them (≥ 2K
-  tokens), joins the move thread first (counted). `start_step` refuses only a parked set a failed step left; dropping it
-  (each expert SSD-only, its row released, its reserved unit freed) joins the thread first, so no unit is freed while
-  the thread writes it.
+- **The rows' reuse (A's m3, D8x2-M2), a re-layout (D8x2-m1), a step that never reached its end.** A step that would
+  park into the rows, or read ahead into them (≥ 2K tokens), first joins the thread and maps every chunk left (its
+  launch, before its work: counted) — a join alone would leave the old parked experts' `ahead_map` entries naming rows
+  the new parking takes — and every parking step resets `ahead_map` to −1 for every layer before writing its own.
+  `after_materialize` joins and drops a move in progress (each reservation freed, its expert left SSD-only) before the
+  seed reads `owner`. *As built:* nothing is refused at `start_step`: a short prompt step whose last layer never ran (an
+  auxiliary group skipped, or a failure) has its phase 1 at the next launch, after that launch's join of the moves
+  and its wait for the step's left parking event (its rows hold the bytes once the parking copies ran).
 - **The thread (B's conditions; C).** One named daemon thread, made at the store's first exclusive materialize, joined
   at shutdown after the engine's drain; an exception surfaced at the next commit (a raise), never lost; CPU affinity
-  off the engine loop's core and the I/O worker's; low OS priority (`os.setpriority`); the copy by `Tensor.copy_` on
-  pinned views (the GIL released per chunk; glibc's large-block `memcpy`, non-temporal stores past its threshold). Its
+  off the engine loop's core and the I/O worker's; low OS priority (`os.setpriority`, nice 10); the copy by numpy's
+  `copyto` on pinned views (single-threaded, the GIL released per piece: torch's CPU `copy_` would fan out over its
+  intra-op pool). Its
   cost: ≈ 1.5 GB a prompt, ≈ 0.15-0.2 s of one core, ≈ 3 GB of DRAM traffic beside decode's RAM gathers (C: the
   overlapped ≈ 4 tokens ≈ +1.5-3 ms each). A copy engine instead (a device bounce) would put ≈ 1.5 GB on the H2D link
   decode's ≈ 530 MB a token of RAM gathers use, and need a scratch slot: the thread is the lighter.
-- **Gating.** Exclusive tiers; a tail step below READ_AHEAD_TOKENS with no decode or verify row; the rows' room
-  (2 × 135 a role) — past it, the rest park over RAM as today. No option, no core lines.
-- **Plants** (bytes or bits): `parked_row_superset_runs`, `row_moved_after_promoted`, `row_hit_before_parked` (a hit's
-  gather before the parking event), `row_move_before_unmapped` (the copy before phase 1's event),
-  `row_mapped_before_copied` (phase 3 before the chunk's flag), `row_reused_before_moved` (the next short prompt's
-  parking into a row the thread still reads).
+- **Gating.** Exclusive tiers; a lending step below READ_AHEAD_TOKENS with no decode or verify row; the rows' room
+  (2 × 135 a role) — free RAM units first as today, then the rows, past them over RAM as today. No option, no core
+  lines. *As built:* a parked step's hits per layer reach min(E, the rows) (`hit_most`; a read-ahead set's A_ra), D8s's
+  hit parts sized by it; `expert_fetch@1` lets `dst` have wider rows (a slot → row copy: the unit at each row's start;
+  its oracle and the CUDA gather amended, no other provider).
+- **Plants** (bytes or bits; `holon_judge.planted._d8x`, one test under the deployment's terms with RAM full, checked
+  after every step): `parked_row_superset_runs` (bits), `row_hit_before_parked` (the slot → row copies after the
+  step's hits: bits, bytes), `row_move_before_unmapped` (*as built:* the victims stay mapped to the units the thread
+  fills — the event itself cannot be planted early, the thread learns its table from the copy that follows it —:
+  bytes, residency), `row_mapped_before_copied` (a chunk mapped with the thread held: bytes),
+  `row_reused_before_moved` (the next short prompt maps the last one's chunks without waiting their copies, the
+  thread held until its parking ran: bytes), `row_reused_before_mapped` (A's D8x2-M2: joined, neither mapped nor
+  reset: the old parked experts hit rows the new parking took), `reserved_unit_named` (A's D8x2-M1: residency, and
+  the bits where a decode routes it first), `row_moved_after_promoted` (residency, a lost cache slot).
 - **The A/B must report (C-m2, B).** Decode SSD MB a token over tokens 1-8 and 9-32 on both arms; the count of parked
   experts read from the SSD before their move; the joins a ≥ 2K prompt makes on the thread; the engine loop's launch
   latency p50 / p99 (p99 up ≤ 1 ms) and the decode tokens the move overlaps (≤ 5% slower). Kept only if 1K prefill
-  gains and decode loses at no size.
+  gains and decode loses at no size. The store counts them: `move_counts` (device: experts parked in rows, paired with
+  a victim, mapped, reconciled) and `move_stats` (host: moves, joins and their ns, parked experts routed before their
+  chunk was mapped).
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the

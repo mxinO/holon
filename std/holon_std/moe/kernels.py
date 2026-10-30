@@ -145,7 +145,9 @@ then `staging` slots, then cache slots.
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/dev/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
-  device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. An optional `runs [U, X, 2]
+  device view: a zero-copy gather); the slots are distinct. `dst` may have wider rows, `[S, row]` with row ≥ unit (a
+  multiple of 16 bytes): the unit at each row's start (docs/dev/v1-glm.md D8x: landing rows). Facts: unit_bytes,
+  staging. An optional `runs [U, X, 2]
   int64` reads landing rows (docs/dev/v1-glm.md D8f; `src [U, row]` of its own width): the slot gets row `fetch[0, i]`'s
   extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with `beside = True` also takes
   `beside=True`: the same copy on few SMs, for one off the critical path beside other work. Optional member

@@ -47,6 +47,7 @@ import torch
 from holon.api import Extent, MemOp, Ref, RowKind
 
 from . import files
+from . import move as moves
 from .residency import LAG, ResidencyMap
 from .resolver import ACTIVATION_LOAN, CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
 from .ring import ROUND_SLOTS, ROUNDS, Lent
@@ -181,6 +182,16 @@ class TieredStore:
         self.pending_demotions = None                   # a call's demotions not yet enqueued (D8t): (group, its
         #                                                 classes' gathers, their keywords): the next call enqueues them
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
+        # D8x (docs/dev/v1-glm.md): a short prompt step (below READ_AHEAD_TOKENS, no decode row, lending) parks its lent
+        # experts in the idle read-ahead rows (`_rows`; the rows it took so far, on the device), its end due
+        # (`_move_end`); the move into RAM that follows (`_move`, until every chunk is mapped; `_moved` the last one,
+        # for its counts), its thread (`_mover`), its chunk and lag (`move_chunk`, `move_lag`), and the host's counts
+        self._rows, self._rows_used, self._move_end = False, None, False
+        self._move: moves.Move | None = None
+        self._moved: moves.Move | None = None
+        self._mover: moves.Mover | None = None
+        self.move_chunk, self.move_lag = moves.CHUNK, moves.LAG
+        self.move_stats = dict.fromkeys(("moves", "joins", "join_ns", "routed_before"), 0)
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
         # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
@@ -444,6 +455,13 @@ class TieredStore:
         # on-demand ones, set g % DEPTH layer g's: the first A_ra of its SSD-only set, lowest ids first
         self.ahead_rows = min(self._read_ahead or self.staging, self.items)
         self.ahead_map = static(f"{self.name}.ahead", (shape[0], self.items))      # a layer's read-ahead row, or −1
+        # D8x: the rows a short prompt step's parking took so far; the move's counts (experts parked in rows, paired
+        # with a victim, mapped, reconciled: routed into another tier before their chunk was mapped)
+        self._rows_used = static(f"{self.name}.rows_used", (1,))
+        self.move_counts = self.ctx.static(f"{self.name}.move_counts", (4,), torch.int64)
+        # the move's table (+ a sink row: phase 1 runs in a lent step, so nothing it keeps may come from the loan)
+        self._move_table = static(f"{self.name}.move_table", (DEPTH * self.ahead_rows + 1, 2 + self.roles))
+        self._move_host = None                   # its pinned host copy and count (at the first move)
         self.ahead_slots: dict[int, int] = {}
         self.landing: dict[str, tuple] = {}
         self.runs: dict[str, object] = {}
@@ -546,6 +564,7 @@ class TieredStore:
                                        pref_units=DEPTH * self.roles, device="host", mapped=True)
             self.descriptors, shape, n_rows = {}, {}, self.landing_rows * self.halves + DEPTH * self.ahead_rows
             self.piece_runs = {}                 # D8g: each piece's runs in a landing row (the I/O worker's rule)
+            self.canon_runs, self._canon_dev = {}, {}    # D8x: a parked row's (its piece as a slot holds it)
             for c in classes:
                 rows = []
                 for n in range(len(c.pieces)):
@@ -559,6 +578,8 @@ class TieredStore:
                 self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
                                                         dtype=torch.int64)
                 self.piece_runs[c.name] = _runs(self.descriptors[c.name].numpy())
+                self.canon_runs[c.name] = _canonical(self.descriptors[c.name].numpy())
+                self._canon_dev[c.name] = torch.from_numpy(self.canon_runs[c.name]).to(ctx.device)
                 shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
                 self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
                                              min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
@@ -583,6 +604,12 @@ class TieredStore:
         """Seed the new pool: the policy's items within its bytes, each class's arena laid out for its share, the map
         at the tier but for the seed, copied in; the policy's state, counts and words zeroed."""
         self._decode_set = False                # the decode kinds are written again at the next launch
+        if self.exclusive:                      # D8x: a move in progress joined and dropped (A's D8x2-m1); its thread
+            self._move_drop()                   # made once
+            self._move_end, self._moved = False, None
+            if self._mover is None:
+                self._mover = moves.Mover(self.name, self._move_copy,
+                                          moves.mover_cores(getattr(getattr(self.io, "service", None), "cores", ())))
         classes = list(self.classes.values())
         size = self.arena.capacity * self.granule
         groups = list(self._order)
@@ -771,18 +798,20 @@ class TieredStore:
         return tiered
 
     def ahead_pieces(self, g: int, role: int, rows: np.ndarray) -> np.ndarray:
-        """D8g: the pieces layer g's read-ahead set asked for into landing rows `rows` (its request rows, on the
-        host)."""
-        table = self.ahead_view(device=False)[g % DEPTH, role].numpy()
-        return table[1 + rows - self.ahead_base(g), 0]
+        """D8g: the pieces read ahead, or parked (D8x), into landing rows `rows` for role `role` (the read-ahead sets'
+        request rows, on the host: row j is set (j − first) // A_ra's entry (j − first) % A_ra; layer g's set is its
+        own)."""
+        at = rows - self.ahead_base(0)
+        return self.ahead_view(device=False)[:, role].numpy()[at // self.ahead_rows, 1 + at % self.ahead_rows, 0]
 
-    def landing_runs(self, name: str, rows: np.ndarray, pieces: np.ndarray) -> torch.Tensor:
+    def landing_runs(self, name: str, rows: np.ndarray, pieces: np.ndarray, parked: bool = False) -> torch.Tensor:
         """D8g: class `name`'s runs [rows, X, 2] on the host with landing rows `rows` holding `pieces` (their runs
-        known from the descriptors: `_runs`); the other rows as an earlier copy left them."""
+        known from the descriptors: `_runs`; `parked` rows', D8x, their pieces as a slot holds them: `_canonical`);
+        the other rows as an earlier copy left them."""
         if name not in self._runs_host:
             n = self.landing_rows * self.halves + DEPTH * self.ahead_rows
             self._runs_host[name] = np.zeros((n, *self.piece_runs[name].shape[1:]), dtype=np.int64)
-        self._runs_host[name][rows] = self.piece_runs[name][pieces]
+        self._runs_host[name][rows] = (self.canon_runs if parked else self.piece_runs)[name][pieces]
         return torch.from_numpy(self._runs_host[name])
 
     def read_lists(self, tiered: torch.Event) -> dict[str, np.ndarray]:
@@ -869,10 +898,14 @@ class TieredStore:
             reads.bind()
 
     def before_launch(self, step) -> tuple[list[tuple[torch.Tensor, np.ndarray]], list[MemOp]]:
+        if self._parked is not None and self._move_end:     # (D8x: a parked set's rows filled before its move reads
+            self.wait_parked()                              # them, the step that parked it having failed)
         self._parked = None                     # no step's parking event outlives it (A's D8l-m2: a failed step's)
         if self.pending_demotions is not None:  # a step that ended before its map's last layer (an auxiliary group
             self.flush_demotions()              # skipped): its demotions and their join before this step's work
             torch.accelerator.current_stream(self.ctx.device).wait_stream(self.moves_stream())   # (D8t, A's m2)
+        if self._move_end:                      # D8x: such a step's move begins here, after that join
+            self._move_start()
         if not self._sized:                     # launches follow the final materialize (the startup profile's minimum
             self._check_pinned()                # pools never launch): the arena's size is final here
             self._sized = True
@@ -910,6 +943,10 @@ class TieredStore:
             self._mode = "stage"                                 # a pass's misses may pass the staging slots
         else:
             self._mode = None
+        # D8x: a lending prompt step below READ_AHEAD_TOKENS with no decode or verify row parks its lent experts in the
+        # idle read-ahead rows; it, and a read-ahead step, first finish the last such step's move (A's D8x2-M2)
+        self._rows = self.exclusive and self._mode is not None and bool(prompt) and not self._ahead and not any(decode)
+        self._move_due(step.step, every=self._rows or self._ahead)
         # a staging step of large passes whose clients all pipeline: its staging a ring of parts (`Lent`)
         self._parts = self.pipeline if self._mode == "stage" and self.pipeline > 1 and self._pipelining and \
             self.large_passes(at) and not self.exclusive else 1
@@ -979,6 +1016,15 @@ class TieredStore:
         if self.exclusive and mode:              # the step's lent experts that ended in RAM: parked
             lent = record["records"][record["records"][:, 1] == -1]
             self.parked += int((self.residency.host[lent[:, 0], lent[:, 2]] == -1).all(-1).sum())
+        if (m := self._moved) is not None:      # D8x: the move's error raised here; its experts routed before their
+            if m.error is not None:             # chunk was mapped (SSD reads its rows would have saved)
+                raise RuntimeError(f"{self.name}: the D8x move thread failed: {m.error!r}") from m.error
+            if m.entries is not None and step.step > m.step:
+                late = [i for i in range(m.chunks) if i >= len(m.mapped_at) or m.mapped_at[i] > step.step]
+                items = np.concatenate([m.entries[i * m.chunk:(i + 1) * m.chunk, 0] for i in late]) if late else []
+                self.move_stats["routed_before"] += int(record["routed"].reshape(-1)[items].sum())
+                if not late:
+                    self._moved = None
         for tap in self.taps:
             tap(step, record)
         if swaps := self.policy.after_commit(telemetry["counts"].numpy(), self.residency.host):
@@ -989,6 +1035,9 @@ class TieredStore:
         its coordinator behind (still in a read past its time bound): then the descriptors stay open."""
         if self._loan is not None:
             self._loan.release()
+        if self._mover is not None:             # D8x: the move thread first (it copies into the RAM tier's units)
+            self._mover.stop()
+            self._mover = None
         service = getattr(self.io, "service", None) if self.exclusive else None    # (a native worker's)
         if service is not None:
             service.shutdown()
@@ -1008,8 +1057,13 @@ class TieredStore:
                 and self.prefill >= self.items)
 
     def begin(self) -> None:
-        """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any; then
-        a read-ahead step's first DEPTH layers' sets (docs/dev/v1-glm.md D8f)."""
+        """At the step's first resolve (after its words are zeroed and its edits applied): its lent slots, if any — a
+        short prompt step's (D8x) parked in the read-ahead rows, every layer's row map reset first (A's D8x2-M2) —;
+        then a read-ahead step's first DEPTH layers' sets (docs/dev/v1-glm.md D8f)."""
+        if self._rows:
+            self.ahead_map.fill_(-1)
+            self._rows_used.zero_()
+            self._move_end = True
         if self._mode is not None:                 # a graphed step never gets here: it never borrows
             self._borrowing[self._step] = self._mode
             self.lend_needs.zero_()
@@ -1106,6 +1160,18 @@ class TieredStore:
         return self._loan.use(loan[-loan.data_ptr() % 512:])             # (torch's blocks are 512-byte aligned)
 
     @property
+    def hits(self) -> bool:
+        """This step's tier ops take the row map (`ahead_map`): a read-ahead step's sets (D8f), a short prompt step's
+        parked experts (D8x)."""
+        return self._ahead or self._rows
+
+    @property
+    def hit_most(self) -> int:
+        """The most hits a layer call of this step can have: a read-ahead set's rows, or a layer's experts parked in
+        the rows (D8x)."""
+        return self.ahead_rows if self._ahead else min(self.items, DEPTH * self.ahead_rows)
+
+    @property
     def stage_slots(self) -> int:
         """The staging slots of a step that borrows none: its stage list's (exclusive tiers pad theirs to a pass's
         width with its last slot: `after_materialize`)."""
@@ -1177,6 +1243,8 @@ class TieredStore:
         if self.exclusive and self.moves_async and g == len(self._order) - 1:      # the step's moves joined back
             self.flush_demotions()               # (the step's last call's, at the join: D8t A's M1)
             torch.accelerator.current_stream(self.ctx.device).wait_stream(self.moves_stream())
+        if self._move_end and g == len(self._order) - 1:     # D8x: a short prompt step's parked experts' move, after
+            self._move_start()                               # every demotion of the step landed
         if self._ahead and g + DEPTH < self.borrowing_groups:     # the layer two on: its set, now its readers ran
             self.read_ahead(g + DEPTH)
         if self.lent is not None:
@@ -1315,8 +1383,10 @@ class TieredStore:
     def _park(self, picked: torch.Tensor) -> None:
         """Exclusive tiers (docs/dev/v1-glm.md D8b, D8l; Maya's `LEND_PARK_LRU`): the lent experts `picked` [groups,
         items], still mapped to their slots, leave VRAM hottest first (ties by group, then id): into free RAM units of
-        their classes, else into the units of RAM's coldest expert of the same classes when strictly hotter (that one
-        goes to the SSD), else onto the SSD (the file holds every piece). A parked piece's slot is copied into its unit
+        their classes, else — a short prompt step (D8x) — into the read-ahead rows while they have room (mapped
+        SSD-only, their rows in `ahead_map`: the step's hits, moved into RAM after it), else into the units of RAM's
+        coldest expert of the same classes when strictly hotter (that one goes to the SSD), else onto the SSD (the file
+        holds every piece). A parked piece's slot is copied into its unit (or row)
         now, before the step's staging overwrites it — and, for an expert holding a slot of the step's activation loan,
         before the forward writes the loan (`activations` waits for the copies: D8l). On the device, no host sync (the
         step's first resolve, or a tail step's early start: no synchronizing call — though under a long kernel on the
@@ -1348,20 +1418,19 @@ class TieredStore:
             placed &= ranks[r] < free.sum(1)[cls[:, r]]
         to = torch.stack([free_units[cls[:, r], ranks[r].clamp(0, u_n - 1)] for r in range(roles)], 1).int()
         to = torch.where(placed[:, None], to, -1)
-        # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter
         rest = lent & ~placed
+        if self._rows:                           # D8x: the rest, hottest first, into the rows while they have room
+            rank = torch.argsort(torch.where(rest, -heat, math.inf), stable=True)
+            row = torch.empty_like(rank).scatter_(0, rank, torch.arange(n, device=dev)) + self._rows_used
+            rowed = rest & (row < DEPTH * self.ahead_rows)
+            rest &= ~rowed
+            self._rows_used += rowed.sum().int()
+            self.move_counts[0] += rowed.sum()
+        # 2. the rest, hottest first, over RAM's coldest of the same classes while strictly hotter
         ram = (slots == -1).all(1) & (units >= 0).all(1) & ~picked
-        dropped = torch.zeros(n + 1, dtype=torch.bool, device=dev)    # (+ a sink entry, as `to`'s row below)
+        over, dropped = self._over_coldest(rest, ram, heat, units)
+        to = torch.where(over >= 0, over, to)
         at = torch.arange(n, device=dev)
-        to = torch.cat([to, to[:1]])
-        for sig in self._signatures:                                     # [groups] bool: one class per role
-            member = sig.repeat_interleave(items)
-            a = torch.argsort(torch.where(rest & member, -heat, math.inf), stable=True)
-            b = torch.argsort(torch.where(ram & member, heat, math.inf), stable=True)
-            pair = (at < (rest & member).sum()) & (at < (ram & member).sum()) & (heat[a] > heat[b])
-            to.index_copy_(0, torch.where(pair, a, n), torch.where(pair[:, None], units[b], to[n:]))
-            dropped.scatter_(0, torch.where(pair, b, n), True)
-        to, dropped = to[:n], dropped[:n]
         placed = to[:, 0] >= 0
         # 3. the maps: parked into their units (−1), the rest and the dropped onto the SSD (−2), the already parked
         # as they were
@@ -1370,12 +1439,86 @@ class TieredStore:
         for r in range(roles):
             flat_owner.scatter_(0, torch.where(placed, cls[:, r] * u_n + to[:, r].long(), sink), at.int())
         owner.view(-1).copy_(flat_owner[:sink])
+        if self._rows:
+            self._park_rows(cls, slots, rowed, self.ahead_base(0) + row)
         self._copy_parked(cls, slots, to, placed)
         lent = lent | (picked & ~already)
         res.copy_(torch.where(lent[:, None], torch.where(placed[:, None], -1, -2),
                               torch.where(already[:, None], -1, torch.where(dropped[:, None], -2, slots)))
                   .view(groups, items, roles).int())
         host.copy_(torch.where(lent[:, None], to, torch.where(dropped[:, None], -1, units)).view(groups, items, roles))
+
+    def _over_coldest(self, rest: torch.Tensor, ram: torch.Tensor, heat: torch.Tensor,
+                      units: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per class signature, the k-th hottest of `rest` [n] against RAM's k-th coldest (`ram` [n]; heat, then group,
+        then id) while strictly hotter: each one's units [n, R] (−1: none) and the coldest displaced [n] (`_park`'s
+        step 2, D8x's victims)."""
+        n, dev = rest.shape[0], rest.device
+        to = torch.full((n + 1, units.shape[1]), -1, dtype=units.dtype, device=dev)    # (+ a sink entry each)
+        dropped = torch.zeros(n + 1, dtype=torch.bool, device=dev)
+        at = torch.arange(n, device=dev)
+        for sig in self._signatures:                                     # [groups] bool: one class per role
+            member = sig.repeat_interleave(self.items)
+            a = torch.argsort(torch.where(rest & member, -heat, math.inf), stable=True)
+            b = torch.argsort(torch.where(ram & member, heat, math.inf), stable=True)
+            pair = (at < (rest & member).sum()) & (at < (ram & member).sum()) & (heat[a] > heat[b])
+            to.index_copy_(0, torch.where(pair, a, n), torch.where(pair[:, None], units[b], to[n:]))
+            dropped.scatter_(0, torch.where(pair, b, n), True)
+        return to[:n], dropped[:n]
+
+    def _park_rows(self, cls: torch.Tensor, slots: torch.Tensor, rowed: torch.Tensor, row: torch.Tensor) -> None:
+        """D8x: the experts `rowed` [n] parked in landing rows `row` [n] (a short prompt step's): the row map, the rows'
+        pieces in the read-ahead sets' request rows (D8g's copies read them) and their runs on the device (a parked row
+        holds its piece as a slot does: `_canonical`), then each piece's slot copied into its row (an `expert_fetch@1`
+        launch a class, slot → row) on the copy stream — the parking event after `_copy_parked`'s follows them."""
+        n, roles = slots.shape
+        base, room = self.ahead_base(0), DEPTH * self.ahead_rows
+        rel = torch.where(rowed, row - base, room)                         # (room: a sink entry)
+        self.ahead_map.view(-1).copy_(torch.where(rowed, row, self.ahead_map.view(-1)))
+        piece = self.piece.view(n, roles)
+        view = self.ahead_view()
+        for r in range(roles):
+            col = torch.cat([view[:, r, 1:, 0].reshape(-1), view.new_zeros(1)])
+            col.index_copy_(0, rel, piece[:, r])
+            view[:, r, 1:, 0].copy_(col[:room].view(DEPTH, self.ahead_rows))
+        lists = []
+        for k, name in enumerate(self.classes):
+            rows, runs = self.landing_view(name)
+            region = torch.cat([runs[base:], runs.new_zeros(1, *runs.shape[1:])])
+            for r in range(roles):
+                mine = rowed & (cls[:, r] == k)
+                region.index_copy_(0, torch.where(mine, rel, room),
+                                   self._canon_dev[name][torch.where(mine, piece[:, r], 0).long()])
+            runs[base:].copy_(region[:room])
+            mine = (cls == k) & rowed[:, None]                               # [n, roles]
+            lists.append((name, *self._slot_list(mine, slots, row[:, None].expand(n, roles)), rows))
+        self._fetch_lists(lists)
+
+    @staticmethod
+    def _slot_list(mine: torch.Tensor, slots: torch.Tensor, to: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """The (slot, destination) list [2, n·R] of the pieces `mine` [n, R] (`to` their destinations); its count."""
+        n, roles = slots.shape
+        pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
+        ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos, x.reshape(-1))
+                for x in (slots.int(), to.int())]                        # (+ a sink entry each)
+        return torch.stack([e[:-1] for e in ends]), mine.sum().int().view(1)
+
+    def _fetch_lists(self, lists: list) -> torch.Stream | None:
+        """Each (class, list, count, destination): the class's slots into the destination, one fetch launch a class, on
+        the store's copy stream after the work enqueued so far (the lists kept until they ran); the stream (None: a CPU
+        device, copied at once)."""
+        slots = self.residency.device
+        side = self.fetch_stream() if slots.is_cuda else None
+        if side is not None:
+            side.wait_stream(torch.accelerator.current_stream(slots.device))
+        with side if side is not None else contextlib.nullcontext():
+            for name, fetch, count, dst in lists:
+                self._class_fetch[name](fetch, count, self.classes[name].slots(), dst)
+        if side is not None:
+            for _, fetch, count, _ in lists:
+                fetch.record_stream(side)
+                count.record_stream(side)
+        return side
 
     def _loan_slots(self) -> tuple[int, int] | None:
         """This step's activation loan in its tail: (the tail's class, the first slot the loan's bytes touch — the
@@ -1390,25 +1533,10 @@ class TieredStore:
         """Each parked piece's slot into its RAM unit, one fetch launch a class (`expert_fetch@1`, slot → unit), on the
         store's copy stream after the work enqueued so far: the step's first resolve waits for them (`wait_parked`)
         before its staging can overwrite a lent slot."""
-        n, roles = slots.shape
-        lists = []                                                       # each class's (slot, unit) list, here
-        for c, name in enumerate(self.classes):
-            mine = (cls == c) & placed[:, None]                          # [n, roles]
-            pos = torch.where(mine, mine.reshape(-1).cumsum(0).view(n, roles) - 1, n * roles).reshape(-1)
-            ends = [torch.zeros(n * roles + 1, dtype=torch.int32, device=slots.device).scatter_(0, pos, x.reshape(-1))
-                    for x in (slots.int(), to)]                          # (+ a sink entry each)
-            lists.append((name, torch.stack([e[:-1] for e in ends]), mine.sum().int().view(1)))
-        side = self.fetch_stream() if slots.is_cuda else None
-        if side is not None:                     # the copies on the copy stream, their lists kept until they ran
-            side.wait_stream(torch.accelerator.current_stream(slots.device))
-        with side if side is not None else contextlib.nullcontext():
-            for name, fetch, count in lists:
-                sc = self.classes[name]
-                self._class_fetch[name](fetch, count, sc.slots(), sc.units())
+        lists = [(name, *self._slot_list((cls == k) & placed[:, None], slots, to), c.units())
+                 for k, (name, c) in enumerate(self.classes.items())]
+        side = self._fetch_lists(lists)
         if side is not None:
-            for _, fetch, count in lists:
-                fetch.record_stream(side)
-                count.record_stream(side)
             self._parked = torch.Event(device=slots.device)
             self._parked.record(side)
 
@@ -1417,6 +1545,147 @@ class TieredStore:
         if self._parked is not None:
             torch.accelerator.current_stream(self.ctx.device).wait_event(self._parked)
             self._parked = None
+
+    # -- D8x: a short prompt's parked experts move into RAM ------------------------------------------------------------
+    def _move_start(self) -> None:
+        """Phase 1, at a short prompt step's end (after the step's moves joined: every demotion landed), on the current
+        stream, eagerly: its experts still parked in the rows, hottest first by (heat, group, id), each paired with
+        RAM's coldest of its classes, strictly colder (`_over_coldest`, the parking's order); each victim leaves RAM
+        (SSD-only, its `host_units` −1), its units reserved for its parked expert in `owner` only — the parked expert's
+        `host_units` stay −1 until its chunk is mapped, so nothing reads or names a unit the thread fills (A's
+        D8x2-M1). The pairs, hottest first, are the move's table, copied to the host; the thread copies the rows once
+        the event after them has passed."""
+        self._move_end = False
+        if self._move is not None:
+            raise RuntimeError(f"{self.name}: a short prompt's move began over the last one's (D8x2-M2)")
+        res, host = self.residency.device, self.host_units
+        groups, items, roles = res.shape
+        n, dev = groups * items, res.device
+        slots, units = res.reshape(n, roles), host.reshape(n, roles)
+        heat = (self.heat.double() if self.heat is not None else torch.zeros(groups, items, device=dev)).reshape(-1)
+        rows = self.ahead_map.view(-1)
+        parked = (rows >= 0) & (slots == -2).all(1)
+        to, victim = self._over_coldest(parked, (slots == -1).all(1) & (units >= 0).all(1), heat, units)
+        moving = to[:, 0] >= 0
+        self._reserve(moving, to)
+        self._displace(victim)
+        at = torch.arange(n, device=dev)
+        room = DEPTH * self.ahead_rows
+        order = torch.argsort(torch.where(moving, -heat, math.inf), stable=True)
+        rank = torch.empty_like(order).scatter_(0, order, at)
+        table = self._move_table.fill_(-1)
+        table.index_copy_(0, torch.where(moving, rank, room), torch.cat([at[:, None], rows[:, None], to], 1).int())
+        self.move_counts[1] += moving.sum()
+        if self._move_host is None:
+            pinned = dev.type == "cuda"
+            self._move_host = (torch.empty((room, 2 + roles), dtype=torch.int32, pin_memory=pinned),
+                               torch.empty(1, dtype=torch.int32, pin_memory=pinned))
+        tab, count = self._move_host
+        tab.copy_(table[:room], non_blocking=True)
+        count.copy_(moving.sum().int().view(1), non_blocking=True)
+        event = None
+        if dev.type == "cuda":
+            event = torch.Event(device=dev)
+            event.record()
+        self._move = self._moved = moves.Move(self._step, self.move_chunk, table[:room], tab, count, event)
+        self.move_stats["moves"] += 1
+        self._mover.submit(self._move)
+
+    def _reserve(self, moving: torch.Tensor, to: torch.Tensor) -> None:
+        """Phase 1: the units `to` [n, R] reserved for the experts `moving` [n] in `owner` only (A's D8x2-M1)."""
+        owner, (c_n, u_n), roles = self.owner, self.owner.shape, self.roles
+        cls = self.classes32.long()[:, None, :].expand(-1, self.items, roles).reshape(-1, roles)
+        at = torch.arange(len(moving), device=moving.device)
+        flat = torch.cat([owner.reshape(-1), owner.new_zeros(1)])
+        for r in range(roles):
+            flat.scatter_(0, torch.where(moving, cls[:, r] * u_n + to[:, r].long(), c_n * u_n), at.int())
+        owner.view(-1).copy_(flat[:-1])
+
+    def _displace(self, victim: torch.Tensor) -> None:
+        """Phase 1: the victims [n] leave RAM — SSD-only, their `host_units` −1 (the file holds every piece)."""
+        res, host = self.residency.device.view(-1, self.roles), self.host_units.view(-1, self.roles)
+        res.copy_(torch.where(victim[:, None], -2, res))
+        host.copy_(torch.where(victim[:, None], -1, host))
+
+    def _move_due(self, launch: int, every: bool = False) -> None:
+        """Phase 3, at launch `launch` (`before_launch`, before the step's graph or forward; on the current stream,
+        eagerly): the move's chunks due — chunk i at launch (its step + `move_lag` + i), or (`every`: a step that
+        parks into the rows or reads ahead into them, A's D8x2-M2) every one left — mapped, after the thread copied
+        them (joined if late: counted)."""
+        m = self._move
+        if m is None:
+            return
+        due = None if every else launch - m.step - self.move_lag + 1
+        if due is not None and due <= m.mapped:
+            return
+        self._move_wait(m, due)
+        upto = m.chunks if due is None else min(due, m.chunks)
+        if upto > m.mapped:
+            self._move_map(m, m.mapped * m.chunk, min(upto * m.chunk, len(m.entries)))
+            m.mapped_at += [launch] * (upto - m.mapped)
+            m.mapped = upto
+        if m.mapped == m.chunks:
+            self._move = None
+
+    def _move_wait(self, m: moves.Move, chunks: int | None) -> None:
+        """The host waits until the thread copied `m`'s first `chunks` chunks (None: all): the acquire before their
+        map (A's D8x-m2); a wait counted."""
+        waited = self._mover.wait(m, chunks)
+        self.move_stats["joins"] += bool(waited)
+        self.move_stats["join_ns"] += waited
+
+    def _move_map(self, m: moves.Move, lo: int, hi: int) -> None:
+        """Entries [lo, hi) of `m` mapped: each parked expert to its reserved units if it is still SSD-only and holds
+        them; else (routed meanwhile: admitted to VRAM or kept in RAM) its units freed (A's D8x-M2)."""
+        table = m.table[lo:hi]
+        item, units = table[:, 0].long(), table[:, 2:]
+        res, host = self.residency.device.view(-1, self.roles), self.host_units.view(-1, self.roles)
+        owner = self.owner.view(-1)
+        held = self.classes32.long()[item // self.items] * self.owner.shape[1] + units.long()     # [m, R]
+        own = owner[held] == item[:, None].int()
+        now = res[item]
+        ok = self._still_parked(now, own)
+        res[item] = torch.where(ok[:, None], -1, now)
+        host[item] = torch.where(ok[:, None], units, host[item])
+        owner[held] = torch.where(own & ~ok[:, None], -1, owner[held])
+        self.move_counts[2] += ok.sum()
+        self.move_counts[3] += (~ok).sum()
+
+    @staticmethod
+    def _still_parked(now: torch.Tensor, own: torch.Tensor) -> torch.Tensor:
+        """Phase 3's reconcile: a moving expert is mapped only if still SSD-only (`now` [m, R], its map) and holding
+        its reserved units (`own` [m, R])."""
+        return (now == -2).all(1) & own.all(1)
+
+    def _move_drop(self) -> None:
+        """The move's chunks not yet mapped dropped (a re-layout, A's D8x2-m1): the thread joined first, so no unit
+        is freed while it writes it; each reservation freed, its expert left SSD-only."""
+        m = self._move
+        if m is None:
+            return
+        self._move = None
+        self._mover.wait(m)
+        table = m.table[m.mapped * m.chunk:len(m.entries)]
+        item, owner = table[:, 0].long(), self.owner.view(-1)
+        held = self.classes32.long()[item // self.items] * self.owner.shape[1] + table[:, 2:].long()
+        owner[held] = torch.where(owner[held] == item[:, None].int(), -1, owner[held])
+
+    def _move_copy(self, m: moves.Move, entries: np.ndarray) -> None:
+        """The thread's copies of one chunk's entries (item, row, units by role): each role's row into its unit."""
+        for item, row, *units in entries.tolist():
+            for r, c in enumerate(self.layer_classes[item // self.items]):
+                rows, _ = self.landing_view(c.name, device=False)
+                np.copyto(c.host_view()[units[r]].numpy(), rows[row, :c.unit_bytes].numpy())
+
+    def reservations(self) -> list[tuple[int, int, int]]:
+        """D8x: the move's live reservations, (class index, unit, item): RAM units `owner` names for a parked expert
+        whose chunk is not yet mapped (its `host_units` −1: A's D8x2-M1)."""
+        m = self._move
+        if m is None:
+            return []
+        left = self._mover.entries(m)[m.mapped * m.chunk:]
+        return [(int(self.class_table[item // self.items, r]), u, item)
+                for item, _, *units in left.tolist() for r, u in enumerate(units)]
 
     def start_step(self, early: bool = False) -> None:
         """The step's first device work (its first resolve; or, `early`, a tail step's under exclusive tiers before its
@@ -1715,6 +1984,13 @@ def _runs(desc: np.ndarray) -> np.ndarray:
         runs[:, x, 1] = np.where(some, nbytes, 0)
         at += np.where(some, -(-(hi - lo) // ALIGN) * ALIGN, 0)
     return runs
+
+
+def _canonical(desc: np.ndarray) -> np.ndarray:
+    """Each piece's runs [P, X, 2] in a row that holds it as a slot does (D8x's parked rows, written by a slot's copy):
+    its extents back to back from the row's start, (offset, nbytes); (0, 0) past them."""
+    nbytes = desc[:, :, 3].astype(np.int64)
+    return np.stack([np.where(nbytes > 0, np.cumsum(nbytes, 1) - nbytes, 0), nbytes], -1)
 
 
 def _offsets(extents: list[Extent]) -> list[tuple[Extent, int]]:
