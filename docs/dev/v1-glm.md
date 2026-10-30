@@ -1331,12 +1331,13 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
      from a unit the thread is still filling (A's D8x2-M1) —, an event recorded after the table's copy to the host.
   2. *The move thread* waits that event, then copies row → unit in fixed chunks (C: ≈ 50 experts, one decode token's
      worth), hottest first, publishing each chunk with a release store of its done flag.
-  3. *At launch (prompt step + 2 + i)* chunk i is mapped (the store acquires its flag, joining the thread for it if
+  3. *At launch (prompt step + 3 + i)* chunk i is mapped (the store acquires its flag, joining the thread for it if
      late — a host wait, counted): each expert to its unit, its row released — by a small eager kernel on main before
      the step's graph launch, never inside a capture (exclusive tiers refuse host edits; A's m1, B; no move holds
      reservations at a capture: graphs are captured once, at startup, after `after_materialize` dropped any — std
-     cannot ask torch.cuda whether a capture runs, so that is structural, not asserted). *As built:* + 2, not + 1 (`move.LAG`): with overlap, launch + 1 is made
-     before the prompt step's device work ends, so no copy can have begun by then and every chunk 0 would join.
+     cannot ask torch.cuda whether a capture runs, so that is structural, not asserted). *As built:* + 3, not + 1
+     (`move.LAG`): with overlap, launch + 1 is made before the prompt step's device work ends and + 2 as it ends (the
+     A/B's first probe, at + 2: every 1K prompt's chunk 0 joined, ≈ 40 ms, its launches' p99 +30 ms).
   Placement then depends on the step count only: run-identical. The parked experts' SSD-only window is ≈ one token a
   chunk. Every owner ↔ host check accepts a reservation (`owner[u]` = p while no piece's `host_units` names u: the
   tests' `_held_once` through the store's `reservations()`); no kernel reads `owner` as "p holds u" (`moe_tiers@2`'s
