@@ -125,6 +125,12 @@ class SlotClass:
                      lands_by=lands_by)
 
 
+
+def _cache_slots(c) -> int:
+    """A materialized class's cache slots (its arena less its null and staging slots): what a lent step's tail is sized
+    against, as the layout's (D8u (a); A's D8u-R-M1 — not the class's cap)."""
+    return c.size - c.null - c.staging
+
 class TieredStore:
     def __init__(self, ctx, *, name: str, items: int, roles: int, top_k: int, staging: int, prefill: int = 0,
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
@@ -945,19 +951,18 @@ class TieredStore:
                 self._step_loan = min(self._loan_bytes, self._step_loan_bytes(at))
             buffers = max((f(at) for f in self.tail_bytes), default=0)
             inside = self._stages_in_tail(at) and self._mode == "stage" and not self._rounds and bool(self._step_loan)
-            cache = (lambda c: c.size - c.null - c.staging) if inside else (lambda c: c.cap)   # (D8u (a))
-            n_step = self._split(buffers, self._step_loan, cls, cache, self._largest(at), stage=inside)
+            n_step = self._split(buffers, self._step_loan, cls, _cache_slots, self._largest(at), stage=inside)
             if n_step > n:                      # (D8u (a), A-M1: the startup's tail holds every lent step's)
                 raise RuntimeError(f"{self.name}: a step of {at} prompt tokens wants a tail of {n_step} slots, past "
                                    f"its layout's {n}")
             self._step_tail = (cls, n_step)
-            self._step_down = {c: min(m, self.tail_down.get(c, 0)) for c, m in self._down(n_step, cache).items()}
+            self._step_down = {c: min(m, self.tail_down.get(c, 0)) for c, m in self._down(n_step, _cache_slots).items()}
             # (a whole-expert tail lends its gate/up slots past the buffers whole: a range the largest allocation fits)
             classes = list(self.classes.values())
             unit = classes[cls].unit_bytes
             self._step_gu_loan = n_step * unit - buffers if self._step_down and self._step_loan else self._step_loan
             if inside:                          # D8u (a): [buffers | staging | loan], each down tail [staging | loan]
-                room = self._loan_room(n_step, cls, buffers, cache)
+                room = self._loan_room(n_step, cls, buffers, _cache_slots)
                 first, b = classes[cls].size - n_step, -(-buffers // unit)
                 self._step_stage = {cls: (first + b, classes[cls].size - room[cls])} | \
                     {c: (classes[c].size - m, classes[c].size - room[c]) for c, m in self._step_down.items()}
@@ -977,7 +982,8 @@ class TieredStore:
         if errors := {name: int(t[0]) for name, t in telemetry.items() if "errors" in name and int(t[0])}:
             raise RuntimeError(f"{self.name}: step {step.step}'s kernels flagged errors {errors} (errors: 1 = a "
                                "corrupt residency entry, 2 = the delta log overflowed, 4 = a step's lent slots fell "
-                               "short of a pass's staging, 8 = the CPU's share past its job table; edit_errors: a "
+                               "short of a pass's staging, 8 = the CPU's share past its job table, 16 = the "
+                               "compaction's second pass left a resident without a slot; edit_errors: a "
                                "host edit's precondition failed; kernel_errors: the kernel's bits, the CPU worker's "
                                "1 = a task failed, 2 = a wait timed out)")
         mode = self._borrowing.pop(step.step, None)
@@ -1124,6 +1130,9 @@ class TieredStore:
                 cls, first = self._loan_slots()
                 ranges.append(classes[cls].slots()[first:].view(-1)[-self._step_gu_loan:])
             ranges = sorted((r[-r.data_ptr() % 512:] for r in ranges), key=len)
+            if sum(len(r) for r in ranges) < self._step_loan:          # (A's D8u-R-M1: the ranges hold the loan)
+                raise RuntimeError(f"{self.name}: a step's loan ranges hold {sum(len(r) for r in ranges)} bytes, "
+                                   f"short of its loan's {self._step_loan}")
             self._loaned = True
             return self._loan.use_ranges(ranges)
         if (tail := self._loan_slots()) is not None:
@@ -1304,8 +1313,8 @@ class TieredStore:
         moves = []
         for c, m in entries:                                         # 2. the moves over the final lent set
             moving, to, freed, rank_f, left = self._pairing(picked, c, m)
-            picked = picked | left                                   # (none: kept as the rule's own guard)
-            moves.append((c, moving, to, freed, rank_f))
+            self.errors.bitwise_or_(left.any().int() * 16)           # (none can be: flagged, never lent — a late
+            moves.append((c, moving, to, freed, rank_f))             # lend is the fault itself; A's D8u-R-m1)
         return picked, moves
 
     def _pairing(self, picked: torch.Tensor, c: int, m: int) -> tuple:
