@@ -109,7 +109,7 @@ uv run holon prebuild                # GGUF kernels and FlashInfer modules for t
 `holon prebuild` compiles the GGUF kernels and FlashInfer's modules for the SM of every visible GPU, once per install;
 `holon prebuild --sm 86 89 120` names the targets instead, and `MAX_JOBS=N` caps the parallel compiles.
 `uv sync --frozen --group dev` also installs the lock tools (`python -m holon_tools`), which make the offload locks'
-routing profiles and Qwen3.8-Flash-Next's MTP pack, and the test dependencies.
+routing profiles, and the test dependencies.
 
 ### Docker
 
@@ -339,9 +339,10 @@ ISTA-DASLab's GSQ-RCO quantizations of Qwen3.8-Flash-Next (`ISTA-DASLab/Qwen3.8-
 split in two files): IQ2_XS on the RTX 5080 (16 GB), IQ3_S on the RTX 5090 (32 GB). Their locks offload the experts,
 keep the PLE n-gram table (26.8 GiB) and the token embeddings in pinned host RAM, serve 33,792 tokens of context to
 one sequence, and draft three tokens a step with the model's MTP head (`docs/dev/v1-flash-next.md` §20.1, §22.7).
-The GGUF files carry no MTP head: the drafter reads it from a pack of its own (`mtp.path`), which Strata's public
-tools build from the BF16 checkpoint `Qwen/Qwen3.8-Flash-Next` (only the head's tensors are downloaded) and Holon's
-rewrites. From the install above (the RTX 5080's file; on the RTX 5090, `IQ3_S`, `86000000000` and `0.985`):
+The GGUF files carry no MTP head: the drafter loads an already-packed head (`mtp.path`) as it is; Holon does not
+pack or quantize it. Strata's public tools make one from the BF16 checkpoint `Qwen/Qwen3.8-Flash-Next` (only the
+head's tensors are downloaded). From the install above (the RTX 5080's file; on the RTX 5090, `IQ3_S`, `86000000000`
+and `0.985`):
 
 ```bash
 uv sync --frozen --group dev                         # the lock tools
@@ -351,22 +352,20 @@ git clone https://github.com/Niko1221/Strata.git strata && git -C strata checkou
 uv run python strata/tools/mtp_fetch.py fetch --out mtp
 STRATA_GGUF_PY=$(uv run python -c "import gguf, pathlib; print(pathlib.Path(gguf.__file__).parents[1])") \
   uv run python strata/tools/mtp_pack.py --src mtp --experts q2_0 --out mtp/mtp-q2_0.gguf
-uv run python -m holon_tools mtp-pack mtp/mtp-q2_0.gguf mtp/mtp-q2_0-q8.gguf
 
 uv run python -m holon_tools profile <first file> --max-seqs 1 --max-model-len 4096 --memory-fraction 0.97 \
   --host-memory 70000000000 --plugin-options rows.place=ple:host,token_embd:host ggml_cuda.pass_rows=4096 \
   moe.ring_lend=tail
 uv run holon serve ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --host-memory 70000000000 --memory-fraction 0.97 \
-  --plugin-options mtp.path=$PWD/mtp/mtp-q2_0-q8.gguf
+  --plugin-options mtp.path=$PWD/mtp/mtp-q2_0.gguf
 ```
 
 - **The MTP pack.** Strata's `mtp_fetch.py` reads the head's 31 tensors from the checkpoint's pinned revision and
-  checks each one's sha256; its `mtp_pack.py`, run on Holon's environment's gguf-py, writes the pack whose sha256 is
-  `a22206a4d74eafbf31063a84610292535fb3b49af9a339963817fd04aed81e4d` (`docs/dev/v1-flash-next.md` §13).
-  `holon_tools mtp-pack` rewrites the head's ten large dense projections from BF16 to Q8_0, as Strata's own draft head
-  runs them (§21.11), and prints the result's sha256: from that pack it starts with `a55280a0417d4b19`, the pack the
-  locks name (`mtp-q2_0-q8@a55280a0417d4b19`). Keep the name `mtp-q2_0-q8.gguf`: under another, the start logs
-  `differs from the lock: source:mtp.path`. The pack changes only the drafts; the verify decides the output.
+  checks each one's sha256; its `mtp_pack.py`, run on Holon's environment's gguf-py, writes the experts in Q2_0 and
+  the dense projections in BF16, sha256 `a22206a4d74eafbf31063a84610292535fb3b49af9a339963817fd04aed81e4d`
+  (`docs/dev/v1-flash-next.md` §13): the pack the locks name (`mtp-q2_0@a22206a4d74eafbf`). Keep the name
+  `mtp-q2_0.gguf`: under another, the start logs `differs from the lock: source:mtp.path`. The pack changes only the
+  drafts; the verify decides the output.
 - **The routing profile.** `<first file>` is the `-00001-of-00002.gguf` file `hf download` placed under its snapshot
   directory, `<HF cache>/hub/models--ISTA-DASLab--Qwen3.8-Flash-Next-GSQ-RCO-GGUF/snapshots/<revision>/IQ2_XS/`; the
   profile's default name is the one the lock names. The locks were measured with a profile of 60 task prompts, 128
