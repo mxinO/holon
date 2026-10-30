@@ -58,6 +58,9 @@ ROUNDS_BELOW = 8192                          # D8s: steps of fewer prompt tokens
 ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (v1-glm.md D8f)
 DEPTH = 2                                    # layers read ahead (D8f): layer g + DEPTH's set at layer g's end
 READ_AHEAD_TOKENS = 2048                     # a prompt step reads ahead from this many prompt tokens (D8f)
+PROMPT_HEAT = 16.0                           # RAM's heat for each expert a step routes only from prompt rows (≈ 0.8x
+#                                              RAM's steady median heat at GLM's deployment; the replay alike from 0.5x
+#                                              to 4x: docs/dev/v1-glm.md §13 step 7, C's 1K lever)
 LAND = 2                                     # d: launches between a swap's unmap and its map (D4)
 LOG = 2                                      # the delta log's records per group, per item
 FLOOR = 4                                    # F2: each group's hottest items before the global ranking
@@ -157,8 +160,9 @@ class TieredStore:
         self._read_ahead = read_ahead            # `moe.read_ahead` (D8f): landing rows a read-ahead set (0: default)
         # `ram_heat` (`moe.ram_heat`, docs/dev/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
         # for parking, keeps and demotions — by a long-memory heat of its own, decaying by this factor a decode token
-        # (each routed expert of a token +1; seeded from the profile), not the policy's ≈ 12-token one: the decode after
-        # a lending prompt then reads fewer long-term-warm experts back from the SSD (0: the policy's heat)
+        # (each routed expert of a token +1, of a prompt step +PROMPT_HEAT once; seeded from the profile), not the
+        # policy's ≈ 12-token one: the decode after a lending prompt then reads fewer long-term-warm experts back from
+        # the SSD (0: the policy's heat)
         if not 0.0 <= ram_heat < 1.0:
             raise ValueError(f"{name}: ram_heat {ram_heat}: a decay factor a token in [0, 1)")
         self._ram_decay, self.ram_heat = ram_heat, None
@@ -1435,13 +1439,20 @@ class TieredStore:
                                "never waited (its request rows would be rewritten under a read in flight)")
         if self.exclusive:
             self.recorded.clear()
-        if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go
-            tokens = self.counts[0].sum() / self.top_k
-            self.ram_heat.mul_(torch.pow(self._ram_decay_t, tokens)).add_(self.counts)
+        if self.ram_heat is not None:            # the last step's tokens into RAM's heat, before its counts go
+            self._age_heat()
         for t in self.zeroed:
             t.zero_()
         self.residency.apply(self.edit_errors)
         self.begin()
+
+    def _age_heat(self) -> None:
+        """RAM's heat (`moe.ram_heat`) after the last step: decayed by its decode tokens, each routed expert of a decode
+        token +1, and each expert only its prompt rows routed +PROMPT_HEAT once (C's 1K lever: the next prompt's
+        parking then pushes out fewer experts a prompt routes back; a long prompt counts as one) — on the device."""
+        tokens = self.counts[0].sum() / self.top_k
+        prompt = ((self.routed & 1) != 0) & (self.counts == 0)
+        self.ram_heat.mul_(torch.pow(self._ram_decay_t, tokens)).add_(self.counts).add_(prompt.float() * PROMPT_HEAT)
 
     def _swap(self, commit: int, swaps: list[tuple[int, int, bool]]) -> None:
         """A host policy's swaps, two-phase: the outgoing items unmapped at launch commit + 2, the incoming copied into

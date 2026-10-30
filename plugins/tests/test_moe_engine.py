@@ -2314,6 +2314,32 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe, mo
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_rams_heat_counts_a_steps_prompt_only_routes_once(gpu_moe_wide, mode2):
+    """C's 1K lever (docs/dev/v1-glm.md §13 step 7): under the deployment's terms RAM's heat (`moe.ram_heat`) after a
+    step decays by its decode tokens and adds each decode token's routes, and adds PROMPT_HEAT once to each expert only
+    its prompt rows routed (none before: prompt steps counted nothing), so the next prompt's parking pushes out fewer
+    experts a prompt routes back; the streams are the resident store's."""
+    from holon_std.tiered import store as tiered_store
+
+    file, prompts, want = gpu_moe_wide
+    engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=mode2())
+    store = engine.ctx.shared_objects[KEY]
+    assert _served(engine, prompts) == want
+    heat, keep = store.ram_heat, store.ram_heat.clone()
+    try:
+        for t in (heat, store.counts, store.routed):
+            t.zero_()
+        store.routed[0, 3] = 1                                       # a prompt row's route only
+        store.routed[0, 4], store.counts[0, 4] = 3, 2                # a decode row's (and a prompt's)
+        store._age_heat()
+        assert float(heat[0, 3]) == tiered_store.PROMPT_HEAT and float(heat[0, 4]) == 2.0
+        assert float(heat.sum()) == tiered_store.PROMPT_HEAT + 2.0
+    finally:
+        heat.copy_(keep)
+        engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("plant, terms", [(p, "default") for p in (None, "loan_parking_late",
                                                                     "loan_write_before_parked", "parking_event_early",
                                                                     "loan_wait_unrecorded")]

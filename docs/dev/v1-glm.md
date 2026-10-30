@@ -1288,6 +1288,18 @@ on the slower-drive node.
   150 / 300 over the bench's whole mix) and the 1K bytes' origin split (C's suspects in order: in-prompt victims, a
   hotter SSD-only set at rest, the read-ahead's own waste, read amplification).
 
+**D8v — Step 7: RAM's heat counts a prompt's routes (C's 1K lever after the 1K measurement; built, not yet
+measured).** *Why:* a 1K prompt reads ≈ 1.35 GB of its own parking victims back (§13 step 7: 197 of the 225 RAM
+experts it pushes to the SSD are routed by the same prompt), because `moe.ram_heat` counts decode tokens only, so the
+experts prompts use look cold to RAM. *The rule:* after a step, each expert only its prompt rows routed gets
+`PROMPT_HEAT` (16, ≈ 0.8× RAM's steady median heat at GLM's deployment) once, beside the decode tokens' counts and
+decay (`_age_heat`; a long prompt counts once). Policy only: placement moves, never a step's bytes; only where
+`moe.ram_heat` is set (mode (ii): no committed lock). *Replayed* (`heat_replay.py`, the D8t recording, the previous
+prompt's routes at 0.5-4× the median RAM heat, the same victim counts): the 1K prompt's victim re-reads 1,290 →
+1,097-1,104 MiB (≈ −75 ms, **≈ +1.9% 1K prefill**), its decode's victim reads 10.6 → 6.8 MiB a token over tokens
+1-32 and 2.68 → 2.30 after; 4K −64 MiB a prompt, 32K −146 MiB and 75.7 → 65.9 MiB a token over tokens 1-32; flat
+across the band. *Test:* `test_rams_heat_counts_a_steps_prompt_only_routes_once` (under the deployment's terms).
+
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
 drive's own 0.40; the drive measured 75% busy over tokens 1-32 at 32K, not idle): 32K decode **1.11** with the slopes
