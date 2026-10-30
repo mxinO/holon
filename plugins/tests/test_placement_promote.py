@@ -50,7 +50,7 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
                                            (64, "prefill"), (6, "overflow"), (64, "narrow"), (6, "exclusive"),
                                            (12, "mixed exclusive"), (6, "exclusive budget"),
-                                           (12, "mixed exclusive budget")])
+                                           (12, "mixed exclusive budget"), (6, "exclusive budget empty")])
 def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, kinds):  # noqa: F811
     """Every output and write: slots, the fetch list (staged misses by id, then the promoted into their slots), counts,
     misses, the map, the empty slots left, the state (stamps, clock, spares), the delta log after the records already
@@ -62,19 +62,23 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     refilled spare's owner stays mapped and is logged `(group, SPARE, b)`, an owner taking its spare back
     `(group, OWN, b)`: `moe_tiers@2` places them. With the `budget` fact 1 (docs/dev/v1-glm.md D8t; a third of the
     experts SSD-only here): the spares' owners, then every SSD miss by first entry, then the one RAM miss used most
-    recently before the call's stamp (two or more with different stamps), within the empty slots and spares."""
+    recently before the call's stamp (two or more with different stamps), within the empty slots and spares — a RAM
+    miss filling an empty slot displaces nothing and is not counted (`empty`: the 8 empty slots a lending step leaves
+    when its loan comes back, RAM misses filling them past the budget)."""
     budget = 1 if "budget" in kinds else None
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E,
                      **({} if budget is None else {"budget": budget}))
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)
     exclusive = "exclusive" in kinds
-    if kinds in ("decode", "overflow", "narrow", "exclusive", "exclusive budget"):
+    if kinds in ("decode", "overflow", "narrow", "exclusive", "exclusive budget", "exclusive budget empty"):
         case["kinds"][:] = DECODE
     elif kinds == "prefill":
         case["kinds"][:] = PREFILL
     if budget is not None:                             # SSD-only experts: no host unit in any role
         case["host"][torch.arange(E) % 3 == 0] = -1
+    if "empty" in kinds:                               # after a lending step: its slots back, empty
+        case["n_empty"][0] = case["empty"].shape[1]
     state, stage = _state(case, steady, tokens), _stage(case, E, ring)
     state["exclusive"][0] = int(exclusive)
     if kinds == "narrow":
@@ -115,9 +119,13 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         before = {int(o) - 1 for o in state["spare"][:, 0] if o > 0}
         missing = (case["residency"] < 0).all(-1)
         ram = [a for a in promoted if (case["host"][a] >= 0).all() and a not in before]
-        assert len(ram) <= budget                                           # one RAM promotion at most
         routed = set(case["ids"][(case["kinds"] == DECODE)[:, None] & (case["ids"] >= 0)].tolist())
         cands = [e for e in routed if missing[e] and (case["host"][e] >= 0).all() and e not in before]
+        n_ssd = sum(1 for e in routed if missing[e] and not (case["host"][e] >= 0).all() and e not in before)
+        fill = max(0, int(case["n_empty"][0]) - n_ssd)                     # empty slots left to RAM misses: exempt
+        assert len(ram) <= fill + budget                                    # one RAM promotion over a resident
+        room = int(case["n_empty"][0]) + len(before) - len(set(promoted) & before) - n_ssd   # slots left to them
+        assert "empty" not in kinds or len(ram) == min(len(cands), fill + budget, room) > budget
         assert tokens < 12 or len({int(state["last"][e]) for e in cands}) > 1   # (recency decides at 12 tokens)
         if ram:
             assert ram[0] == min(cands, key=lambda e: (-int(state["last"][e]), e))

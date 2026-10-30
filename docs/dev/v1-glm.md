@@ -1107,7 +1107,12 @@ tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD 
     oracle test's 12-token case has RAM candidates of distinct stamps); SSD misses first by first entry, then the RAM
     miss, within the empty slots and spares (m3); the policy reaches its contract through std.tiered's optional
     `resolve_facts`. The replay oracle carries the budget (the end-to-end parity test runs it); the stamps test runs
-    the admit-all arm (its plant needs every miss's demotion).
+    the admit-all arm (its plant needs every miss's demotion). **Fixed after the A/B: the budget counts only
+    admissions that displace a resident.** As built it also capped RAM misses filling empty slots, so the slots a
+    lending prompt's loan gives back refilled one a layer a token — though a fill demotes nothing (the miss is gathered
+    anyway; only its destination changes). RAM misses now take the empty slots the SSD misses leave, plus at most
+    `budget` over residents, in the oracle, its replay and `k_promote`; the oracle test's `empty` case (a layer's 8
+    empty slots after a lending step) promotes more RAM misses than the budget.
   - *Lever 1b* (2c49da20): a call's demotions are enqueued by the next call after its gathers, `moved` after them;
     a call whose table is the pending one's enqueues them before its tier op (A's M1 (1): the simpler choice); the
     step's last call at its join, and a step start refuses any left (M1 (2), so no capture holds one).

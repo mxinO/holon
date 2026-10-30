@@ -14,8 +14,9 @@ A call with a routed (not dropped) entry of a `DECODE` row, in this order:
    empty slots + its spares) are promoted. With the optional fact `budget` (docs/dev/v1-glm.md D8t; absent: the rule
    above) the promoted are, in this order and then the first min(that, empty slots + spares) of them: the
    candidates owning a spare (taking it back costs no copy: never counted), those not in the read host tier — SSD
-   misses under exclusive tiers, every role's `host` unit −1 — by first entry, and at most `budget` of the rest
-   (RAM misses) by their `last` before this call's stamp, most recent first, ties by expert id. A promoted owner of a
+   misses under exclusive tiers, every role's `host` unit −1 — by first entry, and of the rest (RAM misses) the empty
+   slots the SSD misses leave (a fill displaces no resident: exempt) plus at most `budget`, by their `last` before this
+   call's stamp, most recent first, ties by expert id. A promoted owner of a
    spare takes its own spare back (no record: the host still maps it there); the others, in order, take the layer's
    empty slots from the top (record `(group, a, −2 − j)`), then the spares no promoted expert owns, in entry order
    (record `(group, a, o)`, o the spare's owner: a took o's slots). A spare taken is absent.
@@ -110,8 +111,10 @@ def moe_resolve_promote(ids: torch.Tensor, kinds: torch.Tensor, residency: torch
         if budget is not None:                                          # D8t: owners, SSD misses, `budget` RAM ones
             rest = [e for e in cands if e not in owner]
             ram = [e for e in rest if (host[e] >= 0).all()]
-            cands = [e for e in cands if e in owner] + [e for e in rest if e not in ram] + \
-                sorted(ram, key=lambda e: (-int(before_stamp[e]), e))[:budget]
+            ssd = [e for e in rest if e not in ram]
+            fill = max(0, n_empty - len(ssd))                           # empty slots after the SSD misses: filling
+            cands = [e for e in cands if e in owner] + ssd + \
+                sorted(ram, key=lambda e: (-int(before_stamp[e]), e))[:fill + budget]   # one displaces nothing
         promoted = cands[:n_empty + len(present)]
         used = {owner[a] for a in promoted if a in owner}
         for a in promoted:
@@ -243,8 +246,9 @@ def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = Non
     routed, one per spare taken, keeping a resident, none in a complete layer — with the device's terms: the spares set
     up at a layer's first decode step's boundary (M6 set them up at the seed from the profile's coldest), empty slots
     (taken before other spares), and spares returning to their owners; with `budget` (the contract's fact, an
-    inclusive layout's misses all in RAM): the spares' owners, then at most `budget` others by their stamp before the
-    step's, most recent first, ties by expert id."""
+    inclusive layout's misses all in RAM): the spares' owners, then the layer's empty slots' worth of others plus at
+    most `budget` (only a displacement counts), by their stamp before the step's, most recent first, ties by expert
+    id."""
     res = seed.astype(bool).copy()
     groups, experts = res.shape
     last = np.zeros(res.shape, dtype=np.int32)
@@ -271,7 +275,8 @@ def replay(seed: np.ndarray, steps: list[dict], classes: np.ndarray | None = Non
             cands = [e for e in order if not res[g, e]]
             if budget is not None:
                 rest = [e for e in cands if e not in owners[g]]
-                cands = [e for e in cands if e in owners[g]] + sorted(rest, key=lambda e: (-before[e], e))[:budget]
+                cands = [e for e in cands if e in owners[g]] + \
+                    sorted(rest, key=lambda e: (-before[e], e))[:int(empty[g]) + budget]   # empty slots: exempt
             promoted = cands[:empty[g] + len(present)]
             used = {owners[g].index(a) for a in promoted if a in owners[g]}
             free = [s for s in present if s not in used]

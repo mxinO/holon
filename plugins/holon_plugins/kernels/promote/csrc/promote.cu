@@ -147,7 +147,8 @@ __global__ void k_promote(const int32_t * __restrict__ ids, const uint8_t * __re
                     sel[n++] = e;
                 }
             }
-            for (int b = 0; b < budget; ++b) {         // the next most recent RAM miss not yet taken
+            const int fill = max(0, n_empty - (n - owners));   // empty slots the SSD misses leave: exempt (a fill
+            for (int b = 0; b < fill + budget; ++b) {  // displaces no resident); the next most recent RAM miss
                 int best = -1;
                 for (int i = 0; i < n_cand; ++i) {
                     const int e = order[i];

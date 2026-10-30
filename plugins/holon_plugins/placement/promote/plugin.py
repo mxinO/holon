@@ -15,8 +15,9 @@ from . import reference
 OP = "moe_resolve.promote"
 
 
-BUDGET = 1        # RAM -> VRAM promotions a layer a decode call (docs/dev/v1-glm.md D8t: Maya admits every miss; one
-#                   keeps the hit rate and halves the promoted bytes, replayed on GLM's decode routes)
+BUDGET = 1        # RAM -> VRAM promotions displacing a resident, a layer a decode call (docs/dev/v1-glm.md D8t: Maya
+#                   admits every miss; one keeps the hit rate and halves the promoted bytes, replayed on GLM's decode
+#                   routes); filling an empty slot displaces nothing and is not counted
 
 
 class Promote:
@@ -29,8 +30,9 @@ class Promote:
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         self.items, self.roles = items, roles
-        # D8t: at most BUDGET RAM misses a layer promotes a decode call (SSD misses and spare owners besides), the
-        # resolve contract's `budget` fact; a test's admit-all arm sets BUDGET None: Maya's promote-on-fetch
+        # D8t: at most BUDGET RAM misses a layer promotes a decode call over a resident (SSD misses, spare owners and
+        # fills of empty slots besides), the resolve contract's `budget` fact; a test's admit-all arm sets BUDGET
+        # None: Maya's promote-on-fetch
         self.resolve_facts = {} if BUDGET is None else {"budget": BUDGET}
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
