@@ -50,7 +50,8 @@ def _state(case: dict, steady: bool, seed: int) -> dict[str, torch.Tensor]:
 @pytest.mark.parametrize("tokens, kinds", [(1, "decode"), (6, "decode"), (12, "mixed"), (300, "mixed"),
                                            (64, "prefill"), (6, "overflow"), (64, "narrow"), (6, "exclusive"),
                                            (12, "mixed exclusive"), (6, "exclusive budget"),
-                                           (12, "mixed exclusive budget"), (6, "exclusive budget empty")])
+                                           (12, "mixed exclusive budget"), (6, "exclusive budget empty"),
+                                           (6, "exclusive budget few")])
 def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, kinds):  # noqa: F811
     """Every output and write: slots, the fetch list (staged misses by id, then the promoted into their slots), counts,
     misses, the map, the empty slots left, the state (stamps, clock, spares), the delta log after the records already
@@ -64,14 +65,16 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
     experts SSD-only here): the spares' owners, then every SSD miss by first entry, then the one RAM miss used most
     recently before the call's stamp (two or more with different stamps), within the empty slots and spares — a RAM
     miss filling an empty slot displaces nothing and is not counted (`empty`: the 8 empty slots a lending step leaves
-    when its loan comes back, RAM misses filling them past the budget)."""
+    when its loan comes back, RAM misses filling them past the budget; `few`: 2 empty slots, fewer than the SSD
+    misses, which take them — the RAM misses within the budget, over residents: spares)."""
     budget = 1 if "budget" in kinds else None
     resolve = kernel(plugins, device, OP, PROVIDERS[device], experts=E, top_k=K, roles=ROLES, staging=E,
                      **({} if budget is None else {"budget": budget}))
     ring = sources == "ring"
     case = routing(tokens, seed=tokens + len(kinds) + steady, whole=True, ring=ring)
     exclusive = "exclusive" in kinds
-    if kinds in ("decode", "overflow", "narrow", "exclusive", "exclusive budget", "exclusive budget empty"):
+    if kinds in ("decode", "overflow", "narrow", "exclusive", "exclusive budget", "exclusive budget empty",
+                 "exclusive budget few"):
         case["kinds"][:] = DECODE
     elif kinds == "prefill":
         case["kinds"][:] = PREFILL
@@ -79,6 +82,8 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         case["host"][torch.arange(E) % 3 == 0] = -1
     if "empty" in kinds:                               # after a lending step: its slots back, empty
         case["n_empty"][0] = case["empty"].shape[1]
+    if "few" in kinds:                                 # fewer empty slots than SSD misses: theirs
+        case["n_empty"][0] = 2
     state, stage = _state(case, steady, tokens), _stage(case, E, ring)
     state["exclusive"][0] = int(exclusive)
     if kinds == "narrow":
@@ -126,6 +131,9 @@ def test_resolve_matches_the_oracle(plugins, device, steady, sources, tokens, ki
         assert len(ram) <= fill + budget                                    # one RAM promotion over a resident
         room = int(case["n_empty"][0]) + len(before) - len(set(promoted) & before) - n_ssd   # slots left to them
         assert "empty" not in kinds or len(ram) == min(len(cands), fill + budget, room) > budget
+        if "few" in kinds:                             # no fill: a RAM promotion takes a spare (a resident's)
+            assert 0 < int(case["n_empty"][0]) < n_ssd and fill == 0
+            assert all(o >= 0 for _, a, o in want["records"] if a in ram)
         assert tokens < 12 or len({int(state["last"][e]) for e in cands}) > 1   # (recency decides at 12 tokens)
         if ram:
             assert ram[0] == min(cands, key=lambda e: (-int(state["last"][e]), e))

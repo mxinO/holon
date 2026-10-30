@@ -776,9 +776,10 @@ __device__ void place(const Tiers & T, int g, int e, int roles, int experts, con
     __syncthreads();
 }
 
-__global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, int g, int32_t * fetch,
-                        const int32_t * n_fetch, const int32_t * stage, const int32_t * delta, const int32_t * start,
-                        const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
+__global__ void __launch_bounds__(TIER_THREADS, 1)
+k_tiers(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, int g, int32_t * fetch,
+        const int32_t * n_fetch, const int32_t * stage, const int32_t * delta, const int32_t * start,
+        const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
     extern __shared__ int32_t flags[];                 // [experts]: 1 routed, 2 by a DECODE row, 4 placed, 8 admitted,
     __shared__ int red[TIER_THREADS];                  // 16 an SSD miss
     __shared__ double hk[TIER_THREADS];
