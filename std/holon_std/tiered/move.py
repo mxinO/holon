@@ -13,10 +13,10 @@ import time
 import numpy as np
 
 CHUNK = 50                  # experts a chunk (C: about one decode token's copy at the deployment's sizes)
-FIRST = 12                  # the first chunk's: the hottest parked, copied in a few ms
-LAG = 2                     # chunk i is mapped at launch (the prompt step + LAG + i): with overlap, launch + 1 is made
-#                             before the prompt step's device work ends and + 2 as it ends (a first chunk of 50 joined
-#                             there, ≈ 40 ms; of FIRST, a few ms of copies)
+FIRST = 50                  # the first chunk's (12 measured: at + 2 it still joined, at + 3 it mapped the next later)
+LAG = 3                     # chunk i is mapped at launch (the prompt step + LAG + i): with overlap, launch + 1 is made
+#                             before the prompt step's device work ends and + 2 as it ends, when the thread begins, so
+#                             any chunk mapped there joins it (50: ≈ 40 ms, 12: ≈ 9 ms); + 3 gives it one decode token
 NICE = 10                   # the thread's niceness: it yields to the engine loop and the workers
 
 

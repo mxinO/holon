@@ -1336,8 +1336,11 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
      the step's graph launch, never inside a capture (exclusive tiers refuse host edits; A's m1, B; no move holds
      reservations at a capture: graphs are captured once, at startup, after `after_materialize` dropped any — std
      cannot ask torch.cuda whether a capture runs, so that is structural, not asserted). *As built:* + 3, not + 1
-     (`move.LAG`): with overlap, launch + 1 is made before the prompt step's device work ends and + 2 as it ends (the
-     A/B's first probe, at + 2: every 1K prompt's chunk 0 joined, ≈ 40 ms, its launches' p99 +30 ms).
+     (`move.LAG`): with overlap, launch + 1 is made before the prompt step's device work ends and + 2 as it ends, when
+     the thread begins (the A/B's first probe, at + 2: every 1K prompt's chunk 0 joined, ≈ 40 ms, its launches' p99
+     +30 ms; a first chunk of the 12 hottest joined there too, ≈ 9 ms, and at + 3 mapped the next 50 a token later:
+     tokens 1-8 +9.9%). Phase 3 runs from operands phase 1 stores (indices, expert, unit): a few gathers, wheres and
+     puts a chunk.
   Placement then depends on the step count only: run-identical. The parked experts' SSD-only window is ≈ one token a
   chunk. Every owner ↔ host check accepts a reservation (`owner[u]` = p while no piece's `host_units` names u: the
   tests' `_held_once` through the store's `reservations()`); no kernel reads `owner` as "p holds u" (`moe_tiers@2`'s
@@ -1386,7 +1389,12 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
   latency p50 / p99 (p99 up ≤ 1 ms) and the decode tokens the move overlaps (≤ 5% slower). Kept only if 1K prefill
   gains and decode loses at no size. The store counts them: `move_counts` (device: experts parked in rows, paired with
   a victim, mapped) and `move_stats` (host: moves, entries mapped or reconciled, joins and their ns, parked experts
-  routed before their chunk was mapped).
+  routed before their chunk was mapped). *Measured and kept* (`docs/dev/evidence/glm_step7_mode2_d8x_2026-10-30.json`;
+  one RTX 5090, the deployment's flags; the coordinator's call at the bounds): 1K prefill 0.954 → 1.080 of Maya's
+  default (+13%), decode 1.061 → 1.060, 0.991 → 0.987, 0.886 → 0.891 at 1K / 4K / 32K (within the rounds' range); at
+  + 3 with the trim (an uncapped node, Holon against Holon), tokens 1-8 +4.8% by median (77.7 → 81.4 ms;
+  SSD 97.1 → 114.8 MB a token), launch p99 +1.01 ms (0.48 → 1.49 ms), no join; tokens 9-32 identical. Open (plan §10):
+  the thread builds its row and unit views per piece under the GIL — likely the rest of the p99.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
