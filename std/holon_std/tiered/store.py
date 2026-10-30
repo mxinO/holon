@@ -605,8 +605,9 @@ class TieredStore:
         at the tier but for the seed, copied in; the policy's state, counts and words zeroed."""
         self._decode_set = False                # the decode kinds are written again at the next launch
         if self.exclusive:                      # D8x: a move in progress joined and dropped (A's D8x2-m1); its thread
-            self._move_drop()                   # made once
-            self._move_end, self._moved = False, None
+            self._move_drop()                   # made once; the row map naming no row (a static comes back zeroed: row
+            self._move_end, self._moved = False, None       # 0 for every expert of a group no step's sets cover, an
+            self.ahead_map.fill_(-1)                         # auxiliary model's)
             if self._mover is None:
                 self._mover = moves.Mover(self.name, self._move_copy,
                                           moves.mover_cores(getattr(getattr(self.io, "service", None), "cores", ())))

@@ -2278,6 +2278,27 @@ def test_a_read_ahead_step_reads_each_layers_hottest_ssd_only_experts(gpu_moe, h
             torch.cuda.synchronize()
     engine.close()
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_an_auxiliary_groups_call_in_a_read_ahead_step_finds_no_hit(gpu_moe):
+    """A read-ahead step (D8f) reads ahead the target's layers only; an auxiliary model's group (an MTP head's: here the
+    last layer taken as one, `borrowing_groups`) has no set, so its tier op's row map must name no row — the map
+    starts at −1 at every materialize (zeroed, it named row 0 for every expert: an SSD miss of that layer gathered
+    from whatever row 0 held) — and its call waits no read-ahead (one never signalled: the wait ran out its time bound,
+    then the worker failed open). The streams are the resident store's."""
+    from holon_std.tiered import store as tiered_store
+
+    file, prompts, want = gpu_moe
+    with mock.patch.object(tiered_store.TieredStore, "borrowing_groups", property(lambda self: len(self.groups) - 1)):
+        engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+        store = engine.ctx.shared_objects[KEY]
+        store.read_ahead_tokens = 8                  # (prompt steps of 8 tokens or more read ahead)
+        assert bool((store.ahead_map == -1).all())
+        assert _served(engine, prompts) == want
+        engine.close()
+
+
 def _ram_units_hold_their_pieces(store) -> int:
     """Every RAM-resident expert's units hold its pieces' bytes, as the file has them (exclusive tiers); how many."""
     from holon_std.tiered import files

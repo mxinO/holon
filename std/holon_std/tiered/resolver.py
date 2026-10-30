@@ -157,9 +157,9 @@ class DeviceResolver:
             self._gather(fetch, store.n_ram)
 
         def finish() -> None:
-            if store.hits:                       # read ahead: its set signalled two layers back (or at step start);
-                if store._ahead:                 # parked (D8x): ready by the parking event main waited
-                    store.wait_ahead(g)
+            if store.hits:                       # read ahead: its set signalled two layers back (or at step start) —
+                if store._ahead and g < store.borrowing_groups:      # an auxiliary model's group has none —; parked
+                    store.wait_ahead(g)          # (D8x): ready by the parking event main waited
                 self._gather(store.hit, store.n_hit, landed=True, part=None)
             for r in range(rounds):
                 if r:
