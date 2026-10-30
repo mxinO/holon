@@ -232,32 +232,24 @@ reserve = 1 GiB if the card drives a display or a process outside Holon holds me
   need a GPU run on their cards (§9).
 - **The tool.** `holon_tools profile` starts from the lock, as `propagate` does.
 
-### D5. The MTP pack: found by identity, downloaded if published, else no speculation
+### D5. The MTP pack: found by identity, else no speculation (the owner's decision, 2026-10-30)
 
-**General (core `cli`).**
-- **Lookup.** For each `[sources]` key of the lock that no flag gives (`mtp.path=` empty counts as given), the CLI
-  checks:
-  - the identity is shaped `^[A-Za-z0-9._+-]+@[0-9a-f]{16}$`;
-  - `~/.cache/holon/sources/<identity>/` holds the file.
-- **Making it.** The CLI asks the model plugin, then the plugins declaring the lock's options (the same owners as
-  `spill`), through an optional hook, `make_source(identity, directory) -> path | None`. The hook finds the file in
-  `directory` or makes it there. None means "not mine"; a `ValueError` carries the reason it is unavailable. The
-  failure memo is the plugin's.
-- **When it fails, no speculation.** Both lock entries get `max_draft_tokens 0`, with the warning: "<key> unavailable
-  (<reason>): speculation off". The reason comes from the plugin, which states the cost: ≈ 30% slower decode on
-  Qwen3.8-Flash-Next, *est.* (C-N5).
-- **A failed attempt is remembered** in `sources/<identity>.failed` for a day, keyed by Holon's version, so it is not
-  retried at every start.
+The owner decided: no published pack and no local build. Main has meanwhile moved to loading Strata's pack as it is
+(`mtp-q2_0@a22206a4d74eafbf`, BF16 projections; `holon_tools mtp-pack` removed).
+- **Lookup (core `cli`).** For each `[sources]` key of the lock that no flag gives (`mtp.path=` empty counts as given),
+  the CLI checks that the identity is shaped `^[A-Za-z0-9._+-]+@[0-9a-f]{16}$` and takes the file in
+  `~/.cache/holon/sources/<identity>/`. The engine compares the opened file's identity with the lock's
+  (`plans.py:121-125`).
+- **When it is missing, no speculation.** Both lock entries get `max_draft_tokens 0`, with one warning: the key, the
+  identity, where it was looked for, and the plugin's hint.
+  - The hint is an optional hook, `source_hint(identity) -> str | None`, asked of the same owners as `spill`. It
+    replaces rev 3's `MakesSources.make_source` in the ABI (`HintsSources`; 1.6 is not released, so the swap is free).
+  - `models.qwen4_exp`'s hint gives the cost (≈ 30% of decode, est.) and Strata's commands from the README, writing
+    the pack into that directory.
+  - An unreadable cache is the same as a missing file.
 - **Flags that turn speculation off** (`--max-draft-tokens 0`) skip the lookup.
-
-**The body (`models.qwen4_exp`).**
-- **A published pack is the primary path.** The hook downloads the file by identity from the project's Hub repository
-  at a pinned revision, via `huggingface_hub`, and checks its sha256 against the identity.
-  - The licence allows redistributing derived works with its notice (rev 2, D5).
-  - Publishing waits for the owner's go. Until then, the registry of published packs is empty, and the hook reports
-    "not published yet; README's manual recipe builds it" with the cost.
-- **No local build.** It is not cheap: a 5.2 GB range fetch, ≈ 5 min of CPU, and a bit-exact port of Strata's
-  quantizer. The manual recipe stays in `tools/README.md`.
+- **Removed:** the published-pack download, its memo and link, and `models.qwen4_exp`'s `huggingface-hub`
+  dependency.
 
 ### D5b. The launch lines' plugin options
 
@@ -298,7 +290,7 @@ As built after the code review, `check_core_loc.py` counts **+201 → 5220 / 600
 | the per-user pin lock; the budget; per-entry restart admission; the history `[defaults?, lock + spill, lock]`; `fit_lock` (sources, spills, notes; owners skip kernels and survive load failures); `source_file`; `checkpoint_bytes`; the size guard on `repo_ref`'s name; the refusal's notes | `cli.py` | 111 |
 | memory-only entries with their notes, `admit` per entry, each failure printed, the one `_say` | `supervisor.py` | 13 |
 | the refusal's shortfall and override; `host_bytes` | `memory.py`, `plans.py` | 5 |
-| `OutOfUnits`; `Spills`, `MakesSources`; `TierCtx.host_left` | `holon.api` | 6 |
+| `OutOfUnits`; `Spills`, `HintsSources`; `TierCtx.host_left` | `holon.api` | 6 |
 
 B's part A took out the engine-side lock, the `/tmp` open sequence, the regex over our own message, the hub lookups in
 the error path and the regex over the weight source's display string. What brought the total back above +170 is what
@@ -323,7 +315,7 @@ an entry that never ran, the unreadable-cgroup fallback, and the "unknown" reser
 1. **Core:** the API additions, `platform`, the engine and executor, the supervisor, then the CLI, with CPU tests.
 2. **std:** the tier's gate and `OutOfUnits`; the store's never-fatal and shipped lookup; std offload's manual spill
    note.
-3. **plugins:** `models.qwen4_exp`'s `spill` and `make_source`; declare `huggingface-hub`.
+3. **plugins:** `models.qwen4_exp`'s `spill` and `source_hint`.
 4. **Tools and bench:** `profile` from the lock and `--ship`; the bench's `--auto`; the Dockerfile; the README.
 5. **GPU on an idle RTX A5000 only,** while the bar cards are busy. §9's bar-card runs come after the combined
    propagation.
@@ -336,7 +328,7 @@ holon: GPU memory: state pools <S> GiB = free <F> − peak <K> − slack <L> (al
 holon: routing profile: shipped (profile_x4_gate.json)
 holon: start failed (memory): host memory <B> GiB too small: plugin.tiered.pinned.… needs …, <L> GiB left
 holon: retrying the lock with rows.place=ple:ssd,token_embd:host cpu_task.io_threads=4 (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −16/−26% at 1K/4K, MTP decode −6/−7% (RTX 5090)
-holon: mtp.path unavailable (mtp-q2_0-q8@a55280a0417d4b19 is not published yet …; ≈ 30% slower decode, est.): speculation off
+holon: WARNING: mtp.path mtp-q2_0@a22206a4d74eafbf unavailable (not in ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/; serving without the MTP head costs ≈ 30% of decode (est.). Strata's public tools make it …): speculation off
 ```
 
 A give-up after a host-memory refusal ends with the four ordered hints of D1 step 3. The overrides are as in rev 2.
@@ -346,8 +338,8 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 - **As rev 2:** the Launch flags section is deleted; the model table's caption, the one-line Quickstart, the Docker
   cache volume, and the Host RAM table with "RAM for full speed".
 - **"Other use" in the table includes Holon's own ≈ 3 GiB** (C-N7, *est.*, measured in §9.3).
-- **The Flash-Next section** says the pack downloads on first use once published. Until then, it keeps the manual
-  recipe and says the server runs without MTP when the pack is missing.
+- **The Flash-Next section** makes the pack with Strata's commands straight into the cache directory; without it
+  the server runs without MTP and says so.
 - **Known limitations** add:
   - serialized starts;
   - two containers without memory limits;
@@ -475,3 +467,7 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 | B: `executor.slack` on `_sizes` | **Fixed:** `Ledger.sizes` is public |
 | B O1, O2 (drop the spill tag, admission) | **Kept** at the coordinator's call |
 | B part B (a `deploy` slot) | **Deferred** to the auto-tune library |
+| **The owner's MTP decision (2026-10-30), and main's load-only pack** | |
+| No published pack, no local build | **Done:** the download path, memo and link are gone; a missing pack serves without speculation with one warning (the cost and Strata's commands); `MakesSources` became `HintsSources.source_hint` (D5) |
+| The Flash-Next routing profiles | **Shipped:** both, counted with Strata's pack (`mtp-q2_0.gguf`, 889,017,216 bytes, sha256 `a22206a4…`), under the names the new locks give; the store now matches a profile on its largest file, the target's, so a deployment without the MTP head still seeds from it |
+| Rebased on main (75d73fc2) | **Done:** README conflicts resolved for the load-only pack |
