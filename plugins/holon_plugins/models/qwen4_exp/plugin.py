@@ -16,7 +16,7 @@ class Plugin:
     recipe = staticmethod(recipe)
     draft_head = staticmethod(draft_head)
     spill = staticmethod(deploy.spill)                  # `holon serve` (docs/dev/v1-auto-config.md D1, D5)
-    make_source = staticmethod(deploy.make_source)
+    source_hint = staticmethod(deploy.source_hint)
 
     @staticmethod
     def trained_context(cfg, source) -> int | None:

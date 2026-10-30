@@ -542,12 +542,12 @@ protocol FinalizesWeights() optional, implemented by plugins
   finalize_weights(self, ctx: 'BuildCtx') -> 'None'
 protocol GraphKeyed() optional, implemented by plugins
   graph_key: Any
+protocol HintsSources() optional, implemented by plugins
+  source_hint(self, identity: 'str') -> 'str | None'
 protocol KeepsTentatives() optional, implemented by plugins
   keep_tentative: int
 protocol KnowsCapacity() optional, implemented by plugins
   capacity(self, seq: 'SeqView') -> 'int'
-protocol MakesSources() optional, implemented by plugins
-  make_source(self, identity: 'str', directory: 'str') -> 'str | None'
 protocol MixesRowKinds() optional, implemented by plugins
   mixes_row_kinds: bool
 protocol NeedsHostLens() optional, implemented by plugins

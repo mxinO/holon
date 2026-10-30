@@ -1,22 +1,15 @@
 """What fits Qwen3.8-Flash-Next's locks to a machine (docs/dev/v1-auto-config.md D1, D5), asked by `holon serve`:
 `spill`, the PLE n-gram table read from the SSD when RAM is short (byte-identical, `v1-flash-next.md` §22.1), and
-`make_source`, the MTP pack the locks name, downloaded once the project publishes it."""
+`source_hint`, how to make the MTP pack the locks name with Strata's public tools (Holon loads it as it is)."""
 from __future__ import annotations
 
-import contextlib
-import hashlib
 import os
 import pathlib
-import time
 from collections.abc import Mapping
 
-MTP = "mtp-q2_0-q8@a55280a0417d4b19"     # the pack the locks name (`[sources] mtp.path`; v1-flash-next.md §21.11)
-# identity -> (Hub repository, file, revision) of the packs the project publishes: none yet (the owner's go). The
-# file's sha256 must start with the identity's 16 hex digits.
-PUBLISHED: dict[str, tuple[str, str, str]] = {}
+MTP = "mtp-q2_0@a22206a4d74eafbf"        # the pack the locks name (`[sources] mtp.path`; v1-flash-next.md §13)
 NETWORK = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "lustre", "ceph", "glusterfs", "fuse.sshfs", "9p", "gpfs",
            "beegfs", "afs"}
-RETRY_S = 3600                           # a failed fetch of a published pack is tried again an hour later
 
 
 def storage(path: str, mountinfo: str = "/proc/self/mountinfo", sysfs: str = "/sys") -> str:
@@ -60,38 +53,17 @@ def spill(options: Mapping[str, object], checkpoint: str) -> tuple[dict[str, str
             "prefill −16%/−26% at 1K/4K and MTP decode −6%/−7% on an RTX 5090, unmeasured on an RTX 5080")
 
 
-def make_source(identity: str, directory: str) -> str | None:
-    """The MTP pack `identity` names, in `directory` (a link to the hub cache's file), downloaded by identity from the
-    project's published packs and checked against it; None for another identity; ValueError why not (a failed fetch
-    of a published pack is remembered for an hour beside `directory`, keyed by what was published)."""
+def source_hint(identity: str) -> str | None:
+    """How to make the MTP pack the locks name (the README's Qwen3.8-Flash-Next section), and the cost of serving
+    without it; None for another identity."""
     if identity != MTP:
         return None
-    out = pathlib.Path(directory) / "mtp-q2_0-q8.gguf"
-    if out.is_file():
-        return str(out)
-    if identity not in PUBLISHED:
-        raise ValueError("not published yet; the README's Qwen3.8-Flash-Next section builds it by hand. Without it "
-                         "decode is ≈ 30% slower (est.)")
-    memo, key = pathlib.Path(f"{directory}.failed"), repr(PUBLISHED[identity])
-    if memo.is_file() and time.time() - memo.stat().st_mtime < RETRY_S and memo.read_text().startswith(key + "\n"):
-        raise ValueError(memo.read_text().partition("\n")[2] + " (remembered; tried again an hour later)")
-    try:
-        from huggingface_hub import hf_hub_download
-
-        repo, name, revision = PUBLISHED[identity]
-        path = hf_hub_download(repo, name, revision=revision)
-        digest = hashlib.sha256()
-        with open(path, "rb") as f:
-            while block := f.read(1 << 24):
-                digest.update(block)
-        if not digest.hexdigest().startswith(identity.rpartition("@")[2]):
-            raise ValueError(f"{repo}/{name}@{revision} is not {identity} (sha256 {digest.hexdigest()[:16]})")
-        link = out.with_name(f".{out.name}.{os.getpid()}")
-        link.unlink(missing_ok=True)
-        link.symlink_to(path)
-        os.replace(link, out)                # atomic: a concurrent first start finds one whole link
-        return str(out)
-    except Exception as e:  # noqa: BLE001 — offline, not found, a wrong file: serve without it, and say why
-        with contextlib.suppress(OSError):  # a cache that cannot be written only loses the memo
-            memo.write_text(f"{key}\n{e}")
-        raise ValueError(str(e)) from None
+    out = f"~/.cache/holon/sources/{MTP}"
+    return ("serving without the MTP head costs ≈ 30% of decode (est.). Strata's public tools make it (README, "
+            "Qwen3.8-Flash-Next):\n"
+            "    git clone https://github.com/Niko1221/Strata.git strata && git -C strata checkout 296b59d\n"
+            "    uv run python strata/tools/mtp_fetch.py fetch --out mtp\n"
+            f"    mkdir -p {out}\n"
+            '    STRATA_GGUF_PY=$(uv run python -c "import gguf, pathlib; '
+            'print(pathlib.Path(gguf.__file__).parents[1])") '
+            f"uv run python strata/tools/mtp_pack.py --src mtp --experts q2_0 --out {out}/mtp-q2_0.gguf")

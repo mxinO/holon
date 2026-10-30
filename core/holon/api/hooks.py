@@ -247,10 +247,10 @@ class Spills(Protocol):
         is refused. None: nothing to offer for `checkpoint` (its local path)."""
 
 
-class MakesSources(Protocol):
-    def make_source(self, identity: str, directory: str) -> str | None:
-        """A file a lock names by identity (`<name>@<build>`, its `[sources]`), made or fetched into `directory`;
-        its path. None: not this plugin's; ValueError: this plugin's, unavailable now (the message says why)."""
+class HintsSources(Protocol):
+    def source_hint(self, identity: str) -> str | None:
+        """How to make a file a lock names by identity (`<name>@<build>`, its `[sources]`) that `holon serve` did
+        not find in its cache, and what serving without it costs; None: not this plugin's."""
 
 
 

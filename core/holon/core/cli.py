@@ -199,7 +199,7 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
              ) -> tuple[dict[str, object], dict[str, str], list[str], list[str]]:
     """What fits the lock to this machine (docs/dev/v1-auto-config.md D1, D5), asking `owners` (the model plugin, the
     plugins declaring the lock's options and sources): settings giving the lock's `[sources]` no flag gives
-    (`MakesSources`, into CACHE; when one is unavailable or the cache cannot be written, speculation off instead: they
+    (`HintsSources`, in CACHE; when one is missing or the cache cannot be read, speculation off instead: they
     are drafters' heads), the spill (`Spills`; one setting an option a flag gives is dropped) with its notes, and the
     notes of manual alternatives."""
     if found is None:
@@ -223,16 +223,15 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
 
 
 def source_file(identity: str, owners: list) -> str:
-    """The file `identity` names, in or into `CACHE/sources/<identity>/`, from the first owner whose `make_source`
-    claims it; ValueError why not."""
+    """The file `identity` names, in `CACHE/sources/<identity>/`; ValueError why not, with how to make it from the
+    first owner whose `source_hint` knows."""
     if not re.fullmatch(r"[A-Za-z0-9._+-]+@[0-9a-f]{16}", identity):
         raise ValueError("not a file identity")
-    (directory := CACHE / "sources" / identity).mkdir(parents=True, exist_ok=True)
-    path = next((p for o in owners if (p := getattr(o, "make_source", lambda *a: None)(identity, str(directory)))),
-                None)
-    if path is None:
-        raise ValueError("no installed plugin makes it")
-    return path
+    directory = CACHE / "sources" / identity
+    if files := sorted(f for f in directory.glob("*") if f.is_file()):
+        return str(files[0])
+    hint = next((h for o in owners if (h := getattr(o, "source_hint", lambda i: None)(identity))), "")
+    raise ValueError(f"not in {directory}/" + (f"; {hint}" if hint else ""))
 
 
 def auto_context(model_plugin: object, source: object) -> int:

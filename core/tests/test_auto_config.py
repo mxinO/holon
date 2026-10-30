@@ -104,29 +104,30 @@ class _Owner:
     def spill(self, options, checkpoint):
         return self._spill
 
-    def make_source(self, identity, directory):
-        if isinstance(self._source, Exception):
-            raise self._source
+    def source_hint(self, identity):
         return self._source
 
 
 def test_the_lock_is_fitted_with_its_files_a_spill_and_manual_notes(tmp_path, monkeypatch, capsys):
-    """D1, D5: a lock's file found or made by identity; one that cannot be had serves without speculation (both lock
-    entries), never a refusal; a spill becomes a memory-only entry before the lock, dropped when a flag sets one of
-    its keys; an empty spill is a note for the refusal only; no defaults entry when asked."""
+    """D1, D5: a lock's file found by identity in the cache; one missing serves without speculation (both lock
+    entries) with the plugin's hint, never a refusal, and an unreadable cache too; a spill becomes a memory-only entry
+    before the lock, dropped when a flag sets one of its keys; an empty spill is a note for the refusal only; no
+    defaults entry when asked."""
     monkeypatch.setattr(cli, "CACHE", tmp_path)
     found = _found({"mtp.path": "head@0123456789abcdef"}, {"rows.place": "t:host"})
-    owners = [_Owner(({"rows.place": "t:ssd"}, "slower"), "/x/head.gguf"), _Owner(({}, "manual"))]
+    owners = [_Owner(({"rows.place": "t:ssd"}, "slower"), "make it so"), _Owner(({}, "manual"))]
+    (pack := tmp_path / "sources" / "head@0123456789abcdef" / "head.gguf").parent.mkdir(parents=True)
+    pack.write_bytes(b"head")
     extra, spill, notes, manual = cli.fit_lock(found, {}, owners, "m")
-    assert extra == {"plugin_options": {"mtp.path": "/x/head.gguf"}} and spill == {"rows.place": "t:ssd"}
+    assert extra == {"plugin_options": {"mtp.path": str(pack)}} and spill == {"rows.place": "t:ssd"}
     assert notes == ["rows.place=t:ssd slower"] and manual == ["manual"]
     assert cli.fit_lock(found, {"plugin_options": {"rows.place": "t:host"}}, owners, "m")[1] == {}      # flags win
-    offline = [_Owner(source=ValueError("offline"))]
-    assert cli.fit_lock(found, {}, offline, "m")[0] == {"max_draft_tokens": 0}
-    assert "head@0123456789abcdef unavailable (offline): speculation off" in capsys.readouterr().err
-    assert cli.fit_lock(found, {"max_draft_tokens": 0}, offline, "m")[0] == {"plugin_options": {}}  # never asked
-    monkeypatch.setattr(cli, "CACHE", tmp_path / "unwritable")
-    (tmp_path / "unwritable").write_text("")                     # a cache that cannot be made: never a crash (A C-M2)
+    pack.unlink()
+    assert cli.fit_lock(found, {}, owners, "m")[0] == {"max_draft_tokens": 0}
+    assert "head@0123456789abcdef unavailable (not in" in (err := capsys.readouterr().err) and "; make it so" in err
+    assert cli.fit_lock(found, {"max_draft_tokens": 0}, owners, "m")[0] == {"plugin_options": {}}  # never looked for
+    monkeypatch.setattr(cli, "CACHE", tmp_path / "unreadable")
+    (tmp_path / "unreadable").write_text("")                     # a cache that is not a directory: never a crash
     assert cli.fit_lock(found, {}, owners, "m")[0] == {"max_draft_tokens": 0}
     with pytest.raises(ValueError, match="not a file identity"):
         cli.source_file("../x@0123456789abcdef", owners)
