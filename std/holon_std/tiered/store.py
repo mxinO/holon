@@ -1471,7 +1471,8 @@ class TieredStore:
         """D8x: the experts `rowed` [n] parked in landing rows `row` [n] (a short prompt step's): the row map, the rows'
         pieces in the read-ahead sets' request rows (D8g's copies read them) and their runs on the device (a parked row
         holds its piece as a slot does: `_canonical`), then each piece's slot copied into its row (an `expert_fetch@1`
-        launch a class, slot → row) on the copy stream — the parking event after `_copy_parked`'s follows them."""
+        launch a class, slot → row, the rows strided) on the copy stream — the parking event after `_copy_parked`'s
+        follows them."""
         n, roles = slots.shape
         base, room = self.ahead_base(0), DEPTH * self.ahead_rows
         rel = torch.where(rowed, row - base, room)                         # (room: a sink entry)
@@ -1492,7 +1493,8 @@ class TieredStore:
                                    self._canon_dev[name][torch.where(mine, piece[:, r], 0).long()])
             runs[base:].copy_(region[:room])
             mine = (cls == k) & rowed[:, None]                               # [n, roles]
-            lists.append((name, *self._slot_list(mine, slots, row[:, None].expand(n, roles)), rows))
+            lists.append((name, *self._slot_list(mine, slots, row[:, None].expand(n, roles)),
+                          rows[:, :self.classes[name].unit_bytes]))
         self._fetch_lists(lists)
 
     @staticmethod

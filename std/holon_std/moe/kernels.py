@@ -145,12 +145,12 @@ then `staging` slots, then cache slots.
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/dev/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
-  device view: a zero-copy gather); the slots are distinct. `dst` may have wider rows, `[S, row]` with row ≥ unit (a
-  multiple of 16 bytes): the unit at each row's start (docs/dev/v1-glm.md D8x: landing rows). Facts: unit_bytes,
-  staging. An optional `runs [U, X, 2]
-  int64` reads landing rows (docs/dev/v1-glm.md D8f; `src [U, row]` of its own width): the slot gets row `fetch[0, i]`'s
-  extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with `beside = True` also takes
-  `beside=True`: the same copy on few SMs, for one off the critical path beside other work. Optional member
+  device view: a zero-copy gather); the slots are distinct. `dst`'s rows may be strided (`dst.stride(0)` ≥ unit, a
+  multiple of 16 bytes: landing rows as `rows[:, :unit]`, docs/dev/v1-glm.md D8x). Facts: unit_bytes, staging. An
+  optional `runs [U, X, 2] int64` reads landing rows (docs/dev/v1-glm.md D8f; `src [U, row]` of its own width): the
+  slot gets row `fetch[0, i]`'s extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with
+  `beside = True` also takes `beside=True`: the same copy on few SMs, for one off the critical path beside other work.
+  Optional member
   `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
   instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True` also
   takes `part` and exactly one of `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q =
@@ -161,7 +161,8 @@ then `staging` slots, then cache slots.
   its cost its live entries' where the instance can (kernels.ggml_cuda: q8_1 activations — the activations of the
   others not quantized; its native FP4 quantize ignores `sparse`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
-  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
+  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy (its `dst` rows unit wide, unstrided: the strided
+  rows are `expert_fetch@1`'s only) on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits
   until key's copies have landed (each key waited for once). Facts: unit_bytes, copy — the copy list's placement an
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);

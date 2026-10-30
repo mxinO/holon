@@ -434,7 +434,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
 
 // Every CTA walks every fetched unit; its threads move UNROLL 16-byte words each per trip, all loads before all
 // stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory). A unit is
-// `words` words; the destination's rows `dst_words` (at least `words`: wider rows, a unit at each one's start).
+// `words` words; the destination's rows `dst_words` apart (at least `words`: strided rows).
 template <int UNROLL>
 __global__ void k_fetch(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const uint4 * __restrict__ src,
                         uint4 * __restrict__ dst, int64_t words, int64_t dst_words, int staging) {
@@ -1137,14 +1137,15 @@ void patch(at::Tensor & y, const at::Tensor & rows, const at::Tensor & cpu) {
 
 void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, int64_t beside) {
     const c10::cuda::CUDAGuard guard(dst.device());
-    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) >= src.size(1) && src.size(1) % 16 == 0 &&
-                    dst.size(1) % 16 == 0,
-                "src [U, unit], dst [S, unit] (or [S, row] of wider rows) with unit and row multiples of 16 bytes");
+    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && src.size(1) % 16 == 0 &&
+                    dst.stride(1) == 1 && dst.stride(0) >= dst.size(1) && dst.stride(0) % 16 == 0,
+                "src [U, unit], dst [S, unit] (its rows may be strided: stride(0) >= unit) with unit and the stride "
+                "multiples of 16 bytes");
     TORCH_CHECK(fetch.dim() == 2 && fetch.size(0) == 2, "fetch [2, staging]");
     check(fetch, dst, at::kInt, {2, fetch.size(1)}, "fetch");
     check(n, dst, at::kInt, {1}, "n");
     check(src, dst, at::kByte, {src.size(0), src.size(1)}, "src");
-    check(dst, dst, at::kByte, {dst.size(0), dst.size(1)}, "dst");
+    TORCH_CHECK(dst.scalar_type() == at::kByte, "dst: uint8");
     TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 && reinterpret_cast<uintptr_t>(dst.data_ptr()) % 16 == 0,
                 "src and dst 16-byte aligned");
     const auto * f = fetch.data_ptr<int32_t>();
@@ -1153,10 +1154,10 @@ void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & s
     TORCH_CHECK(beside >= 0, "beside: a CTA count, or 0");
     if (beside) {                                      // beside other work: on `beside` CTAs, many reads in flight
         k_fetch<BESIDE_UNROLL><<<int(beside), FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
-                                                                          dst.size(1) / 16, int(fetch.size(1)));
+                                                                          dst.stride(0) / 16, int(fetch.size(1)));
     } else {
         k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
-                                                                         dst.size(1) / 16, int(fetch.size(1)));
+                                                                         dst.stride(0) / 16, int(fetch.size(1)));
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
@@ -1437,6 +1438,6 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
               gather_roles(fetch.unsqueeze(0), n, {src}, {dst}, FETCH_CTAS, 0, 1, 0, {runs});
           }, "expert_fetch@1 from landing rows: dst[fetch[1, i]] = the extents runs[fetch[0, i]] name in src[fetch[0, i]]");
     m.def("fetch", &gather, "expert_fetch@1 (beside > 0: on that many CTAs, beside other work — expert_prefetch@1's "
-          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging) (a wider dst row: "
-          "its first unit bytes)");
+          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging) (dst's rows may be "
+          "strided)");
 }

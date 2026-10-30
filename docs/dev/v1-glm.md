@@ -1368,8 +1368,9 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
 - **Gating.** Exclusive tiers; a lending step below READ_AHEAD_TOKENS with no decode or verify row; the rows' room
   (2 × 135 a role) — free RAM units first as today, then the rows, past them over RAM as today. No option, no core
   lines. *As built:* a parked step's hits per layer reach min(E, the rows) (`hit_most`; a read-ahead set's A_ra), D8s's
-  hit parts sized by it; `expert_fetch@1` lets `dst` have wider rows (a slot → row copy: the unit at each row's start;
-  its oracle and the CUDA gather amended, no other provider).
+  hit parts sized by it; `expert_fetch@1`'s `dst` rows may be strided (B: still @1, the std idiom — the slot → row
+  copy passes `rows[:, :unit]`; the CUDA gather takes the stride, the oracle writes through the view;
+  `expert_prefetch@1`'s rows stay unit wide).
 - **Plants** (bytes or bits; `holon_judge.planted._d8x`, one test under the deployment's terms with RAM full, checked
   after every step): `parked_row_superset_runs` (bits), `row_hit_before_parked` (the slot → row copies after the
   step's hits: bits, bytes), `row_move_before_unmapped` (*as built:* the victims stay mapped to the units the thread
