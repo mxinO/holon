@@ -2292,103 +2292,6 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("cache", ["*=0.75", "*=0.45", "*=0.3"])
-def test_a_tail_holding_its_staging_refuses_or_serves_without_overflow(gpu_moe_wide, cache):
-    """D8u (a), B-m3: with the staging inside the tail, a smaller arena's layout refuses the loan (`require`: the
-    tail cannot hold buffers, staging and loan beside a pass's staging outside it) or serves the resident store's
-    streams with no loan overflow."""
-    from holon_std.tiered import store as tiered_store
-
-    file, prompts, want = gpu_moe_wide
-    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
-            "moe.lend_peak": "require", "moe.cache": cache, "moe.ram": "*=0.5",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    with mock.patch.object(tiered_store, "ROUNDS_BELOW", 32):
-        try:
-            engine = _gpu_engine(file, host_memory=1 << 30, plugin_options=opts)
-        except RuntimeError as e:                # (refused at the layout: no step ever overflows)
-            assert "moe.lend_peak = require" in str(e) or "tail" in str(e), e
-            return
-        store = engine.ctx.shared_objects[KEY]
-        got = _served(engine, prompts)
-        assert got == want and store.loan_overflows == 0 and store.borrowed["stage"], store.loan_overflows
-        engine.close()
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("plant", [None, "buffers_over_staging", "staging_over_loan", "staging_outside_tail",
-                                   "staging_before_parked", "coldest_swap_unrelocated"])
-def test_a_tail_step_stages_inside_its_tail_and_lends_its_coldest(gpu_moe_wide, plant):
-    """D8u (a) and (c) (docs/dev/v1-glm.md): a stage step's tail holds the passes' buffers, then its staging, then the
-    loan's range (each down class's tail its staging, then a loan range), so it lends no expert outside the tail for
-    its staging (`staging_lent` 0); its tail's holders hotter than a resident outside every tail trade places with it
-    (Maya's `lend_tail`); the streams are the resident store's, every RAM unit and slot its pieces' bytes. Plants: the
-    buffers laid over the staging (`buffers_over_staging`), the staging holders' parking copies late outside the
-    step's wait (`staging_before_parked`), the swapped-in holders left at their tail slots
-    (`coldest_swap_unrelocated`) — each wrong bytes or bits —; the staging's last slot the loan's first
-    (`staging_over_loan`): refused as the loan is handed out; no staging inside the tail (`staging_outside_tail`): lent
-    outside again, counted."""
-    from holon_judge import planted
-    from holon_std.tiered import store as tiered_store
-
-    file, prompts, want = gpu_moe_wide
-    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
-            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5", "moe.ram_heat": "0.999",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    steps, swaps = [], []
-    with mock.patch.object(tiered_store, "ROUNDS_BELOW", 32), \
-            getattr(planted, plant)() if plant else contextlib.nullcontext() as fired:
-        engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts)
-        store = engine.ctx.shared_objects[KEY]
-        heat = store.ram_heat                     # a heat spread over the experts, against their ids' order
-        heat.copy_((torch.arange(heat.numel(), device=heat.device).flip(0) % 7).view_as(heat).float())
-        coldest, activations = store._coldest, store.activations
-
-        def counted(picked, cls, n):
-            out = coldest(picked, cls, n)
-            swaps.append((out & ~picked).sum())
-            return out
-
-        def ranges(step):                         # each tail step's layout as its loan is handed out
-            out = activations(step)
-            if store._step_stage:
-                steps.append((store._step_tail, dict(store._step_down), dict(store._step_stage),
-                              store._step_gu_loan, max((f(store.step_tokens) for f in store.tail_bytes), default=0)))
-            return out
-        store._coldest, store.activations = counted, ranges
-        done, at_end = store.layer_done, []
-
-        def checked(g):                           # every piece's bytes at each staging step's end (a late wrong
-            done(g)                               # copy is caught before later steps move its expert again)
-            if g == len(store._order) - 1 and store._step_stage:
-                at_end.append(_bytes_exact(store))
-        store.layer_done = checked
-        if plant == "staging_over_loan":          # (refused as the loan is handed out: nothing written over it)
-            with pytest.raises(RuntimeError, match="past the loan's first"):
-                _served(engine, prompts)
-            assert fired["shifted"]
-            engine.close()
-            return
-        got = _served(engine, prompts)
-        wrong, lent = _bytes_exact(store) + sum(at_end), int(store.staging_lent)
-        engine.close()
-    assert steps and sum(int(n) for n in swaps) or plant, (steps, swaps)
-    classes = list(store.classes.values())
-    for (cls, n), down, stage, gu_loan, buffers in steps:     # [buffers | staging | loan], [staging | loan]
-        unit = classes[cls].unit_bytes
-        lo, hi = stage[cls]
-        assert lo == classes[cls].size - n + -(-buffers // unit) and hi == classes[cls].size - gu_loan // unit
-        for c, m in down.items():
-            assert stage[c][0] == classes[c].size - m and stage[c][0] <= stage[c][1] <= classes[c].size
-    if plant is None:
-        assert got == want and not wrong and lent == 0, (wrong, lent)
-    elif plant == "staging_outside_tail":
-        assert fired["zeroed"] and lent > 0
-    else:
-        assert fired and (got != want or wrong), (plant, dict(fired), wrong)
-
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("plant", [None, "loan_parking_late", "loan_write_before_parked", "parking_event_early",
                                    "loan_wait_unrecorded"])
 def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan(gpu_moe_wide, plant):
@@ -2438,13 +2341,11 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
         got = _served(engine, prompts)
         wrong = _bytes_exact(store)
         to_ssd = [(int(n), int(m)) for n, m in to_ssd]
-        rounds_lent = int(store.staging_lent)    # (rounds steps lend their fixed set by design: not counted, A's m1)
         assert store.exclusive and store.borrowed["stage"] and store._step_loan_bytes(64) and to_ssd
         engine.close()
     if plant in (None, "loan_parking_late"):
         assert got == want and not wrong and sum(n for n, _ in to_ssd) and not any(m for _, m in to_ssd), \
             (wrong, to_ssd)
-        assert rounds_lent == 0
         assert plant is None or fired["delayed"] and fired["filled"]
     else:
         assert fired["delayed"] and fired["filled"] and wrong, plant
