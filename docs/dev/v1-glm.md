@@ -1385,8 +1385,8 @@ routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per
   experts read from the SSD before their move; the joins a ≥ 2K prompt makes on the thread; the engine loop's launch
   latency p50 / p99 (p99 up ≤ 1 ms) and the decode tokens the move overlaps (≤ 5% slower). Kept only if 1K prefill
   gains and decode loses at no size. The store counts them: `move_counts` (device: experts parked in rows, paired with
-  a victim, mapped, reconciled) and `move_stats` (host: moves, joins and their ns, parked experts routed before their
-  chunk was mapped).
+  a victim, mapped) and `move_stats` (host: moves, entries mapped or reconciled, joins and their ns, parked experts
+  routed before their chunk was mapped).
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the

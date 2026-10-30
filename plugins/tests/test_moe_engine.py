@@ -2461,7 +2461,7 @@ def test_a_short_prompt_parks_its_lent_experts_in_the_read_ahead_rows(gpu_moe_wi
     with d8x_plant(plant) if plant else contextlib.nullcontext(collections.Counter()) as fired:
         engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=mode2(**{"moe.ram": "*=0.25"}))   # (RAM full)
         store, step, bad, cache, slots = engine.ctx.shared_objects[KEY], engine.step, collections.Counter(), {}, []
-        store.move_chunk = 2
+        store.move_first, store.move_chunk = 1, 2
         heat = torch.rand(store.ram_heat.shape, generator=torch.Generator().manual_seed(0))   # RAM's heat spread (a
         store.ram_heat.copy_(heat * 8)                     # lent expert hotter than RAM's coldest: no profile here)
 
@@ -2486,7 +2486,7 @@ def test_a_short_prompt_parks_its_lent_experts_in_the_read_ahead_rows(gpu_moe_wi
         engine.close()
     if plant is None:
         assert same and not +bad, bad
-        assert counts[0] > counts[1] > 0 and counts[2] > 0 and counts[3] > 0 and stats["moves"], (counts, stats)
+        assert counts[0] > counts[1] > 0 and stats["entries"] > counts[2] > 0 and stats["moves"], (counts, stats)
     else:
         assert sum(fired.values()) and (not same or +bad), (plant, dict(fired), bad)
 

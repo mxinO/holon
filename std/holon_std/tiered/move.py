@@ -13,9 +13,10 @@ import time
 import numpy as np
 
 CHUNK = 50                  # experts a chunk (C: about one decode token's copy at the deployment's sizes)
-LAG = 3                     # chunk i is mapped at launch (the prompt step + LAG + i): with overlap, launch + 1 is made
-#                             before the prompt step's device work ends and + 2 as it ends, so the thread's first chunk
-#                             has one decode token (+ 2: every chunk 0 joined, ≈ 40 ms, the launches' p99 +30 ms)
+FIRST = 12                  # the first chunk's: the hottest parked, copied in a few ms
+LAG = 2                     # chunk i is mapped at launch (the prompt step + LAG + i): with overlap, launch + 1 is made
+#                             before the prompt step's device work ends and + 2 as it ends (a first chunk of 50 joined
+#                             there, ≈ 40 ms; of FIRST, a few ms of copies)
 NICE = 10                   # the thread's niceness: it yields to the engine loop and the workers
 
 
@@ -25,8 +26,8 @@ class Move:
     device, at once). `entries` is the host's copy (`Mover.entries`); the thread sets `copied` (chunks), the store
     `mapped` (chunks, each one's launch in `mapped_at`)."""
 
-    def __init__(self, step: int, chunk: int, table, host, count, event) -> None:
-        self.step, self.chunk, self.table, self.host, self.count, self.event = step, chunk, table, host, count, event
+    def __init__(self, step: int, sizes: tuple[int, int], table, host, count, event) -> None:
+        self.step, self.sizes, self.table, self.host, self.count, self.event = step, sizes, table, host, count, event
         self.entries: np.ndarray | None = None
         self.copied, self.mapped, self.mapped_at = 0, 0, []
         self.error: BaseException | None = None
@@ -34,7 +35,13 @@ class Move:
     @property
     def chunks(self) -> int:
         """Its chunks (its entries known: `entries`)."""
-        return -(-len(self.entries) // self.chunk)
+        return len(self.edges) - 1
+
+    @property
+    def edges(self) -> list[int]:
+        """Its chunks' first entries, then its entry count: a first chunk of `sizes[0]`, then chunks of `sizes[1]`."""
+        n, (first, size) = len(self.entries), self.sizes
+        return [0] + list(range(min(first, n), n, size)) + [n] if n > first else [0, n] if n else [0]
 
 
 class Mover:
@@ -100,8 +107,9 @@ class Mover:
         while (move := self._jobs.get()) is not None:
             try:
                 entries = self.entries(move)
+                edges = move.edges
                 for i in range(move.chunks):
-                    self._copy(move, entries[i * move.chunk:(i + 1) * move.chunk])
+                    self._copy(move, entries[edges[i]:edges[i + 1]])
                     with self._cond:         # (release: the chunk's copies before its flag)
                         move.copied = i + 1
                         self._cond.notify_all()

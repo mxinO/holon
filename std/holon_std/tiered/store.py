@@ -190,8 +190,8 @@ class TieredStore:
         self._move: moves.Move | None = None
         self._moved: moves.Move | None = None
         self._mover: moves.Mover | None = None
-        self.move_chunk, self.move_lag = moves.CHUNK, moves.LAG
-        self.move_stats = dict.fromkeys(("moves", "joins", "join_ns", "routed_before"), 0)
+        self.move_chunk, self.move_first, self.move_lag = moves.CHUNK, moves.FIRST, moves.LAG
+        self.move_stats = dict.fromkeys(("moves", "entries", "joins", "join_ns", "routed_before"), 0)
         # `staging`: slots for the graphed steps' misses; `prefill`: a prefill pass's (lent in its step when more, so
         # a pinned cache must be able to lend that many: else the staging slots hold them, as before D8);
         # `ring_tokens`: the prompt tokens of a step from which it streams through the ring (D8; 0: never)
@@ -459,9 +459,14 @@ class TieredStore:
         # D8x: the rows a short prompt step's parking took so far; the move's counts (experts parked in rows, paired
         # with a victim, mapped, reconciled: routed into another tier before their chunk was mapped)
         self._rows_used = static(f"{self.name}.rows_used", (1,))
-        self.move_counts = self.ctx.static(f"{self.name}.move_counts", (4,), torch.int64)
-        # the move's table (+ a sink row: phase 1 runs in a lent step, so nothing it keeps may come from the loan)
-        self._move_table = static(f"{self.name}.move_table", (DEPTH * self.ahead_rows + 1, 2 + self.roles))
+        self.move_counts = self.ctx.static(f"{self.name}.move_counts", (3,), torch.int64)
+        # the move's table (+ a sink row: phase 1 runs in a lent step, so nothing it keeps may come from the loan), and
+        # phase 3's operands by entry and role, made at phase 1: the map's and `host_units`' flat index, `owner`'s
+        # (int64); the expert and its unit (int32)
+        room = DEPTH * self.ahead_rows
+        self._move_table = static(f"{self.name}.move_table", (room + 1, 2 + self.roles))
+        self._move_at = self.ctx.static(f"{self.name}.move_at", (2, room + 1, self.roles), torch.int64)
+        self._move_add = static(f"{self.name}.move_add", (2, room + 1, self.roles))
         self._move_host = None                   # its pinned host copy and count (at the first move)
         self.ahead_slots: dict[int, int] = {}
         self.landing: dict[str, tuple] = {}
@@ -1023,7 +1028,8 @@ class TieredStore:
                 raise RuntimeError(f"{self.name}: the D8x move thread failed: {m.error!r}") from m.error
             if m.entries is not None and step.step > m.step:
                 late = [i for i in range(m.chunks) if i >= len(m.mapped_at) or m.mapped_at[i] > step.step]
-                items = np.concatenate([m.entries[i * m.chunk:(i + 1) * m.chunk, 0] for i in late]) if late else []
+                edges = m.edges
+                items = np.concatenate([m.entries[edges[i]:edges[i + 1], 0] for i in late]) if late else []
                 self.move_stats["routed_before"] += int(record["routed"].reshape(-1)[items].sum())
                 if not late:
                     self._moved = None
@@ -1578,7 +1584,13 @@ class TieredStore:
         order = torch.argsort(torch.where(moving, -heat, math.inf), stable=True)
         rank = torch.empty_like(order).scatter_(0, order, at)
         table = self._move_table.fill_(-1)
-        table.index_copy_(0, torch.where(moving, rank, room), torch.cat([at[:, None], rows[:, None], to], 1).int())
+        put = torch.where(moving, rank, room)
+        table.index_copy_(0, put, torch.cat([at[:, None], rows[:, None], to], 1).int())
+        cls = self.classes32.long()[:, None, :].expand(groups, items, roles).reshape(n, roles)
+        self._move_at.index_copy_(1, put, torch.stack([at[:, None] * roles + torch.arange(roles, device=dev),
+                                                       cls * self.owner.shape[1] + to.long()]))
+        item = at.int()[:, None].expand(n, roles)
+        self._move_add.index_copy_(1, put, torch.stack([item, to]))
         self.move_counts[1] += moving.sum()
         if self._move_host is None:
             pinned = dev.type == "cuda"
@@ -1591,7 +1603,8 @@ class TieredStore:
         if dev.type == "cuda":
             event = torch.Event(device=dev)
             event.record()
-        self._move = self._moved = moves.Move(self._step, self.move_chunk, table[:room], tab, count, event)
+        self._move = self._moved = moves.Move(self._step, (self.move_first, self.move_chunk), table[:room], tab,
+                                                 count, event)
         self.move_stats["moves"] += 1
         self._mover.submit(self._move)
 
@@ -1625,7 +1638,7 @@ class TieredStore:
         self._move_wait(m, due)
         upto = m.chunks if due is None else min(due, m.chunks)
         if upto > m.mapped:
-            self._move_map(m, m.mapped * m.chunk, min(upto * m.chunk, len(m.entries)))
+            self._move_map(m, m.edges[m.mapped], m.edges[upto])
             m.mapped_at += [launch] * (upto - m.mapped)
             m.mapped = upto
         if m.mapped == m.chunks:
@@ -1641,25 +1654,23 @@ class TieredStore:
     def _move_map(self, m: moves.Move, lo: int, hi: int) -> None:
         """Entries [lo, hi) of `m` mapped: each parked expert to its reserved units if it is still SSD-only and holds
         them; else (routed meanwhile: admitted to VRAM or kept in RAM) its units freed (A's D8x-M2)."""
-        table = m.table[lo:hi]
-        item, units = table[:, 0].long(), table[:, 2:]
-        res, host = self.residency.device.view(-1, self.roles), self.host_units.view(-1, self.roles)
-        owner = self.owner.view(-1)
-        held = self.classes32.long()[item // self.items] * self.owner.shape[1] + units.long()     # [m, R]
-        own = owner[held] == item[:, None].int()
-        now = res[item]
-        ok = self._still_parked(now, own)
-        res[item] = torch.where(ok[:, None], -1, now)
-        host[item] = torch.where(ok[:, None], units, host[item])
-        owner[held] = torch.where(own & ~ok[:, None], -1, owner[held])
-        self.move_counts[2] += ok.sum()
-        self.move_counts[3] += (~ok).sum()
+        at, held = self._move_at[0, lo:hi], self._move_at[1, lo:hi]                    # [m, R]: phase 1's operands
+        item, unit = self._move_add[:, lo:hi]
+        res, host, owner = self.residency.device.view(-1), self.host_units.view(-1), self.owner.view(-1)
+        now, holds = res[at], owner[held]
+        own = holds == item
+        ok = self._still_parked(now, own)                # (a piece's role: an expert's tier and reservation are whole)
+        res.index_put_((at,), torch.where(ok, -1, now))
+        host.index_put_((at,), torch.where(ok, unit, host[at]))
+        owner.index_put_((held,), torch.where(own & ~ok, -1, holds))
+        self.move_counts[2] += ok[:, 0].sum()
+        self.move_stats["entries"] += hi - lo
 
     @staticmethod
     def _still_parked(now: torch.Tensor, own: torch.Tensor) -> torch.Tensor:
-        """Phase 3's reconcile: a moving expert is mapped only if still SSD-only (`now` [m, R], its map) and holding
-        its reserved units (`own` [m, R])."""
-        return (now == -2).all(1) & own.all(1)
+        """Phase 3's reconcile: a moving expert's piece is mapped only if still SSD-only (`now` [m, R], its map) and
+        holding its reserved unit (`own` [m, R])."""
+        return (now == -2) & own
 
     def _move_drop(self) -> None:
         """The move's chunks not yet mapped dropped (a re-layout, A's D8x2-m1): the thread joined first, so no unit
@@ -1669,7 +1680,7 @@ class TieredStore:
             return
         self._move = None
         self._mover.wait(m)
-        table = m.table[m.mapped * m.chunk:len(m.entries)]
+        table = m.table[m.edges[m.mapped]:len(m.entries)]
         item, owner = table[:, 0].long(), self.owner.view(-1)
         held = self.classes32.long()[item // self.items] * self.owner.shape[1] + table[:, 2:].long()
         owner[held] = torch.where(owner[held] == item[:, None].int(), -1, owner[held])
@@ -1687,7 +1698,8 @@ class TieredStore:
         m = self._move
         if m is None:
             return []
-        left = self._mover.entries(m)[m.mapped * m.chunk:]
+        self._mover.entries(m)
+        left = m.entries[m.edges[m.mapped]:]
         return [(int(self.class_table[item // self.items, r]), u, item)
                 for item, _, *units in left.tolist() for r, u in enumerate(units)]
 

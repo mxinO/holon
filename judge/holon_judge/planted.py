@@ -2194,7 +2194,7 @@ def _d8x(kind: str) -> Iterator[collections.Counter]:
     elif kind == "promoted":
         def mapped(now, own):
             fired["promoted"] += 1
-            return own.all(1)
+            return own
         patches.append(mock.patch.object(cls_, "_still_parked", staticmethod(mapped)))
     with contextlib.ExitStack() as stack:
         for patch in patches:
