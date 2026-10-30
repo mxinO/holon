@@ -532,6 +532,12 @@ decode and 0.9 for prefill, and every row meets its bar ([docs/dev/v1-flash-next
 
 Holon decodes with MTP at 129–132 tok/s on the RTX 5080 and 175–194 tok/s on the RTX 5090.
 
+**Since then, the MTP head as packed.** The MTP rows above ran the head's dense projections in Q8_0, a step Holon no
+longer takes: it loads Strata's pack as it is (BF16 projections). Re-measured against that Q8_0 head on the same card
+and build, MTP decode is 0.991 / 0.976 / 0.988 on the RTX 5080 and 0.990 / 0.982 / 0.989 on the RTX 5090, with the
+same tokens per verify pass and prefill unchanged; scaled, the RTX 5090's MTP decode at 4K and 32K is about 0.98 / 0.99
+against Strata, under its 1.0 bar, until a quantization step returns.
+
 Caveats:
 - **The RTX 5090's MTP decode at 4K and 32K sits on its bar** (one of the two rounds 0.4–0.5% under it), with fewer
   tokens per verify pass than Strata's (2.78 against 2.93 at 4K, 3.21 against 3.28 at 32K).
