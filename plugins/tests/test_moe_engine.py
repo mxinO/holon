@@ -2198,42 +2198,56 @@ def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_a_narrow_read_ahead_step_reads_each_layers_hottest_ssd_only_experts(gpu_moe):
-    """D8u (b): a prompt step below the full read-ahead's size reads ahead each layer's NARROW_READ_AHEAD hottest
-    SSD-only experts by the store's heat (`moe.ram_heat`), ties by id, into its set's rows in id order — none at all
-    before (D8f read ahead from READ_AHEAD_TOKENS only) —; the streams are the resident store's."""
+@pytest.mark.parametrize("case", ["narrow", "full", "no heat"])
+def test_a_read_ahead_step_reads_each_layers_hottest_ssd_only_experts(gpu_moe, case):
+    """D8u (b): a prompt step reads ahead each layer's hottest SSD-only experts by the store's heat (`moe.ram_heat`),
+    ties by id, its width of them, into its set's rows in id order — below the full read-ahead's size
+    NARROW_READ_AHEAD of them (`narrow`; none before D8u), from it A_ra (`full`, `moe.read_ahead` 2: the hottest, not
+    D8f's lowest ids, where a set exceeds it); without a heat the lowest ids (`no heat`, D8f's rule) —; the streams are
+    the resident store's. A read-ahead signalled and never waited is refused at the next step's start (A's m2)."""
     from holon_std.tiered import store as tiered_store
 
     file, prompts, _ = gpu_moe
     resident = _gpu_engine(file)
     want = _served(resident, prompts)
     resident.close()
+    width = 2                                        # (the tiny model's 8 experts a layer: GLM's 6 of 288)
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "moe.ram_heat": "0.999",
-        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} | ({"moe.read_ahead": str(width)}
+                                                                        if case == "full" else {}))
     store = engine.ctx.shared_objects[KEY]
-    store.read_ahead_tokens, store.narrow_ahead_tokens = 1 << 20, 8     # (every prompt step of 8 tokens: narrow)
+    full = case == "full"
+    store.read_ahead_tokens, store.narrow_ahead_tokens = (8, 8) if full else (1 << 20, 8)
     heat = store.ram_heat                            # a heat against the ids' order, with ties (a pure prompt step's)
     heat.copy_((torch.arange(heat.numel(), device=heat.device).flip(0) % 3).view_as(heat).float())
+    if case == "no heat":
+        store.heat = None
     seen, read = [], tiered_store.TieredStore.read_ahead
 
     def recorded(self, g):
         only = (self.residency.device[g] == -2).all(-1).cpu()
-        heat = self.heat[g].double().cpu()
+        h = self.heat[g].double().cpu() if self.heat is not None else torch.zeros(only.shape, dtype=torch.float64)
         read(self, g)
-        seen.append((only, heat, self.ahead_map[g].cpu().clone()))
+        seen.append((only, h, self.ahead_map[g].cpu().clone()))
 
-    width = 2                                        # (the tiny model's 8 experts a layer: GLM's 6 of 288)
     with mock.patch.object(tiered_store.TieredStore, "read_ahead", recorded), \
             mock.patch.object(tiered_store, "NARROW_READ_AHEAD", width):
         assert _served(engine, prompts) == want
-    assert seen and any(int(only.sum()) > width for only, _, _ in seen)    # (the narrowing bites,
-    assert any(len(set(heat[only].tolist())) > 1 for only, heat, _ in seen)  # by heat)
-    for only, heat, rows in seen:
-        ids = [int(e) for e in torch.nonzero(only).flatten()]
-        hot = sorted(sorted(ids, key=lambda e: (-float(heat[e]), e))[:width])      # the hottest, ties by id
-        assert [int(e) for e in torch.nonzero(rows >= 0).flatten()] == hot
-        assert rows[rows >= 0].tolist() == sorted(rows[rows >= 0].tolist())        # rows in id order, contiguous
+        assert store.ahead_rows == width if full else store.ahead_rows > width
+        assert seen and any(int(only.sum()) > width for only, _, _ in seen)    # (the width bites,
+        assert case == "no heat" or any(len(set(h[only].tolist())) > 1 for only, h, _ in seen)  # by heat)
+        for only, h, rows in seen:
+            ids = [int(e) for e in torch.nonzero(only).flatten()]
+            hot = sorted(sorted(ids, key=lambda e: (-float(h[e]), e))[:width])     # the hottest, ties by id
+            assert [int(e) for e in torch.nonzero(rows >= 0).flatten()] == hot
+            assert rows[rows >= 0].tolist() == sorted(rows[rows >= 0].tolist())    # rows in id order, contiguous
+        if case == "narrow":                          # a read-ahead never waited: the next step refuses
+            store.read_ahead(0)
+            with pytest.raises(RuntimeError, match="never waited"):
+                store.start_step()
+            store.wait_ahead(0)
+            torch.cuda.synchronize()
     engine.close()
 
 def _ram_units_hold_their_pieces(store) -> int:

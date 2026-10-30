@@ -181,6 +181,7 @@ class TieredStore:
         self._runs_host: dict[str, np.ndarray] = {}
         self._ahead, self.read_ahead_tokens = False, READ_AHEAD_TOKENS     # this step reads ahead; from how many
         self.narrow_ahead_tokens, self._ahead_width = NARROW_READ_AHEAD_TOKENS, 0   # (D8u: narrow below; its width)
+        self._ahead_signalled: set[int] = set()          # the layers whose read-ahead was signalled, not yet waited
         self.pending_demotions = None                   # a call's demotions not yet enqueued (D8t): (group, its
         #                                                 classes' gathers, their keywords): the next call enqueues them
         self._started, self._parked = False, None      # this step's device work begun (`start_step`); its parking
@@ -739,6 +740,12 @@ class TieredStore:
             rows[0, 0] = take.sum()
             view[r].copy_(rows[:a + 1])
         self.io.signal(self.ahead_slots[g])
+        self._ahead_signalled.add(g)
+
+    def wait_ahead(self, g: int) -> None:
+        """The current stream waits for layer g's read-ahead (signalled two layers back, or at the step's start)."""
+        self.io.wait(self.ahead_slots[g])
+        self._ahead_signalled.discard(g)
 
     def ahead_base(self, g: int) -> int:
         """Layer g's read-ahead set's first landing row (past the on-demand halves)."""
@@ -1433,6 +1440,9 @@ class TieredStore:
         if self.pending_demotions is not None:  # every call's demotions enqueued by its step's join (D8t)
             raise RuntimeError(f"{self.name}: a call's demotions outlived its step (none may enter the next one, or "
                                "a graph's capture)")
+        if self._ahead_signalled:               # every read-ahead waited in its step (D8u, A's m2)
+            raise RuntimeError(f"{self.name}: layers {sorted(self._ahead_signalled)}'s read-ahead was signalled and "
+                               "never waited (its request rows would be rewritten under a read in flight)")
         if self.exclusive:
             self.recorded.clear()
         if self.ram_heat is not None:            # the last step's decode tokens into RAM's heat, before its counts go

@@ -158,7 +158,7 @@ class DeviceResolver:
 
         def finish() -> None:
             if store._ahead:                     # read ahead: its set signalled two layers back (or at step start)
-                store.io.wait(store.ahead_slots[g])
+                store.wait_ahead(g)
                 self._gather(store.hit, store.n_hit, landed=True, part=None)
             for r in range(rounds):
                 if r:
@@ -237,7 +237,7 @@ class DeviceResolver:
         for p in range(hits):
             def hit(p=p):
                 if p == 0:                       # read ahead: its set signalled two layers back (or at step start)
-                    store.io.wait(store.ahead_slots[g])
+                    store.wait_ahead(g)
                 self._gather(store.hit, store.n_hit, landed=True, part=p, size=q)
             landed.append(hit)
         landed += [lambda p=p: self._gather(fetch, store.n_ram, part=p, size=q) for p in range(ram)]
@@ -329,7 +329,7 @@ class DeviceResolver:
         else:
             part = self._stage_parts(lists, slots)
         if store._ahead:                         # read ahead: its set signalled two layers back (or at step start)
-            store.io.wait(store.ahead_slots[g])
+            store.wait_ahead(g)
         return slots, part, _Beside(self, ids, main, store.read_back(fetch), rounds)
 
     @staticmethod

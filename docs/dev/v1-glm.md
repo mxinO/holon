@@ -1229,6 +1229,12 @@ on the slower-drive node.
   pick for both widths, the rounds' hit parts by the step's width; the test (`test_moe_engine.py`) reads ahead a tiny
   model's prompt steps at width 2 against a heat with ties and checks each layer's set is its hottest by (−heat, id),
   rows in id order, the streams the resident store's — before the change no step below the full size read ahead.
+  *A's code review (minors):* m1 — GLM's 1K prompts are tail steps (`moe.ring_tokens` 512 ≤ 1,024), so `begin()`
+  runs at their early start, at the launch, before the dense layers: their first two sets get the lead; a narrow step
+  without a loan still signals them at its first resolve (no deployment here). m2 — the store keeps the layers whose
+  read-ahead was signalled, cleared at each wait (`wait_ahead`); `start_step` refuses leftovers, as it does a call's
+  demotions. m3 — the test runs three cases: narrow, full width with a set past `moe.read_ahead` (the hottest, not
+  D8f's lowest ids), and no heat (the lowest ids); the narrow case also signals one and checks the refusal.
 - **(a)** *The layout* (A-M1): the gate/up tail is the pass buffers, then the staging, then the loan; `tail_view`
   returns the buffers' slots only; each down tail is its staging, then the loan's ranges; the staging ends on a whole
   slot at or below the loan's first touched slot. Per-step sizing keeps the staging at every lent step size, asserted
