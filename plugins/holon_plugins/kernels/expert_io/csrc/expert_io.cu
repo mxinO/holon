@@ -645,17 +645,14 @@ struct Tiers {
     int32_t * hit, * n_hit;                            // [R, 2, F], [R]: the misses read ahead (row, slot)
     int groups, units, rows;                           // rows: the on-demand landing rows (a round's)
     int32_t * stamp, * clock;                          // [C, U], [1] or null: the call each unit was last demoted into
-                                                       // by, and the calls so far (moves beside the next calls)
-    double * lh;                                       // [G * E] scratch (D8t): the call's displaceable experts' heats
-    int32_t * li;                                      // [G * E]: their indices (−1: displaced by the call)
-};
+};                                                     // by, and the calls so far (moves beside the next calls)
 
 // A unit the previous call demoted into (or this one): its copy may still be running beside this call (`stamp`).
 __device__ __forceinline__ bool pending(const Tiers & T, int c, int u) {
     return T.stamp != nullptr && uint32_t(T.clock[0]) + 1u - uint32_t(T.stamp[c * T.units + u]) <= 1u;
 }
 
-constexpr int TIER_THREADS = 1024;                     // (D8t: the call's scans over 4x the threads)
+constexpr int TIER_THREADS = 256;
 constexpr int SPARE = -4, OWN = -5;                    // records of a policy with spares (F10): b's slots a spare; b
                                                        // took its spare back
 constexpr int FREED = -2;                              // an owner freed by the call: reusable from the next one
@@ -688,51 +685,18 @@ __device__ __forceinline__ double heat_at(const Tiers & T, int x) {     // (an i
     return T.heat_i ? double(T.heat_i[x]) : double(T.heat[x]);
 }
 
-__device__ __forceinline__ bool displaceable(const Tiers & T, int g, int x, int roles, int experts,
-                                             const int32_t * flags) {
-    const int gg = x / experts, e = x % experts;
-    bool ok = !(gg == g && flags[e] & (1 | 4));        // routed by the call (1), placed by it (4)
-    for (int r = 0; r < roles && ok; ++r) {
-        ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1 &&
-             T.host[x * roles + r] >= 0 && !pending(T, T.classes[gg * roles + r], T.host[x * roles + r]);
-    }
-    return ok;
-}
-
-// D8t: the call's displaceable experts listed once (T.lh, T.li; `n_list` of them, in no order: ties go by index), so
-// each displacement reads one short list instead of every expert's tiers. Exact: during a call that set only loses
-// the experts it displaces (a placed expert is the call's layer's, flagged 4; the units it gives were never
-// displaceable experts'), which `coldest` strikes from the list as it takes them.
-__device__ void list_displaceable(const Tiers & T, int g, int roles, int experts, const int32_t * flags, int * n_list) {
-    if (threadIdx.x == 0) {
-        *n_list = 0;
-    }
-    __syncthreads();
-    for (int x = threadIdx.x; x < T.groups * experts; x += blockDim.x) {
-        if (displaceable(T, g, x, roles, experts, flags)) {
-            const int at = atomicAdd(n_list, 1);
-            T.lh[at] = heat_at(T, x);
-            T.li[at] = x;
-        }
-    }
-    __syncthreads();
-}
-
 __device__ int coldest(const Tiers & T, int g, int roles, int experts, double than, const int32_t * flags,
-                       double * hk, int * ik, int n_list) {
+                       double * hk, int * ik) {
     double bh = INFINITY;
     int bi = INT_MAX;
-    if (n_list >= 0) {                                 // the call's list (D8t)
-        for (int i = threadIdx.x; i < n_list; i += blockDim.x) {
-            const int x = T.li[i];
-            if (x >= 0 && (T.lh[i] < bh || (T.lh[i] == bh && x < bi))) {
-                bh = T.lh[i];
-                bi = x;
-            }
+    for (int x = threadIdx.x; x < T.groups * experts; x += blockDim.x) {
+        const int gg = x / experts, e = x % experts;
+        bool ok = !(gg == g && flags[e] & (1 | 4));    // routed by the call (1), placed by it (4)
+        for (int r = 0; r < roles && ok; ++r) {
+            ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1 &&
+                 T.host[x * roles + r] >= 0 && !pending(T, T.classes[gg * roles + r], T.host[x * roles + r]);
         }
-    }
-    for (int x = threadIdx.x; n_list < 0 && x < T.groups * experts; x += blockDim.x) {
-        if (displaceable(T, g, x, roles, experts, flags)) {
+        if (ok) {
             const double h = heat_at(T, x);
             if (h < bh || (h == bh && x < bi)) {
                 bh = h;
@@ -757,20 +721,13 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, double th
     const double h = hk[0];
     const int i = ik[0];
     __syncthreads();
-    const int out = i != INT_MAX && h < than ? i : -1;
-    for (int j = threadIdx.x; out >= 0 && n_list >= 0 && j < n_list; j += blockDim.x) {
-        if (T.li[j] == out) {                          // struck: displaced by the call
-            T.li[j] = -1;
-        }
-    }
-    __syncthreads();
-    return out;
+    return i != INT_MAX && h < than ? i : -1;
 }
 
 // Expert e of layer g into RAM: `given` units (one per role) if not null, else free units of every class, else the
 // coldest's (displaced to the SSD), else the SSD. Thread 0 writes; `units` gets the result (-1: the SSD).
 __device__ void place(const Tiers & T, int g, int e, int roles, int experts, const int * given, int32_t * flags,
-                      int * units, int * red, double * hk, int n_list) {
+                      int * units, int * red, double * hk) {
     __shared__ int ok;
     if (given == nullptr) {
         if (threadIdx.x == 0) {
@@ -786,7 +743,7 @@ __device__ void place(const Tiers & T, int g, int e, int roles, int experts, con
         }
         if (!ok) {
             const int x = T.heat || T.heat_i ? coldest(T, g, roles, experts, heat_at(T, g * experts + e), flags, hk,
-                                                       red, n_list) : -1;
+                                                       red) : -1;
             if (threadIdx.x == 0) {
                 for (int r = 0; r < roles; ++r) {
                     units[r] = x >= 0 ? T.host[x * roles + r] : -1;
@@ -861,13 +818,6 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
         }
     }
     __syncthreads();
-    __shared__ int n_list;                             // the call's displaceable experts (D8t; −1: scan them all)
-    if (T.lh != nullptr && (T.heat != nullptr || T.heat_i != nullptr)) {
-        list_displaceable(T, g, roles, experts, flags, &n_list);
-    } else if (tid == 0) {
-        n_list = -1;
-    }
-    __syncthreads();
     int j = 0;
     __shared__ int gone;
     for (int i = 0; i < n_rec; ++i) {                  // 1. admissions (uniform: every thread reads the same record)
@@ -882,7 +832,7 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                 }
             }
             __syncthreads();
-            place(T, g, b, roles, experts, nullptr, flags, units, red, hk, n_list);
+            place(T, g, b, roles, experts, nullptr, flags, units, red, hk);
             if (tid == 0 && units[0] >= 0) {
                 for (int r = 0; r < roles; ++r) {
                     const int m = T.n_moves[r * 2]++;
@@ -960,7 +910,7 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                 }
             }
             __syncthreads();
-            place(T, g, b, roles, experts, from_ram ? given : nullptr, flags, units, red, hk, n_list);
+            place(T, g, b, roles, experts, from_ram ? given : nullptr, flags, units, red, hk);
             if (tid == 0 && units[0] >= 0) {
                 for (int r = 0; r < roles; ++r) {
                     const int m = T.n_moves[r * 2]++;
@@ -1006,7 +956,7 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
         }
         bool kept = false;
         if (!(flags[e] & 8) && (flags[e] & 2)) {
-            place(T, g, e, roles, experts, nullptr, flags, units, red, hk, n_list);
+            place(T, g, e, roles, experts, nullptr, flags, units, red, hk);
             kept = units[0] >= 0;
         }
         if (tid == 0) {
@@ -1064,8 +1014,7 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
            at::Tensor & owner, const at::Tensor & capacity, const c10::optional<at::Tensor> & heat, at::Tensor & io,
            at::Tensor & moves, at::Tensor & n_moves, at::Tensor & ssd, at::Tensor & n_ssd, at::Tensor & n_ram,
            int64_t rows, const c10::optional<at::Tensor> & ahead, at::Tensor & hit, at::Tensor & n_hit,
-           const c10::optional<at::Tensor> & stamp, const c10::optional<at::Tensor> & clock,
-           const c10::optional<at::Tensor> & list_heat, const c10::optional<at::Tensor> & list_index) {
+           const c10::optional<at::Tensor> & stamp, const c10::optional<at::Tensor> & clock) {
     const c10::cuda::CUDAGuard guard(ids.device());
     const int64_t tokens = ids.size(0), k = ids.size(1), groups = residency.size(0), experts = residency.size(1),
                   roles = residency.size(2), F = stage.size(1);
@@ -1112,14 +1061,7 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
             classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h, hi,
             io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), ssd.data_ptr<int32_t>(),
             n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), ah, hit.data_ptr<int32_t>(),
-            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows), nullptr, nullptr, nullptr, nullptr};
-    TORCH_CHECK(list_heat.has_value() == list_index.has_value(), "list_heat and list_index: both or neither");
-    if (list_heat.has_value()) {                       // the call's displaceable list's scratch (D8t)
-        check(*list_heat, ids, at::kDouble, {groups * experts}, "list_heat");
-        check(*list_index, ids, at::kInt, {groups * experts}, "list_index");
-        T.lh = list_heat->data_ptr<double>();
-        T.li = list_index->data_ptr<int32_t>();
-    }
+            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows), nullptr, nullptr};
     TORCH_CHECK(stamp.has_value() == clock.has_value(), "stamp and clock: both or neither");
     if (stamp.has_value()) {
         check(*stamp, ids, at::kInt, {owner.size(0), owner.size(1)}, "stamp");
@@ -1475,8 +1417,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
           pybind11::arg("io"), pybind11::arg("moves"), pybind11::arg("n_moves"), pybind11::arg("ssd"),
           pybind11::arg("n_ssd"), pybind11::arg("n_ram"), pybind11::arg("rows"), pybind11::arg("ahead"),
           pybind11::arg("hit"), pybind11::arg("n_hit"), pybind11::arg("stamp") = pybind11::none(),
-          pybind11::arg("clock") = pybind11::none(), pybind11::arg("list_heat") = pybind11::none(),
-          pybind11::arg("list_index") = pybind11::none());
+          pybind11::arg("clock") = pybind11::none());
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
     m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream (`runs`: "
