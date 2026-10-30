@@ -51,6 +51,9 @@ the history and decisions; read them only for the item at hand, never as require
   `judge/` (accuracy) or `bench/` (performance) under a plain name, with `--help`; a spike a document cites as how
   its numbers were produced may stay, with its README, under `docs/dev/spikes/`.
 - Every bug fix comes with a test that fails before and passes after.
+- A change to a path a deployment configures (a placement policy, a store's tiers, a loan) is tested under that
+  deployment's own terms as well as the defaults, and smoked once on the real model at its deployment before it is
+  called built.
 - **Lean tests.** A new test catches something no existing test catches; otherwise extend or parametrize an existing
   one. Share expensive setup (module-scoped engines, one run checked by several assertions), prefer tiny models on
   the CPU, and use the GPU only where it is the point. Watch `pytest --durations`. Mark a test `slow` (over ≈ 8 s) or

@@ -2177,6 +2177,15 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 - **A5000s**: sm_86 L0, the tiny tests, step 1 on the vehicle, N4's probe, the suite.
 
 
+**Process for mode (ii) changes (the coordinator's rule after D8u (a) + (c), 2026-10-30).**
+- **Test under the deployment's policy.** Every exclusive-tier change's engine tests run under the deployment's terms
+  too — F10 (`placement.promote@1`) with the spares a tail step releases, `lend_tail`, the loan's options, RAM's heat
+  (`test_moe_engine.py`'s `_mode2` / `mode2` fixture, a tail step after decoding so the spares are set up) — not only
+  the default policy. D8l's tests and D8t's (their F10 demotion cases already) run so since 2026-10-30.
+- **Smoke the real model before "built".** Before a mode (ii) change is reported built: one 1K, one 4K and one 32K
+  request at the deployment's flags on one RTX 5090, with the step-level counters (the tail, its staging, what it
+  lends and parks, loan overflows).
+
 ## 13. Review log
 
 ### Step 1's code review (panels A, B, C; the lead's order, §11 call 4)

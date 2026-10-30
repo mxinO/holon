@@ -905,6 +905,24 @@ def gpu_moe_wide(tmp_path_factory):
     return path / "moe.gguf", prompts, want
 
 
+def _mode2(**over) -> dict:
+    """GLM mode (ii)'s deployment terms on the tiny models (docs/dev/v1-glm.md, the process section: an exclusive-tier
+    change's engine tests run under them too): exclusive tiers, F10 (`placement.promote@1`, the spares a tail step
+    releases), the tail lent with the step-peak loan required, RAM's own heat, the loan's margin and largest range,
+    split calls and gathers beside the compute — the cache and RAM fractions the tiny models'."""
+    return {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
+            "moe.placement": "placement.promote@1", "moe.ram_heat": "0.999", "moe.loan_margin": "1.12",
+            "moe.loan_largest": "0.55", "moe.split": "on", "moe.copy_beside": "on",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} | over
+
+
+@pytest.fixture
+def mode2():
+    """`_mode2`, the deployment's terms (overrides by keyword)."""
+    return _mode2
+
+
 @contextlib.contextmanager
 def _no_host_sync(cls, *methods, mode="error"):
     """`cls`'s methods raise on any operation that waits for the device (a borrowing step's lending and ring), or
@@ -2267,7 +2285,8 @@ def _ram_units_hold_their_pieces(store) -> int:
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
+@pytest.mark.parametrize("terms", ["default", "mode2"])
+def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe, mode2, terms):
     """Step 1's review S1-B1 (docs/dev/v1-glm.md D8b, D9): RAM with free units, the tail lent with the step's activation
     loan (`require`): lent experts are parked from intact slots — the step's lending runs before the loan is handed to
     the forward, an expert holding a loan slot goes to the SSD, the copies are waited for before a lent slot is reused —
@@ -2277,12 +2296,15 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
     file, prompts, want = gpu_moe
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} if terms == "default" else mode2()
     for plant in (contextlib.nullcontext, parking_late, parking_unwaited):     # the fence, then under a forced delay
         with plant() as fired:
             engine = _gpu_engine(file, host_memory=1 << 28, plugin_options=opts)
             store = engine.ctx.shared_objects[KEY]
             got = _served(engine, prompts)
+            if terms == "mode2":                     # again, after decoding: F10's spares set up (released)
+                assert int((store.state["spare"][..., 0] > 0).sum()) > 0
+                got = got if got != want else _served(engine, prompts)
             assert store.exclusive and store.borrowed["stage"] and store.parked > 0, (store.borrowed, store.parked)
             assert store._parked is None             # each step's parking copies waited for (C S1-M2's fence)
             wrong = _bytes_exact(store)
@@ -2292,9 +2314,11 @@ def test_parked_experts_hold_their_pieces_beside_the_activation_loan(gpu_moe):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-@pytest.mark.parametrize("plant", [None, "loan_parking_late", "loan_write_before_parked", "parking_event_early",
-                                   "loan_wait_unrecorded"])
-def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan(gpu_moe_wide, plant):
+@pytest.mark.parametrize("plant, terms", [(p, "default") for p in (None, "loan_parking_late",
+                                                                    "loan_write_before_parked", "parking_event_early",
+                                                                    "loan_wait_unrecorded")]
+                         + [(None, "mode2"), ("loan_write_before_parked", "mode2")])
+def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan(gpu_moe_wide, mode2, plant, terms):
     """D8l (docs/dev/v1-glm.md): a tail step's lent experts holding slots of its activation loan are parked in RAM as
     the others (once they went to the SSD): RAM with free units here, no lent expert goes to the SSD, and every RAM
     unit holds its pieces as the file does, the streams the resident store's — the forward waits for the parking
@@ -2308,7 +2332,7 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
     file, prompts, want = gpu_moe_wide
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} if terms == "default" else mode2()
     with getattr(planted, plant)() if plant else contextlib.nullcontext() as fired:
         engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts)
         store, to_ssd = engine.ctx.shared_objects[KEY], []
@@ -2339,6 +2363,9 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
             engine.close()
             return
         got = _served(engine, prompts)
+        if terms == "mode2":                     # again, after decoding: F10's spares set up, the tail releases them
+            assert int((store.state["spare"][..., 0] > 0).sum()) > 0
+            got = got if got != want else _served(engine, prompts)
         wrong = _bytes_exact(store)
         to_ssd = [(int(n), int(m)) for n, m in to_ssd]
         assert store.exclusive and store.borrowed["stage"] and store._step_loan_bytes(64) and to_ssd
