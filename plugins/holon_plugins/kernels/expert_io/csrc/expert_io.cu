@@ -652,7 +652,7 @@ __device__ __forceinline__ bool pending(const Tiers & T, int c, int u) {
     return T.stamp != nullptr && uint32_t(T.clock[0]) + 1u - uint32_t(T.stamp[c * T.units + u]) <= 1u;
 }
 
-constexpr int TIER_THREADS = 256;
+constexpr int TIER_THREADS = 1024;                     // (D8t: its scans and sweeps took ≈ twice as long at 256)
 constexpr int SPARE = -4, OWN = -5;                    // records of a policy with spares (F10): b's slots a spare; b
                                                        // took its spare back
 constexpr int FREED = -2;                              // an owner freed by the call: reusable from the next one
