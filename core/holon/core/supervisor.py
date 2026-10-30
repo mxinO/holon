@@ -37,9 +37,10 @@ import collections
 import contextlib
 import dataclasses
 import secrets
+import sys
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Coroutine, Sequence
+from collections.abc import AsyncIterator, Callable, Coroutine, Mapping, Sequence
 from typing import Any
 
 from holon.api import SamplingParams, TokenDelta, sequence_seed
@@ -106,10 +107,15 @@ class Supervisor:
     """An `EngineClient` that keeps an engine process serving (see the module docstring)."""
 
     def __init__(self, history: Sequence[Any], policy: Policy | None = None,
-                 target: Callable[..., None] = engine_main) -> None:
+                 target: Callable[..., None] = engine_main, memory_only: Mapping[int, str] | None = None,
+                 admit: Callable[[Any, dict | None], contextlib.AbstractContextManager] | None = None) -> None:
+        """`memory_only`: history entries rolled back to only after a start fails for memory (a spill), with what to
+        say then. `admit(config, the entry's last ready report or None)`: the context each restart runs in, yielding
+        the config to start (a StartFailed refuses it)."""
         if not history:
             raise ValueError("the config history is empty")
         self.history, self.policy, self._target = list(history), policy or Policy(), target
+        self.memory_only, self._admit, self._reports = memory_only or {}, admit, {}
         self.version = len(self.history) - 1            # the history entry the engine runs
         self._engine: EngineProcess | None = None       # None while (re)starting
         self._ready = asyncio.Event()                   # set while an engine serves, or once given up
@@ -330,13 +336,17 @@ class Supervisor:
         for req in self._requests.values():
             req.strikes = req.crashes = 0
 
-    def _roll_back(self) -> bool:
-        """Restart on the previous config in the history from now on; False if there is none."""
+    def _roll_back(self, kind: str | None = None) -> bool:
+        """Restart on the previous config in the history from now on (a `memory_only` one only after a start failed
+        for memory, `kind`; None: crashes); False if there is none."""
         self._charged.clear()
-        if self.version == 0:
+        older = [v for v in range(self.version - 1, -1, -1) if kind == "memory" or v not in self.memory_only]
+        if not older:
             return False
-        self.version -= 1
+        self.version = older[0]
         self.counters["rollbacks"] += 1
+        _say(f"rolled back to configuration {self.version} of {len(self.history)} after "
+             + (f"a {kind} failure" if kind else "crashes") + f" {self.memory_only.get(self.version, '')}")
         return True
 
     async def _launch(self) -> None:
@@ -345,17 +355,22 @@ class Supervisor:
             begin = time.monotonic()
             config, lock = self.history[self.version]
             try:
-                engine = await asyncio.wait_for(EngineProcess.start(config, self._target, lock),
-                                                self.policy.start_timeout)
+                with self._admit(config, self._reports.get(self.version)) if self._admit and self._start_s else \
+                        contextlib.nullcontext(config) as config:
+                    engine = await asyncio.wait_for(EngineProcess.start(config, self._target, lock),
+                                                    self.policy.start_timeout)
             except (RuntimeError, TimeoutError) as e:
                 failed += 1
-                if failed == self.policy.rollback_crashes or isinstance(e, StartFailed) and e.kind != "error":
+                kind = e.kind if isinstance(e, StartFailed) else "error"
+                _say(f"start failed ({kind}): {str(e) or 'start timed out'}")
+                if failed == self.policy.rollback_crashes or kind != "error":
                     failed = 0
-                    if not self._roll_back():
+                    if not self._roll_back(kind):
                         self._give_up(f"the engine fails to start on every configuration in its history "
                                       f"(last: {str(e) or 'start timed out'})")
                 continue
             self._start_s.append(time.monotonic() - begin)
+            self._reports[self.version] = engine.client.ready
             self._up_since = time.monotonic()
             self._engine = engine
             self._ready.set()
@@ -402,6 +417,10 @@ class Supervisor:
         self._tasks.discard(task)
         if not task.cancelled() and (e := task.exception()) is not None:    # never leave requests waiting
             self._give_up(f"supervisor failed: {type(e).__name__}: {e}")
+
+
+def _say(text: str) -> None:
+    print(f"holon: {text}", file=sys.stderr, flush=True)
 
 
 @contextlib.asynccontextmanager

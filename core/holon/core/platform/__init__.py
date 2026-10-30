@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import mmap
 import os
+import pathlib
 import re
 from collections.abc import Callable, Sequence
 
@@ -88,11 +89,12 @@ def free_memory(device: torch.device) -> int:
     return torch.cuda.mem_get_info(device)[0]
 
 
-def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
+def peak_memory(device: torch.device, fn: Callable[[], object], out: dict | None = None) -> int:
     """Peak bytes `fn()` takes on `device` beyond what it held before: its allocations' peak, or what the caching
     allocator maps for them where that is more — its segments' rounding and the holes its blocks leave (allocations
     alone left an RTX 5090 at --memory-fraction 0.99 with 3 MiB free after 32K-token steps). It returns cached,
-    unused blocks to the driver first, as `reserved_growth` does, so the growth is measured from a clean cache."""
+    unused blocks to the driver first, as `reserved_growth` does, so the growth is measured from a clean cache. With
+    `out`, `out["overshoot"]`: what the allocator reserved beyond the peak returned (none: the peak counts it)."""
     _cuda(device, "peak memory")
     synchronize(device)
     torch.cuda.empty_cache()
@@ -100,7 +102,61 @@ def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
     allocated, reserved = torch.cuda.memory_allocated(device), torch.cuda.memory_reserved(device)
     fn()
     synchronize(device)
-    return max(torch.cuda.max_memory_allocated(device) - allocated, torch.cuda.max_memory_reserved(device) - reserved)
+    grown = torch.cuda.max_memory_reserved(device) - reserved
+    peak = max(torch.cuda.max_memory_allocated(device) - allocated, grown)
+    if out is not None:
+        out["overshoot"] = max(0, grown - peak)
+    return peak
+
+
+def gpu_shared(device: torch.device) -> str | None:
+    """Why other clients may grow on `device` after the start ("" if none seen; None: unknown, without NVML as on
+    arm64): it drives a display, or a process visible in this PID namespace, not this engine nor its parent, holds
+    memory on it."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        gpu = pynvml.nvmlDeviceGetHandleByUUID(f"GPU-{torch.cuda.get_device_properties(device).uuid}")
+        if pynvml.nvmlDeviceGetDisplayActive(gpu):
+            return "drives a display"
+        pids = {p.pid for f in (pynvml.nvmlDeviceGetComputeRunningProcesses,
+                                pynvml.nvmlDeviceGetGraphicsRunningProcesses) for p in f(gpu)}
+    except Exception:  # noqa: BLE001 — no NVML or no answer
+        return None
+    others = sorted(p for p in pids - {os.getpid(), os.getppid()} if os.path.exists(f"/proc/{p}"))
+    return f"processes {others} use it" if others else ""
+
+
+def host_ram(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> tuple[int, int, str]:
+    """(available, total, what limits it): the lesser of `MemAvailable` and, for this process's cgroup (v2) and each
+    ancestor with a limit, the limit less what it holds besides clean file pages; total the lesser of `MemTotal` and
+    the lowest limit (docs/dev/v1-auto-config.md D1). Under cgroup v1, `MemAvailable` alone."""
+    read = lambda f: pathlib.Path(f).read_text() if os.path.exists(f) else ""      # noqa: E731
+    info = {k: int(v.split()[0]) << 10 for k, v in (ln.split(":", 1) for ln in read(f"{proc}/meminfo").splitlines())}
+    available, total, why, groups = info["MemAvailable"], info["MemTotal"], "meminfo", read(f"{proc}/self/cgroup")
+    if ":memory:" in groups:
+        return available, total, "meminfo; cgroup v1 limits not read: --host-memory sets them"
+    root, found = pathlib.Path(cgroup), (available, total, why)
+    path = root / next((ln[3:].lstrip("/") for ln in groups.splitlines() if ln.startswith("0::")), "")
+    try:
+        for d in (path if path.is_dir() else root, *path.parents):   # a container's own cgroup is its mount's root
+            if limits := [int(v) for f in ("max", "high") if (v := read(d / f"memory.{f}").strip()) not in ("", "max")]:
+                stat = {k: int(v) for k, v in (ln.split() for ln in read(d / "memory.stat").splitlines())}
+                free = min(limits) - int(read(d / "memory.current")) + sum(stat.get(k, 0) * s for k, s in (
+                    ("active_file", 1), ("inactive_file", 1), ("file_dirty", -1), ("file_writeback", -1)))
+                binds = free < found[0]
+                found = (max(0, min(found[0], free)), min(found[1], *limits),
+                         f"cgroup /{d.relative_to(root)}" if binds else found[2])
+            if d == root:
+                break
+    except (OSError, ValueError) as e:             # unreadable: what meminfo says, and why
+        return available, total, f"meminfo; cgroup not read ({e}): --host-memory sets a limit"
+    return found
+
+
+def host_headroom(total: int) -> int:
+    """Host memory kept free of pinned pools: what grows after the start (worker processes, the frontend, a desktop)."""
+    return max(6 << 30, total // 20)
 
 
 def reserved_growth(device: torch.device, fn: Callable[[], object], copies: int = 1) -> int:

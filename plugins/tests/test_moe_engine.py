@@ -264,10 +264,13 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     The static policy caches whole experts, F2's warm start: item 0, 1, … of every layer, or a profile's hottest; a
     layer's distinct misses never pass its staging slots, and a step that did would stop the engine. The adaptive
     policies (the default F11, F4, F2–F3's two-phase swaps through the copy stream) serve the same outputs at a
-    quarter of the experts while they move them; F11's residency, step by step, is its replay oracle's (L1 parity)."""
+    quarter of the experts while they move them; F11's residency, step by step, is its replay oracle's (L1 parity).
+    A profile that cannot seed the cache (a host path, another file's) is warned about and the cache starts cold
+    (docs/dev/v1-auto-config.md D4)."""
     import json as json_
 
     from holon_judge.placement import parity, route_dump
+    from holon_std.tiered import store as tiered
     from holon_tools.__main__ import main  # `holon_tools profile`: decode routes, beside the file
 
     checkpoint, prompts = tiny_moe
@@ -321,14 +324,20 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
         elif cached:
             assert resident[:, :per_layer[1]].all()
         assert 0 < store.peak_misses <= store.staging if cached < 8 else store.peak_misses == 0
-    with pytest.raises(ValueError, match="relative to the checkpoint's directory"):   # plans record no host path
-        _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
-                                                           "moe.placement.profile": str(profile)})
     capsys.readouterr()
-    cold = _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25",
-                                                              "moe.placement.profile": "absent.profile.json"})
-    assert _served(cold, prompts) == want                    # a lock's profile not written here yet: said, served cold
-    assert capsys.readouterr().out.count("no routing profile") == 1
+    _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                       "moe.placement.profile": str(profile)})
+    assert "not used (a name relative to the checkpoint's directory)" in capsys.readouterr().err   # no host path
+    shipped = json_.loads(profile.read_text())                 # counted with an MTP head's file and group too
+    shipped["checkpoint"].append(["mtp-head.gguf", 1])
+    shipped["layers"]["99"] = [1] * 8
+    (tmp_path / "shipped").mkdir()
+    (tmp_path / "shipped" / "p.json").write_text(json_.dumps(shipped))
+    with mock.patch.object(tiered, "PROFILES", tmp_path / "shipped"):   # it seeds; `none` asks for a cold cache
+        seeded, cold = (_engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1"} | extra)
+                        for extra in ({}, {"moe.placement.profile": "none"}))
+        assert seeded.ctx.shared_objects[KEY]._profile_counts.any()
+        assert not cold.ctx.shared_objects[KEY]._profile_counts.any()
     store.stage = store.stage[:, :store.peak_misses - 1].contiguous()       # as if staging had been too small
     for p in prompts:
         engine.add([(t + 7) % 512 for t in p], GREEDY)                       # new prompts (no prefix-cache hit)
@@ -351,9 +360,10 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     (tmp_path / "other").mkdir()
     other, _ = _gguf_and_dense(checkpoint, tmp_path / "other", Q.Q4_0)
     other = other.rename(tmp_path / other.name)                     # another quant beside it in the blob directory
-    with pytest.raises(ValueError, match="was counted on"):
-        _engine(other, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
-                                                            "moe.placement.profile": "moe-a.profile.json"})
+    _engine(other, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
+                                                        "moe.placement.profile": "moe-a.profile.json"})
+    err = capsys.readouterr().err
+    assert "not used (counted on" in err and "the cache starts cold" in err
     for policy in ("", "placement.lru@1", "placement.profile_decay@1"):
         engine = _engine(link, host_memory=1 << 24, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.placement": policy,
@@ -1120,8 +1130,8 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     file, prompts, want = gpu_moe
     peaks, measure = [], platform.peak_memory
 
-    def peak_memory(device, fn):
-        peaks.append(measure(device, fn))
+    def peak_memory(device, fn, out=None):
+        peaks.append(measure(device, fn, out))
         return peaks[-1]
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on"}
     with mock.patch.object(platform, "peak_memory", peak_memory):
@@ -2167,7 +2177,7 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(request, passes):
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     with stack, mock.patch.object(platform, "peak_memory",
-                                  lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
+                                  lambda device, fn, out=None: peaks.append(measure(device, fn, out)) or peaks[-1]):
         engine = _gpu_engine(file, host_memory=1 << (29 if two else 28), plugin_options=opts, **long)
         store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
         _reserve_steps(engine, store, reserve, gen, 1300 if two else 300)

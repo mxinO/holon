@@ -185,6 +185,7 @@ class Executor:
         self.writes = Writes(device)                           # what shared objects write before a launch
         self._before = [o.before_launch for o in shared if hasattr(o, "before_launch")]
         self._lenders = [o for o in shared if hasattr(o, "lend_activations")]
+        self.memory_note = ""                    # how `slack` derived the state pools' budget (logged)
         self._observers = [o for o in shared if hasattr(o, "after_commit")]
         self._telemetry: list[dict[str, tuple[torch.Tensor, list[torch.Tensor]]]] | None = None   # at first launch
 
@@ -209,15 +210,16 @@ class Executor:
         (`max_step_tokens` prompt tokens in rows of at most `max_model_len`, each sampled) run on minimum-size pools,
         and minus the graphs' private pool. Where a shared object lends the steps from some size their activations
         (`lend_activations`, told the worst step's peak), the worst step below that size (at least an eager step of
-        every slot's decode or verify rows) is the one reserved."""
+        every slot's decode or verify rows) is the one reserved. `fraction` 0: `slack`'s rule."""
         ledger.materialize(None)
         self.state.reset_padding()
+        out = None if fraction else {}
         with torch.no_grad():
-            peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan()))
+            peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan()), out)
             lends = min((t for o in self._lenders if (t := o.lend_activations(peak))), default=0)
             small = max(lends - 1, self.cfg.max_seqs * (1 + self.cfg.max_draft_tokens))   # (eager decode rows too)
             if lends and small < self.cfg.max_step_tokens:
-                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(small)))
+                peak = platform.peak_memory(self.device, lambda: self._worst_step(self._profile_plan(small)), out)
             if self.graphs is not None:
                 # Captured largest bucket first, the smaller ones reuse its blocks, so the pool is what the largest
                 # bucket's variants leave reserved; every bucket's execs take the device memory the largest's do.
@@ -227,7 +229,27 @@ class Executor:
                     len(self.buckets))
                 self.graphs = graphs                     # the profile's graphs go before the free memory is read
         ledger.free()
-        return int(platform.free_memory(self.device) * fraction) - peak
+        free = platform.free_memory(self.device)
+        if fraction:
+            return int(free * fraction) - peak
+        return free - peak - self.slack(ledger, free, peak, out)
+
+    def slack(self, ledger: Ledger, free: int, peak: int, out: dict) -> int:
+        """`memory_fraction` 0 (docs/dev/v1-auto-config.md D2): today's 10% of the free memory, unless a fill pool
+        would stay short of its preference there; then what the allocator reserved past the peak (`out`) and a reserve
+        for clients that grow later (1 GiB on a card a display or another process shares, 256 MiB on one it does not
+        or where NVML cannot tell), at most those 10%."""
+        pools = [p for p in ledger.pools.values() if not p.host]
+        sizes = ledger.sizes(pools, max(0, int(free * 0.9) - peak))
+        short = [p for p in pools if p.fill and sizes[p.name] < p.pref_units]
+        shared = platform.gpu_shared(self.device) if short else ""
+        reserve = (1 << 30 if shared else 256 << 20) if short else free
+        slack = min(free - int(free * 0.9), out.get("overshoot", 0) + reserve)
+        card = shared or ("headless" if shared == "" else "unknown without NVML; --memory-fraction F sets a share")
+        self.memory_note = (f"free {free / 2**30:.2f} − peak {peak / 2**30:.2f} − slack {slack / 2**30:.2f} GiB ("
+                            + (f"allocator {out.get('overshoot', 0) / 2**30:.2f} + reserve {reserve / 2**30:.2f}, "
+                               f"{card})" if short else "10%: no cache short of its preference)"))
+        return slack
 
     def _profile_plan(self, tokens: int = 0) -> BatchPlan:
         n = np.array(profile_rows(self.cfg, tokens), dtype=np.int32)

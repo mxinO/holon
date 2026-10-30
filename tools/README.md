@@ -71,9 +71,16 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 # pin the fastest provider per decode op on this GPU, then the same checks as propagate
 ... tune <model> [--ops attention.paged_decode rmsnorm …] [--batch 8] [--tokens 64] --golden … --floor …
 
-# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it)
-python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [engine flags]
+# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it),
+# its engine from the model's lock for this card under the flags given; --ship imports a profile into std's shipped ones
+python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [--no-lock]
+                              [--plans plans] [engine flags: --host-memory …]
+python -m holon_tools profile <profile.json> --ship
 ```
+
+The tools build engines in process, which never derive a deployment value (docs/dev/v1-auto-config.md P2): an offload
+or tier lock's runs pass `--host-memory BYTES` (its pools' bytes; a start refuses with what they need), and
+`--memory-fraction` keeps its 0.9 default unless given.
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this
 machine's class, else the nearest class's), `--prompts` (prompt set of L2 and of the snapshot trace; default

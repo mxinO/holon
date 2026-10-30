@@ -13,6 +13,11 @@ if TYPE_CHECKING:
     import numpy as np
     import torch
 
+class OutOfUnits(RuntimeError):
+    """Memory does not hold what was requested: a pool's units, a ledger's budget, a host pool (the engine's start
+    fails with the kind "memory", which every retry of that configuration would repeat)."""
+
+
 class Pool(Protocol):
     """A pool's buffer is `[segments, capacity, unit_bytes / segments]`: one unit is a chunk in every segment (e.g.
     one KV page in every layer, layer-major), so the core can copy units without knowing what they hold."""

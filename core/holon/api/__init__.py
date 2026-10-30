@@ -50,7 +50,7 @@ from .frontend import (
 )
 from .hooks import Rewindable  # the optional hooks: `holon.api.hooks`
 from .manifest import ABI, SLOTS, Cardinality, Manifest, Option, Provenance, Resource
-from .memory import Pool
+from .memory import OutOfUnits, Pool
 from .mixer import Mixer, Planner
 from .model import (
     AuxSpec,
@@ -90,15 +90,15 @@ from .tier import BlockRecord, EntryView, EvictionPolicy, Fence, Load, StateTier
 __all__ = [
     "ABI", "ERROR_KINDS", "FINISH_REASONS", "KERNEL_PROPS", "SLOTS", "Abort", "AuxSpec", "Batch", "BatchPlan",
     "Binding", "BlockRecord", "BuildCtx", "Cardinality", "Constraint", "DeviceBatch", "DraftPolicy", "Drafter",
-    "DrafterPlugin", "EngineClient", "EngineRequest", "EntryView", "EvictionPolicy", "Extent",
-    "Fence", "Fingerprint", "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish", "KernelRegistry",
-    "KernelSpec", "LayerDecl", "Layout", "Load", "Lock", "LogitsProcessor", "LogitsProcessorPlugin", "Logprobs",
-    "Manifest", "MaskRow", "MemOp", "Mixer", "ModelPlugin", "ModelSpec", "Option", "Paged", "Pages", "ParseEvent",
-    "Payload", "Plan", "Planner", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Reasoning", "Ref",
-    "Registries", "Registry", "RequestError", "Residual", "Resolved", "Resource", "Rewindable", "RowKind", "SampleOut",
-    "Sampler", "SamplerPlugin", "SamplingParams", "Scheme", "Seq", "SeqTable", "SeqView", "Slot", "StateKind",
-    "StateKindFactory", "StateSpec", "StateTier", "Status", "StepCtx", "Stream", "TargetView",
-    "Text", "TierCtx", "TokenDelta", "TokenSrc", "Tokenizer", "ToolArgsDelta", "ToolCallEnd", "ToolCallStart", "Unit",
-    "UnitPin", "Verifier", "VocabView", "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned",
-    "rewind_modules", "sequence_seed", "to_term",
+    "DrafterPlugin", "EngineClient", "EngineRequest", "EntryView", "EvictionPolicy", "Extent", "Fence", "Fingerprint",
+    "FrontendBundle", "FrontendPlugin", "HitLen", "InStepPublish", "KernelRegistry", "KernelSpec", "LayerDecl",
+    "Layout", "Load", "Lock", "LogitsProcessor", "LogitsProcessorPlugin", "Logprobs", "Manifest", "MaskRow", "MemOp",
+    "Mixer", "ModelPlugin", "ModelSpec", "Option", "OutOfUnits", "Paged", "Pages", "ParseEvent", "Payload", "Plan",
+    "Planner", "Plugin", "Pool", "PrefixView", "Provenance", "QTensor", "Reasoning", "Ref", "Registries", "Registry",
+    "RequestError", "Residual", "Resolved", "Resource", "Rewindable", "RowKind", "SampleOut", "Sampler",
+    "SamplerPlugin", "SamplingParams", "Scheme", "Seq", "SeqTable", "SeqView", "Slot", "StateKind", "StateKindFactory",
+    "StateSpec", "StateTier", "Status", "StepCtx", "Stream", "TargetView", "Text", "TierCtx", "TokenDelta", "TokenSrc",
+    "Tokenizer", "ToolArgsDelta", "ToolCallEnd", "ToolCallStart", "Unit", "UnitPin", "Verifier", "VocabView",
+    "WeightMap", "WeightRule", "WeightSource", "canonical_hash", "parse_versioned", "rewind_modules", "sequence_seed",
+    "to_term",
 ]
