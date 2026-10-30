@@ -2441,11 +2441,13 @@ def test_a_tail_steps_loan_experts_are_parked_before_the_forward_writes_the_loan
         got = _served(engine, prompts)
         wrong = _bytes_exact(store)
         to_ssd = [(int(n), int(m)) for n, m in to_ssd]
+        rounds_lent = int(store.staging_lent)    # (rounds steps lend their fixed set by design: not counted, A's m1)
         assert store.exclusive and store.borrowed["stage"] and store._step_loan_bytes(64) and to_ssd
         engine.close()
     if plant in (None, "loan_parking_late"):
         assert got == want and not wrong and sum(n for n, _ in to_ssd) and not any(m for _, m in to_ssd), \
             (wrong, to_ssd)
+        assert rounds_lent == 0
         assert plant is None or fired["delayed"] and fired["filled"]
     else:
         assert fired["delayed"] and fired["filled"] and wrong, plant

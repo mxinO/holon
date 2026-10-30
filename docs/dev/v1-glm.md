@@ -1267,9 +1267,11 @@ on the slower-drive node.
   real steps: the probe's 32K steps and `test_a_tail_holding_its_staging_refuses_or_serves_without_overflow`.
   *Layout:* `_step_stage` per class [lo, hi), `_step_loan_from` each loan range's first slot; `tail_view` returns the
   buffers' slots only; `activations` hands out each down range from `_step_loan_from` and refuses a step whose
-  staging reaches past it (`staging_over_loan`: refused as the loan is handed out, before any write). `Lent` puts the
+  staging reaches past it (`staging_over_loan`: refused as the loan is handed out, before any write) — a guard that
+  cannot fire as built (both sides come from the same `_loan_room`; A's m2), kept against a later change. `Lent` puts the
   tail's staging first in its pool (`_pool`), then the empty slots and the lent experts' outside it, and counts a tail
-  step's staging lends in `staging_lent`. *Fence (C-m2):* transitive, as stated; the plant `staging_before_parked`
+  step's staging lends in `staging_lent` — only at a step that stages in its tail (A's m1: rounds and ring steps lend by
+  design). *Fence (C-m2):* transitive, as stated; the plant `staging_before_parked`
   defers those holders' parking copies on the host to the first layer's end, outside the step's event: their RAM
   units take the staged bytes (the bytes check at each staging step's end). *(c):* `_coldest` after `lend_tail`'s pick,
   per class signature, holders hottest first against residents outside every tail coldest first (heat, group, id),

@@ -107,8 +107,9 @@ class Lent:
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
-            if self.tail is not None:                                        # D8u (a): a tail step's staging lent
-                s.staging_lent += picked.sum()                               # outside its tail (counted)
+            if s._step_stage:                                               # D8u (a): a step staging in its tail
+                s.staging_lent += picked.sum()                               # that lent outside it too (counted;
+                #                                                              rounds and ring steps lend by design)
         want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
         if self.parts > 1 or single:
             want = want.clamp(max=s.prefill)
