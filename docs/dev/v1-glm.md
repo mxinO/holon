@@ -1138,52 +1138,80 @@ tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD 
     `k_promote` and `k_settle` take (0.43 + 0.48), its predicted saving 0.4-0.5 ms (≈ 1% of a 32K token), and the
     per-call model behind it over-predicted lever 2 nine-fold (58 → 15 µs predicted, 57 → 51 measured).
 
-**D8u — Step 7: lend VRAM's coldest, and the loan's fixed term at its step's need (design, not built; the
-coordinator's lever for 32K after D8t).** *Why, measured:* after D8l a 32K prompt's decode reads 142 MB a token from the
-SSD over tokens 1-32 (34 after), and 53% of it is RAM's experts the prompt pushed to the SSD (§13 step 7, the split
-after D8l). The tail lends its slots' holders whatever their heat; Maya (`glm_prefill.cu` `lend_tail`) first moves a
-lent slot's expert over the layer's coldest main-slot resident when that one is colder (a device copy), so a prompt
-costs the decode its coldest experts, not whichever sat in the tail.
-- **The rule.** At a tail step's early start, before `_park`: per slot class (Holon's classes span layers, so the
-  class's coldest, not the layer's), the lent experts hotter than the class's coldest whole-VRAM residents outside
-  the tail take their slots, hottest first against coldest first, while strictly hotter (`moe.ram_heat`, the heat
-  parking already uses); the displaced residents become the lent set, parked by D8l's rule. The copies are
-  slot → slot on the store's copy stream, after the parking copies of the residents they overwrite and before the
-  one event `activations` waits for. No core lines: the store's `picked` set and one copy list.
-- **The fixed term.** `moe.loan_fixed_mib` 1,024 is the 2K-token step's need with prompt logprobs (§13 L1: the
-  overflow at 0 is 552 / 404 / 100 / 0 MiB at 1K / 4K / 8K / 32K without them, +152 with); `moe.loan_taper`
-  8192,32768 already takes it to ≈ 20 MiB at 32K, so **the trim pays below 8K only**: the need + 50 MiB in 64 MiB steps
-  (+ the head where the step asks prompt logprobs) frees 384 / 512 MiB at 1K / 4K — 56 / 75 experts fewer lent.
-- **The replay** (`lend_coldest.py` on the D8t tree's per-piece recording, the bench's 24 requests: the target lent
-  set swapped into the after-prompt map — a resident kept takes nothing, a newly lent one the kept one's place, RAM
-  only while hotter than the hottest piece the prompt pushed out —, then decode through the D8t rule per layer at its
-  capacities; the rule replayed on the recording's own map gives 137.3 / 34.9 MB a token from the SSD against the
-  recorded 142.0 / 33.6, and 993 / 644 from RAM against 996 / 643). Decode ms over 256 tokens against the recording's
-  rule, SSD at C's 0.42 ms a MB (1K 0.33), RAM at ≈ 43 GB/s:
+**D8u — Step 7: the 32K staging lends, the 1K prefill, and lending the coldest (design for the panel, not built;
+the coordinator's levers after the D8t table and the count check).** Measured on the D8t tree (§13 step 7: the capped
+table at 9c059bc3, the count check, the per-piece probe after D8l); replays with `lend_coldest.py` on the probe's
+recording — the target lent set swapped into the after-prompt map (a kept expert stays in VRAM; its post-prompt place
+goes to a newly lent one, a RAM place only while hotter than the hottest piece the prompt pushed out), then decode
+through the D8t rule per layer at its capacities, empty slots exempt (a11bfcb8). Replayed on the recording's own map it
+gives 137.3 / 34.9 MB a token from the SSD over tokens 1-32 / after, against the recorded 142.0 / 33.6, and 993 / 644
+MB from RAM against 996 / 643. Decode ms over 256 tokens, SSD at C's 0.42 ms a MB (1K 0.33), RAM at ≈ 43 GB/s.
 
-  | | 1K | 4K | 32K |
-  |---|---|---|---|
-  | empty slots exempt from the budget (a11bfcb8) | −36 | −62 | −192 |
-  | + lend the coldest | −166 | −313 | −314 |
-  | + lend the coldest, the fixed term trimmed | −174 | −365 | −314 |
+**(a) The 32K staging lends.** A 32K step lends 969 experts for its tail and **425-441 more for its staging**
+(`Lent`'s `lend` call 1: per-class needs of 158-172 / 205-212 / 200-206 slots — each class a layer's most misses,
+≈ 210 of 288; the two down classes cover disjoint layers, so 405-418 whole experts, ≈ 2.8 GiB). D8h makes the need: a
+layer's misses are gathered once a step and must live across its four 8K passes (each pass's combine and D10 buffers
+are reused pass after pass). Maya stages through ≈ 12 slots and a 160-expert prestage inside its borrow because it runs
+a 32K chunk as one pass (its 5,168 MB activation window sized for it).
+- **Replayed** (32K, against D8t's rule with the exemption, which alone is −192): no staging lends at all **−821**
+  (the bound: −2.5 ms a token beyond the exemption, SSD over tokens 1-32 137 → 112 MB a token); 4K and 1K unchanged
+  (22 and 0 staging lends: D8s's rounds).
+- **D8s's rounds at 32K: no.** The gate (086f08f8) was set because a 32K step's rounds serialized its gathers on main
+  for ≈ 0 bytes saved (29.14 → 31.39 s a request, before D8g and D8h). D8g's copy engines would now run them beside
+  the compute, but D8h is what forbids them: rounds reuse a fixed set of slots, so with four passes each round's
+  pieces leave before the next pass reads them (F3b: rounds only where a step has one pass). Rounds at 32K mean
+  gathering every miss once a pass — ≈ 4 × 51 GB of RAM gathers at ≈ 48 GB/s, ≈ 4.3 s beside ≈ 9 s of compute (D8h
+  measured 2.45 s of waits for two passes) — and the SSD misses read again or held in host landing rows: **32K
+  prefill −15 to −30%** predicted. Round-major order (each round computed for all four passes) needs every pass's
+  buffers at once (≈ 7.1 GiB at 32K): no.
+- **The staging inside the tail (proposed).** The whole-expert tail (D8w) grows by the step's staging, at the arena's
+  end beside the buffers and the loan: its n sized by bytes (buffers 1,826 + loan 4,437 + staging ≈ 1,820 MiB = 8,083
+  MiB at 6.78 MiB an expert → **n ≈ 1,192**) with each class's tail at least its staging plus its share (class 1: n ×
+  8/42 ≥ 212 → n ≥ 1,113, met); the loan's ranges take whatever the tail's classes have past the staging (one range ≥
+  the largest allocation, as today). The step's staging list points into the tail's slots; `Lent` makes no staging
+  lend at a tail step. **≈ 1,192 lent against ≈ 1,394** (969 + 425): replayed (the tail's extra holders at random)
+  **−521 at 32K** (−1.3 ms a token beyond the exemption, ≈ +2.5%). **32K prefill ≈ unchanged** (+0.3% ± 1%): ≈ 200
+  fewer parking copies (≈ 1.4 GB, ≈ −30 ms of the up-front wait), ≈ 1.4 GB fewer victims re-read by the prompt (its
+  drive is ≈ 74% busy: not its bound), ≈ 220 more compaction relocations device to device (≈ 2 ms). No core lines:
+  the store's tail sizing (`_split` with per-class minima), `Lent._want` at tail steps, the staging list. Plants:
+  `staging_outside_tail` (a tail step's staging lend made anyway: counted, asserted 0) and `staging_over_loan` (a
+  staging slot inside a loan range: the bytes check).
 
-  At 32K the coldest's share is −122 ms (−0.5 ms a token, ≈ −0.9%): 699 of the 1,372 lent are among the class's
-  coldest already, and the SSD bytes over tokens 1-32 barely move (137.3 → 136.0 MB a token) — every lent expert
-  still pushes one of RAM's to the SSD. At 4K the two give −1.2 ms a token (≈ −2.4%), at 1K −0.5 (≈ −1.3%).
-- **What it does not reach: the count, checked** (`lend_count.py`, one RTX 5090 desktop, 9c059bc3: a lending
-  step's `lend_tail` and staging `lend` calls hooked). Per GiB of tail we lend as Maya does: the 32K tail is 969 gate/up
-  slots and 184 + 784 down slots (D8w's compaction: 969 whole experts, 6.42 GiB, 3 more, none stuck) against Maya's
-  ≈ 924 whole-expert slots for its 6,519 MB borrow (`tail_slots`: 22 a layer at ≈ 7.0-7.5 MB a slot). The rest of the
-  2.3× (1,372 lent against 603) is three things Maya does not do: **the prompt's staging lends ≈ 425 whole experts
-  more** (`lend` call 1: per-class needs 158-172 / 205-212 / 200-206 slots, the two down classes each sized for a
-  layer's misses, so 405-418 experts; calls 2-3 ≈ 22), where Maya's staging (86 MB) and prestage (160 experts) sit
-  inside its borrow; **the tail step releases F10's spares, 86-98 owners**; and **Maya's tail is a third empty when a
-  prompt starts** (603 of ≈ 924 slots held: its decode refills free slots only through background fills) where F10
-  refills every one. Which experts leave matters less than how many: the staging's ≈ 425 are the next 32K lever's
-  target (its slots inside the tail, or D8s's rounds at 32K, gated off at 8K since 086f08f8), before this note's rule.
-- **Plants, if built:** `relocation_before_park` (a resident overwritten before its parking copy read it: its RAM
-  unit takes the hot expert's bytes — the bytes check) and `loan_before_relocation` (the loan written before a
-  relocation read its source — bitwise). Exclusive tiers only; placement moves, never a step's bytes.
+**(b) The 1K prefill: ≥ Maya on both node classes.** 0.916 on the D8t table's node, 0.964 on D8l's.
+- **Why the node moves the two engines apart** (what the jobs logged: the bench's results, Maya's prompt lines, the
+  drive's counters around each run). Holon's 1K prompt is **the drive's**: 9.2 GB from the SSD, the I/O worker busy
+  3.59 s of a ≈ 4.0 s prompt. Maya's is **its host copies'**: 45.5 GB from RAM and 7.0-7.3 GB from the disk at
+  15.2-15.5 GB/s. On the D8t table's node Holon's prompt took 4.103 s for 9.19 GB (2.24 GB/s) against 4.024 s for 9.24
+  (2.30) on D8l's, while Maya's took 3.571 s against 3.640 (its copies 15.5 against 15.2 GB/s, its disk 6.98 against
+  7.28 GB). Over whole runs the drive there reads ≈ 1.8-1.9 GB/s while busy against ≈ 2.7, at a larger mean request:
+  a slower drive for Holon's reads, slightly faster host copies for Maya's.
+- **The gap is bytes and idle**: Holon reads ≈ 2 GB more from the disk than Maya at 1K (≈ 0.8 s at 2.6 GB/s), and
+  its drive idles ≈ 0.4 s of the prompt (11%).
+- **C's narrow read-ahead below 8K (proposed first).** A prompt step below 2,048 tokens reads the next layer's 6
+  hottest SSD-only experts (by `moe.ram_heat`, ≈ 41 MiB) during the current layer, through the read-ahead set's rows
+  (D8f; `moe.read_ahead`'s set, today from 2,048 tokens and lowest ids first). Replayed on the probe's 1K prompts: the
+  hottest 6 are routed **86.8%** (4: 86.3%) against 76.9% for the whole SSD-only set — why D8s's two-layer full
+  read-ahead from 512 tokens read +25% and lost. Waste ≈ 0.23 GB a prompt (+2.5%, ≈ +0.09 s); the ≈ 36 MiB a layer it
+  moves forward fills the ≈ 10 ms a layer the drive idles. **Predicted 1K prefill +6-9%** (C's +4-7% inside it): 0.916
+  → ≈ 0.97-1.00 here, 0.964 → ≈ 1.02-1.05 there. 4K is already covered (the full set from 2,048 tokens; its hottest
+  6 routed 98.7%).
+- **Then the bytes**: the 2 GB more than Maya at 1K. 216 of RAM's experts are pushed out by a 1K prompt's 225 lent
+  (Maya evicts ≈ 205 a 1K prompt) and 77% of the SSD-only set is routed; the per-piece split of a 1K prompt's reads by
+  origin against Maya's disk-read counters is the next measurement, before a design.
+- **Deeper read-ahead in prompt steps (4K, measured first):** D8l moved 4K's SSD reads from layers 0-11 to later ones,
+  and the drive idles early because the read-ahead runs two layers ahead (`DEPTH`). A third set costs ≈ 0.9 GiB of
+  pinned host rows (≈ 135 experts out of RAM's 64 GiB): predicted 0 to +3% at 4K, an A/B before any build.
+
+**(c) Lending the coldest (Maya's `lend_tail`): kept as (a)'s choice of experts, not a lever of its own.** Moving a
+tail slot's expert over the class's coldest resident when hotter (device copies before the loan) makes the tail's
+leavers the coldest. Replayed beyond the exemption: −122 at 32K on today's tail (−0.5 ms a token), −251 / −130 at 4K /
+1K; **on (a)'s joint tail −676 against its −521** (−0.6 ms a token more at 32K). With (a) it is one rule:
+the joint tail's experts chosen coldest. The fixed term's trim (`moe.loan_fixed_mib` at the step's need) pays below
+8K only (`moe.loan_taper` 8192,32768 already takes it to ≈ 20 MiB at 32K): −8 / −52 at 1K / 4K beyond (c).
+
+**Order.** (b)'s narrow read-ahead (small, exact: placement and reads only), then (a)'s joint tail with (c)'s rule,
+then (b)'s bytes. Predicted after (a) + (c): 32K decode 0.909 → ≈ 0.94; after (b)'s read-ahead, 1K prefill ≈ 0.97-1.00
+on the slower-drive node.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
