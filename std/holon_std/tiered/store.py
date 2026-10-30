@@ -891,9 +891,9 @@ class TieredStore:
         """The routing counts that seed the cache, by group (docs/dev/v1-auto-config.md D4): from `profile`'s JSON
         file `{"checkpoint": …, "layers": {"<group>": [count per item]}}` beside the checkpoint (its name relative to
         the checkpoint's directory, so plans record no host path), else from a profile shipped in PROFILES, else none
-        (a cold cache; `none`: cold, asked for). A profile counts only if it was counted on this checkpoint's files (or
-        some of them: a profile of the target serves a deployment whose auxiliary model, an MTP head, adds its own file
-        and group); groups it does not name count zero. It only seeds the cache, so one that does not fit is warned
+        (a cold cache; `none`: cold, asked for). A profile counts only if the largest file it was counted on, the
+        target's, is this checkpoint's: an auxiliary model's (an MTP head's) file and group may be absent on either
+        side, and groups it does not name count zero. It only seeds the cache, so one that does not fit is warned
         about, never fatal."""
         counts = np.zeros(self.residency.host.shape[:2])
         if self._profile == "none":                     # `moe.placement.profile=none`: a cold cache, asked for
@@ -907,9 +907,10 @@ class TieredStore:
             try:
                 data = json.loads(path.read_text())
                 files = data.get("checkpoint") or []
-                if not files or not all(any(_same(f, c) for c in self.checkpoint) for f in files):
+                if not files or not any(_same(max(files, key=lambda f: f[1]), c) for c in self.checkpoint):
                     raise ValueError(f"counted on {files}, not on this checkpoint {self.checkpoint}")
-                rows = {self._order[int(g)]: np.asarray(row, dtype=np.float64) for g, row in data["layers"].items()}
+                rows = {self._order[int(g)]: np.asarray(row, dtype=np.float64) for g, row in data["layers"].items()
+                        if int(g) in self._order}
                 if any(r.shape != (self.items,) or (r < 0).any() for r in rows.values()):
                     raise ValueError(f"not {self.items} counts per group")
             except (OSError, ValueError, KeyError, TypeError) as e:

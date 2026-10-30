@@ -325,7 +325,12 @@ def test_the_offload_store_serves_what_the_resident_store_does(tiny_moe, tmp_pat
     _engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1",
                                                        "moe.placement.profile": str(profile)})
     assert "not used (a name relative to the checkpoint's directory)" in capsys.readouterr().err   # no host path
-    with mock.patch.object(tiered, "PROFILES", tmp_path):      # a shipped profile seeds; `none` asks for a cold cache
+    shipped = json_.loads(profile.read_text())                 # counted with an MTP head's file and group too
+    shipped["checkpoint"].append(["mtp-head.gguf", 1])
+    shipped["layers"]["99"] = [1] * 8
+    (tmp_path / "shipped").mkdir()
+    (tmp_path / "shipped" / "p.json").write_text(json_.dumps(shipped))
+    with mock.patch.object(tiered, "PROFILES", tmp_path / "shipped"):   # it seeds; `none` asks for a cold cache
         seeded, cold = (_engine(file, host_memory=1 << 24, plugin_options={"moe.store": "std.moe.offload@1"} | extra)
                         for extra in ({}, {"moe.placement.profile": "none"}))
         assert seeded.ctx.shared_objects[KEY]._profile_counts.any()
