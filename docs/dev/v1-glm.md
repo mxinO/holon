@@ -1124,8 +1124,59 @@ tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD 
     displacement takes the list's coldest by (heat, index), striking it — the oracle's sequential placement exactly,
     with no K and no fallback (the list holds them all: A's m1 moot), no racing claims (so no `victim_search_racy`
     to plant); 1,024 threads. Checked against the oracle with the layer's RAM experts equally cold and run to run.
-  - *Not built yet:* `kernels.promote`'s fused promote + resolve + settle (B-M2; ≈ 0.4-0.5 ms of the 0.88 its two
-    launches take), pending the A/B of the three above.
+    **Reverted (8f8ad39e) after the A/B** (§13 step 7): +0.5% decode alone, nothing measurable over lever 1, for a
+    scratch, a refusal inside a capture and 66 more lines. **Where `k_tiers` goes on the RTX 5090** (`clock64`,
+    decode calls, cycles a call; ≈ 2.05 records and 0.35 SSD misses a call under lever 1): the scan kernel at 256
+    threads ≈ 142k — admissions 58k (≈ 2 placements, each a full scan), keeps and reads 40k, the freed-units sweep 40k,
+    flags 4k; the list kernel at 1,024 ≈ 147k — the list's build alone 63k (≈ 5,000 entries a call through one shared
+    counter), admissions 25k, keeps and reads 44k, the sweep 10k. With 2 placements a call, one list costs more than
+    the scans it saves; A5000's profile (≈ 4.6 records a call before the budget) had the scans at 85%. **Kept from
+    it: the 1,024 threads alone** (one constant; the scans' reductions stay ordered by (heat, index)): on the A5000
+    under lever 1 (≈ 3.3 records a call) a call takes 101k cycles against 188k at 256 — the placements' scans 140k →
+    61k, the freed sweep 17k → 7k.
+  - *The fused settle (B-M2): not built* (the coordinator's call after the A/B): its ceiling is the 0.91 ms a token
+    `k_promote` and `k_settle` take (0.43 + 0.48), its predicted saving 0.4-0.5 ms (≈ 1% of a 32K token), and the
+    per-call model behind it over-predicted lever 2 nine-fold (58 → 15 µs predicted, 57 → 51 measured).
+
+**D8u — Step 7: lend VRAM's coldest, and the loan's fixed term at its step's need (design, not built; the
+coordinator's lever for 32K after D8t).** *Why, measured:* after D8l a 32K prompt's decode reads 142 MB a token from the
+SSD over tokens 1-32 (34 after), and 53% of it is RAM's experts the prompt pushed to the SSD (§13 step 7, the split
+after D8l). The tail lends its slots' holders whatever their heat; Maya (`glm_prefill.cu` `lend_tail`) first moves a
+lent slot's expert over the layer's coldest main-slot resident when that one is colder (a device copy), so a prompt
+costs the decode its coldest experts, not whichever sat in the tail.
+- **The rule.** At a tail step's early start, before `_park`: per slot class (Holon's classes span layers, so the
+  class's coldest, not the layer's), the lent experts hotter than the class's coldest whole-VRAM residents outside
+  the tail take their slots, hottest first against coldest first, while strictly hotter (`moe.ram_heat`, the heat
+  parking already uses); the displaced residents become the lent set, parked by D8l's rule. The copies are
+  slot → slot on the store's copy stream, after the parking copies of the residents they overwrite and before the
+  one event `activations` waits for. No core lines: the store's `picked` set and one copy list.
+- **The fixed term.** `moe.loan_fixed_mib` 1,024 is the 2K-token step's need with prompt logprobs (§13 L1: the
+  overflow at 0 is 552 / 404 / 100 / 0 MiB at 1K / 4K / 8K / 32K without them, +152 with); `moe.loan_taper`
+  8192,32768 already takes it to ≈ 20 MiB at 32K, so **the trim pays below 8K only**: the need + 50 MiB in 64 MiB steps
+  (+ the head where the step asks prompt logprobs) frees 384 / 512 MiB at 1K / 4K — 56 / 75 experts fewer lent.
+- **The replay** (`lend_coldest.py` on the D8t tree's per-piece recording, the bench's 24 requests: the target lent
+  set swapped into the after-prompt map — a resident kept takes nothing, a newly lent one the kept one's place, RAM
+  only while hotter than the hottest piece the prompt pushed out —, then decode through the D8t rule per layer at its
+  capacities; the rule replayed on the recording's own map gives 137.3 / 34.9 MB a token from the SSD against the
+  recorded 142.0 / 33.6, and 993 / 644 from RAM against 996 / 643). Decode ms over 256 tokens against the recording's
+  rule, SSD at C's 0.42 ms a MB (1K 0.33), RAM at ≈ 43 GB/s:
+
+  | | 1K | 4K | 32K |
+  |---|---|---|---|
+  | empty slots exempt from the budget (a11bfcb8) | −36 | −62 | −192 |
+  | + lend the coldest | −166 | −313 | −314 |
+  | + lend the coldest, the fixed term trimmed | −174 | −365 | −314 |
+
+  At 32K the coldest's share is −122 ms (−0.5 ms a token, ≈ −0.9%): 699 of the 1,372 lent are among the class's
+  coldest already, and the SSD bytes over tokens 1-32 barely move (137.3 → 136.0 MB a token) — every lent expert
+  still pushes one of RAM's to the SSD. At 4K the two give −1.2 ms a token (≈ −2.4%), at 1K −0.5 (≈ −1.3%).
+- **What it does not reach.** 32K's tokens 1-32 are the count the prompt displaces (1,372 experts against Maya's 603
+  for a similar tail: 6.42 GiB here, 6.5 GB Maya's borrow) — which experts leave matters less than how many. Before a
+  build, the count gap is checked first (Maya's slot stride and `lend_tail`'s counting against our whole-expert tail,
+  D8w, whose down-class slots free beside the gate/up ones they follow).
+- **Plants, if built:** `relocation_before_park` (a resident overwritten before its parking copy read it: its RAM
+  unit takes the hot expert's bytes — the bytes check) and `loan_before_relocation` (the loan written before a
+  relocation read its source — bitwise). Exclusive tiers only; placement moves, never a step's bytes.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
@@ -2109,6 +2160,9 @@ the I/O worker's counters (`io_stats`), nsys over 16 decode tokens after a 1K pr
 | The steady decode token's breakdown (nsys over tokens 33-96 of a third 32K prompt, RTX 5090, mode (ii) at 8,192-row passes against the RTX 5090 lock's mode (i), both graphed; GPU ms a token) | Compute ≈ 14 in both; the RAM hits' gathers 15.6 against 12.8 (≈ 595 MB, the copy stream's demotions contending); the SSD waits 17.1 (≈ 5 depth-1 reads at 2.96 ms: Maya's 5.2 reads, 16.4 ms); the tier ops 3.3 against 0.44; the copy stream busy 19.0 ms (168 `k_fetch` a token); GPU 51.0 against 27.2, never idle (no host turnaround: tokens 33-256 run at 48.5 ms, 1-32 at 106). A 32K early start costs 23-28 ms of host time (≈ 1,800 launches; the first 85), `_unmap` 2-7 ms a call: neither a lever. **D8t** takes the two that are (a promotion budget, fewer tier launches) |
 | Decode tokens 1-32's SSD reads by origin (the per-piece probe at 8,192-row passes before D8l, the bench's 24 requests; MB a token) | 32K 163.8: (a) lent and not parked 78.8 (48%), (b) RAM's pushed to the SSD in the prompt 26.9 (16%), (c) SSD-only before the prompt 57.7 (35%), (d) evicted in the decode 0.4 — the prompt lends 1,368 experts (437 parked) against Maya's 603. 4K 84.6: 27.6 / 2.1 / 54.2 / 0.7; 1K 67.5: 15.5 / 1.9 / 49.1 / 1.0 (the context's own first reads, (c), dominate below 32K). D8l parks (a); the split on its build follows |
 | The capped mode (ii) table with D8l (b01fa72d against bdd86267 at the 8,192-row deployment, one session: 5 rounds; `docs/dev/evidence/glm_step7_mode2_d8l_2026-10-29.json`) | Decode against Maya's default arm 0.988 (0.934) / 0.933 / 0.843, before D8l 0.971 / 0.907 / 0.792 (32K +6.4%, 4K +2.6%, 1K +1.7%); prefill 0.964 / 1.021 / 1.259, before 0.973 / 1.068 / 1.297 — the one up-front wait costs more than predicted (+40 / +222 / +293 ms against ≈ 26 / 43 / 116): a prompt + 256 tokens nets −0.15 / −0.10 / −0.60 s. The README's GLM rows |
+| D8t's decode A/B (one RTX 5090 desktop, the 64 GiB step, mode (ii) at 8,192-row passes, a warm-up and 4 rounds; D8l b01fa72d the base, lever 1 + 1b 2c49da20, lever 2 alone, both fa2ec322) | Decode against the base, the median of round medians at 1K / 4K / 32K: **lever 1 1.025 / 1.061 / 1.028, lever 2 1.005 / 1.007 / 1.005, both 1.029 / 1.064 / 1.027** (means 1.035 / 1.049 / 1.017; the rounds' ranges apart but 1K lever 2's); per token 42.7 → 41.5, 50.5 → 47.4, 54.3 → 52.9 ms: −1.2 / −3.1 / −1.4 against the predicted −4.6 to −5.0. Prefill within ±0.2% in every arm. The steady 32K token under nsys (tokens 33-96, GPU ms, base → both): busy 48.4 → 46.4; the RAM hits' gathers 15.3 → 12.2 (182 → 146 µs a call), the copy stream's `k_fetch` 18.4 → 7.0, `k_tiers` 2.40 → 2.16 (57.1 → 51.3 µs a call, predicted ≈ 15), `k_promote` + `k_settle` 0.88 → 0.91, the SSD waits 15.8 → 16.3; VRAM hits 243 → 252 experts a token. Lever 1 lands on its prediction, lever 2 misses it (reverted, D8t); what is left is the SSD's waits and the RAM gathers (≈ 530 MB a token at ≈ 43 GB/s) |
+| D8l's up-front wait, its cause (one RTX 5090 desktop; one 4K and one 32K lending step after the bench's warm-up; then the bench's method on 4K and 32K × 5 prompts, a warm-up and 3 rounds, bdd86267's parking against b01fa72d's and b01fa72d without the wait) | **The parking copies run at the link's rate:** SM `k_fetch` (8 CTAs) on the store's copy stream, 8 launches back to back over 61 ms at 4K (502 experts parked), 17 over 165 ms at 32K (1,007) — ≈ 42-53 GB/s device → host; copy engines would save ≤ 10-25 ms (and `expert_prefetch@1`'s `copy_batch` is host → device only). **Skipping the wait recovers nothing at 4K and 30 ms of 258 at 32K** (prompt s, medians: 5.028 / 5.244 / 5.251 and 10.344 / 10.602 / 10.572; ranges ≤ 0.02 s): B's per-range contract is not built. **Where it goes** (tiers per piece at the early start, per layer; the per-layer `k_wait` timeline under nsys): the prompt reads the same SSD bytes (11.73 against 11.76 GiB at 4K, 18.97 both at 32K) and gathers the same RAM bytes, but **in other layers**: the old rule dropped the tail's lent experts to the SSD — most of them early layers' (553 + 388 MiB in layers 0-11 at 4K) — where the prompt read them back first; D8l parks them and pushes RAM's coldest instead, spread over the layers (385 … 492 MiB a sixth). At 4K, a drive-bound prompt (≈ 280 MB a layer's time), layers 0-11 read 318 MiB less and later layers more: the drive idles early (two layers of read-ahead cannot run further) and the last layers wait — 80 ms ahead at layer 11, 124 ms behind at the end. At 32K the cost sits before the first MoE layer in every arm (the step's first resolve waits for the parking copies, as staging overwrites lent slots): 6.80 GiB parked against 2.98 (+3.8 GiB, ≈ +85 ms), and the host blocked behind it (113 ms in `activations` against 26) leaves a 48 ms gap after; 134 ms behind by layer 5, then constant |
+| Decode tokens 1-32's SSD reads by origin after D8l (the per-piece probe on the D8t tree 562001e2, as before) | 32K **142.0** (163.8 before D8l): (a) lent and not parked 6.9 (5%), **(b) RAM's pushed to the SSD in the prompt 75.7 (53%)**, (c) SSD-only before 54.5 (38%), (d) evicted in the decode 4.9; 1,372 lent, 1,240 of them parked, 1,228 of RAM's pushed to the SSD. 4K 73.2: 0.8 / 17.4 / 51.2 / 3.9; 1K 62.2: 0.3 / 10.6 / 47.7 / 3.7. RAM gathers 996 MiB a token over tokens 1-32 at 32K against 643 after: the lent slots refill slowly under D8t's budget (fixed: a11bfcb8) |
 
 ### Step 6 (the illegal address first; the bench and the deployment follow)
 
