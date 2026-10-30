@@ -1304,52 +1304,64 @@ prompt's routes at 0.5-4× the median RAM heat, the same victim counts): the 1K 
 1-32 and 2.68 → 2.30 after; 4K −64 MiB a prompt, 32K −146 MiB and 75.7 → 65.9 MiB a token over tokens 1-32; flat
 across the band. *Test:* `test_rams_heat_counts_a_steps_prompt_only_routes_once` (under the deployment's terms).
 
-**D8x — Step 7: a short prompt parks its lent experts in the idle read-ahead rows (C's second 1K lever; design for
-the panel, not built).** *Why, replayed* (the D8t recording, the bench's 1K prompts): a 1K prompt lends ≈ 225 experts,
-parks them over RAM's coldest, and reads 1.26 GiB of the ≈ 216 it pushed to the SSD back itself (of its 9.18 GB from
-the SSD) — any victim choice is read back ≈ 80-88% at 1K, where a prompt routes almost every expert. Below
-READ_AHEAD_TOKENS the read-ahead's host rows sit idle: DEPTH × A_ra = 2 × 135 rows a role, pinned and mapped, ≈ 1.9
-GiB — room for all 225. Parked there, no RAM expert leaves during the prompt; the RAM units are taken back in the
-background during decode, when the same victims leave as today. *Predicted:* the prompt's SSD bytes −1.26 GiB (−14.7%)
-— ≈ −0.5 s of a drive-bound ≈ 4.0 s, **≈ +13% 1K prefill** on today's tree (D8v, measured, did not hold its
-replay: reverted); decode's bytes unchanged (the same victims, pushed later); 4K and up untouched (their read-ahead uses the rows,
-and a 4K prompt lends 376, past the rows).
-- **The prompt.** In a tail step of fewer than READ_AHEAD_TOKENS prompt tokens and no decode or verify row (no
-  read-ahead then: D8f), `_park` sends the lent experts, hottest first, to the read-ahead rows of their roles before
-  RAM: each a row, its parking copy (D8l's `k_fetch`, slot → row instead of slot → unit) on the copy stream inside the
-  one parking event. The expert is mapped SSD-only, with `ahead_map[g][e]` its row: the step's tier op then gathers it
-  as a read-ahead hit from its row (D8f's path: an SSD miss for admission and heat, never kept), so no new copy
-  contract. Past the rows' room the rest park over RAM as today. Ordering: the hits' gathers follow the parking event
-  on main (`activations` waits it before the step's first resolve), as D8l's staging does.
-- **The move, after the prompt.** Each parked expert goes to a RAM unit (free, else RAM's coldest of its classes when
-  strictly colder, which leaves to the SSD), in three phases at step boundaries, all device-side edits on main between
-  steps (as `_park`'s) and one host copy:
-  1. at a decode step's start: the victim unmapped (its pieces SSD-only, the unit owned by the parked expert, which
-     stays mapped SSD-only — not free, not displaceable), an event recorded after the step (its reads of the victim's
-     unit done);
-  2. a store-owned host thread waits that event, then copies row → unit (both pinned host memory), 32 MiB chunks,
-     yielding between chunks, at low priority;
-  3. at the first step start after the copy: the parked expert mapped to the unit (RAM), its row released.
-
-  A decode step that routes a parked expert before phase 3 reads it from the SSD (mapped SSD-only: correct, as
-  today's victim read would be); hottest first keeps that rare. *The copy's cost:* ≈ 1.5 GB a prompt (225 × 6.78
-  MiB): ≈ 0.15-0.2 s of one core and ≈ 3 GB of DRAM traffic at a desktop's ≈ 8-10 GB/s single-thread memcpy, spread
-  over the first decode tokens (to measure in the smoke: core time and the decode tokens it overlaps). *A copy engine
-  instead:* host → host has no DMA path of its own (CUDA does it with the CPU); a device bounce (row → a VRAM scratch
-  → unit, both copy engines) would put ≈ 1.5 GB on the H2D link beside decode's ≈ 530 MB a token of RAM gathers
-  (≈ +5% of the link over 64 tokens) and needs a scratch slot: **the host thread is the lighter**, by the owner's
-  measure too (one low-priority core for ≈ 0.2 s, never on the step's path).
-- **The rows before reuse.** A prompt step that would park into the rows or read ahead into them joins the move thread
-  first (counted; a 1K prompt follows ≥ its own decode, so the join is normally free) — no step writes a row the thread
-  may still read. **Abandoned or failed steps:** the store keeps the parked set on the host (as A's m2 keeps the
-  signalled read-aheads); `start_step` refuses a step while a parked expert is neither moved nor dropped, and an
-  engine that serves on after a failure drops them (each mapped SSD-only, row released: the file holds every piece).
-- **Gating.** Exclusive tiers, a tail step below READ_AHEAD_TOKENS with no decode or verify row; no option, no core
-  lines; RAM-holds-all layouts untouched.
-- **Plants** (judged by bytes or bits): `row_hit_before_parked` (the hit's gather before the parking copy into its row),
-  `row_move_before_unmapped` (the copy into the victim's unit before its unmap took effect, under a delayed
-  step), `row_mapped_before_copied` (phase 3 before phase 2's copy), `row_reused_before_moved` (the next short prompt's
+**D8x — Step 7: a short prompt parks its lent experts in the idle read-ahead rows (C's second 1K lever; rev 2 after
+A, B and C: design for A's re-check, not built).** *Why, replayed* (the D8t recording, the bench's 1K prompts): a 1K
+prompt lends ≈ 225 experts, parks them over RAM's coldest, and reads 1.26 GiB of the ≈ 216 it pushed to the SSD back
+itself (of its 9.18 GB from the SSD) — any victim choice is read back ≈ 80-88% at 1K, where a prompt routes almost every
+expert. Below READ_AHEAD_TOKENS the read-ahead's host rows are idle (DEPTH × A_ra = 2 × 135 rows a role, pinned and
+mapped, ≈ 1.9 GiB; B-M2 is moot: D8u (b)'s narrow read-ahead, which would have shared them, was reverted). Parked
+there, no RAM expert leaves during the prompt. *Predicted* (C): the prompt's SSD bytes −1.26 GiB, ≈ −0.55 s of a
+drive-bound ≈ 4.0 s, **≈ +12-14% 1K prefill** on today's tree (D8v reverted); decode ≈ 0 (no heat changes: decode's
+own keeps and demotions keep their order — D8v's lesson), with ≈ 5-10 extra SSD reads a prompt for parked experts
+routed before their move (≈ 35-70 MB, ≲ 0.3% of decode) once the move is per step (below).
+- **Parked rows are not read-ahead rows (A-M1, B-M1).** A third state below READ_AHEAD_TOKENS: *hits from parked
+  rows* — `ahead_map` passed to the tier op for the parked experts, with no I/O signal and no `wait_ahead`; `_ahead`
+  stays off. Their readiness is the parking event `activations()` already makes main wait (D8l), before the step's
+  first resolve. **Layout:** a parking copy (D8l's `k_fetch`, slot → row) writes the canonical piece, its extents back
+  to back from offset 0, so `landing_runs` gives a parked row identity runs (extent x at Σ the earlier extents' bytes)
+  in the device table and D8g's host table (`_runs_host`); the row → unit copy moves those canonical bytes as they are.
+  **Pieces:** the parking writes the read-ahead request table's piece column that D8g's copy-engine path reads for each
+  hit row. No contract changes (`moe_tiers@2`'s `ahead [E]` is a landing row; the gather is `expert_fetch@1` with
+  runs). Plant `parked_row_superset_runs` (a parked row gathered with its piece's superset runs: wrong bytes).
+- **The move, deterministic and per step (A-M3, C-m1).** Hottest parked first by (heat, group, id), each against RAM's
+  coldest of its classes by (heat, group, id), strictly colder, in the order the parking used (A's m4):
+  1. *At the prompt step's end* (its last layer's join, on main, eager): the victims unmapped (their pieces SSD-only),
+     each victim's unit reserved for its parked expert (owner set; the expert stays SSD-only: not free, not
+     displaceable), an event recorded.
+  2. *The move thread* waits that event, then copies row → unit in fixed chunks (C: ≈ 50 experts, one decode token's
+     worth), hottest first, publishing each chunk with a release store of its done flag.
+  3. *At the start of step (prompt end + 1 + i)* chunk i is mapped (the store acquires its flag, joining the thread
+     for it if late — a host wait, counted): each expert to its unit, its row released — by a small eager kernel on
+     main before the step's graph launch, never inside a capture (exclusive tiers refuse host edits; A's m1, B).
+  Placement then depends on the step count only: run-identical. The parked experts' SSD-only window is ≈ one token a
+  chunk.
+- **An expert routed during the move (A-M2, C-M1).** A parked expert routed before its chunk's phase 3 is an ordinary
+  SSD miss (read into the on-demand landing halves, never the rows). F10 may admit it to VRAM, or the keep rule keep it
+  in RAM: phase 3 maps an expert only if it is still SSD-only and still holds its reservation; otherwise it frees the
+  reserved unit (owner −1) and releases the row. The tier op's keep skips an expert holding a reservation (one flag
+  test before `place()`). Plant `row_moved_after_promoted` (phase 3 maps an expert decode admitted: two tiers at once,
+  the residency check and the bytes).
+- **The rows' reuse, failed steps (A's m3).** A step that would park into the rows, or read ahead into them (≥ 2K
+  tokens), joins the move thread first (counted). `start_step` refuses only a parked set a failed step left; dropping it
+  (each expert SSD-only, its row released, its reserved unit freed) joins the thread first, so no unit is freed while
+  the thread writes it.
+- **The thread (B's conditions; C).** One named daemon thread, made at the store's first exclusive materialize, joined
+  at shutdown after the engine's drain; an exception surfaced at the next commit (a raise), never lost; CPU affinity
+  off the engine loop's core and the I/O worker's; low OS priority (`os.setpriority`); the copy by `Tensor.copy_` on
+  pinned views (the GIL released per chunk; glibc's large-block `memcpy`, non-temporal stores past its threshold). Its
+  cost: ≈ 1.5 GB a prompt, ≈ 0.15-0.2 s of one core, ≈ 3 GB of DRAM traffic beside decode's RAM gathers (C: the
+  overlapped ≈ 4 tokens ≈ +1.5-3 ms each). A copy engine instead (a device bounce) would put ≈ 1.5 GB on the H2D link
+  decode's ≈ 530 MB a token of RAM gathers use, and need a scratch slot: the thread is the lighter.
+- **Gating.** Exclusive tiers; a tail step below READ_AHEAD_TOKENS with no decode or verify row; the rows' room
+  (2 × 135 a role) — past it, the rest park over RAM as today. No option, no core lines.
+- **Plants** (bytes or bits): `parked_row_superset_runs`, `row_moved_after_promoted`, `row_hit_before_parked` (a hit's
+  gather before the parking event), `row_move_before_unmapped` (the copy before phase 1's event),
+  `row_mapped_before_copied` (phase 3 before the chunk's flag), `row_reused_before_moved` (the next short prompt's
   parking into a row the thread still reads).
+- **The A/B must report (C-m2, B).** Decode SSD MB a token over tokens 1-8 and 9-32 on both arms; the count of parked
+  experts read from the SSD before their move; the joins a ≥ 2K prompt makes on the thread; the engine loop's launch
+  latency p50 / p99 (p99 up ≤ 1 ms) and the decode tokens the move overlaps (≤ 5% slower). Kept only if 1K prefill
+  gains and decode loses at no size.
 
 **D8r — Step 7: the post-prompt refill. Dropped: its spike failed the gate (32K decode −13.5%, §13 step 7).** It was
 pending a measured spike (C's review, the coordinator's call). C's replay (`refill_c.py`, the time model by context: 0.41 ms a MB at 32K, 0.33 at 1K, the
