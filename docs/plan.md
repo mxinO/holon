@@ -791,6 +791,11 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   release; ABBA 3 rounds (6 only within 3% of a bar), release bars 3 rounds; the perf smoke (`bench/perf_smoke.py`)
   per change and the real-client smoke (`bench/client_smoke.py`) at each merge; `pytest` leaves out
   `slow` and `model` tests, the pre-merge full run (`-m ""`) shards over idle GPUs.
+- **`cpu_task@1` fail-stop by construction** (GLM, A's m1 on ea7ddd01): the provider fails open (a wait past its time
+  bound, or a failed task, answers at once, every later wait too), and each consumer had to watch its error word; the
+  exclusive tiers' I/O worker never did, so its timeouts left wrong bytes silently until GLM's ea7ddd01. The provider
+  should carry its own error word as telemetry with a commit-time raise, so no consumer can forget it (a contract
+  change: its consumers' watches then go).
 - **RTX 3090 27B trace differs by desktop** (`c203f34`, release §19.1): the 27B lock's snapshot trace on the RTX 3090
   differs between two desktops of the same class, cause not identified; diagnose before the next 3090 propagation.
 

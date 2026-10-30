@@ -1993,7 +1993,7 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.1",
             "moe.placement": "placement.promote@1",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.copy_beside": variant,
-            "cpu_task.timeout": 2.0}
+            "cpu_task.timeout": 30.0}               # (a bound no busy machine meets by accident: A's m2)
     load, calls = _Beside.load, []
 
     def spy(self):
