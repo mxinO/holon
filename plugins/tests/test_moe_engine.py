@@ -1090,6 +1090,21 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     engine.close()
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_an_ssd_read_past_its_time_bound_stops_the_engine(gpu_moe):
+    """Exclusive tiers: the I/O worker fails open (`cpu_task@1`: a wait past its time bound, or a failed task, answers
+    at once, and every later wait too), so its error word is the store's to check at each commit — unchecked, the
+    reads it gave up on left wrong bytes in the slots and the units, silently. With a bound no read meets the step's
+    commit refuses to go on."""
+    file, prompts, _ = gpu_moe
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "cpu_task.timeout": 1e-6,
+        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+    with pytest.raises(RuntimeError, match="kernel_errors"):
+        _served(engine, prompts)
+    engine.close()
+
+
 @pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
@@ -2278,20 +2293,6 @@ def test_a_read_ahead_step_reads_each_layers_hottest_ssd_only_experts(gpu_moe, h
                 store.start_step()
             store.wait_ahead(0)
             torch.cuda.synchronize()
-    engine.close()
-
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_an_ssd_read_past_its_time_bound_stops_the_engine(gpu_moe):
-    """Exclusive tiers: the I/O worker fails open (`cpu_task@1`: a wait past its time bound, or a failed task, answers
-    at once, and every later wait too), so its error word is the store's to check at each commit — unchecked, the
-    reads it gave up on left wrong bytes in the slots and the units, silently (the beside test's 2 s bound, once, under
-    a CI job's load). With a bound no read meets the step's commit refuses to go on."""
-    file, prompts, _ = gpu_moe
-    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
-        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "cpu_task.timeout": 1e-6,
-        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
-    with pytest.raises(RuntimeError, match="kernel_errors"):
-        _served(engine, prompts)
     engine.close()
 
 

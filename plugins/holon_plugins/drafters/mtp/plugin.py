@@ -24,8 +24,8 @@ import os
 import torch
 
 NAMESPACE = "mtp"
-HOW = ("build it (README, \"Qwen3.8-Flash-Next\": `holon_tools mtp-pack`) and pass --plugin-options "
-       "mtp.path=<file>, or serve without drafting: --max-draft-tokens 0")
+HOW = ("make Strata's pack (README, \"Qwen3.8-Flash-Next\": `mtp_fetch.py`, `mtp_pack.py`) and pass "
+       "--plugin-options mtp.path=<file>, or serve without drafting: --max-draft-tokens 0")
 
 
 class Plugin:

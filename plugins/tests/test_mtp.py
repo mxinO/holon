@@ -130,5 +130,5 @@ def test_a_missing_mtp_pack_is_named(tiny, tmp_path):
               metadata={"format": "pt"})
     with pytest.raises(PluginError, match=r"no pack of its own is named \(mtp.path\).*--max-draft-tokens 0"):
         _engine(tmp_path)
-    with pytest.raises(FileNotFoundError, match=r"no MTP pack .*absent.gguf \(mtp.path\).*holon_tools mtp-pack"):
+    with pytest.raises(FileNotFoundError, match=r"no MTP pack .*absent.gguf \(mtp.path\).*Strata's pack"):
         _engine(path, plugin_options={"spec.k": "3", "mtp.path": str(tmp_path / "absent.gguf")})
