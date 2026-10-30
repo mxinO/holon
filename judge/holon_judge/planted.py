@@ -2171,6 +2171,124 @@ def _relocation(skip: str, ns: int = 0) -> Iterator[collections.Counter]:
 
 
 @contextlib.contextmanager
+def buffers_over_staging() -> Iterator[collections.Counter]:
+    """D8u (a), A-M1: `tail_view` lays the passes' buffers over the tail's staging (its slots from the staging's first,
+    as many as the buffers'), so a pass's buffers overwrite the pieces staged there."""
+    from holon_std.tiered import store as tiered
+
+    view, fired = tiered.TieredStore.tail_view, collections.Counter()
+
+    def planted(self):
+        out = view(self)
+        if out is None or self.lent is None or self.lent.tail is None or self.lent.tail[0] not in self._step_stage:
+            return out
+        cls, _ = self.lent.tail
+        c, (lo, _hi) = list(self.classes.values())[cls], self._step_stage[cls]
+        fired["over"] += 1
+        return c.slots()[lo:].view(-1)[:len(out)]
+    with mock.patch.object(tiered.TieredStore, "tail_view", planted):
+        yield fired
+    print(f"plant buffers-over-staging fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def staging_over_loan() -> Iterator[collections.Counter]:
+    """D8u (a), A-M1: each class's staging in the tail one slot further (where its loan range is not empty), its last
+    slot the loan's first touched one — the slot the loan hands out first (`use_ranges`: each range from its start).
+    The store refuses the step as it hands out the loan (before any staging gather or loan write)."""
+    from holon_std.tiered import store as tiered
+
+    launch, fired = tiered.TieredStore.before_launch, collections.Counter()
+
+    def planted(self, *args, **kw):
+        out = launch(self, *args, **kw)
+        classes = list(self.classes.values())
+        for c, (lo, hi) in list(self._step_stage.items()):
+            if hi < classes[c].size:
+                self._step_stage[c] = (lo + 1, hi + 1)
+                fired["shifted"] += 1
+        return out
+    with mock.patch.object(tiered.TieredStore, "before_launch", planted):
+        yield fired
+    print(f"plant staging-over-loan fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def staging_outside_tail() -> Iterator[collections.Counter]:
+    """D8u (a): a tail step stages outside its tail anyway (no staging sized inside it): its staging lent as before,
+    counted in `staging_lent`."""
+    from holon_std.tiered import store as tiered
+
+    fired = collections.Counter()
+
+    def none(self, c, m, slots):
+        fired["zeroed"] += 1
+        return 0
+    with mock.patch.object(tiered.TieredStore, "_stage_need", none):
+        yield fired
+    print(f"plant staging-outside-tail fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def staging_before_parked() -> Iterator[collections.Counter]:
+    """D8u (a), C-m2: the parking copies of the experts holding the tail's staging slots issued outside the parking
+    event the step waits — on a stream of their own, deferred on the host to the first layer's end, so they run after
+    its staging gathers wrote those slots (deterministically: not a race a device sync could hide)."""
+    from holon_std.tiered import store as tiered
+
+    cls_ = tiered.TieredStore
+    copy, done, fired, streams, deferred = cls_._copy_parked, cls_.layer_done, collections.Counter(), {}, []
+
+    def planted(self, cls, slots, to, placed):
+        if not slots.is_cuda or not self._step_stage:
+            return copy(self, cls, slots, to, placed)
+        lo = torch.zeros(len(self.classes), dtype=slots.dtype, device=slots.device)
+        hi = torch.zeros_like(lo)
+        for c, (a, b) in self._step_stage.items():
+            lo[c], hi[c] = a, b
+        staging = ((slots >= lo[cls]) & (slots < hi[cls])).any(1) & placed
+        fired["staging_parked"] += int(staging.sum())
+        copy(self, cls, slots.clone(), to.clone(), placed & ~staging)     # the rest as built: the event waited
+        deferred.append((cls.clone(), slots.clone(), to.clone(), staging))
+        return None
+
+    def layer_done(self, g):
+        done(self, g)
+        if g or not deferred:
+            return
+        event, side = self._parked, streams.setdefault(id(self), torch.cuda.Stream())
+        side.wait_stream(torch.cuda.current_stream())                    # after the first layer's gathers
+        self.fetch_stream = lambda split=False: side
+        try:
+            for args in deferred:
+                copy(self, *args)
+                fired["late"] += 1
+        finally:
+            del self.fetch_stream
+            deferred.clear()
+        self._parked = event
+    with mock.patch.object(cls_, "_copy_parked", planted), mock.patch.object(cls_, "layer_done", layer_done):
+        yield fired
+    print(f"plant staging-before-parked fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
+def coldest_swap_unrelocated() -> Iterator[collections.Counter]:
+    """D8u (c): the coldest swap's lent set kept, but the compaction skips the tail's class: a kept hot holder stays
+    mapped at its tail slots, which the step's buffers, staging and loan overwrite."""
+    from holon_std.tiered import store as tiered
+
+    compaction, fired = tiered.TieredStore._compaction, collections.Counter()
+
+    def planted(self, picked, tail=None):
+        fired["skipped"] += tail is not None
+        return compaction(self, picked)
+    with mock.patch.object(tiered.TieredStore, "_compaction", planted):
+        yield fired
+    print(f"plant coldest-swap-unrelocated fired: {dict(fired)}", file=sys.stderr)
+
+
+@contextlib.contextmanager
 def tail_down_not_compacted() -> Iterator[collections.Counter]:
     """D8w: the down classes' tails lent with their residents still mapped there (no relocation)."""
     with _relocation("copies") as fired:
@@ -3248,6 +3366,10 @@ PLANTS: dict[str, Callable[[], contextlib.AbstractContextManager[None]]] = {
     "tail_down_not_compacted": tail_down_not_compacted, "compaction_map_stale": compaction_map_stale,
     "compaction_return_wrong_layer": compaction_return_wrong_layer, "compaction_beside_moves": compaction_beside_moves,
     "loan_range_overlap": loan_range_overlap,
+    # D8u: the staging inside the tail and the coldest swap
+    "buffers_over_staging": buffers_over_staging, "staging_over_loan": staging_over_loan,
+    "staging_outside_tail": staging_outside_tail, "staging_before_parked": staging_before_parked,
+    "coldest_swap_unrelocated": coldest_swap_unrelocated,
     # D8s: a staging step's rounds through fixed slots
     "round_slots_reused_early": round_slots_reused_early, "round_slot_shared": round_slot_shared,
     "part_one_role": part_one_role, "spare_lent_outside_tail": spare_lent_outside_tail,

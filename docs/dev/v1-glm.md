@@ -1258,6 +1258,30 @@ on the slower-drive node.
   step releases); under F10 the tiny model refuses the tail outright (its cap-sized staging). Both reverted, the
   plants and tests with them; a rebuild starts from a test under F10 with spares, sizes the staging from the layout's
   cache slots (the tail re-sized at the final materialize), and bounds (c)'s swaps.
+- **(a) and (c) rebuilt (the design delta for A and C, before the real-model smoke).** The rebuild re-applies
+  53305f96 and 659e8c03 with three changes:
+  - *The root cause of the illegal address, fixed:* the compaction ran class by class, and a resident left without a
+    slot in a later class was lent after the earlier classes' moves were listed. Before (c) only the down classes,
+    which cover disjoint layers, were compacted; (c) added the gate/up tail every expert has, so a kept hot holder could
+    be listed to move in gate/up and then be lent when its down piece found no slot — parked (its map RAM or SSD), then
+    relocated anyway (mapped at the freed slot while lent). Now two passes: the residents left without a slot in any
+    class first, all of them lent, then every class's pairing over that lent set. A second pass strands no one: lending
+    more frees more slots and leaves fewer residents to place. Test
+    `test_a_resident_the_compaction_lends_in_one_class_moves_in_none` (under the deployment's terms): a holder kept in
+    the gate/up tail beside a lent expert of the other down class, its own down piece in a tail with no freed slot —
+    lent and moved before, lent and moved nowhere now.
+  - *The staging sized from each class's cache, not its cap:* the startup sizes the tail as before (no staging inside),
+    and the final layout re-sizes it once each class's cache is known (`after_materialize`: `_tail(taken, stage=True)`,
+    `tail_down` with it), stepping back to staging where the class cannot hold it beside a pass's staging outside; a
+    step sizes its own from the same cache slots (the arena's size less its null and staging slots). GLM's 32K step:
+    ≈ 236 a class inside against 27 before.
+  - *Tested under the deployment's terms:* the staging test runs F10 with released spares too (`mode2`, the cache
+    fraction 0.9 so the tiny model's cache holds such a tail), its swaps made and the bytes exact; under F10 the
+    busiest layer may pass the even-spread estimate by a few slots, lent outside and counted (< 16 asserted there,
+    0 under the default policy).
+  - Unchanged from the cleared build: the layout, the guard, the pool's order, the counter (A's m1), (c)'s rule and
+    its exclusions, the plants. Next: A's and C's quick re-check, then the real-model smoke (1K / 4K / 32K at the
+    deployment's flags with the lending counts), then the 32K A/B.
 - **After the build:** A's code review, then the A/B — (b) on both node classes where they can be had, (a) + (c) on
   32K decode. **Measurement only, later:** C's empty reserve (the tail's k coldest slots left empty at rest, arms k =
   150 / 300 over the bench's whole mix) and the 1K bytes' origin split (C's suspects in order: in-prompt victims, a
@@ -2261,6 +2285,7 @@ the I/O worker's counters (`io_stats`), nsys over 16 decode tokens after a 1K pr
 | A lending prompt's count against Maya's (one RTX 5090 desktop, 9c059bc3; `lend_tail` and each staging `lend` hooked; Maya's source and its tier diagnostics) | A 32K tail step lends **969 whole experts for its tail** (969 gate/up slots, 184 + 784 down slots: 6.42 GiB, D8w's compaction adding none), **86-98 owners of F10's released spares**, and **425-441 for the prompt's staging** (`lend` call 1: 405-418, for per-class needs of 158-172 / 205-212 / 200-206 slots — the two down classes each a layer's misses; calls 2-3: 21-23); 4K: 368 + 115 + 22. Maya's 6,519 MB borrow is ≈ 924 whole-expert slots (22 a layer: `tail_slots` over its strides of ≈ 7.0-7.5 MB), its staging (86 MB) and prestage (160 experts) inside it, and it drops 603 a 32K prompt because a third of its tail is empty when a prompt starts (its decode refills free slots by background fills only). Per GiB of tail the two match; the 2.3× is the staging outside the tail, the spares, and a tail F10 keeps full (D8u) |
 | D8u (b), the narrow read-ahead below 2K tokens: tried, reverted (82bae0c8 against 2862e471, both node classes, Maya's default arm beside them, 1K and 4K × 8 prompts, a warm-up and 3 rounds; the old tree's round 0 lost on both to a wrap edited mid-run, so 2 rounds) | 1K prefill **−1.4%** (capped node: 255.2 → 251.6 tok/s) and **−1.7%** on the other class's node (249.1 → 244.9; its job step held no memory cap, so Holon against Holon only); 4K prefill and every decode cell within ±0.3%. The 1K prompt read 9.21 → 9.45 GB from the SSD (+0.24: the replay's waste) at 2.30 → 2.32 GB/s on average — no idle filled; its prompt 4.010 → 4.069 s. Against Maya's default arm on the capped node, 1K prefill 0.973 before, 0.960 with it. Reverted; the one hottest-first pick and A's m2 guard kept |
 | D8u (a) + (c) on GLM: reverted before its A/B (53305f96 and 659e8c03; the lending count on one RTX 5090 desktop, the bench's warm-up then 4K and two 32K prompts of 64 tokens) | The 32K tail 996 slots (969 before): its staging inside 27 slots a class (sized from each class's cap, not its cache), the step still lending 347 + 34 + 3 experts outside it for staging; 4K 368 + 23. (c) kept 308 and 335 of the 996 holders (≈ 660 swaps a step); the second 32K step's staging `lend` hit an illegal address (49 residents the compaction left stuck before it). Reverted with its plants and tests; the 32K A/B not run |
+| The loan's fixed term at mode (ii)'s deployment, trimmed? (`bench/loan_need.py`, one RTX 5090 desktop, the 64 GiB step, 69c6f180; steps of 512, 1,024, 2,069, 4,096, 8,192, 16,384 and 32,768 tokens × prompt logprobs none / 1 / 20) | **Today's 1,024 MiB at taper 8192,32768: no overflow in any of the 21 cells** (nor 960). Every trim tried overflows by the prompt-logprob head's 152 MiB chunk, a range fit, not bytes: 768 at taper 4096,32768 at 1K, 2,069, 4K and 8K; 832 at 2,069 and 8K; 896 at taper 2560,32768 at 2,069 and 8K — the need peaks near 2K and the 8K step needs the whole term (the taper holds it flat to its `full`). A safe cut would be ≈ 64-128 MiB (≈ 10-19 experts fewer lent at 1K, ≤ 1%): **dropped**. At the term 0 the 512-token step overflowed 392 MiB and its prompt-logprob step ran out of memory at 0.99. The RTX 5080's GLM lock lends no loan (`moe.lend_peak` off): no sweep there |
 
 ### Step 6 (the illegal address first; the bench and the deployment follow)
 

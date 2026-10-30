@@ -63,6 +63,10 @@ class Lent:
             self.end[tail[0]] -= tail[1]
             for c, m in store._step_down.items():       # a whole-expert tail's other classes (D8w): their tails
                 self.end[c] -= m
+        # D8u (a): the staging inside the tail, per class [lo, hi) of its slots (none: an empty range at the end)
+        self.stage_lo, self.stage_hi = self.end.clone(), self.end.clone()
+        for c, (lo, hi) in store._step_stage.items():
+            self.stage_lo[c], self.stage_hi[c] = lo, hi
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:
@@ -103,6 +107,9 @@ class Lent:
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
+            if s._step_stage:                                               # D8u (a): a step staging in its tail
+                s.staging_lent += picked.sum()                               # that lent outside it too (counted;
+                #                                                              rounds and ring steps lend by design)
         want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
         if self.parts > 1 or single:
             want = want.clamp(max=s.prefill)
@@ -158,7 +165,8 @@ class Lent:
         lent = (s.lent_call >= 0)[:, None, :]                                                # [G, 1, E]
         slots = torch.cat([s.empty, s.lent_slots.permute(0, 2, 1)], 2)                     # [G, R, 2E]
         ok = torch.cat([empty.expand(groups, roles, experts), lent.expand(groups, roles, experts)], 2)
-        return slots, ok & (slots < self.end[classes][:, :, None])
+        inside = (slots >= self.stage_lo[classes][:, :, None]) & (slots < self.stage_hi[classes][:, :, None])
+        return slots, ok & ((slots < self.end[classes][:, :, None]) | inside)      # (D8u (a): the tail's staging)
 
     def _held(self, classes: torch.Tensor) -> torch.Tensor:
         """Per class, the lent slots serving the step's ring and staging."""
@@ -167,16 +175,19 @@ class Lent:
         return held.index_add_(0, classes[:, :, None].expand_as(ok).reshape(-1), ok.reshape(-1).long())
 
     def _pool(self, res: torch.Tensor, classes: torch.Tensor) -> None:
-        """Each class's lent slots in `pool` (past them −1): the layers' empty slots, then the lent experts', outside
-        the tail."""
+        """Each class's lent slots in `pool` (past them −1): the tail's staging first (D8u (a)), then the layers'
+        empty slots, then the lent experts', outside the tail."""
         s = self.store
         groups, experts, roles = res.shape
         slots, ok = self._lent(classes)
         slots, ok = slots.reshape(-1), ok.reshape(-1)
         cls = classes[:, :, None].expand(groups, roles, 2 * experts).reshape(-1)
+        inside = (slots >= self.stage_lo[cls]) & (slots < self.stage_hi[cls])
         mine = (cls[None] == torch.arange(len(s.classes), device=res.device)[:, None]) & ok[None]   # [C, N]
+        first = mine & inside[None]
+        rank = torch.where(first, first.cumsum(1) - 1, first.sum(1, keepdim=True) + (mine & ~first).cumsum(1) - 1)
         sink = s.pool.shape[1] - 1
-        s.pool.fill_(-1).scatter_(1, torch.where(mine, mine.cumsum(1) - 1, sink), slots.expand(len(mine), -1))
+        s.pool.fill_(-1).scatter_(1, torch.where(mine, rank, sink), slots.expand(len(mine), -1))
 
     def _ring(self, res: torch.Tensor, classes: torch.Tensor, half: torch.Tensor, ringed: torch.Tensor) -> None:
         """The ring slots of every layer's missing pieces (its half at `half` per class), and their copies' tables;
