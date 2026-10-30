@@ -1292,8 +1292,12 @@ on the slower-drive node.
 measured).** *Why:* a 1K prompt reads ≈ 1.35 GB of its own parking victims back (§13 step 7: 197 of the 225 RAM
 experts it pushes to the SSD are routed by the same prompt), because `moe.ram_heat` counts decode tokens only, so the
 experts prompts use look cold to RAM. *The rule:* after a step, each expert only its prompt rows routed gets
-`PROMPT_HEAT` (16, ≈ 0.8× RAM's steady median heat at GLM's deployment) once, beside the decode tokens' counts and
-decay (`_age_heat`; a long prompt counts once). Policy only: placement moves, never a step's bytes; only where
+`PROMPT_HEAT` (16, ≈ 0.8× RAM's steady median heat at GLM's deployment) but is never lifted past 2 × `PROMPT_HEAT` by
+it, beside the decode tokens' counts and decay (`_age_heat`). *Bounded (A's m1):* an unbounded +16 a prompt-only step
+would let a run of them (logprob scoring, chunked prefill) outrank decode-hot experts for thousands of tokens. A's
+floor instead (`max(heat, 16)`) replays as well at 1K but worse at 4K (the victims' decode reads over tokens 1-32
+17.4 → 27.3 MiB a token: at 4K a prompt routes nearly every RAM expert, so the floor flattens RAM's order) and at 32K
+(65.9 → 73.6); the bump capped at 32 (and at 48) replays as the bump at every size. Policy only: placement moves, never a step's bytes; only where
 `moe.ram_heat` is set (mode (ii): no committed lock). *Replayed* (`heat_replay.py`, the D8t recording, the previous
 prompt's routes at 0.5-4× the median RAM heat, the same victim counts): the 1K prompt's victim re-reads 1,290 →
 1,097-1,104 MiB (≈ −75 ms, **≈ +1.9% 1K prefill**), its decode's victim reads 10.6 → 6.8 MiB a token over tokens
