@@ -951,8 +951,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}
     assert experts == {"linear_experts_arena@1": "kernels.ggml_cuda"}            # arenas never bind @2
     words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]
-    assert len(words) == 1 and all(m._kernel.errors is words[0] for m in engine.executor.model.modules()
-                                   if hasattr(m, "cls"))          # the ggml id-error word, one per engine
+    io = [store.io.errors] if store.exclusive else []           # (the I/O worker's word: it fails open)
+    ggml = [t for t in words if not any(t is x for x in io)]
+    assert len(words) == 1 + len(io) and len(ggml) == 1 and all(   # the ggml id-error word, one per engine
+        m._kernel.errors is ggml[0] for m in engine.executor.model.modules() if hasattr(m, "cls"))
     if not cache:                                # a corrupt map entry: null slots read, the commit stops the engine
         store.residency.device[0, :, 0] = 1 << 20
         engine.add(prompts[0], GREEDY)
@@ -962,6 +964,21 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     held, nbytes = torch.cuda.memory_allocated(), store.arena.capacity * store.arena.unit_bytes
     store.arena._set(0)                         # as the ledger frees it: no view outlives the arena pool's buffer
     assert held - torch.cuda.memory_allocated() >= nbytes > 0
+    engine.close()
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_an_ssd_read_past_its_time_bound_stops_the_engine(gpu_moe):
+    """Exclusive tiers: the I/O worker fails open (`cpu_task@1`: a wait past its time bound, or a failed task, answers
+    at once, and every later wait too), so its error word is the store's to check at each commit — unchecked, the
+    reads it gave up on left wrong bytes in the slots and the units, silently. With a bound no read meets the step's
+    commit refuses to go on."""
+    file, prompts, _ = gpu_moe
+    engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
+        "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "cpu_task.timeout": 1e-6,
+        "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+    with pytest.raises(RuntimeError, match="kernel_errors"):
+        _served(engine, prompts)
     engine.close()
 
 
