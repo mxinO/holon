@@ -365,13 +365,15 @@ uv run holon serve ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
   drafts; the verify decides the output.
 - **The routing profile.** Holon ships the profiles the locks were measured with (counted with this pack); any profile
   serves the same output.
-- **Without the pack** the server serves the lock without drafting, warned about once with the cost (decode ≈ 30%
-  slower, est.) and these commands. `--max-draft-tokens 0` serves without drafting and never looks for the pack.
+- **Without the pack** the server serves the lock without drafting, warned about once with the cost (decode 24–37%
+  slower on an RTX 5080 and 5090, 1K–32K) and these commands. `--max-draft-tokens 0` serves without drafting and
+  never looks for the pack.
 - **A host short of RAM** reads the PLE table from the model file instead of 26.8 GiB of pinned RAM: `holon serve`
   retries the lock with `rows.place=ple:ssd,token_embd:host` after a start refused for host memory, unless the file
   is on a rotating or network disk. The output is byte-identical to the RAM tier's; on the RTX 5090 it cost 16% / 26%
   of prefill at 1K / 4K and 6–7% of decode with MTP (`docs/dev/v1-flash-next.md` §22.1), measured with the I/O
-  worker's earlier pool of four pread threads (now one io_uring thread, 16 reads in flight).
+  worker's earlier pool of four pread threads (now one io_uring thread, 16 reads in flight); on the RTX 5080, with
+  the current worker, 60% / 71% / 71% of prefill at 1K / 4K / 32K and 2% of decode.
 - **Accuracy** (`docs/dev/v1-flash-next.md` §22.4, §22.10): the locks pass L2 against the judge's golden and floors;
   GPU self-consistency (decode against prefill, chunked against one-shot, MTP against plain) passes on both cards; on
   72 hard task items (greedy, thinking on) Holon answered 70 correctly on the RTX 5080 and 72 on the RTX 5090, Strata

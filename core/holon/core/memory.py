@@ -13,6 +13,7 @@ they hold.
 from __future__ import annotations
 
 import dataclasses
+import functools
 import math
 from collections.abc import Callable
 
@@ -47,10 +48,19 @@ class Pool:
         self.capacity_dev = torch.tensor(capacity, dtype=torch.int32, device=self.device)
         # The null unit (the last one, never handed out) is where padding rows of a captured graph write.
         self.null = capacity - 1 if self.has_null and capacity else None
-        self._free = list(range(capacity - (self.null is not None) - 1, -1, -1))  # pop() hands out low ids first
-        self._refs = np.zeros(capacity, dtype=np.int32)
+        self.__dict__.pop("_free", None)          # the units' bookkeeping, again on first use
+        self.__dict__.pop("_refs", None)
         if self.null is not None:   # zeroed, so what padding rows read is finite
             self.buffer.view(self.segments, capacity, self.unit_bytes // self.segments)[:, self.null] = 0
+
+    # Built on first use: a pool viewed whole (e.g. a host table of 320M rows) never pays ≈ 40 B a unit for them.
+    @functools.cached_property
+    def _free(self) -> list[int]:
+        return list(range(self.capacity - (self.null is not None) - 1, -1, -1))   # pop() hands out low ids first
+
+    @functools.cached_property
+    def _refs(self) -> np.ndarray:
+        return np.zeros(self.capacity, dtype=np.int32)
 
     @property
     def base(self) -> int:

@@ -246,8 +246,8 @@ The owner decided: no published pack and no local build. Main has meanwhile move
   identity, where it was looked for, and the plugin's hint.
   - The hint is an optional hook, `source_hint(identity) -> str | None`, asked of the same owners as `spill`. It
     replaces rev 3's `MakesSources.make_source` in the ABI (`HintsSources`; 1.6 is not released, so the swap is free).
-  - `models.qwen4_exp`'s hint gives the cost (≈ 30% of decode, est.) and Strata's commands from the README, writing
-    the pack into that directory.
+  - `models.qwen4_exp`'s hint gives the cost (24–37% of decode, measured) and Strata's commands from the README,
+    writing the pack into that directory.
   - An unreadable cache is the same as a missing file.
 - **Flags that turn speculation off** (`--max-draft-tokens 0`) skip the lookup.
 - **Removed:** the published-pack download, its memo and link, and `models.qwen4_exp`'s `huggingface-hub`
@@ -329,7 +329,7 @@ holon: GPU memory: state pools <S> GiB = free <F> − peak <K> − slack <L> (al
 holon: routing profile: shipped (profile_x4_gate.json)
 holon: start failed (memory): host memory <B> GiB too small: plugin.tiered.pinned.… needs …, <L> GiB left
 holon: retrying the lock with rows.place=ple:ssd,token_embd:host (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −16/−26% at 1K/4K, MTP decode −6/−7% (RTX 5090)
-holon: WARNING: mtp.path mtp-q2_0@a22206a4d74eafbf unavailable (not in ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/; serving without the MTP head costs ≈ 30% of decode (est.). Strata's public tools make it …): speculation off
+holon: WARNING: mtp.path mtp-q2_0@a22206a4d74eafbf unavailable (not in ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/; serving without the MTP head costs 24–37% of decode (measured on an RTX 5080 and 5090). Strata's public tools make it …): speculation off
 ```
 
 A give-up after a host-memory refusal ends with the four ordered hints of D1 step 3. The overrides are as in rev 2.

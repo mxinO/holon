@@ -22,7 +22,11 @@ def read(jobs: list[tuple[Extent, np.ndarray]]) -> None:
     for extent, dst in jobs:
         if dst.nbytes != extent.nbytes:
             raise ValueError(f"{extent}: a destination of {dst.nbytes} bytes")
-        by_path.setdefault(extent.path, []).append((extent, dst))
+        # An extent past a window is read a window at a time: the bounce buffers stay WORKERS windows (a 27 GiB
+        # table read whole took as much again, in shared memory a host without swap cannot reclaim, as it was copied)
+        for at in range(0, extent.nbytes, WINDOW):
+            by_path.setdefault(extent.path, []).append(
+                (Extent(extent.path, extent.offset + at, min(WINDOW, extent.nbytes - at)), dst[at:at + WINDOW]))
     for path, pieces in by_path.items():
         pieces.sort(key=lambda p: p[0].offset)
         windows, lo, end, run = [], 0, 0, []
