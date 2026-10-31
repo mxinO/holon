@@ -197,10 +197,11 @@ class EngineChecks:
         return snap
 
     def _pinned(self) -> Engine:
-        """An engine on the pinned pools — unless the deployment requires its step-peak loan (`moe.lend_peak =
-        require`): an explicit budget skips the startup profile the loan is measured from, so such an engine measures
-        its own pools (closed predecessors leave it the same free memory)."""
-        measures = self.config.plugin_options.get("moe.lend_peak") == "require"
+        """An engine on the pinned pools — unless the deployment lends its steps their activations (`moe.lend_peak`
+        on or require): an explicit budget skips the startup profile the loan is measured from (and the
+        `activation_loan@1` site a real start selects, so the lock would lack it), so such an engine measures its own
+        pools (closed predecessors leave it the same free memory)."""
+        measures = self.config.plugin_options.get("moe.lend_peak") in ("on", "require")
         engine = self._fresh(dataclasses.replace(self.config, state_memory=self.config.state_memory or
                                                  (None if measures else self.pool_bytes)))
         if self.pool_bytes is None:

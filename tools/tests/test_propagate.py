@@ -205,11 +205,13 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
     with pytest.raises(RuntimeError, match="2 check steps overflowed their activation loan, by up to 5 MiB"):
         propagate.EngineChecks(EngineConfig(model="m"), [], None).snapshot()
     monkeypatch.setattr(propagate, "Engine", Measuring)
-    # a deployment that requires its step-peak loan measures every engine's pools (its loan comes from that profile)
-    lent = EngineConfig(model="m", plugin_options={"moe.lend_peak": "require"})
-    checks = propagate.EngineChecks(lent, [], None, pool_bytes=990)
-    checks.snapshot(), checks.snapshot()
-    assert built[-2:] == [None, None]
+    # a deployment that lends its step-peak loan measures every engine's pools (its loan, and the activation_loan@1
+    # site a real start selects, come from that profile)
+    for lend in ("on", "require"):
+        lent = EngineConfig(model="m", plugin_options={"moe.lend_peak": lend})
+        checks = propagate.EngineChecks(lent, [], None, pool_bytes=990)
+        checks.snapshot(), checks.snapshot()
+        assert built[-2:] == [None, None], lend
 
 
 @pytest.mark.slow
