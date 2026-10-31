@@ -44,6 +44,7 @@ def test_the_spill_targets_any_disk_not_known_to_rotate_or_be_remote(tmp_path, m
         assert got is None
     else:
         assert got[0] == {"rows.place": "ple:ssd,token_embd:host"} and want in got[1]
+        assert "−66%/−80%/−81%" in got[1] and "−60%/−71%/−71%" in got[1]      # the cost as measured (release head)
     assert deploy.spill({"rows.place": "ple:ssd"}, "/data/model.gguf") is None        # nothing in RAM to spill
 
 
