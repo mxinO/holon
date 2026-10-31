@@ -1,7 +1,7 @@
 # v1 — GLM on any host from its floor up: the RAM tier sized from the host budget
 
-Status: **design note, rev 1 (2026-10-31), for the panel (A correctness, B architecture, C performance).** Nothing is
-built.
+Status: **design note, rev 2 (2026-10-31), answering the panel's review of rev 1** (A correctness, B architecture, C
+performance; all three: buildable after rev 2). The answers are in §7. Nothing is built.
 
 **The owner's request (2026-10-31):** "we should not assume the 64g is the only one we need support, we should be able
 to adapte to different mem size (with 64g as a lower limit maybe)".
@@ -9,179 +9,218 @@ to adapte to different mem size (with 64g as a lower limit maybe)".
 **Goal.** On any host from GLM's floor up, `holon serve <model>` serves GLM-5.3-Flash at its best configuration for the
 RAM it has, with no flags:
 - the RAM tier is sized from auto-config's host budget, not mode (ii)'s fixed `moe.ram=*=0.6238`;
-- speed rises with RAM, from mode (ii) at the floor to the lock (mode (i)) once every expert fits;
-- below the floor, the start is refused, naming the measured minimum.
+- speed rises with RAM, from the floor to the lock (mode (i)) once every expert fits;
+- below the floor, the start is refused at build, naming each term of the measured minimum;
+- below the performance knee, it serves with a warning.
 
-The mechanism lives in std, so every offload lock gets it (Flash-Next and Qwen3-30B-A3B as well as GLM). The model plugin
-supplies only its measured tuning. There is no model logic in core.
+The mechanism is in std, so every offload lock gets it. The model plugin supplies only its measured tuning, keyed by
+card. Core gains two additive members.
 
 ## 1. What is fixed today, and why it is not enough
 
-- `glm5_next`'s spill (`plugins/holon_plugins/models/glm5_next/deploy.py`) returns `MODE2`. Its RAM share,
-  `moe.ram=*=0.6238`, is the share that fits a 64 GB host, whatever the host has.
-  - **On a 48 GB host** the spill's start is refused too. The refusal's hint is std's generic one (B's s2 at the
-    close).
-  - **On a 96 GB host** it pins about 50 GiB where about 80 fit, so it runs at 64 GB speed. Mode (ii)'s decode at 4K
-    and 32K is 0.98 and 0.92 of Maya's, against 1.11 and 1.05 in mode (i).
-- The spill hook is called before the budget is read (`cli.py`: `fit_lock` comes before `host_budget`). It is given
-  neither the budget nor the lock's card class. `MODE2` is therefore gated on `moe.lend_peak = require` as a proxy for
-  "the RTX 5090 lock" (B's s1).
-- **Std's generic spill** for other offload locks only *names* a manual `moe.ram='*=0.5'`. It offers nothing it can try.
+- **`glm5_next`'s spill returns `MODE2`.** Its RAM share, `moe.ram=*=0.6238`, fits a 64 GB host whatever the host has.
+  - A 48 GB host is refused.
+  - A 96 GB host pins about 50 GiB where about 80 fit, so it runs at 64 GB speed.
+- **The spill hook sees neither the budget nor the card.** `MODE2` is gated on `moe.lend_peak = require` as a proxy for
+  the RTX 5090 lock (B's s1 at the close).
+- **Std's generic spill only names a manual `moe.ram='*=0.5'`.**
+- **Spills merge last-setter-wins** (`cli.py` `fit_lock`), so a later owner overrides the model's measured values (B-R2).
 
 ## 2. The design
 
-### D1. The RAM share is sized where the pools are known: in std, at the store's layout (recommended)
+### D1. `fit`: one owner of the host remainder, sized once at build
 
-- **The new option value.** `moe.ram=fit` makes the pinned tier hold, per class, the expert share that fits the host
-  budget:
-  - **The budget:** `EngineConfig.host_memory`, which `holon serve` derives as auto-config's budget.
-  - **Taken off first:** the store's own non-tier host pools (the staging and landing rows, the parking units) and every
-    other host pool already requested. Among those are the token embeddings and PLE rows of `std.tiered.rows`.
-- **How the store learns those bytes.** The store asks a build-time `host_left()` on its context. That is the same
-  question the state tier asks today (`TierCtx.host_left`, `core/holon/api/tier.py`). The engine already knows the
-  answer (`cfg.host_memory − ledger.host_bytes()`).
-- **What core gives.** It exposes that answer on the plugin context at the store's build, as an addition. Exposing
-  `host_left()` where the store builds is the open item for step 0.
-  - **If the store's layout can take its RAM units after the ledger sizes them** (the RAM tier as a host *fill* pool,
-    min = the floor, pref = every piece, as the VRAM cache fills free VRAM), that is preferred. It needs no new seam.
-    The ledger does the arithmetic it already does for device pools, and the pools' order of requests cannot skew it.
-  - **Otherwise,** the store reads `host_left()` at `resolver()` time, after reserving its own non-tier pools first.
-  - Step 0 reads `TieredStore._tables` / `holds` against the ledger and picks one. Either way it is core +≤ 5 lines,
-    additive (ABI 1.6 → 1.7 minor).
-- **Why not in the spill hook.** The hook runs before the engine exists. It would have to re-derive the other pools'
-  bytes (rows, staging, landing, parking) that the store and the ledger compute exactly at build. That arithmetic would
-  be duplicated, and it would drift with every store change.
+**The value.** `moe.ram=fit`, the whole value only (no per-class `fit`), makes the store solve one expert fraction f
+(D2) from the host budget. The rules:
+- **When.** The store resolves `fit` once, at its first `holds()` question (the first `resolver()`, at build), before
+  the startup profile. It caches f, and passes `*=f` to the tier. Every later `holds()`, the profile's minimum layout
+  included, uses the cached f. A host pool is never re-pinned or re-seeded (B-R1, A-RAM-M1.2).
+- **Against what:** `BuildCtx.host_left()`, a new optional API member: `cfg.host_memory − ledger.host_bytes()`.
+  - It is **not gated on `clamp_context`**, so `exact.py`, the bench and the tests have a budget whenever
+    `host_memory` is set (B-R1). A placement-only choice is not a lock degradation.
+  - **Without a host budget, `fit` refuses** ("moe.ram=fit needs a host budget: `holon serve` derives one;
+    elsewhere, --host-memory").
+- **Taken off before solving:**
+  - the store's own host pools: the read-ahead landing rows and their on-demand halves, the I/O and run tables;
+  - every host pool already requested: the embeddings and the PLE rows of `std.tiered.rows`;
+  - **the state tier's level as a fixed request,** its configured bytes, if a state tier is set and has not built
+    yet;
+  - **a constant reserve:** the I/O worker's bounce windows (≤ 512 MiB), the pinned buffers outside the ledger
+    (`_readback`, `_move_host`, D8g's lists; A-RAM-M1.4), and R (D4).
+- **Re-checked before pinning.** Just before the tier's pool is requested, the store re-reads `platform.host_ram()`.
+  It takes `f = min(f, f(live available − headroom − R))`, so the serve-start snapshot cannot over-commit by what
+  other processes took meanwhile (A-RAM-M1.3).
+- **One owner (A-RAM-M1).** Under `fit` the store is the only reader of the host remainder. A state tier set beside it
+  takes its configured level as a fixed request, and does not clamp to `host_left()`. Its build checks `fit` among the
+  options and fails rather than race.
+- **Quantized.** f is rounded down to 1/256, so placement does not drift with a few MB of free RAM from start to start
+  (A-RAM-m1).
 
-### D2. Per class: one fraction of experts, the same for every class
+**Step 0 prices B-R4's zero-core form against this,** and picks it only if its restructure is small. That form is one
+host pool across classes, granted between min and pref by the existing request, with f derived from the grant. It
+needs:
+- `exclusive` decided by the option;
+- the statics (`owner`, `n_ram`, `_ram`) sized by pieces;
+- `Pinned` as one pool with per-class offsets.
 
-- **An expert is resident in RAM only when all its pieces are.** That is its gate/up and down pieces, in different
-  classes (GLM: `gate_up.iq2_xxs`, `down.iq3_xxs` on 8 layers, `down.iq2_s` on 34).
-- **A per-byte split would be wasted.** Splitting the budget by bytes, or by class heat, holds gate/up pieces of experts
-  whose down pieces are on the SSD. Each such miss still reads the SSD, so the bytes buy nothing.
-- **So `fit` solves one fraction `f` per expert:**
+Otherwise it is `host_left()` at build: about +3 core lines, ABI 1.6 → 1.7 minor (B-R4). Both forms keep the single
+owner.
 
-  `f = (host_left − reserve) / Σ_classes(pieces × unit_bytes)`
+### D2. One fraction of whole experts; capped at saturation
 
-  - `held = floor(f × pieces)` in every class.
-  - The store's RAM heat (`moe.ram_heat`) picks *which* experts. It already ranks per expert across classes.
-- **This is what `*=0.6238` already does** (one fraction for all classes), so mode (ii) at 64 GB is the special case.
-  Expect `f ≈ 0.62` there, up to the reserve.
+- **The rule.** An expert serves from RAM only if all its pieces are there: gate/up and down are in different
+  classes, and GLM's down classes cover disjoint layer groups. So `fit` solves one fraction:
 
-### D3. At the boundary where everything fits: the lock, not a 100% exclusive tier
+  `f = min(f_sat, (host_left − pools − reserve) / Σ_classes(pieces × unit_bytes))`
 
-- `holon serve`'s history already tries the lock first and the spill only after the lock's start is refused for host
-  memory (`serve_history`: `[defaults?, lock + spill, lock]`, tried last first). So a host that holds every expert
-  gets mode (i) with no exclusive-tier overhead.
-- Between the two, `fit` yields `f < 1`. At `f ≥ 1` (a lock refused for another host pool, not the tier), `fit`
-  holds every piece, and the store is then non-exclusive, as the lock is.
-- **Expected step at the boundary:** the lock's decode is about 1.5× mode (ii)'s at 64 GB. Part of that is the tier
-  bookkeeping, which mode (ii) at `f → 1` still pays.
-  - So speed rises monotonically with RAM, and jumps up at the boundary rather than down.
-  - The panel may prefer the spill to stop where its predicted speed reaches the lock's. Nothing measured says it
-    does.
+  with `held = max(1, floor(f × pieces))` in each class. The store's RAM heat (`moe.ram_heat`) picks which experts.
+- **The cap at saturation (C §1).** `f_sat = (pieces not in the VRAM cache + the largest step's lend count) / pieces`.
+  - Past it there are no SSD-only experts left and nothing to park, so more units are wasted pinned RAM.
+  - It is about 0.82–0.84 at the RTX 5090's GLM deployment.
+  - The store knows both terms at its layout: the cache's slots by class, and the tail's lend count.
+- **One f against heat-per-byte (A-RAM-m2, C §3).** Step 0 checks offline, from the routing profile's per-expert heat,
+  the route mass captured by one f against heat-greedy whole experts at f = 0.4, 0.62 and 0.74.
+  - If the gap is under 1%, keep one f.
+  - If more, `fit` computes the per-class counts from the profile instead. That is the same output shape.
+- **The MTP head's experts** (an auxiliary group, Flash-Next's `aux.*` classes) count among the pieces and take the
+  same f. GLM's head is unused.
+- **`f ≥ 1`:** every piece is held, the tier is not exclusive, and the store runs as the lock does. It is tested
+  identical to the lock.
 
-### D4. The floor, derived, then measured
+### D3. Where everything fits: the lock
 
-- **What decides the floor.** The floor is where the store cannot work, not where it is slow. Below the measured knee
-  (D4.2), the start serves with a warning naming the knee and its speed.
-- **The minimum the store refuses below** (computed at its layout, the refusal naming each term in bytes):
-  - **headroom:** auto-config's kept-free, max(6 GiB, 5% of RAM), outside the budget;
-  - **+ the non-pinned process:** Python, torch, the CUDA context, the GGUF's metadata, the scheduler. This is RSS
-    the budget does not count. It is unmeasured for GLM, so step 0 measures it.
-  - **+ the other pinned pools:** GLM's token embeddings (0.48 GiB, `rows.place=token_embd:host`), the store's staging,
-    landing and parking units, and the I/O worker's bounce windows (≤ 512 MiB);
-  - **+ a minimal RAM tier:** the experts a 32K prompt step lends and parks (D8b, D8l).
-    - GLM's 32K tail lends 969 whole experts, 6.42 GiB at the RTX 5090 deployment (`docs/dev/v1-glm.md` §13 step 7).
-    - Below that, lent experts go to the SSD and are reread in decode, which is D8l's 48% of decode-time SSD reads
-      before D8l.
-- **The prediction:** headroom 6 + process R + pools ≈ 1.5 + tier 6.5 ≈ **14 GiB + R**. If R ≈ 8 GiB as for
-  Flash-Next, that is about 22 GiB, far below 64 GB.
-- **D4.2, the knee.** At such a floor the store works but decode is SSD-bound: about 1 GB a token at f ≈ 0.08 against
-  the drive's ≈ 6 GB/s, so about 5 tok/s.
-  - The owner's "64 GB" is a performance floor in effect. It needs the knee, which is a measurement.
-  - **Measured:** 48 GB and 40 GB on the capped RTX 5090 at 1K / 32K decode (one round each).
-  - **Stated in the README:** the refusal floor (computed, logged), and the knee as "below N GB, decode under X tok/s".
-  - The panel may instead set the refusal at the knee. My recommendation is to serve and warn: a slow answer beats
-    none, and a cap is the user's to choose.
+- `holon serve`'s history tries the lock first, and the spill only after the lock's start is refused for host memory.
+  So a host that holds every expert gets mode (i).
+- C's model predicts the curve:
+  - a rise from the floor to a knee at about 72–76 GB;
+  - a plateau from about 84 GB, where f is at f_sat;
+  - then a step up to the lock, about +20% decode, at the size where it starts (about 96 GB with little other use).
+- The plateau's speed is reported against the lock, not gated to it.
 
-### D5. The model plugin's part: measured tuning, keyed by the card
+### D4. The floor and the knee
 
-- **The spill hook gains the lock's card class.** It does not need the budget: the store sizes from it (D1).
-  - **Signature:** `spill(options, checkpoint, card)`.
-  - **Compatibility:** core calls a spill with the old two-argument signature as today, and passes the class to one
-    that takes three (one `inspect.signature` check), so the change is additive.
-  - **Callers:** the three in-tree spills (std.moe, qwen4_exp, glm5_next) take it.
+- **The working floor** (A-RAM-M3, refused at build, A-RAM-m3) is the sum of:
+  - auto-config's headroom (outside the budget);
+  - **R**, the non-pinned process. It is measured in step 0 at a 32K step's peak, at the lock and at mode (ii), not at
+    idle.
+  - the ledger's actual fixed host requests at build: the landing rows, about 1.9–2.3 GiB at `read_ahead` 135, and
+    the embeddings, the tables and the reserve;
+  - a minimal tier: at least one unit per class, and the units a call's keeps and a step's parking need (tens of
+    experts).
+- **Below the floor the start is refused** with each term in bytes. It is not a constant: the refusal computes it.
+- **The knee.** The 32K tail's lend (969 experts, 6.4 GiB) and C's knee at about 72–76 GB are performance terms. Bits
+  do not change below them (`_park` falls back to RAM's coldest, then the SSD).
+  - **Below the knee the start serves and warns** ("below N GB, decode under X tok/s"). The model plugin's spill note
+    gives N and X, measured, and so does the README.
+  - The owner's "64 GB as a lower limit maybe" goes to the owner with this choice: refuse at the floor and warn at the
+    knee (Q1).
+- **Memory-failure retries (A-RAM-M2).** Under `fit`, a start killed for memory re-derives f from a fresh snapshot, so
+  a systematic undercount would loop.
+  - Each memory-failure retry of a `fit` entry doubles the reserve, at most 3 times, said in the log. The supervisor
+    passes the retry count; step 0 checks whether the existing restart admission's lowered cap already gives it with no
+    new line.
+  - Then the start refuses with the measured shortfall.
+
+### D5. Spills: the card, first-setter-wins, and the generic spill
+
+- **The card.** `spill(options, checkpoint, *, card)`, keyword-only. Core passes `card=` only to a hook whose
+  signature names it (one `inspect.signature` check), so two-argument hooks keep working. The new signature is written
+  into `core/abi.txt` by hand with the 1.7 bump, since `check_abi.py` compares names only (B-R5).
+- **First-setter-wins (B-R2).** `fit_lock` merges `spill = got[0] | spill`, with the model plugin asked first, so the
+  model's measured set refines std's generic one. The line count is unchanged.
+- **Std's generic spill becomes a real one** for any offload lock: only `moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1`
+  and `moe.ram=fit`. No F10: `placement.promote@1` is a first-party plugin measured on GLM only (B-R3). It applies on
+  the cards where the exclusive-tier tests ran: the bitwise `ssd` cases and `exact.py` (A-RAM-m4).
 - **`glm5_next`'s spill becomes `MODE2[card]` with `moe.ram=fit`.**
-  - **RTX 5090:** the measured set (8,192-row passes, the three loan options, `read_ahead` 135, `stream_tokens`
-    65,536, F10).
+  - **RTX 5090:** the measured set (8,192-row passes, the loan options, `read_ahead`, `stream_tokens` 65,536, F10).
   - **RTX 5080:** per D7.
-  - **Other cards:** None. B's s1: an unmeasured card gets no unmeasured set.
-- **Std's generic spill becomes a real one** for an offload lock without a model spill: `moe.tiers=…pinned,gguf_direct`
-  `moe.ram=fit` plus F10.
-  - Today it only names a manual 0.5 share. It is tried after the model's.
-  - Qwen3-30B-A3B and Flash-Next's experts then degrade the same way. For Flash-Next this comes after its PLE spill,
-    which it combines with.
-  - **Gate:** the bitwise tests under exclusive tiers (`test_moe_engine_gpu.py`'s `ssd` cases) and `exact.py` on
-    Flash-Next at one capped size.
+  - **Other cards:** GLM's spill returns nothing and the generic spill applies (lfu, std's tiers). Its tuned set is
+    never applied to a card it was not measured on.
+- **`check_locks` refuses `fit` in a lock** (a CI check). A lock's placement is fixed; `fit` lives only in spills.
 
-### D6. Do mode (ii)'s 64 GB values hold at 80, 96 and 112 GB?
+### D6. Which 64 GB values move with RAM (C §2)
 
-The prediction is from step 7's replays and probes. Only what is uncertain is measured.
-
-| Value | Depends on | Prediction | Measure? |
-|---|---|---|---|
-| `ggml_cuda.pass_rows` 8,192 | VRAM (the loan beside a pass's buffers) | holds: RAM does not enter | no |
-| loan options (1.12, 8192,32768, 0.55, 1,024 MiB) | VRAM, the profile's peak | holds | no |
-| `moe.stream_tokens` 65,536 | prompt streaming vs the tail | holds | no |
-| F10 (`placement.promote@1`, D8t's budget) | the VRAM cache's churn | holds; it promotes from RAM or SSD alike | no |
-| `moe.ram_heat` 0.999 | which experts RAM keeps | holds; it matters less as f → 1 | no |
-| `moe.read_ahead` 135 | the SSD-only experts a prompt step reads ahead | **uncertain:** with fewer SSD-only experts at f ≈ 0.95, its landing rows may cost more VRAM than they save | **yes:** 135 against 64 at 96 GB, prefill 1K / 4K |
+| Value | Prediction | Measured |
+|---|---|---|
+| `pass_rows` 8,192, the loan options, `stream_tokens` 65,536, `ram_heat` 0.999 | hold (VRAM-side, or matter less as SSD-only shrinks) | no |
+| `read_ahead` 135 **with D8x's rows** | coupled. D8x parks a short prompt's ≈ 225 lent experts in 2 × `read_ahead` rows a role, 128 at 64 GB, so ≈ 100 park over RAM again | 1K prefill and D8x's `parked_in_rows`, at 64 GB and 80 GB: `read_ahead` 135 against D8x's rows decoupled from it |
+| F10's budget (1 a layer) | likely at the plateau, where promotions only shuffle VRAM and RAM | one arm at 80 GB: budget 1 against 0 against `placement.lfu`, 32K decode |
+| Parking (D8l, D8x) | self-adjusting: idle past f_sat | counters only |
 
 ### D7. The RTX 5080
 
-- **Its lock serves 8K steps without a loan** (`moe.lend_peak` off, §7.2). Mode (ii) has never run there.
-- **The rule extends** if the exclusive tiers start and are exact at its deployment (staging lent from the cache, no
-  step-peak loan) with a measured set.
-- **Measure:**
-  - a smoke and `exact.py` at the 5080 lock's flags + `moe.ram=fit` under a 64 GiB cap;
-  - then one capped bench at 64 GB against the lock, `read_ahead` {135, 64}.
-- **If it starts and is exact,** `MODE2["rtx-5080"]` ships with its own reported numbers, not gated against Maya. Maya
-  on 16 GB in mode (ii) is not a program bar.
-- **If not,** the 5080's spill stays None, with the reason recorded.
+- Its lock serves 8K steps without a loan (`moe.lend_peak` off). Mode (ii) has never run there.
+- **Step 3:** a smoke and `exact.py` at its lock's flags with the generic spill, under a 64 GiB cap.
+- **If exact:** one capped bench at 64 GB against the lock, with `read_ahead` and F10 as in D6. `MODE2["rtx-5080"]`
+  ships with its own reported numbers (Maya on 16 GB is not a program bar).
+- **If not,** the 5080's GLM spill stays None (the generic spill too), with the reason recorded.
 
 ## 3. Acceptance
 
-1. **Capped RTX 5090** (cgroup-enforced job step, the node's NVMe, the bench's D11 method, 3 rounds after a warm-up)
-   at 64, 80 and 96 GB, plus the uncapped lock:
-   - decode and prefill at 1K / 4K / 32K rise monotonically with RAM;
-   - at 64 GB they are at or above today's mode (ii) (the close's record), within its round spread;
-   - where every expert fits, they match the lock.
-   - Plus 48 and 40 GB for the knee (D4.2), one round each, reported.
-2. **Zero OOM kills** at every size (`memory.events`), and the refusal below the floor names it.
-3. **`exact.py` at 80 GB:** the spill as `holon serve` gives it, byte-identical to the lock's first run, on the RTX
-   5090.
-4. **The RTX 5080** per D7.
-5. **Tests** under the deployment's terms (the `mode2` fixture with `moe.ram=fit`):
-   - `fit`'s arithmetic engine-free (fractions, the floor's refusal message, `f ≥ 1`);
-   - the bitwise `ssd` cases at a `fit` share;
-   - the CPU default suite with no GPU visible (`CUDA_VISIBLE_DEVICES=`), as CPU CI runs it.
-6. **The real-model smoke** at 80 GB before reporting built.
+1. **The capped RTX 5090** (a cgroup-enforced job step, the node's NVMe, D11's method):
+   - 64, 72 and 80 GB at 3 rounds;
+   - 96 GB at 1 round, recording which of the lock and the spill started;
+   - 48 and 40 GB at 1 round each, for the knee;
+   - the uncapped lock.
+
+   At each size: 1K and 32K (4K only at 64 GB and the lock), SSD MB a decode token over tokens 1–32, and D8x's
+   `parked_in_rows`. Speed rises with RAM. At 64 GB it is at or above the close's mode (ii) within its round spread.
+   The plateau is reported against the lock. The grid is placed by C's replay (step 0) before the GPU runs, and moved
+   if the curve bends elsewhere.
+2. **Zero OOM kills** at every size (`memory.events`). Below the floor the refusal comes at build, with its terms.
+3. **`exact.py`:**
+   - the RTX 5090 at 80 GB, the spill as `holon serve` gives it, byte-identical to the lock's first run;
+   - the generic spill on Qwen3-30B-A3B (the RTX 5080 offload lock) and on Flash-Next (one card), each capped.
+4. **Tests,** under the deployment's terms (the `mode2` fixture with `moe.ram=fit`):
+   - `fit`'s arithmetic, engine-free: quantization, f_sat, the floor's refusal message, `f ≥ 1`;
+   - the bitwise `ssd` cases at a `fit` share, and at the floor's f;
+   - `f ≥ 1` identical to the lock;
+   - first-setter-wins;
+   - `check_locks` refusing `fit`;
+   - the CPU default suite with no GPU visible (`CUDA_VISIBLE_DEVICES=`).
+5. **The RTX 5080,** per D7.
+6. **The real-model smoke** at 72 GB before reporting built.
 
 ## 4. Locks
 
-- **The core addition** (`host_left` at build, and the 3-argument spill call) outdates every lock: 27, on four card
-  classes.
-- **Std** (`std.tiered`, `std.moe`) and `models.glm5_next` / `models.qwen4_exp` change too. They are covered by the same
-  round.
-- **Predicted:** every trace byte-identical, because no lock sets `moe.ram` and `fit` is only in spills.
-- **One round at the close,** as release §22. A moved trace stops for review.
+- **Core** (`BuildCtx.host_left`, the spill's `card`) outdates every lock: 27, on four card classes.
+- `std.tiered`, `std.moe`, `models.glm5_next` and `models.qwen4_exp` change in the same round.
+- **Predicted:** every trace byte-identical, since no lock sets `moe.ram` and `fit` lives only in spills.
+- **One round at the close** (release §22). A moved trace stops for review.
 
 ## 5. Steps
 
 | Step | Work | Check |
 |---|---|---|
-| 0 | Measure GLM's non-pinned RSS (R) at the lock and at mode (ii); read the store against the ledger and pick D1's form | R in bytes; the panel told which form |
-| 1 | `fit` in `std.tiered` (D1, D2); the refusal (D4); the spill's card (D5); `glm5_next`'s `MODE2[card]`; std's real spill | engine-free tests; `ssd` bitwise at `fit`; CPU suite without a GPU |
-| 2 | Capped RTX 5090: 64 / 80 / 96 GB + the lock; `read_ahead` at 96 GB (D6); 48 / 40 GB knee | acceptance 1, 2 |
-| 3 | `exact.py` at 80 GB; the RTX 5080 (D7) | acceptance 3, 4 |
-| 4 | The lock round; README (GLM: any host from the floor; the knee; the table by RAM size) | acceptance 5, 6; the panel's delta review |
+| 0 | R at a 32K step's peak (lock, mode (ii)); D1's form priced (B-R4); one f against heat-greedy offline; C's replay of the step-7 recording at RAM sizes (C writes it); the retry count's source | R; the form; the gap; the grid's sizes |
+| 1 | `fit` (D1, D2), the floor's refusal and the knee's warning (D4), the retries, the card and the merge (D5), `MODE2[card]`, the generic spill, `check_locks` | acceptance 4 |
+| 2 | Capped RTX 5090 grid (acceptance 1), with D6's arms at 64 GB and 80 GB | acceptance 1, 2 |
+| 3 | `exact.py` (acceptance 3); the RTX 5080 (D7) | acceptance 3, 5 |
+| 4 | The lock round; README (GLM on any host from its floor; the knee; the table by RAM size) | acceptance 6; the panel's delta review |
+
+## 6. Questions for the owner
+
+- **Q1, the floor:** refuse at the computed working floor and warn below the measured knee (this design), or refuse at
+  the knee (about 72–76 GB by C's model, near the "64 GB" guess)?
+
+## 7. The panel's review of rev 1, and how rev 2 answers it
+
+| Finding | Answer |
+|---|---|
+| B-R1 `fit` resolves once, against a defined `host_left()` | **Taken** (D1): once at build, cached, `*=f` to the tier; `host_left()` not gated on `clamp_context`; refuses without a budget; whole value only |
+| B-R2 spills merge last-wins | **Taken** (D5): first-setter-wins, model first |
+| B-R3 no F10 in the generic spill | **Taken** (D5): tiers and `fit` only; GLM's tuned set only on measured cards |
+| B-R4 the fill pool is a restructure | **Taken:** `host_left()` at build (+3 core, ABI 1.7); the zero-core form priced in step 0 |
+| B-R5 keyword-only `card`, `abi.txt` by hand | **Taken** (D5) |
+| A-RAM-M1 one owner, sized once, re-checked before pinning, pinned buffers counted | **Taken** (D1): the store is the only reader; the state tier a fixed request; before the profile; live re-read; reserve |
+| A-RAM-M2 a memory-failure restart loops | **Taken** (D4): the reserve doubles per retry, at most 3, then refuse |
+| A-RAM-M3 the floor from real requests; the 6.4 GiB tail is a knee term | **Taken** (D4): the ledger's requests + R at a 32K peak + ≥ 1 unit a class + the working tier; the tail a knee term |
+| A-RAM-m1 quantize f | **Taken** (D1): 1/256, down |
+| A-RAM-m2 / C §3 one f against heat-greedy | **Taken** (D2): checked offline in step 0; keep one f under 1% |
+| A-RAM-m3 refuse at build | **Taken** (D4) |
+| A-RAM-m4 the spill only where tested | **Taken** (D5) |
+| C §1 cap at saturation; the knee ≈ 72–76 GB; plateau; +20% step | **Taken** (D2's f_sat, D3, D4) |
+| C §1 replay first | **Taken** (step 0; C writes it) |
+| C §2 `read_ahead` coupled with D8x's rows; F10 at the plateau | **Taken** (D6) |
+| C §4 the grid | **Taken** (acceptance 1) |
+| Other: `check_locks` refuses `fit`; the MTP head under `fit`; generic-spill exactness on the 30B and Flash-Next; `f ≥ 1` identical | **Taken** (D5, D2, acceptance 3, 4) |
