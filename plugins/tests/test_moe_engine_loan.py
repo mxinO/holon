@@ -366,9 +366,11 @@ def test_a_whole_expert_tail_lends_its_experts_whole(gpu_moe, policy, plant):
             assert not all(ok), (plant, ok)
         engine.close()
     if plant is None:
+        # (the refusals without exclusive tiers: an engine refused at its start is never closed, and an exclusive
+        # store's D8x move thread kept it, ~190 MiB of VRAM and its pinned pools, for the rest of the worker)
+        bare = {k: opts[k] for k in ("moe.store", "moe.ring_tokens", "moe.ring_lend", "moe.lend_peak", "moe.placement")}
         with pytest.raises(RuntimeError, match="require.*moe.ring_lend is not tail"):
-            _gpu_engine(file, host_memory=1 << 27, plugin_options=opts | {"moe.ring_lend": "coldest"})
-        bare = {k: opts[k] for k in ("moe.store", "moe.ring_tokens", "moe.ring_lend", "moe.lend_peak")}
+            _gpu_engine(file, host_memory=1 << 27, plugin_options=bare | {"moe.ring_lend": "coldest"})
         engine = _gpu_engine(file, host_memory=1 << 27, state_memory=64 << 20, plugin_options=bare)
         with pytest.raises(RuntimeError, match="startup profile did not run"):
             _served(engine, prompts)
