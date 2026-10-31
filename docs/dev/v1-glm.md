@@ -1,15 +1,12 @@
 # v1 — GLM: GLM-5.3-Flash on Holon, then its expert offload compared with Project Maya
 
-Status: **design closed 2026-10-25, rev 10, panel-clean** (panel B confirmed B9-M1's fix; B's build notes B10-m1 and
-B10-m2 are in §4 and D9). **The build proceeds per §9** (step 1's rest — the parking commit, D8f's SSD path with its
-landing pool, then F10 and promote's `lend_tail` — then steps 2 on), the panel reviewing code at each step's close. Rev
-9 drew A 2 minors + 2 nits, B 1 major + 2 minors, C 3 minors; §13 answers each with the lead's calls (§11). (Rev 8 drew
-A 1 + 2, B 2 minors, C 1 + 2; rev 7 drew A 2 majors, B 1 + 2, C 2 + 2; rev 6 drew A 1 major + 2 minors, B 1 + 1, C 2
-minors; rev 5 drew A 2 + 1 + nit, B 3 minors, C 1 + 1; rev 4 drew A 1 major + 2 minors + 1 nit, B 1 + 3, C 2 notes; rev
-3 drew A 4 minors + 3 nits, B 2 majors + 2 minors, C 1 major + 2 minors; rev 2 drew A 5 majors + 4 minors, B 1 + 8, C 7
-+ 9; rev 1, A 6 + 12, B 9 + 17, C 3 blockers + 10 + 13.) Step 0 is under way (N0, N1's mode (i), N2's decode and prompt
-traces, N3 and N4's A5000 probes done; §8). In the engine only step 1's (b)+(e) is built. Parameters marked "est."
-freeze when step 0's evidence lands.
+Status: **closed 2026-10-31** (plan §10, GLM status; the close's record `docs/dev/evidence/glm_close_2026-10-31.json`).
+The design is rev 10 as the panel cleared it (2026-10-25); §13 records the build per step and every lead's call.
+**Drifts from it, as built:** acceptance 2 restated to identity within a card (owner, Q13); acceptance 6's core
+change, +1 line and 2 changed (`platform.peak_memory`, owner, Q8); mode (ii) ships as `glm5_next`'s spill on the RTX
+5090 lock (`holon serve` after a start refused for host memory, auto-config's hook), not a named override set in a
+lock (acceptance 7); the RTX 5080 serves 8K steps without a loan (§7.2); the exclusive tiers grew past D8f's plan by
+D8g–D8x (§2), with the loan's options provisional (plan §10, the measured loan rule); MTP (D7) and K4 (Q12) deferred.
 
 **Scope.** Plan §10 ("Expert caching/offload", milestone GLM) and `docs/dev/v1-offload.md`:
 - D2: the target (45 layers: 11 MLA + DSA indexer, 34 KDA; 288 experts top-8 + 1 shared; mHC; sigmoid `noaux_tc`
