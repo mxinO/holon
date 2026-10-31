@@ -149,12 +149,12 @@ GLM's RAM-adapt task propagates them; this branch propagates nothing.
   measurement went too: the `out` dict, the slack's term and the note's "allocator" term. The slack is the reserve,
   at most the 10%, and nothing moves.
 
-**Core lines:** the build is +34 (5,230 → 5,264):
+**Core lines:** the build is +36 (5,230 → 5,266), with A's code-review minors:
 
 | Module | Lines | What |
 |---|---|---|
-| `engine` | +13 | the shared `_release` |
-| `platform` | +13 | `oom_kills` and `_cgroup`, less the overshoot |
+| `engine` | +12 | the shared `_release` |
+| `platform` | +14 | `oom_kills` and `_cgroup`, less the overshoot |
 | `ipc` | +6 | |
-| `cli` | +3 | |
+| `cli` | +5 | |
 | `executor` | −1 | |
