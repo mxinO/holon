@@ -4,6 +4,7 @@ entry."""
 import os
 
 import numpy as np
+import pytest
 import torch
 from holon.api import Extent
 from holon_std.tiered import files
@@ -28,6 +29,8 @@ def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch
         assert np.array_equal(dst, data[type(tmp_path)(extent.path)][extent.offset:extent.offset + extent.nbytes])
     assert max(sizes) <= files.WINDOW + files.ALIGN
     assert os.O_DIRECT                                      # the reader asks for it (Linux)
+    with pytest.raises(ValueError, match=r"shape \(10, 10\)"):    # windows slice a destination by bytes: 1-D only
+        files.read([(Extent(str(tmp_path / "a"), 0, 100), np.zeros((10, 10), dtype=np.uint8))])
 
 
 def test_a_window_reads_no_gap_past_gap_bytes(tmp_path, monkeypatch):

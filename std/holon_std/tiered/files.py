@@ -17,11 +17,11 @@ WORKERS = 8
 
 
 def read(jobs: list[tuple[Extent, np.ndarray]]) -> None:
-    """Fill each destination (a uint8 array of its extent's size) with its extent's bytes."""
+    """Fill each destination (a one-dimensional uint8 array of its extent's size) with its extent's bytes."""
     by_path: dict[str, list[tuple[Extent, np.ndarray]]] = {}
     for extent, dst in jobs:
-        if dst.nbytes != extent.nbytes:
-            raise ValueError(f"{extent}: a destination of {dst.nbytes} bytes")
+        if dst.ndim != 1 or dst.nbytes != extent.nbytes:      # (windows slice it by bytes)
+            raise ValueError(f"{extent}: a destination of shape {dst.shape}, {dst.nbytes} bytes")
         # An extent past a window is read a window at a time: the bounce buffers stay WORKERS windows (a 27 GiB
         # table read whole took as much again, in shared memory a host without swap cannot reclaim, as it was copied)
         for at in range(0, extent.nbytes, WINDOW):
