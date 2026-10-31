@@ -34,6 +34,7 @@ import zmq.asyncio
 
 from holon.api import Abort, EngineRequest, RequestError, SamplingParams, TokenDelta
 
+from . import platform
 from .memory import OutOfUnits
 from .plugins import PluginError, PluginLoadFailed
 
@@ -49,9 +50,12 @@ _POLL_MS = 1000
 FAILED_KINDS = {PluginLoadFailed: "error", PluginError: "plugin", OutOfUnits: "memory"}
 
 
+def _kind(e: BaseException) -> str:
+    return next((k for t, k in FAILED_KINDS.items() if isinstance(e, t)), "error")
+
+
 def _failed(e: BaseException, prefix: str = "") -> list[bytes]:
-    kind = next((k for t, k in FAILED_KINDS.items() if isinstance(e, t)), "error")
-    return [b"failed", _encode((kind, f"{prefix}{type(e).__name__}: {e}"))]
+    return [b"failed", _encode((_kind(e), f"{prefix}{type(e).__name__}: {e}"))]
 
 
 class StartFailed(RuntimeError):
@@ -85,6 +89,8 @@ def serve(engine_factory: Callable[[], Any], endpoints: Endpoints,
         ready = report(engine)
     except Exception as e:  # noqa: BLE001 — reported to the launcher, which raises it
         outbox.send_multipart(_failed(e))
+        if _kind(e) != "error":                   # a refusal ("memory", "plugin"): its reason, which the launcher
+            raise SystemExit(1) from None         # prints, without a traceback (an unexpected error keeps its own)
         raise
     outbox.send_multipart([b"ready", _encode(ready)])
     try:
@@ -273,8 +279,9 @@ class EngineProcess:
     async def start(cls, config: Any, target: Callable[..., None] = engine_main, lock: str | None = None
                     ) -> EngineProcess:
         """Launch an engine for `config` (configured from `lock`, if one) and wait until it is ready; raises
-        RuntimeError (StartFailed when the engine reports why, or "memory" when it was killed: the OOM killer's
-        SIGKILL) if it fails to start. `target` runs in the child (tests substitute engines that fail on purpose)."""
+        RuntimeError (StartFailed when the engine reports why, or "memory" when the OOM killer killed it) if it fails
+        to start. `target` runs in the child (tests substitute engines that fail on purpose)."""
+        kills = platform.oom_kills()
         proc, endpoints = launch(config, target, lock)
         engine = cls(proc, endpoints, Client(endpoints, alive=proc.is_alive))
         try:
@@ -282,8 +289,9 @@ class EngineProcess:
         except BaseException as e:
             await engine.stop(graceful=False)
             if type(e) is RuntimeError and proc.exitcode == -signal.SIGKILL:     # it died before stop killed it
-                raise StartFailed("memory", "the engine was killed while starting (SIGKILL): out of memory, most "
-                                  "likely (the OOM killer)") from e
+                if kills is None or platform.oom_kills() != kills:      # the OOM killer's (no count read: most likely)
+                    raise StartFailed("memory", "the engine was killed (SIGKILL) while starting: out of memory") from e
+                raise RuntimeError("the engine was killed (SIGKILL) while starting, not by the OOM killer") from e
             raise
         ready = engine.client.ready
         if "plan_id" in ready:

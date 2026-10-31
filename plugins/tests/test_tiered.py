@@ -15,8 +15,9 @@ def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch
     """Unaligned extents in any order, adjacent, overlapping a window's end, larger than a window (read a window at a
     time), at the file's end, from two files."""
     monkeypatch.setattr(files, "WINDOW", 3 * files.ALIGN)
-    sizes, real = [], os.preadv
+    sizes, real, maps, real_map = [], os.preadv, [], files.mmap.mmap
     monkeypatch.setattr(files.os, "preadv", lambda fd, bufs, at: sizes.append(bufs[0].nbytes) or real(fd, bufs, at))
+    monkeypatch.setattr(files.mmap, "mmap", lambda *a, **k: maps.append(k.get("flags")) or real_map(*a, **k))
     data = {p: np.random.default_rng(i).integers(0, 256, 9 * files.ALIGN + 77, dtype=np.uint8)
             for i, p in enumerate((tmp_path / "a", tmp_path / "b"))}
     for p, d in data.items():
@@ -27,7 +28,7 @@ def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch
     files.read(jobs)
     for extent, dst in jobs:
         assert np.array_equal(dst, data[type(tmp_path)(extent.path)][extent.offset:extent.offset + extent.nbytes])
-    assert max(sizes) <= files.WINDOW + files.ALIGN
+    assert max(sizes) <= files.WINDOW + files.ALIGN and set(maps) == {files.mmap.MAP_PRIVATE}     # (anon, not shmem)
     assert os.O_DIRECT                                      # the reader asks for it (Linux)
     with pytest.raises(ValueError, match=r"shape \(10, 10\)"):    # windows slice a destination by bytes: 1-D only
         files.read([(Extent(str(tmp_path / "a"), 0, 100), np.zeros((10, 10), dtype=np.uint8))])

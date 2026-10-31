@@ -52,8 +52,8 @@ def test_a_tail_store_lends_its_streaming_steps_their_activations(gpu_moe):
     file, prompts, want = gpu_moe
     peaks, measure = [], platform.peak_memory
 
-    def peak_memory(device, fn, out=None):
-        peaks.append(measure(device, fn, out))
+    def peak_memory(device, fn):
+        peaks.append(measure(device, fn))
         return peaks[-1]
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail", "moe.lend_peak": "on"}
     with mock.patch.object(platform, "peak_memory", peak_memory):
@@ -491,7 +491,7 @@ def test_exclusive_tier_steps_fit_the_profiled_reserve(request, passes):
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     with stack, mock.patch.object(platform, "peak_memory",
-                                  lambda device, fn, out=None: peaks.append(measure(device, fn, out)) or peaks[-1]):
+                                  lambda device, fn: peaks.append(measure(device, fn)) or peaks[-1]):
         engine = _gpu_engine(file, host_memory=1 << (29 if two else 28), plugin_options=opts, **long)
         store, reserve, gen = engine.ctx.shared_objects[KEY], peaks[-1], torch.Generator().manual_seed(3)
         _reserve_steps(engine, store, reserve, gen, 1300 if two else 300)

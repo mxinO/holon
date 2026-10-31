@@ -62,7 +62,8 @@ def _open(path: str) -> tuple[int, bool]:
 
 def _read_window(fd: int, direct: bool, path: str, lo: int, pieces: list[tuple[Extent, np.ndarray]]) -> None:
     hi = _up(max(e.offset + e.nbytes for e, _ in pieces))
-    with mmap.mmap(-1, hi - lo) as buf:          # page-aligned, as O_DIRECT needs
+    # page-aligned, as O_DIRECT needs; private: anon pages, not shared memory (which a host without swap cannot reclaim)
+    with mmap.mmap(-1, hi - lo, flags=mmap.MAP_PRIVATE) as buf:
         data = np.frombuffer(buf, dtype=np.uint8)
         try:
             got = 0

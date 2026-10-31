@@ -514,4 +514,7 @@ def main(argv: list[str] | None = None) -> None:
         finally:
             await supervisor.close()
 
-    asyncio.run(run())
+    try:
+        asyncio.run(run())                                    # (Ctrl-C cancels `run`: its `finally`s stop the engine)
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None

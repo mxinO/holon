@@ -1,6 +1,7 @@
 """Device abstraction (design §8). The only place in the core allowed to touch `torch.cuda` (invariant 6)."""
 from __future__ import annotations
 
+import contextlib
 import mmap
 import os
 import pathlib
@@ -90,12 +91,11 @@ def free_memory(device: torch.device) -> int:
     return torch.cuda.mem_get_info(device)[0]
 
 
-def peak_memory(device: torch.device, fn: Callable[[], object], out: dict | None = None) -> int:
+def peak_memory(device: torch.device, fn: Callable[[], object]) -> int:
     """Peak bytes `fn()` takes on `device` beyond what it held before: its allocations' peak, or what the caching
     allocator maps for them where that is more — its segments' rounding and the holes its blocks leave (allocations
     alone left an RTX 5090 at --memory-fraction 0.99 with 3 MiB free after 32K-token steps). It returns cached,
-    unused blocks to the driver first, as `reserved_growth` does, so the growth is measured from a clean cache. With
-    `out`, `out["overshoot"]`: what the allocator reserved beyond the peak returned (none: the peak counts it)."""
+    unused blocks to the driver first, as `reserved_growth` does, so the growth is measured from a clean cache."""
     _cuda(device, "peak memory")
     synchronize(device)
     torch.cuda.empty_cache()
@@ -104,10 +104,7 @@ def peak_memory(device: torch.device, fn: Callable[[], object], out: dict | None
     fn()
     synchronize(device)
     grown = torch.cuda.max_memory_reserved(device) - reserved
-    peak = max(torch.cuda.max_memory_allocated(device) - allocated, grown)
-    if out is not None:
-        out["overshoot"] = max(0, grown - peak)
-    return peak
+    return max(torch.cuda.max_memory_allocated(device) - allocated, grown)
 
 
 def gpu_shared(device: torch.device) -> str | None:
@@ -132,18 +129,18 @@ def host_ram(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> tuple[int, 
     """(available, total, what limits it): the lesser of `MemAvailable` and, for this process's cgroup (v2) and each
     ancestor with a limit, the limit less what it holds besides clean file pages; total the lesser of `MemTotal` and
     the lowest limit (docs/dev/v1-auto-config.md D1). Under cgroup v1, `MemAvailable` alone."""
-    read = lambda f: pathlib.Path(f).read_text() if os.path.exists(f) else ""      # noqa: E731
-    info = {k: int(v.split()[0]) << 10 for k, v in (ln.split(":", 1) for ln in read(f"{proc}/meminfo").splitlines())}
-    available, total, why, groups = info["MemAvailable"], info["MemTotal"], "meminfo", read(f"{proc}/self/cgroup")
+    info = {k: int(v.split()[0]) << 10 for k, v in (ln.split(":", 1) for ln in _read(f"{proc}/meminfo").splitlines())}
+    available, total, why = info["MemAvailable"], info["MemTotal"], "meminfo"
+    groups, own = _cgroup(proc, cgroup)
     if ":memory:" in groups:
         return available, total, "meminfo; cgroup v1 limits not read: --host-memory sets them"
     root, found = pathlib.Path(cgroup), (available, total, why)
-    path = root / next((ln[3:].lstrip("/") for ln in groups.splitlines() if ln.startswith("0::")), "")
     try:
-        for d in (path if path.is_dir() else root, *path.parents):   # a container's own cgroup is its mount's root
-            if limits := [int(v) for f in ("max", "high") if (v := read(d / f"memory.{f}").strip()) not in ("", "max")]:
-                stat = {k: int(v) for k, v in (ln.split() for ln in read(d / "memory.stat").splitlines())}
-                free = min(limits) - int(read(d / "memory.current")) + sum(stat.get(k, 0) * s for k, s in (
+        for d in (own, *own.parents):
+            if limits := [int(v) for f in ("max", "high")
+                          if (v := _read(d / f"memory.{f}").strip()) not in ("", "max")]:
+                stat = {k: int(v) for k, v in (ln.split() for ln in _read(d / "memory.stat").splitlines())}
+                free = min(limits) - int(_read(d / "memory.current")) + sum(stat.get(k, 0) * s for k, s in (
                     ("active_file", 1), ("inactive_file", 1), ("file_dirty", -1), ("file_writeback", -1)))
                 binds = free < found[0]
                 found = (max(0, min(found[0], free)), min(found[1], *limits),
@@ -153,6 +150,29 @@ def host_ram(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> tuple[int, 
     except (OSError, ValueError) as e:             # unreadable: what meminfo says, and why
         return available, total, f"meminfo; cgroup not read ({e}): --host-memory sets a limit"
     return found
+
+
+def oom_kills(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> int | None:
+    """Processes the OOM killer has killed in this process's cgroup and below (v2 `memory.events`, v1
+    `memory.oom_control`); None where neither can be read."""
+    groups, own = _cgroup(proc, cgroup)
+    v1 = next((ln.split(":", 2)[2] for ln in groups.splitlines() if ":memory:" in ln), None)
+    with contextlib.suppress(OSError, ValueError):
+        text = _read(pathlib.Path(cgroup, "memory", v1.lstrip("/"), "memory.oom_control") if v1 else
+                     own / "memory.events")
+        return next((int(ln.split()[1]) for ln in text.splitlines() if ln.startswith("oom_kill ")), None)
+    return None
+
+
+def _cgroup(proc: str, cgroup: str) -> tuple[str, pathlib.Path]:
+    """`/proc/self/cgroup` and this process's cgroup (v2) directory: a container's own cgroup is its mount's root."""
+    groups, root = _read(f"{proc}/self/cgroup"), pathlib.Path(cgroup)
+    path = root / next((ln[3:].lstrip("/") for ln in groups.splitlines() if ln.startswith("0::")), "")
+    return groups, path if path.is_dir() else root
+
+
+def _read(f) -> str:
+    return pathlib.Path(f).read_text() if os.path.exists(f) else ""
 
 
 def host_headroom(total: int) -> int:
