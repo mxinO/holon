@@ -550,7 +550,7 @@ def test_rows_on_the_ssd_read_what_the_host_holds(ctx, tmp_path):
     worker = shared["cpu_task.io"]
     worker.before_materialize(ssd)
     worker.after_materialize(ssd)
-    errors = shared["tiered.rows.t.ssd.errors"]
+    file = shared["tiered.rows.t.ssd.file"]
     want = dequantize("iq4_nl", blocks)
     try:
         ids = torch.tensor([0, OUT - 1, 5, 5, 123], device="cuda")
@@ -569,12 +569,12 @@ def test_rows_on_the_ssd_read_what_the_host_holds(ctx, tmp_path):
         with mock.patch.object(tiered_rows._Reads, "plant", 1):        # (not the last row: past the file's end)
             assert not same_bits(table(ids[2:]), want[ids[2:]])
         torch.cuda.synchronize()
-        assert int(errors.word[0]) == 0
+        assert int(worker.errors[0]) == 0
         with pytest.raises(ValueError, match="past the SSD read list"):
             table(torch.zeros(17, dtype=torch.int64, device="cuda"))
     finally:
         worker.shutdown()
-        errors.shutdown()
+        file.shutdown()
 
 
 @pytest.mark.model

@@ -59,7 +59,6 @@ class CpuShare:
             self.hidden = hidden
             self.task = ctx.select_kernel(kernels.CPU_TASK, site="std.moe.cpu", pool="compute").impl(ctx,
                                                                                                     pool="compute")
-            self.store.watch(self.task.errors)             # the worker's error word: checked at each commit
             facts = {"hidden": hidden, "top_k": self.top_k, "dtype": str(ctx.dtype).removeprefix("torch.")}
             self.patch = ctx.select_kernel(kernels.MOE_PATCH_ROWS, site="std.moe.cpu", **facts).impl(ctx, **facts)
         elif hidden != self.hidden:
