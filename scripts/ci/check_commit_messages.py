@@ -3,14 +3,19 @@
 lists the user branch prefix (`<user>/`), so branch names stay out of history: merges take a neutral message. The
 prefix lives there, not here, for the same reason. GitHub CI has no `.private-patterns`, so it checks the tracked
 patterns only; the full set runs where the file is, after a merge and before the push. Usage:
-`check_commit_messages.py [base-ref]`; skipped when the base is unknown (a shallow clone)."""
+`check_commit_messages.py [base-ref]`; skipped when the base is unknown (a shallow clone). No commit names an AI
+agent as a co-author (a `Co-Authored-By:` trailer naming one)."""
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 
 from _common import ROOT, fail
 from check_private import patterns
+
+AI_COAUTHOR = re.compile(r"^\s*co-authored-by:.*\b(claude|anthropic|codex|openai|copilot|chatgpt|gpt-\d|gemini)\b",
+                         re.I)                                  # the owner: no AI agent as a co-author
 
 
 def main() -> None:
@@ -24,9 +29,9 @@ def main() -> None:
     for entry in filter(str.strip, log.split("\x01")):
         sha, _, body = entry.strip().partition("\x00")
         msgs += [f"{sha[:12]}:{i}: {m.group(0)!r}" for i, line in enumerate(body.splitlines(), 1)
-                 if (m := pat.search(line))]
+                 if (m := pat.search(line) or AI_COAUTHOR.search(line))]
     fail(msgs[:40] + ([f"… {len(msgs) - 40} more"] if len(msgs) > 40 else []),
-         f"no private details in commit messages ({base}..HEAD)")
+         f"no private details or AI co-authors in commit messages ({base}..HEAD)")
 
 
 if __name__ == "__main__":
