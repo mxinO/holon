@@ -409,7 +409,7 @@ the owner.
 | 9.4 | Doomed first build (from the budget line to the refusal) | 58.9 s | 50.9 s | under 60 s: no memo (§10 Q3) |
 | 9.4 | Spill cost at 1K / 4K / 32K (local SSD against RAM), prefill / decode | 60.1 / 71.3 / 71.3%, 2.0 / 2.0 / 1.8% | 65.8 / 80.1 / 80.9%, 3.2 / 3.1 / 2.4% | reported. The spill note's RTX 5090 figures (−16 / −26% prefill, from an earlier I/O worker) were stale: the note takes these since the close |
 
-**The OOM fix** (`mxinO/ac-oom`, merged before `067da0cf`). At `e0e1e518`, Flash-Next was OOM-killed four times
+**The OOM fix** (its own branch, merged before `067da0cf`). At `e0e1e518`, Flash-Next was OOM-killed four times
 under a 64 GiB cap (network storage and local SSD alike) and under 41 GiB, with no refusal and no spill. Two causes,
 both on the PLE table's load path:
 1. `std.tiered.files.read` gave a 26.8 GiB extent one bounce window. That window was an anonymous shared map, so the
