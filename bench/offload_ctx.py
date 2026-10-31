@@ -390,7 +390,7 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
 
     import torch
     from holon.api import SamplingParams
-    from holon.core.cli import engine_flags, engine_settings, host_budget
+    from holon.core.cli import engine_flags, engine_settings
     from holon.core.engine import Engine, EngineConfig
 
     # `--auto` in an arm's flags: the values `holon serve` derives (docs/dev/v1-auto-config.md P2) where no flag gives
@@ -400,6 +400,8 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     engine_flags(flags, given_only=True)
     given = engine_settings(flags.parse_args([w for w in words if w != "--auto"]))
     if "--auto" in words:
+        from holon.core.cli import host_budget  # (a tree before auto-config has none)
+
         budget = host_budget(given)
         given = {"clamp_context": True, "memory_fraction": 0.0} | (
             {"host_memory": budget} if budget is not None else {}) | given
