@@ -100,3 +100,61 @@ GLM's RAM-adapt task propagates them; this branch propagates nothing.
   Existing tests updated: the two match patterns above, and F3.3's window test checks the map's flags.
 - The default suite runs on an RTX A5000, then again with `CUDA_VISIBLE_DEVICES=` (CPU CI's terms). Scratch goes to
   `local/tmp/fail-stop/`.
+
+## As built (the panel's notes, A and B on 2df368a3)
+
+**F1:**
+- **Contract:** `cpu_task@1` stays `@1`, its text rewritten in place (B's option b; no lock pins it). The stop at
+  the commit is the provider's duty. One word per worker kind and engine is shared by auxiliary models' instances.
+  Consumers may read the word, never need to watch it, and cannot recover from a bit. Both providers meet the duty:
+  `kernels.cpu_task` raises at the commit, and the oracle `std.moe.reference.cpu_task` runs each task synchronously.
+- **Sticky word (A):** the word is zeroed once, at the first step served (the first `before_launch`, after the
+  start's profile and graph warm-ups), and never again. A bit a side stream sets after a step's snapshot is caught at
+  a later commit, never zeroed away.
+- **Attribution (A, optional) is not built.** The message names the worker and the bits; naming the failing slot
+  needs the native worker to record it.
+
+**F2:**
+- **One release path (A, B):** `Engine._release()` serves both `close` (after its drain) and a start refused
+  part-built (`__init__` runs `_build`, then `_release` on any exception). It:
+  - synchronizes the device;
+  - shuts down the processor and the shared objects, then closes the tier, each error kept and the rest still run;
+  - drops the executor, the processor, the tier and the shared objects;
+  - frees the pools, collects, and releases the allocator's cache.
+  `ctx`, `processor`, `tier` and `executor` have class-level `None` defaults.
+- **The leak's holders:**
+  - The move thread holds the store, and through it the build.
+  - A second holder kept the pinned pools past `gc.collect()`. `platform.device_alias` made a class per call, and
+    that class kept the last alias's host memory alive until the next one was made. That holder was also behind
+    `cpu_task.io`'s 832-byte word pool, which outlived a normal `close`. The alias's interface is now a
+    `SimpleNamespace`, and both are fixed: after a refused start and after a `close`, no pinned region stays alive.
+- **Bounds on the release path (A):** every shutdown on it ends without waiting on another party:
+  - the `cpu_task` workers at `cpu_task.timeout`; a coordinator past it is left behind, as at `close`;
+  - the move thread once its submitted copies are done;
+  - the grammar watchdog's join at 5 s;
+  - the state tier's I/O threads once their queued reads and writes end.
+  No new bound is added.
+- **Test:** it measures after the refusal's exception is discarded. No pinned region stays alive, VRAM is no higher
+  than before the start, and no `moe.move` thread remains.
+
+**F3:**
+- **F3.1:** no logger. A refusal ("memory", "plugin") prints its reason only (the engine exits with status 1); an
+  "error" keeps its traceback on stderr.
+- **F3.4:**
+  - The count is read from the engine's own cgroup and below: v2's `memory.events`, or v1's
+    `memory.oom_control`, under the v1 memory mount.
+  - It shares `_cgroup()` with `host_ram`.
+  - When the count cannot be read, the kind stays "memory".
+- **F3.5:** `peak_memory`'s overshoot is removed. `grown - max(allocated peak, grown)` is 0 by arithmetic, so the
+  measurement went too: the `out` dict, the slack's term and the note's "allocator" term. The slack is the reserve,
+  at most the 10%, and nothing moves.
+
+**Core lines:** the build is +34 (5,230 → 5,264):
+
+| Module | Lines | What |
+|---|---|---|
+| `engine` | +13 | the shared `_release` |
+| `platform` | +13 | `oom_kills` and `_cgroup`, less the overshoot |
+| `ipc` | +6 | |
+| `cli` | +3 | |
+| `executor` | −1 | |
