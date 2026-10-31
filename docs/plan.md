@@ -711,8 +711,9 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   | 6 | Locks: none of its own. The release branch's round advanced all 27 locks |
 
   Owner decisions (2026-10-31):
-  - **No swap:** waived for the merge. These nodes have no swap, so it is unverified; Holon never relies on swap, and the
-    capped runs hold the budget with no OOM kill. A run on a host with swap is a follow-up.
+  - **No swap:** not a criterion. Large-memory PCs usually run without swap, so Holon never relies on it: what does not
+    fit in RAM goes to disk directly (the SSD tier, read from the checkpoint). The capped runs hold the budget with no
+    OOM kill.
   - **Core +211 lines** (5,230 / 6,000): accepted.
   - **The 1 GiB reserve** on a shared or display card (256 MiB on a headless one): accepted.
   - **The doomed-build memo:** not added. The measured doomed build is 58.9 s on the RTX 5080 and 50.9 s on the

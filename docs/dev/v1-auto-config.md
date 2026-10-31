@@ -386,8 +386,9 @@ The tree each row was measured on is given beside it: `e0e1e518` is the release 
 the release head with every lock current; rows without a tree ran at `067da0cf`. The runs used one RTX 5080 or
 RTX 5090 desktop per job, and each RAM test ran in its own capped step (cgroup v2, `memory.high` = `memory.max`).
 **These nodes have no swap.** The no-swap criterion is recorded as "no swap on these nodes", not passed; the owner
-waived it for the merge (2026-10-31): Holon never relies on swap (its own overflow is the SSD tier, read from the
-checkpoint), and the capped runs show the budget holds with no OOM kill. A run on a host with swap stays a follow-up.
+dropped it (2026-10-31): large-memory PCs usually run without swap, so Holon never relies on it; what does not fit in
+RAM goes to disk directly (the SSD tier, read from the checkpoint). The capped runs show the budget holds with no OOM
+kill.
 
 | § | Test | RTX 5080 | RTX 5090 | Verdict |
 |---|---|---|---|---|
