@@ -299,6 +299,14 @@ the error path and the regex over the weight source's display string. What broug
 the code review asked to add: the lock on explicit serves and restarts, per-entry admission with the cap lowered for
 an entry that never ran, the unreadable-cgroup fallback, and the "unknown" reserve without NVML (≈ +20).
 
+**The OOM fix (after acceptance, on the release branch; A cleared it): +11 → 5,230 / 6,000.** Flash-Next under a hard
+64 GiB cap was OOM-killed at its start instead of refused or spilled: the PLE table's 26.8 GiB extent went through one
+shared-memory bounce buffer as large (unreclaimable without swap), and a 320M-row host pool's free list and refcounts
+took ≈ 12 GiB of Python objects outside the host budget. Fixed: `std.tiered`'s `files.read` reads an extent a window
+at a time (no core lines); a pool's free list and refcounts are built on first use (`memory.py`, +7); an engine
+SIGKILLed while starting is a memory failure, so the supervisor rolls back to the spill and the refusal names the
+shortfall (`ipc.py`, +4).
+
 - The ABI gains only additions, so the bump is minor (1.5 → 1.6).
 - `nvidia-ml-py` becomes core's fifth dependency (B-R1).
 
@@ -328,7 +336,7 @@ holon: host memory: budget <B> GiB = available <A> − kept free 6.0 GiB (max 6 
 holon: GPU memory: state pools <S> GiB = free <F> − peak <K> − slack <L> (allocator <O> + reserve 0.25 GiB, headless)
 holon: routing profile: shipped (profile_x4_gate.json)
 holon: start failed (memory): host memory <B> GiB too small: plugin.tiered.pinned.… needs …, <L> GiB left
-holon: retrying the lock with rows.place=ple:ssd,token_embd:host (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −16/−26% at 1K/4K, MTP decode −6/−7% (RTX 5090)
+holon: retrying the lock with rows.place=ple:ssd,token_embd:host (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −66/−80/−81% at 1K/4K/32K, decode −2 to −3% (RTX 5090)
 holon: WARNING: mtp.path mtp-q2_0@a22206a4d74eafbf unavailable (not in ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/; serving without the MTP head costs 24–37% of decode (measured on an RTX 5080 and 5090). Strata's public tools make it …): speculation off
 ```
 
@@ -399,7 +407,7 @@ the owner.
 | 9.4 | Flash-Next, 41 GiB, local SSD | lock refused at 49 s, spilled, serves at 98 s, peak 38.2 GiB, 0 OOM | — | pass (the spill fits the 34.1 GiB budget) |
 | 9.4 | Flash-Next, 96 GiB with 10 GiB used elsewhere | — | serves on its lock (budget 79.1 GiB), peak 90.7 GiB, 0 OOM | pass |
 | 9.4 | Doomed first build (from the budget line to the refusal) | 58.9 s | 50.9 s | under 60 s: no memo (§10 Q3) |
-| 9.4 | Spill cost at 1K / 4K / 32K (local SSD against RAM), prefill / decode | 60.1 / 71.3 / 71.3%, 2.0 / 2.0 / 1.8% | 65.8 / 80.1 / 80.9%, 3.2 / 3.1 / 2.4% | reported. The spill note's RTX 5090 figures (−16 / −26% prefill, from an earlier I/O worker) are stale |
+| 9.4 | Spill cost at 1K / 4K / 32K (local SSD against RAM), prefill / decode | 60.1 / 71.3 / 71.3%, 2.0 / 2.0 / 1.8% | 65.8 / 80.1 / 80.9%, 3.2 / 3.1 / 2.4% | reported. The spill note's RTX 5090 figures (−16 / −26% prefill, from an earlier I/O worker) were stale: the note takes these since the close |
 
 **The OOM fix** (`mxinO/ac-oom`, merged before `067da0cf`). At `e0e1e518`, Flash-Next was OOM-killed four times
 under a 64 GiB cap (network storage and local SSD alike) and under 41 GiB, with no refusal and no spill. Two causes,
@@ -479,7 +487,7 @@ from 195 to 136 s.
 | A-R2 the tier's `except Exception` | **Fixed:** narrowed to `OutOfUnits`, re-raised as `OutOfUnits` |
 | A-R2 the speculation-off fallback on both entries | **Fixed** (D5) |
 | A-R2 / C-N1 "shared" counts Holon's own processes; PID namespaces; arm64 | **Fixed** (D2): own PID and parent excluded, only visible PIDs, no NVML → headless with a log line; §9.1 asserts `headless` |
-| B-R1 core lines | **Taken in shape;** as built +218 with the later asks (§4); `nvidia-ml-py` named |
+| B-R1 core lines | **Taken in shape;** as built +201 with the later asks (§4), +11 with the OOM fix (5,230); `nvidia-ml-py` named |
 | B-R2 cgroup v2 only | **Taken:** v1 logs and falls back to `MemAvailable` |
 | B-R3 storage in the plugin; offer unless `hdd` / `network` | **Taken** (D1 step 2) |
 | B-R4 reading and `flock` in the CLI | **Taken:** no IPC carry; the budget is a plain int in every entry |

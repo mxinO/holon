@@ -5,6 +5,7 @@
  "final_table": {
   "method": "bench/offload_ctx.py, batch 1, 8 natural-text prompts a context x 256 greedy tokens, a warm-up then 5 rounds, arms interleaved and reversed on odd rounds; per round an arm's median (mean) over a cell's requests over Maya's default arm's; the median of the rounds",
   "commit": "db5ed4fb (the RTX 5090 lock 3.lock) with the bench of 4b048aee; one capped RTX 5090 desktop",
+  "shipped_lock": "3.lock stands for the shipped 4.lock: its snapshot trace byte-identical, the change between them startup-only (core pools built on first use, extents read a window at a time; GLM's extents are at most 4 MiB, under a window)",
   "maya": "v1.1.27, default settings (mode (ii): MAYA_GLM_RAM_GB 50)",
   "mode_i": {
    "holon": "the RTX 5090 lock's flags + --auto (auto-config's host and GPU values)",
@@ -115,7 +116,7 @@
    }
   },
   "mode_ii": {
-   "holon": "mode (ii)'s flags (the D8x record's, moe.copy_beside now on by construction), both engines under one enforced 64 GiB job step: a 64 GB host",
+   "holon": "mode (ii)'s flags (the D8x record's, moe.copy_beside now on by construction): the spill's options entered by hand with a fixed --memory-fraction 0.99 and --host-memory 59 GB, not through the spill and auto-config (on this headless card about the same VRAM; a display-driving card reserves about 0.7 GiB more, about 100 fewer VRAM experts); both engines under one enforced 64 GiB job step: a 64 GB host",
    "rounds": 5,
    "tok_s_median": {
     "holon_mode2_64g": {
@@ -372,7 +373,7 @@
     ]
    }
   },
-  "d": "not rerun (the coordinator's call): since step 5 the decode path changed only by copies and placement (expert_fetch's strided dst, k_tiers, k_promote); the sparse quantize's dense instance is identical, its sparse instance runs only in D8g's prefill parts"
+  "d": "not rerun at the close: last run at step 7 after the DSA attend's 3-dot chunked form, a decode numerics change (Holon 69, Maya 69 of 72); since then the decode path changed only by copies and placement (expert_fetch's strided dst, k_tiers, k_promote); the sparse quantize's dense instance is identical, its sparse instance runs only in D8g's prefill parts"
  },
  "vs_main": {
   "method": "release (e4a13c07) against main (75d73fc2), each tree in its own environment, the locks' deployments, a discarded warm-up then rounds reversed on odd rounds; release / main",
@@ -586,23 +587,46 @@
      "why": "trace byte-identical; the activation_loan@1 site every real start selects, recorded once propagate measured a lending deployment's pools (ee532511)",
      "commit": "067da0cf"
     }
+   },
+   {
+    "after": "the spill note's change (models.glm5_next)",
+    "advanced_byte_identical": 2,
+    "commit": "fbc68dfd"
+   },
+   {
+    "after": "the PLE spill note's change (models.qwen4_exp)",
+    "advanced_byte_identical": 2,
+    "commit": "b976fae6"
    }
   ],
-  "heads_current": "27 of 27 head locks pin the current src of every unit"
+  "heads_current": "27 of 27 head locks pin the current src of every unit (after b976fae6)"
  },
  "tests": {
   "default_run_s": {
-   "main": 282.0,
-   "release": 315.2,
-   "ratio": 1.118,
-   "how": "4 workers, --dist loadfile, the same host back to back"
+   "main": 283.0,
+   "release": 301.5,
+   "ratio": 1.065,
+   "how": "4 workers, --dist loadfile, the same host back to back, at 20ef0e92"
   },
   "before_split_s": {
    "main": 303.3,
    "release": 479.4
   },
   "full_suite": "2,061 passed, 139 skipped (-m \"\", 8 GPUs)",
-  "shortfall": "acceptance 8 (<= +5%): accepted by the coordinator; GLM's clean controls of the exclusive-tier store and the new KDA / DSA kernel tests"
+  "shortfall": "acceptance 8 (<= +5%): +6.5%, accepted by the coordinator; GLM's clean controls of the exclusive-tier store and the new KDA / DSA kernel tests"
  },
- "conformance": "docs/dev/evidence/conformance_glm-5.3-flash-maya-s-v2-iq2_xxs-500_rtx-5090_2026-10-31.json (the release tree's rerun)"
+ "conformance": {
+  "record": "docs/dev/evidence/conformance_glm-5.3-flash-maya-s-v2-iq2_xxs-500_rtx-5090_2026-10-31.json",
+  "accepted": "307 of 500",
+  "constrained": {
+   "valid": 283,
+   "invalid": 0,
+   "truncated_share": 0.0782
+  },
+  "unconstrained": {
+   "conformance": 0.455,
+   "judged": 411,
+   "truncated_share": 0.1697
+  }
+ }
 }

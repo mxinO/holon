@@ -679,13 +679,13 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   | # | Result |
   |---|---|
   | 1 | GLM-5.3-Flash (`models.glm5_next`, text only, Maya's GGUF: MLA + the DSA indexer, KDA, mHC, the SwiGLU clamp) on 32 GB (RTX 5090) and 16 GB (RTX 5080, mode (i)); its MTP head unused (D7) |
-  | 2 | Accuracy by the owner's method: the tiny model against HF on the CPU and its Q8_0 copy on the GPU; GPU self-consistency (c), the cover (f) and 72 hard items (d: Holon 69, Maya 69, the RTX 5090); the locks pass L2 in its reference form (D15a: the RTX PRO 6000's bf16 references). On the shipped tree: (c) passes on both cards (KL mean 0.056–0.060, p50 0.0043–0.0048), (f) passes on both; (d) not rerun (since step 5 the decode path changed only by copies and placement) |
+  | 2 | Accuracy by the owner's method: the tiny model against HF on the CPU and its Q8_0 copy on the GPU; GPU self-consistency (c), the cover (f) and 72 hard items (d: Holon 69, Maya 69, the RTX 5090); the locks pass L2 in its reference form (D15a: the RTX PRO 6000's bf16 references). On the shipped tree: (c) passes on both cards (KL mean 0.056–0.060, p50 0.0043–0.0048), (f) passes on both; (d) last run at step 7 after the DSA attend's 3-dot chunked form, a decode numerics change (69 / 72 each); since then the decode path changed only by copies and placement |
   | 3 | Exact within a card (acceptance 2 as restated, owner Q13): run-identical ×3 and byte-identical across fits, policies, lending, the ring and RAM short; the offload store against all-resident on the RTX PRO 6000; across cards a KL reference only. On the shipped tree: both locks run-identical ×3, and on the RTX 5090 mode (ii) as the spill gives it byte-identical to the lock (2,157 steps) |
   | 4 | Bars vs Project Maya v1.1.27 (D11, RTX 5090, 1K / 4K / 32K, 5 rounds): mode (i) decode 1.178 / 1.106 / 1.052, prefill 1.077 / 1.017 / 1.074; mode (ii) at a 64 GB host (64 GiB enforced for both engines) decode 1.040 (0.985) / **0.982 / 0.923** (0.897), prefill 1.096 / 1.025 / 1.248 (medians of the rounds; means in parentheses). Against Maya's checkpoints-off arm (its faster 32K prefill, earlier sessions: not the same session) 32K prefill ≈ 0.99 / ≈ 0.94. **Shortfall:** mode (ii)'s decode after a long prompt — its first 32 tokens read from the SSD the experts the prompt displaced from RAM, where Maya's one-pass borrow leaves part of it empty and displaces fewer |
   | 5 | Memory: the RTX 5090 at 33,792 tokens with 32K steps in both modes (mode (ii) under an enforced 64 GiB step); the RTX 5080 at 33,792 in mode (i), 8K steps without a loan |
-  | 6 | Core: +1 code line and 2 changed (`platform.peak_memory`, owner 2026-10-26); ABI 1.5 kept; 5,219 / 6,000 with auto-config |
-  | 7 | Locks: `rtx-5090` and `rtx-5080` (`tune --new-model`; the grammar processor); mode (ii) is the GLM spill on the RTX 5090 lock (`models/glm5_next/deploy.py`), not a lock; every other lock propagated once at the close, byte-identical, and the RTX 5090 lock approved once for its loan options |
-  | 8 | Tests: **shortfall, accepted (coordinator, 2026-10-31):** the default run 315 s against `main`'s 282 s (+11.8%, 4 workers, the same host back to back), after the MoE engine tests were split by topic, their plants made `slow` and merged onto shared models; the rest is GLM's clean controls of the exclusive-tier store (the MoE engine files 202 s of worker time against 68 s) and the new KDA / DSA kernel tests (+20 s). The full suite (`-m ""`) runs every plant: 2,061 passed |
+  | 6 | Core: GLM's +1 code line and 2 changed (`platform.peak_memory`, owner 2026-10-26); ABI 1.5 kept; 5,230 / 6,000 with auto-config and its OOM fix (+11: pool state built on first use, a startup SIGKILL classed as a memory failure; `docs/dev/v1-auto-config.md`) |
+  | 7 | Locks: `rtx-5090` and `rtx-5080` (`tune --new-model`; the grammar processor); mode (ii) is the GLM spill on the RTX 5090 lock (`plugins/holon_plugins/models/glm5_next/deploy.py`), not a lock; every other lock propagated once at the close, byte-identical, and the RTX 5090 lock approved once for its loan options |
+  | 8 | Tests: **shortfall, accepted (coordinator, 2026-10-31):** the default run 301 s against `main`'s 283 s (+6.5%, 4 workers, the same host back to back), after the MoE engine tests were split by topic, their plants made `slow` and merged onto shared models; the rest is GLM's clean controls of the exclusive-tier store (the MoE engine files 162 s of worker time against 66 s) and the new KDA / DSA kernel tests (+22 s). The full suite (`-m ""`) runs every plant: 2,061 passed |
 
   Decisions: mode (ii) ships as the spill `holon serve` takes after a start refused for host memory, not a lock
   (measured on one RTX 5090 at a 64 GB host); the loan options provisional (the measured loan rule below); MTP and K4
@@ -694,6 +694,38 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   the host heap; the exclusive tiers' I/O worker's error word unwatched (fixed at the close); GLM's signed top-k slowing
   FN's (a constexpr). Next: the follow-ups below (the measured loan rule, the spill sized from the host budget,
   `cpu_task@1` fail-stop, D8x's views).
+
+  **Auto-config status (2026-10-31): delivered with GLM's close.** `holon serve <model>` takes no hand-set
+  numbers. It derives the host budget, the GPU slack and the lock's files (routing profile, MTP pack) at start, and
+  after a refusal for host memory it falls back to a spill entry. Design and record: `docs/dev/v1-auto-config.md`
+  (rev 3, the panels' findings in §11, the §9 record). Merged with GLM on the release branch, one propagation round
+  for both.
+
+  | # | Result |
+  |---|---|
+  | 1 | Bare starts (§9.1): every model with a lock serves on its lock, with no flags, on the RTX 5080 (9 models) and the RTX 5090 (7). The cards read as headless. A missing MTP pack serves without speculation, with one warning |
+  | 2 | Speed (§9.2, §23.7's rule): the automatic arms against the hand-set ones pass 13 of 13 judged rows on the RTX 5090 and 23 of 25 on the RTX 5080. The two misses are shipped profile against `--auto` at 4K / 32K decode (0.9995 / 0.9994 ± 0.0002), from byte-identical profiles. Experts cached: 26.52% against 26.23% hand-set (RTX 5080), 48.40% against 48.07% (RTX 5090). A cold start (no profile) runs at 0.994× / 0.979× of decode. Serving without the MTP pack costs 24–37% of decode at 1K–32K |
+  | 3 | RAM (§9.3, capped steps, cgroup v2): the 27B tier shrinks to fit 18 GiB (16.0 → 11.1 GiB on both cards) and serves; under the cap, `agent_park` loses 12% of throughput and its TTFT p99 goes from 1.29 to 7.03 s (RTX 5080). The 30B offload lock starts in 32 GiB with 6 GiB used elsewhere (budget 19.1 GiB). Every run kept the lag probe within its bar. |
+  | 4 | The OOM fix (§9.4, the release head): Qwen3.8-Flash-Next was OOM-killed four times under a 64 GiB or a 41 GiB cap. The cause: a 27 GiB shared-memory bounce buffer for the PLE table, plus ≈ 12 GiB of a pool's per-unit bookkeeping outside the budget. Both are fixed. A start killed by SIGKILL now counts as a memory failure. On the RTX 5080, with no OOM kill: 64 GiB on network storage refuses once and names the shortfall; 64 GiB and 41 GiB on a local SSD spill and serve. The same holds on the RTX 5090, where 96 GiB with 10 GiB used elsewhere serves on the lock. The spill costs 60 / 71 / 71% of prefill and 2% of decode on the RTX 5080, and 66 / 80 / 81% and 2–3% on the RTX 5090 (1K / 4K / 32K). The spill note's older RTX 5090 figures (−16 / −26%) are stale |
+  | 5 | Core: ABI 1.6 (`Spills`, `HintsSources`, `TierCtx.host_left`, `OutOfUnits` in the API); +211 code lines, 5,230 / 6,000 |
+  | 6 | Locks: none of its own. The release branch's round advanced all 27 locks |
+
+  Pending owner (the recommended default in force):
+  - **No swap:** unverified, because these nodes have no swap. Recorded as "no swap on these nodes", not passed.
+  - **Core +211 lines** (5,230 / 6,000).
+  - **The 1 GiB reserve** on a shared or display card (256 MiB on a headless one).
+  - **The doomed-build memo:** not added. The measured doomed build is 58.9 s on the RTX 5080 and 50.9 s on the
+    RTX 5090, under the 60 s threshold.
+
+  Follow-ups:
+  - the deploy slot or auto-tune library (D6's seam);
+  - a spill that sizes `moe.ram` from the host budget;
+  - the four ac-oom minors:
+    1. a refused start prints the engine's traceback before its one-line reason;
+    2. Ctrl-C ends `holon serve` with a KeyboardInterrupt traceback;
+    3. `files.read`'s bounce windows are shared anonymous maps (shmem), where private ones would read as anon;
+    4. SIGKILL at startup is taken as the OOM killer without checking the cgroup's `oom_kill` count (a user's
+       `kill -9` would also count as a memory failure).
 - **Required staging units and a short card** (panel, K's close): when the staging units are in a pool's minimum
   (a state tier's, `max_seqs` + 1), a shortfall should come out of the context instead of refusing the start. Checked
   at the close review: a served start already does (`clamp_context`: `rtx-5080/12.lock` at a 2.79 GiB state budget
@@ -824,7 +856,15 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **GLM's spill sized from the host budget** (GLM's close, the coordinator): `glm5_next`'s spill returns mode (ii) as
   measured, `moe.ram` `*=0.6238` (RAM's share of the experts for a 64 GB host) whatever the host has. It should take
   the host budget auto-config derives (a seam the spill hook does not get today) and size `moe.ram` from it, so a
-  48 GB or 80 GB host gets the share that fits it rather than the 64 GB host's.
+  48 GB or 80 GB host gets the share that fits it rather than the 64 GB host's. With it: pass the lock's class too
+  and key `MODE2` by class (today `moe.lend_peak = require` stands for the RTX 5090's lock, the only GLM lock that
+  lends: a future lock tuned with `require` on another card would get a set measured at 32 GB), and a refusal after
+  the spill keeps the measured options with a smaller share (today it falls back to std's generic hint).
+- **A start-refused exclusive-tier engine leaks its store** (GLM's close, found by the test split): the D8x move
+  thread starts in `TieredStore.after_materialize` and stops only at close, and an engine refused at its start is never
+  closed, so the thread keeps the store (≈ 190 MiB of VRAM, the pinned pools) alive in that process. `holon serve`
+  starts engines in child processes, so it never leaks there; in-process users (the judge, the benches) do. Start the
+  thread on the first move, or close the store on a failed start.
 - **RTX 3090 27B trace differs by desktop** (`c203f34`, release §19.1): the 27B lock's snapshot trace on the RTX 3090
   differs between two desktops of the same class, cause not identified; diagnose before the next 3090 propagation.
 
