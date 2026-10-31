@@ -1,6 +1,7 @@
 # v1 — Auto config: `holon serve <model>` with no hand-set numbers
 
-Status: **rev 3 (2026-10-28), built on this branch; the locks are not propagated yet (§5).** Rev 2 answered the
+Status: **rev 3 (2026-10-28), built; merged with GLM's close on `v1-glm-close`, every outdated lock propagated there,
+byte-identical (§5).** Rev 2 answered the
 three-reviewer panel on rev 1 (`ba2d2fcb`): A for correctness, B for architecture, C for performance and UX. Rev 3
 answers their re-reviews of rev 2 (`97fe7271`) and takes the coordinator's shape decisions. Every finding is answered
 in §11; the owner's questions are in §10.
@@ -138,8 +139,9 @@ headroom  = max(6 GiB, 5% of min(MemTotal, the lowest limit))
    - **The history** is `[defaults?, lock + spill, lock]`. A spill is dropped if a flag sets any of its keys.
    - **An empty options mapping** means a manual alternative: no entry is made, and the note is printed only in a
      refusal. This is how std's offload names its experts' RAM-short mode (`moe.ram`, 1.9–8.3× slower).
-   - **Storage is the hook's business (B-R3).** `models.qwen4_exp` offers `rows.place` with `ple:ssd` and
-     `cpu_task.io_threads=4` unless the checkpoint's disk is positively `hdd` or `network`.
+   - **Storage is the hook's business (B-R3).** `models.qwen4_exp` offers `rows.place` with `ple:ssd` (at the I/O
+     worker's default depth: GLM removed `cpu_task.io_threads`) unless the checkpoint's disk is positively `hdd` or
+     `network`.
      - It reads the filesystem type from `/proc/self/mountinfo` and `queue/rotational` from sysfs, following
        `slaves/` through LUKS, LVM and md to the real drives (C-N6).
      - `unknown` offers the spill and says so in the note.
@@ -306,9 +308,8 @@ an entry that never ran, the unreadable-cgroup fallback, and the "unknown" reser
   logged. D2 moves no trace, because `propagate` pins `pool_bytes`.
 - **The tier's `clamp_context` gate is off in-process,** so no lock-writing path can shrink the tier.
 - **Propagation.** The core change, std's tier and store, and `models.qwen4_exp` outdate **all 25 lock classes**.
-  They are not propagated on this branch. The coordinator schedules one combined round with GLM's close; the
-  expected verdict everywhere is "advance, byte-identical trace". Until that round lands, `main` would serve defaults
-  for these models, so the branch merges with it.
+  They were propagated in one combined round with GLM's close (`v1-glm-close`, e0e1e518: 27 locks with GLM's two,
+  every snapshot trace byte-identical over three runs, none needing L2), then again after the close's fix round.
 
 ## 6. Build steps
 
@@ -327,7 +328,7 @@ holon: host memory: budget <B> GiB = available <A> − kept free 6.0 GiB (max 6 
 holon: GPU memory: state pools <S> GiB = free <F> − peak <K> − slack <L> (allocator <O> + reserve 0.25 GiB, headless)
 holon: routing profile: shipped (profile_x4_gate.json)
 holon: start failed (memory): host memory <B> GiB too small: plugin.tiered.pinned.… needs …, <L> GiB left
-holon: retrying the lock with rows.place=ple:ssd,token_embd:host cpu_task.io_threads=4 (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −16/−26% at 1K/4K, MTP decode −6/−7% (RTX 5090)
+holon: retrying the lock with rows.place=ple:ssd,token_embd:host (spill, after a memory refusal): PLE table read from the SSD, byte-identical; prefill −16/−26% at 1K/4K, MTP decode −6/−7% (RTX 5090)
 holon: WARNING: mtp.path mtp-q2_0@a22206a4d74eafbf unavailable (not in ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/; serving without the MTP head costs ≈ 30% of decode (est.). Strata's public tools make it …): speculation off
 ```
 

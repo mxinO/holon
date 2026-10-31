@@ -965,14 +965,14 @@ def ggml_experts_stale_q8_1(every: int = 97) -> Iterator[None]:
 
     call, last, calls, fired = plugin.LinearExperts.__call__, {}, itertools.count(1), collections.Counter()
 
-    def planted(self, x, parts, ids):
+    def planted(self, x, parts, ids, **kw):                         # (`sparse=True`: D8g's parts)
         rows = x.x if isinstance(x, plugin.Prepared) else x           # a router-prepared input (step 3c)
         key = (self.k, rows.shape[1])
         prev, last[key] = last.get(key), rows.clone()
         if next(calls) % every == 0 and prev is not None and len(prev) >= len(rows):
             fired[("mmvq" if len(rows) <= self.mmvq_tokens else "mmq") + ("" if x is rows else ", prepared")] += 1
             x = prev[:len(rows)]
-        return call(self, x, parts, ids)
+        return call(self, x, parts, ids, **kw)
     with mock.patch.object(plugin.LinearExperts, "__call__", planted):
         yield
     print(f"plant ggml-experts-stale-q8_1 fired: {dict(fired)}", file=sys.stderr)
@@ -2747,9 +2747,9 @@ def keep_copy_skipped() -> Iterator[None]:
 
     rows, fired = tiered.TieredStore.round_rows, collections.Counter()
 
-    def planted(self, r):
-        rows(self, r)
-        self.io_device()[:, 1:, 2].fill_(-1)
+    def planted(self, r, half=0):                                     # (D8g's rounds: a landing half each)
+        rows(self, r, half=half)
+        self.io_device(half)[:, 1:, 2].fill_(-1)
         fired[_when()] += 1
     with mock.patch.object(tiered.TieredStore, "round_rows", planted):
         yield

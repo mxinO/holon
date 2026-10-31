@@ -47,10 +47,10 @@ def spill(options: Mapping[str, object], checkpoint: str) -> tuple[dict[str, str
     place = [p.strip() for p in str(options.get("rows.place", "")).split(",") if p.strip()]
     if "ple:host" not in place or (disk := storage(checkpoint)) in ("hdd", "network"):
         return None
-    return ({"rows.place": ",".join("ple:ssd" if p == "ple:host" else p for p in place),
-             "cpu_task.io_threads": "4"},
+    return ({"rows.place": ",".join("ple:ssd" if p == "ple:host" else p for p in place)},
             f"the PLE table read from the checkpoint ({disk} disk) instead of ≈ 27 GiB of pinned RAM, byte-identical; "
-            "prefill −16%/−26% at 1K/4K and MTP decode −6%/−7% on an RTX 5090, unmeasured on an RTX 5080")
+            "prefill −16%/−26% at 1K/4K and MTP decode −6%/−7% on an RTX 5090 (measured with an earlier I/O worker), "
+            "unmeasured on an RTX 5080")
 
 
 def source_hint(identity: str) -> str | None:

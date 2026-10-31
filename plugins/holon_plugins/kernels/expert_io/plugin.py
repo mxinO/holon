@@ -99,15 +99,14 @@ class ExpertFetch:
         self.lib = modules(ctx.fingerprint.sm)
         opts = ctx.options.get("plugins", {})
         self.ctas = int(opts.get("expert_io.fetch_ctas", 8))
-        self.beside_ctas = int(opts.get("expert_io.beside_ctas", BESIDE_CTAS))
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    beside = True                          # `(..., beside=True)`: on `expert_io.beside_ctas` CTAs (a store's moves)
+    beside = True                          # `(..., beside=True)`: on BESIDE_CTAS CTAs (a store's moves)
 
     def __call__(self, fetch, n, src, dst, runs=None, beside: bool = False) -> None:
         if runs is None:
-            self.lib.fetch(fetch, n, src, dst, self.beside_ctas if beside else 0)
+            self.lib.fetch(fetch, n, src, dst, BESIDE_CTAS if beside else 0)
         else:                                  # landing rows (docs/dev/v1-glm.md D8f): each piece's extents by its runs
             self.lib.fetch_runs(fetch, n, src, dst, runs)
 

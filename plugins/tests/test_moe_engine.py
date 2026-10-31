@@ -19,6 +19,7 @@ import torch
 from holon.api import RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
+from holon_std.moe import offload as offload_unit
 from holon_std.moe.kernels import DECODE, PADDING
 from holon_std.moe.offload import KEY
 from holon_std.moe.units import CHUNK, MoE
@@ -923,7 +924,7 @@ def _mode2(**over) -> dict:
     return {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
             "moe.placement": "placement.promote@1", "moe.ram_heat": "0.999", "moe.loan_margin": "1.12",
-            "moe.loan_largest": "0.55", "moe.split": "on", "moe.copy_beside": "on",
+            "moe.loan_largest": "0.55", "moe.split": "on",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} | over
 
 
@@ -1834,9 +1835,26 @@ def test_a_loan_takes_its_margin_its_tapered_fixed_bytes_and_a_range_its_largest
     engine.close()
 
 
+@pytest.fixture(scope="module")
+def tail_store(gpu_moe_wide, tmp_path_factory):
+    """One exclusive-tier tail store over `gpu_moe_wide`'s model requantized (GLM's shape: down pieces near a gate/up
+    piece's size), its loan at margin 1 and its largest range the whole peak; for the sizing arithmetic's cases."""
+    file, _, _ = gpu_moe_wide                    # gate/up Q4_0, down Q8_0 and Q5_0 (GLM: IQ2_XXS, IQ3_XXS and IQ2_S)
+    path = tmp_path_factory.mktemp("tail_store") / "moe.gguf"
+    write(file.parent / "hf", path, Q.Q4_0,
+          types={"0.ffn_down_exps": Q.Q8_0, "1.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q5_0})
+    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+            "moe.loan_margin": 1.0, "moe.loan_largest": 1.0}
+    engine = _gpu_engine(path, host_memory=1 << 29, plugin_options=opts)
+    yield engine
+    engine.close()
+
+
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 @pytest.mark.parametrize("pass_rows", [512, 2048, 4096, 8192, 16384])
-def test_a_tail_holds_a_loan_range_for_the_largest_allocation_at_every_pass_size(gpu_moe_wide, tmp_path, pass_rows):
+def test_a_tail_holds_a_loan_range_for_the_largest_allocation_at_every_pass_size(tail_store, pass_rows):
     """D8k (docs/dev/v1-glm.md): the tail the startup profile sizes holds one loan range of a step's largest
     allocation (`moe.loan_largest` of the profiled peak) whatever its passes' buffers, at every `ggml_cuda.pass_rows`
     choice (2 KiB a row here: 1-32 MiB beside a 30 MiB peak), and so does a lent step's share of it — on GLM's shape,
@@ -1844,14 +1862,7 @@ def test_a_tail_holds_a_loan_range_for_the_largest_allocation_at_every_pass_size
     largest range there by chance: GLM's 32K step at 8,192-row passes found none for its 2 GiB residual streams."""
     from holon_std.tiered.store import _profiled_tokens
 
-    file, _, _ = gpu_moe_wide                    # gate/up Q4_0, down Q8_0 and Q5_0 (GLM: IQ2_XXS, IQ3_XXS and IQ2_S)
-    write(file.parent / "hf", tmp_path / "moe.gguf", Q.Q4_0,
-          types={"0.ffn_down_exps": Q.Q8_0, "1.ffn_down_exps": Q.Q8_0, "ffn_down_exps": Q.Q5_0})
-    opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
-            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
-            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
-            "moe.loan_margin": 1.0, "moe.loan_largest": 1.0}
-    engine = _gpu_engine(tmp_path / "moe.gguf", host_memory=1 << 29, plugin_options=opts)
+    engine = tail_store                          # (one engine: the property is the store's sizing arithmetic)
     store = engine.ctx.shared_objects[KEY]
     tokens, peak, buffers = _profiled_tokens(engine.ctx.options), 30 << 20, pass_rows << 11
     store.tail_bytes[:] = [lambda tokens=None: buffers]
@@ -1862,7 +1873,6 @@ def test_a_tail_holds_a_loan_range_for_the_largest_allocation_at_every_pass_size
         ranges = [n_at * classes[cls].unit_bytes - buffers,
                   *(m * classes[c].unit_bytes for c, m in store._down(n_at).items())]
         assert max(ranges) >= big > 0.99 * peak, (pass_rows, n_at, ranges, big)
-    engine.close()
 
 
 @pytest.mark.slow
@@ -1878,12 +1888,12 @@ def test_a_staging_step_stages_in_rounds_through_fixed_slots(gpu_moe_wide):
     file, prompts, want = gpu_moe_wide
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
-            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
-            "moe.copy_beside": "off"}                # (D8s's own gathers; D8g's: the next test)
+            "moe.placement": "placement.promote@1", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
     for plant in (None, "round_slots_reused_early", "round_slot_shared", "part_one_role", "spare_lent_outside_tail"):
         # (the spare plant on steps that lend no tail: a tail step releases the spares before its other lending)
         tail = {"moe.ring_lend": "coldest", "moe.lend_peak": "off"} if plant == "spare_lent_outside_tail" else {}
-        with planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired:
+        with planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired, \
+                mock.patch.object(offload_unit, "BESIDE", "off"):      # (D8s's own gathers; D8g's: the next test)
             engine = _gpu_engine(file, host_memory=1 << 29, plugin_options=opts | tail)
             store, lends, rounds = engine.ctx.shared_objects[KEY], [], []
             store.taps.append(lambda step, record, lends=lends: lends.append(record["lends"])
@@ -2017,7 +2027,7 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
     opts = {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
             "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.1",
             "moe.placement": "placement.promote@1",
-            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.copy_beside": variant,
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
             "cpu_task.timeout": 30.0}               # (a bound no busy machine meets by accident: A's m2)
     load, calls = _Beside.load, []
 
@@ -2030,6 +2040,7 @@ def test_gathers_beside_the_compute_hold_their_fences(gpu_moe_wide, gpu_moe_wide
     below = tiered_store.ROUNDS_BELOW if variant == "rounds" else 0
     with (mock.patch.object(_Beside, "load", spy), mock.patch.object(tiered_store, "ROUNDS_BELOW", below),
           mock.patch.object(tiered_store, "ON_DEMAND", 4), mock.patch.object(tiered_store, "ROUND_SLOTS", 8),
+          mock.patch.object(offload_unit, "BESIDE", variant),
           _beside_delayed(late), planted.PLANTS[plant]() if plant else contextlib.nullcontext() as fired):
         engine = _gpu_engine(file, host_memory=1 << 29, max_seqs=seqs, plugin_options=opts)
         store = engine.ctx.shared_objects[KEY]

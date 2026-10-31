@@ -690,10 +690,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **A warm-up launch before `holon serve` reports ready** (panel, X's close): a pinned arena that does not fit is
   refused at its first launch (D4), which can be the first request's. Launch once before ready, with a test that an
   oversized pinned arena fails before the server reports ready.
-- **F10 with RAM short** (`docs/dev/v1-offload.md` §14, step 8): promote-on-fetch's spares are unlogged on the device, so
-  the host mirror lags them and exclusive tiers refuse F10. A std minor — a delta-log record "push b's slots onto the
-  layer's empty stack", replayed by `ResidencyMap.commit` outside borrowing steps — makes the mirror exact; it lands at
-  the start of the GLM milestone, which needs F10 with RAM short.
+- **F10 with RAM short — delivered at GLM** (`docs/dev/v1-glm.md` D8a; step 1): the spares logged (`SPARE`, `OWN`),
+  the host mirror exact, F10 serving exclusive tiers (mode (ii)'s policy).
 - **Auxiliary-model (MTP) experts through the offload store** (a std minor, in the FN milestone): the store refuses
   an aux model's experts today (`std/holon_std/moe/offload.py:61`: an MTP layer's sub-steps need their own row
   kinds); FN's MTP-on rows (Flash-Next IQ2_XS on the RTX 5080, `docs/dev/v1-offload.md` §7) need them. FN's step 6 also
@@ -703,9 +701,8 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   QSA layer's KV through pinned RAM from 64K contexts (`--kv-resident`, R §3.1 C4); FN's bars stop at 32K, where
   Strata keeps KV in VRAM. Built on `std.mixers.qsa` and X's `DeviceResolver`, reading K's host copies if K's D15
   measures that cheaper; GLM's DSA adopts it.
-- **Lending and the prefill ring under exclusive tiers** (a std minor, in the GLM milestone): with RAM short the
-  store keeps a prefill pass's staging and stages every miss (a lent expert would need a demotion first;
-  `docs/dev/v1-offload.md` §14, step 5), so RAM-short prefill is slow by design; GLM's RAM-short prefill bar needs them.
+- **Lending and the prefill ring under exclusive tiers — delivered at GLM** (`docs/dev/v1-glm.md` D8b, D8l, D8w): a
+  lent expert parked in RAM or sent to the SSD, the whole-expert tail and the activation loan under exclusive tiers.
 - **Bitwise placement invariance as a term of `linear_experts_arena@1`** (a std minor): the offload store's
   exactness rests on the provider's results being slot-, arena- and grouping-invariant, which only
   `kernels.ggml_cuda`'s L0 checks today (`docs/design.md` §6.5); written into the contract, every arena provider's
@@ -757,7 +754,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
     - deferred levers: D4's fused q8_1 store, attention at 4K steps, D6 on resident locks;
     - bench method: per-call A/Bs of sub-50 µs kernels swing ±1–8% between processes; read them over many
       interleaved rounds, or by SASS when the question is "unchanged".
-- **The measured loan rule (GLM step 5's review and step 7's borrow, B):** an optional `ActivationLender.lend_profile(peaks)` member (an additive ABI minor, a few core lines: the core hands the lender the startup profile's measured peaks by step size, the non-lending step's it keeps as the reserve among them, and each step's largest allocation) would let the store size every step's loan from measurements — its token-independent part, its share, its largest range — and delete `moe.loan_fixed_mib`, `moe.loan_taper`, `moe.loan_largest` and most of `moe.loan_margin` (the caching allocator's room for segments stays a factor). Until then those options are provisional (their help says so; `tune` does not search them), their defaults the loan they replaced.
+- **The measured loan rule (GLM step 5's review and step 7's borrow, B):** an optional `ActivationLender.lend_profile(peaks)` member (an additive ABI minor, a few core lines: the core hands the lender the startup profile's measured peaks by step size, the non-lending step's it keeps as the reserve among them, and each step's largest allocation) would let the store size every step's loan from measurements — its token-independent part, its share, its largest range — and delete `moe.loan_fixed_mib`, `moe.loan_taper`, `moe.loan_largest` and most of `moe.loan_margin` (the caching allocator's room for segments stays a factor). Until then those options are provisional (their help says so; `tune` does not search them), their defaults the loan they replaced. GLM-5.3-Flash's two RTX 5090 locks set them (`moe.loan_fixed_mib` 1024, `moe.loan_margin` 1.12, `moe.loan_taper` 8192,32768, `moe.loan_largest` 0.55): `lend_profile` takes those locks' loans as its test oracle, and they move when it lands.
 - **Providers declare the facts they know (GLM step 3's review, B):** kernel selection passes every fact to a provider's `supports`, so a provider that ignores a new additive fact is selected for a site that sets it; each GLM fact needed a refusal guard in six providers. A registry rule — a provider declares the facts it knows, selection refuses one it does not — makes additive facts safe by construction (a core change).
 - **Contract signature hashes (GLM step 1's review, B):** `check_abi.py --write` stores a short hash of each contract's signature beside its name in `contracts.txt`, so a non-additive change at the same major fails CI (today it compares names; `moe_tiers@2` was bumped by hand).
 - **Q2_0 for PyPI installs (release item, FN step 2's review):** the workspace takes gguf-py from llama.cpp's tree

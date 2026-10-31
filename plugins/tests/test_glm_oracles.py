@@ -70,3 +70,20 @@ def test_the_files_tokenizer_is_llama_cpps_and_the_models(tmp_path):
         if reference is not None:
             assert ids == reference.encode(text, add_special_tokens=False).ids, text
         assert tok.decode(ids) == text, text
+
+
+def test_the_ram_short_spill_is_mode_ii_as_measured():
+    """`holon serve`'s spill for the RTX 5090 lock (docs/dev/v1-auto-config.md D1): mode (ii)'s measured settings, each
+    an option an installed plugin declares, with a value in its choices; none for the RTX 5080's lock (mode (ii) was
+    measured on the 5090 only) or for options already setting RAM's share."""
+    from holon.core import cli
+    from holon.core.plugins import discover
+    from holon_plugins.models.glm5_next import deploy
+
+    lock = {"moe.store": "std.moe.offload@1", "moe.lend_peak": "require", "moe.ring_lend": "tail"}
+    options, note = deploy.spill(lock, "/data/glm.gguf")
+    declared = cli.declared_options(discover())
+    assert options == deploy.MODE2 and set(options) <= set(declared) and not cli.outside_choices(options, declared)
+    assert "mode (ii)" in note and "1.7–1.9×" in note
+    assert deploy.spill(lock | {"moe.lend_peak": "off"}, "/data/glm.gguf") is None             # the RTX 5080's
+    assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf") is None

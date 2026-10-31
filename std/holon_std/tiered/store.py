@@ -55,6 +55,7 @@ from .ring import ROUND_SLOTS, ROUNDS, Lent
 
 PADDING, DECODE, PREFILL = 0, 1, 2           # row kinds (std.moe.kernels, `moe_resolve@1`)
 ALIGN = 4096                                 # each class's arena starts at a multiple of it (and of the pool's unit)
+RAM_HEAT = 0.999                             # RAM's heat decay a token under exclusive tiers (`moe.ram_heat`, GLM)
 ROUNDS_BELOW = 8192                          # D8s: steps of fewer prompt tokens stage in rounds (a 32K step's
 #                                              rounds serialize its gathers, ≈ 3% of its wall time, for ≈ 0 bytes)
 ON_DEMAND = 32                               # landing rows a round of on-demand SSD reads at least (v1-glm.md D8f)
@@ -133,7 +134,7 @@ class TieredStore:
                  ring_tokens: int = 0, ring_copy: str = "sm", ring_lend: str = "coldest", stream_tokens: int = 0,
                  lend_peak: str = "off", pipeline: int = 1, policy: Ref | str = "",
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
-                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float = 0.0,
+                 ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float | None = None,
                  loan_margin: float | None = None, loan_taper: tuple[int, int] | None = None,
                  loan_largest: float = 0.0, beside: str = "on") -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
@@ -161,16 +162,17 @@ class TieredStore:
         # `ram_heat` (`moe.ram_heat`, docs/dev/v1-glm.md §7.4's lever 1, step 6): under exclusive tiers, RAM's victims —
         # for parking, keeps and demotions — by a long-memory heat of its own, decaying by this factor a decode token
         # (each routed expert of a token +1; seeded from the profile), not the policy's ≈ 12-token one: the decode after
-        # a lending prompt then reads fewer long-term-warm experts back from the SSD (0: the policy's heat)
-        if not 0.0 <= ram_heat < 1.0:
+        # a lending prompt then reads fewer long-term-warm experts back from the SSD (0: the policy's heat; None:
+        # RAM_HEAT under exclusive tiers, as measured and kept there, else 0 — decided at the tables)
+        if ram_heat is not None and not 0.0 <= ram_heat < 1.0:
             raise ValueError(f"{name}: ram_heat {ram_heat}: a decay factor a token in [0, 1)")
         self._ram_decay, self.ram_heat = ram_heat, None
-        # `beside` (`moe.copy_beside`, docs/dev/v1-glm.md D8g): under exclusive tiers an eager staging step's gathers
-        # by copy engines beside the compute — "stage" (steps of ROUNDS_BELOW prompt tokens or more), "rounds" (the
-        # smaller ones), "on" both, "off" neither; where the device's `expert_prefetch@1` copies from the host's lists
-        # with runs (`copies`, per class: the parts' instance and the SSD rounds')
+        # `beside` (std.moe.offload's BESIDE, docs/dev/v1-glm.md D8g): under exclusive tiers an eager staging step's
+        # gathers by copy engines beside the compute — "stage" (steps of ROUNDS_BELOW prompt tokens or more), "rounds"
+        # (the smaller ones), "on" both, "off" neither; where the device's `expert_prefetch@1` copies from the host's
+        # lists with runs (`copies`, per class: the parts' instance and the SSD rounds')
         if beside not in ("on", "stage", "rounds", "off"):
-            raise ValueError(f"{name}: moe.copy_beside {beside!r}: on, stage, rounds or off")
+            raise ValueError(f"{name}: beside {beside!r}: on, stage, rounds or off")
         self._beside_modes = {"on": ("stage", "rounds"), "off": ()}.get(beside, (beside,))
         self.copies: dict[str, tuple] = {}
         self.halves = 1                          # the on-demand landing halves (two under D8g: ping-pong)
@@ -319,6 +321,8 @@ class TieredStore:
             for c in self.classes.values():
                 c.held = self.tiers[0].holds(c.name, len(c.pieces))
             self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
+            if self._ram_decay is None:
+                self._ram_decay = RAM_HEAT if self.exclusive else 0.0
             ranked = self.policy.device_owned and getattr(self.policy, "heat", None) is not None
             if self.exclusive and (len(self.tiers) < 2 or not (ranked or getattr(self.policy, "frozen", False))):
                 raise NotImplementedError(f"{self.name}: RAM holds fewer pieces than the store: a slower tier must "
@@ -713,7 +717,7 @@ class TieredStore:
         for t in (self.kinds, self.n_empty, *self.zeroed, *self.state.values()):
             t.zero_()
         if self.ram_heat is not None:            # the profile's counts, scaled as tokens' (≈ half a token a piece)
-            prof = torch.as_tensor(self._profile_counts, dtype=torch.float64)
+            prof = torch.tensor(self._profile_counts, dtype=torch.float64)         # (a copy: the counts are read-only)
             self.ram_heat.copy_(prof / max(float(prof.sum()), 1.0) * prof.numel() * 0.5)
             self._ram_decay_t.fill_(self._ram_decay)
         flag = getattr(self.policy, "exclusive_flag", None)  # a policy's own flag: its resolve logs what exclusive
@@ -1904,6 +1908,7 @@ class TieredStore:
         side, and groups it does not name count zero. It only seeds the cache, so one that does not fit is warned
         about, never fatal."""
         counts = np.zeros(self.residency.host.shape[:2])
+        counts.setflags(write=False)                    # (cached: every materialize seeds from it, none writes it)
         if self._profile == "none":                     # `moe.placement.profile=none`: a cold cache, asked for
             return counts
         name = pathlib.PurePath(self._profile)
@@ -1925,8 +1930,10 @@ class TieredStore:
                 if path in named:
                     print(f"holon: {self.name}: routing profile {self._profile} not used ({e})", file=sys.stderr)
                 continue
+            counts = np.zeros(self.residency.host.shape[:2])
             for g, row in rows.items():
                 counts[g] = row
+            counts.setflags(write=False)
             print(f"holon: {self.name}: routing profile {'shipped ' * (path not in named)}{path.name}", file=sys.stderr)
             return counts
         print(f"holon: {self.name}: no routing profile for this checkpoint: the cache starts cold", file=sys.stderr)

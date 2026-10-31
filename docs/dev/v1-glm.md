@@ -1138,8 +1138,9 @@ tokens 33-256 run at 48.5 ms (D8k's probe), tokens 1-32 at 106 (§13: their SSD 
     `k_promote` and `k_settle` take (0.43 + 0.48), its predicted saving 0.4-0.5 ms (≈ 1% of a 32K token), and the
     per-call model behind it over-predicted lever 2 nine-fold (58 → 15 µs predicted, 57 → 51 measured).
 
-**D8u — Step 7: the 32K staging lends, the 1K prefill, and lending the coldest (design for the panel, not built;
-the coordinator's levers after the D8t table and the count check).** Measured on the D8t tree (§13 step 7: the capped
+**D8u — Step 7: the 32K staging lends, the 1K prefill, and lending the coldest (built and measured: (b)'s
+hottest-first pick and its never-waited guard kept, its narrow width reverted; (a) + (c) rebuilt and reverted, §13
+step 7; the coordinator's levers after the D8t table and the count check).** Measured on the D8t tree (§13 step 7: the capped
 table at 9c059bc3, the count check, the per-piece probe after D8l); replays with `lend_coldest.py` on the probe's
 recording — the target lent set swapped into the after-prompt map (a kept expert stays in VRAM; its post-prompt place
 goes to a newly lent one, a RAM place only while hotter than the hottest piece the prompt pushed out), then decode
@@ -1860,7 +1861,7 @@ that check's bound** (lead call 3, A-N2); until then the table gives the runner 
 | `promote_victim_code` | a refill victim's tier code not moved | `exact.py` RAM-short | differs |
 | `landing_reuse_unfenced` | a read-ahead signal enqueued before the reading layer's gather | `exact.py` RAM-short, a 32K prompt, the staging ring of parts | differs |
 | `ssd_slots_in_ring` | rev 8's form: SSD entries staged in ring slots the RAM parts then overwrite | `exact.py` RAM-short, a 250-token chunk with parts on, two rounds | differs |
-| `ondemand_round_unjoined` | round r + 1 of an on-demand read signalled before round r's gather on main | `exact.py` RAM-short, a 250-token chunk with parts on, the on-demand range forced small (two rounds) | differs |
+| `ondemand_round_unjoined` | round r + 1 of an on-demand read signalled before round r's gather on main | `exact.py` RAM-short, a 250-token chunk with parts on, the on-demand range forced small (two rounds) | differs (step 5; **superseded at step 7**: prompt steps take D8g's or D8s's paths, which this plant's `_tiers` no longer reaches; D8g's `landing_half_reused_early`, `io_word_stale` and `round_rows_shared` cover them) |
 | `keep_copy_skipped` | a kept extent's copy into its RAM unit dropped (the I/O worker) | the copy task's L0, the SSD bitwise runs | fails, differs |
 | `parking_unwaited` | the step's first resolve does not wait for the parking copies | the parked test's fence check | fails (structural: the tiny copies finish first) |
 | `graphed_round` | a graphed step forced past one on-demand round | the store's error word | fails |
