@@ -13,9 +13,10 @@ import pytest
 import torch
 from holon_plugins.placement.promote import reference
 from holon_std.moe.kernels import DECODE, PADDING, PREFILL
+from holon_std.moe.offload import KEY
 
+from .moe_engine_common import Q, _engine, _gguf_and_dense, _gpu_engine, _served
 from .test_expert_io import DEVICES, ROLES, E, K, _jobs, _log, _share, _stage, kernel, plugins, routing  # noqa: F401
-from .test_moe_engine import KEY, Q, _engine, _gguf_and_dense, _gpu_engine, _served, gpu_moe, tiny_moe_deep  # noqa: F401
 
 PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
 
@@ -276,7 +277,7 @@ def _parity(store, trace) -> int | None:
                 None)
 
 
-def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  # noqa: F811
+def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):
     """F10 end to end on the CPU providers, three quarters of the experts cached (each layer: 3 spares once set up),
     prompts streamed through a ring of lent slots and staged in lent slots (mixed steps too, `chunk_with_decode`):
     outputs bitwise the resident store's; the residency and empty slots the replay oracle's at every step; promotions
@@ -303,7 +304,7 @@ def test_promote_serves_the_resident_stores_outputs(tiny_moe_deep, tmp_path):  #
 
 @pytest.mark.slow
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_promote_on_the_gpu_is_bitwise_the_resident_store(gpu_moe):  # noqa: F811
+def test_promote_on_the_gpu_is_bitwise_the_resident_store(gpu_moe):
     """F10 on the native path (kernels.promote around kernels.expert_io's resolve, the zero-copy gather into spares,
     decode steps replayed from CUDA graphs, prefill chunked past the mmvq limit): the streams and prompt logprobs are
     the resident store's, bit for bit, at a quarter and half of the experts cached; on the synchronous eager path the

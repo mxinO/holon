@@ -6,8 +6,9 @@ OS page cache. With RAM holding a quarter of the pieces (exclusive tiers, D10) e
 decode graphs)."""
 import pytest
 import torch
+from holon_std.moe.offload import KEY
 
-from .test_moe_engine import KEY, Q, _engine, _gguf_and_dense, _gpu_engine, _served, gpu_moe, tiny_moe  # noqa: F401
+from .moe_engine_common import Q, _engine, _gguf_and_dense, _gpu_engine, _served
 
 PREBUILT = ("expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
 
@@ -23,7 +24,7 @@ def _check(engine) -> None:
     assert all((d[..., 1] == 0).all() and (d[..., 3] > 0).any() for d in store.descriptors.values())
 
 
-def test_the_page_cache_tier_serves_what_the_resident_store_does(tiny_moe, tmp_path):  # noqa: F811
+def test_the_page_cache_tier_serves_what_the_resident_store_does(tiny_moe, tmp_path):
     checkpoint, prompts = tiny_moe
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
     want = _served(_engine(file), prompts)
@@ -34,7 +35,7 @@ def test_the_page_cache_tier_serves_what_the_resident_store_does(tiny_moe, tmp_p
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_the_page_cache_tier_on_the_gpu(gpu_moe):  # noqa: F811
+def test_the_page_cache_tier_on_the_gpu(gpu_moe):
     file, prompts, want = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options=TIERS)
     _check(engine)

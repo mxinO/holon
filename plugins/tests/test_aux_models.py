@@ -166,7 +166,9 @@ def test_an_aux_layer_that_runs_no_prompt_rows_never_holds_a_loan(tmp_path_facto
     layers: the lent slots come back after the target's last layer, every step's — not after the auxiliary layer's,
     which never comes — so no loan outlives its step; the auxiliary classes are not lent to and their pins do not
     stop the target's ring. The streams are the plain engine's."""
-    from .test_moe_engine import KEY, Q, _gguf_and_dense, _tiny_moe
+    from holon_std.moe.offload import KEY
+
+    from .moe_engine_common import Q, _gguf_and_dense, _tiny_moe
 
     checkpoint, prompts = _tiny_moe(tmp_path_factory, 4)
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0)
@@ -197,9 +199,10 @@ def test_pinned_aux_classes_are_seeded_first_beside_a_fill_target(tmp_path_facto
     every expert (a paged floor) caches all of the head's, the target what is left, where the fill alone shares it
     out by F2; `aux.*=0.5` half of them. An exact name wins over a pattern, `*` last. The streams are the plain
     engine's."""
+    from holon_std.moe.offload import KEY
     from holon_std.tiered.store import _cache_of
 
-    from .test_moe_engine import KEY, Q, _gguf_and_dense, _tiny_moe
+    from .moe_engine_common import Q, _gguf_and_dense, _tiny_moe
 
     assert [_cache_of({"*": 2, "aux.*": 1.0, "aux.b": 3}, c) for c in ("aux.a", "aux.b", "a")] == [1.0, 3, 2]
     assert _cache_of({"aux.*": 1.0}, "a") is None

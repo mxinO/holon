@@ -11,6 +11,8 @@ import pathlib  # noqa: E402
 import pytest  # noqa: E402
 import torch  # noqa: E402
 
+from .moe_engine_common import gpu_moe, gpu_moe_wide, mode2, tiny_moe, tiny_moe_deep  # noqa: E402, F401  (module-scoped)
+
 QWEN3_0_6B = max(pathlib.Path.home().glob(".cache/huggingface/hub/models--Qwen--Qwen3-0.6B/snapshots/*"), default=None)
 
 

@@ -313,6 +313,7 @@ def test_pass_rows_rule():
         rows(86, "iq2_xxs", 8, 32768)
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize("name", ["iq2_xxs", "iq2_s", "iq3_xxs"])
 def test_passes_of_16384_rows(sm, name):
     """D9's L0 for PASS_PROVEN's 16,384-row entries (GLM's expert types): under `ggml_cuda.pass_rows` = 16,384 a
@@ -1206,13 +1207,14 @@ def test_swiglu_kernel_within_the_fp32_budget(lib):
     assert torch.isfinite(y[0, 0]) and torch.isnan(reference.swiglu(nan[0, :1], nan[0, INTER:INTER + 1], limit)).all()
 
 
-@pytest.mark.parametrize("name", ["q8_0", "iq2_xxs", "iq2_s", "iq3_xxs"])
+@pytest.mark.parametrize("name", ["q8_0"] + [pytest.param(n, marks=pytest.mark.slow)
+                                             for n in ("iq2_xxs", "iq2_s", "iq3_xxs")])
 def test_swiglu_clamp_on_every_path(ctx, lib, name):
     """docs/dev/v1-glm.md D6's clamp, `glu_limit` (GLM's expert types and the tiny model's Q8_0): the clamped merged
     stack against our SwiGLU, clamped (as ggml's SWIGLU_CLAMP), of the `glu="none"` output — bitwise where mmq ran
     (its fused store where the stack takes it, else our kernel), within the fp32 budget where mmvq's fused gate did —
     at 1, t, t + 1, 64 and 513 tokens, with a limit binding on ≥ 5% of the gate values and ≥ 5% of the up values; the
-    unclamped stack's output differs (the clamp is applied)."""
+    unclamped stack's output differs (the clamp is applied). (GLM's types: `slow`, and the L0 job's.)"""
     none = experts(ctx, name, H, 2 * INTER, 1)
     s = stack(name, E, 2 * INTER, H, seed=21)
     probe = none(gate_up_input(64, seed=22), s.parts, uniform(64, E, seed=22))

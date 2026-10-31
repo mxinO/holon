@@ -360,7 +360,7 @@ it.** The store gains **one option**, `moe.read_ahead` (D8f; B7-m1); provider op
     lent expert parks in RAM** by the rule above (`93199117`): hottest first, into free units of its classes, else over
     RAM's coldest of the same classes when strictly hotter, else onto the SSD (the file holds it); its slots are copied
     into its units (one `expert_fetch@1` launch a class) before the step's staging overwrites them, on the device, no
-    host sync. Exact on the GPU tiny model at one sequence (`test_moe_engine.py`'s `ssd1`: bitwise the resident store,
+    host sync. Exact on the GPU tiny model at one sequence (`test_moe_engine_gpu.py`'s `ssd1`: bitwise the resident store,
     borrowing and parking asserted; without the copies its streams differ) and on the vehicle (A5000, one sequence,
     `moe.ram = *=0.25`, prompts of 5,000 / 700 / 3,000 tokens and 64 generated each: capped vs uncapped identical in
     streams and top-3 prompt logprobs, 9 borrowing steps, 257 experts parked). **The host mirror is tier-exact under
@@ -599,7 +599,7 @@ store, and the slice's):
 *Locks.* Only `store.exclusive` layouts change (mode (ii)'s override set). FN's locks, the vehicle's and every
 RAM-holds-all lock run no exclusive tier: they must advance byte-identical (propagate without --approve, as each step).
 GLM has no lock yet. F10 (mode (ii)'s default) and F11 under exclusive tiers both get the bitwise test with parts on
-(`test_moe_engine.py`'s `ssd` cases at `moe.pipeline` 8) and the two-round test; `exact.py` capped vs uncapped on the
+(`test_moe_engine_gpu.py`'s `ssd` cases at `moe.pipeline` 8) and the two-round test; `exact.py` capped vs uncapped on the
 vehicle with RAM capped.
 
 *Predicted, per mode (ii) cell* (inferred from the probe's bytes; the drive's 2.6 GB/s while busy; to be measured):
@@ -658,7 +658,7 @@ in experts — where Maya stages through ≈ 12 slots and a 96-expert landing ri
   admissions) the step stages as today (the store's choice, logged): its admitted pieces need slots past the pass.
 - **Exactness.** Placement and staging only: the slots a piece is read from change, its bytes do not; each part's
   rows are its experts' own (an expert's tokens never split across parts: a piece is in one round). The exclusive
-  bitwise tests (`test_moe_engine.py`'s `ssd` cases, F10 and F11) and `_bytes_exact` run with rounds on, at ≥ 3 rounds.
+  bitwise tests (`test_moe_engine_gpu.py`'s `ssd` cases, F10 and F11) and `_bytes_exact` run with rounds on, at ≥ 3 rounds.
 - **Plants** (each judged by bytes and outputs): `round_slots_reused_early` (round r + 1 gathered into a fixed slot
   before round r's compute), `ssd_in_ram_slots` (an SSD entry given a RAM slot of the same round), `part_one_role`
   (one role's entry in another part), `spare_lent_outside_tail`.
@@ -731,7 +731,7 @@ routed set, and the 32K decode's 79 MB a token.
   stream; plant `compaction_beside_moves`; the "no resident piece in a loan range" check stays in
   `compaction_map_stale`'s test.
 - **Exactness.** Placement only (the compaction's moves are byte copies, the map follows them). The tail tests
-  (`test_moe_engine.py`'s tail and lending cases, bitwise against the resident store, `_bytes_exact`) run with the
+  (`test_moe_engine_loan.py`'s tail and lending cases, bitwise against the resident store, `_bytes_exact`) run with the
   whole tail, plus a test that each loan range holds no resident piece during the step.
 - **Plants:** `tail_down_not_compacted` (a down tail slot still mapped to a resident: the loan overwrites it),
   `compaction_map_stale` (a moved piece's map not updated), `loan_range_overlap` (two ranges overlapping).
@@ -2314,7 +2314,7 @@ checkpoint, Maya-S24 / M / L, Unsloth's files, DFlash2.
 **Process for mode (ii) changes (the coordinator's rule after D8u (a) + (c), 2026-10-30).**
 - **Test under the deployment's policy.** Every exclusive-tier change's engine tests run under the deployment's terms
   too — F10 (`placement.promote@1`) with the spares a tail step releases, `lend_tail`, the loan's options, RAM's heat
-  (`test_moe_engine.py`'s `_mode2` / `mode2` fixture, a tail step after decoding so the spares are set up) — not only
+  (`moe_engine_common.py`'s `_mode2` / `mode2` fixture, a tail step after decoding so the spares are set up) — not only
   the default policy. D8l's tests and D8t's (their F10 demotion cases already) run so since 2026-10-30.
 - **Smoke the real model before "built".** Before a mode (ii) change is reported built: one 1K, one 4K and one 32K
   request at the deployment's flags on one RTX 5090, with the step-level counters (the tail, its staging, what it
