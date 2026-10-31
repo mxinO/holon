@@ -343,9 +343,9 @@ def main() -> None:
     counts: dict = {}
     DSA_LAYER, MOE_LAYER, KDA_LAYER, MHC_LAYER = map(int, a.layers.split(","))
     with planted.PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        e = from_flags(a.model, a.flags, {"max_seqs": 1, "max_step_tokens": a.step, "prefix_cache": False,
-                                          "max_model_len": a.ctx + a.decode + 64,
-                                          "cuda_graphs": False})               # (eager: the hooks copy to the host)
+        e = from_flags(a.model, a.flags, over={"max_seqs": 1, "max_step_tokens": a.step, "prefix_cache": False,
+                                               "max_model_len": a.ctx + a.decode + 64,   # over a lock's flags: the
+                                               "cuda_graphs": False})    # cover's steps, eager (hooks copy to host)
         layers = e.executor.model.layers
         assert isinstance(layers[DSA_LAYER].mixer, DSAMLA) and isinstance(layers[KDA_LAYER].mixer, KDAUnit)
         dsa, kda = DSA(layers[DSA_LAYER].mixer), KDA(layers[KDA_LAYER].mixer)
