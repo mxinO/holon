@@ -372,6 +372,47 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
   reported "not run" is a failure of the acceptance, not a pass (C-N7).
 - **The bar-card runs wait for the combined propagation.** On this branch, GPU checks run only on an idle RTX A5000.
 
+### §9 record (2026-10-31)
+
+The tree each row was measured on is given beside it: `e0e1e518` is the release tree before the OOM fix, `067da0cf`
+the release head with every lock current; rows without a tree ran at `067da0cf`. The runs used one RTX 5080 or
+RTX 5090 desktop per job, and each RAM test ran in its own capped step (cgroup v2, `memory.high` = `memory.max`).
+**These nodes have no swap.** The no-swap criterion is recorded as "no swap on these nodes", not passed; it is pending
+the owner.
+
+| § | Test | RTX 5080 | RTX 5090 | Verdict |
+|---|---|---|---|---|
+| 9.1 | Bare `holon serve <model>`, every model with a lock (`e0e1e518`) | 9 of 9 serve their lock, plus Flash-Next with the pack, without it, and hand-set | 7 of 7 | pass. The RTX 5080 Flash-Next lock's `activation_loan@1` difference (also hand-set) is recorded in the lock at `067da0cf` |
+| 9.1 | Headless | `gpu_shared` empty, reserve 256 MiB | the same | pass |
+| 9.1 | No MTP pack | serves without speculation, one warning | the same | pass |
+| 9.2 | `--auto` against hand-set, §23.7's rule (`e0e1e518`) | 23 of 25 rows. Misses: shipped profile against `--auto` at 4K / 32K decode, 0.9995 / 0.9994 ± 0.0002, byte-identical profiles | 13 of 13 | pass on the RTX 5090; the two RTX 5080 misses are within 0.06% (recorded) |
+| 9.2 | Experts cached, `--auto` against hand-set | 26.52 / 26.23% | 48.40 / 48.07% | pass |
+| 9.2 | Without the MTP pack, decode cost at 1K / 4K / 32K | 23.6 / 24.6 / 27.9% | 24.3 / 27.1 / 37.2% | reported (the warning says 24–37%) |
+| 9.2 | Cold start (`moe.placement.profile=none`), first 1K decode | 0.994× | 0.979× | reported |
+| 9.3 | Need, uncapped, peak `memory.current` (27B tier / Flash-Next) | 31.9 / 81.2 GiB (`e0e1e518`; Flash-Next 66.9 GiB after the fix) | 35.7 / 83.5 GiB (`067da0cf`) | reported |
+| 9.3 | 27B tier lock under an 18 GiB cap | tier 16.0 → 11.1 GiB, serves, 0 OOM (`e0e1e518`) | 16.0 → 11.1 GiB, serves, 0 OOM (`067da0cf`) | pass |
+| 9.3 | `agent_park` capped at 18 GiB against free: TTFT p50 / p99, throughput | 317 / 7,028 ms against 288 / 1,292 ms, −12% | 174 / 724 ms against 168 / 721 ms, ±0% | reported |
+| 9.3 | 30B offload lock, 32 GiB cap, 6 GiB used elsewhere | budget 19.1 GiB, serves, peak 28.3 GiB | — | pass |
+| 9.3 | Lag probe in the same cgroup: 1 ms sleeps, late p99 (bar 20 ms); 512 MiB touch p99 | ≤ 0.15 ms; touch ≤ 18.6 ms, 36.6 ms during the refused 64 GiB start from network storage | ≤ 0.19 ms; touch ≤ 12.2 ms capped, 31.3 ms uncapped at 83.5 GiB, 32.6 ms during the refused start | pass |
+| 9.4 | Flash-Next, 64 GiB, network storage (`067da0cf`) | refused once at 111 s, shortfall named, peak 61.0 GiB, 0 OOM | refused once at 95 s, peak 63.1 GiB, 0 OOM | pass |
+| 9.4 | Flash-Next, 64 GiB, local SSD | lock refused at 70 s, then spilled, serves at 135 s, peak 59.0 GiB, 0 OOM | lock refused at 61 s, spilled, serves at 120 s, peak 57.8 GiB, 0 OOM | pass |
+| 9.4 | Flash-Next, 41 GiB, local SSD | lock refused at 49 s, spilled, serves at 98 s, peak 38.2 GiB, 0 OOM | — | pass (the spill fits the 34.1 GiB budget) |
+| 9.4 | Flash-Next, 96 GiB with 10 GiB used elsewhere | — | serves on its lock (budget 79.1 GiB), peak 90.7 GiB, 0 OOM | pass |
+| 9.4 | Doomed first build (from the budget line to the refusal) | 58.9 s | 50.9 s | under 60 s: no memo (§10 Q3) |
+| 9.4 | Spill cost at 1K / 4K / 32K (local SSD against RAM), prefill / decode | 60.1 / 71.3 / 71.3%, 2.0 / 2.0 / 1.8% | 65.8 / 80.1 / 80.9%, 3.2 / 3.1 / 2.4% | reported. The spill note's RTX 5090 figures (−16 / −26% prefill, from an earlier I/O worker) are stale |
+
+**The OOM fix** (`mxinO/ac-oom`, merged before `067da0cf`). At `e0e1e518`, Flash-Next was OOM-killed four times
+under a 64 GiB cap (network storage and local SSD alike) and under 41 GiB, with no refusal and no spill. Two causes,
+both on the PLE table's load path:
+1. `std.tiered.files.read` gave a 26.8 GiB extent one bounce window. That window was an anonymous shared map, so the
+   pages were shmem, which cannot be reclaimed without swap. It filled the cap as "file" pages.
+2. `Pool._set` built a Python free list and a refcount array for the table's 320M rows, ≈ 12 GiB outside the host
+   budget.
+
+The fix reads an extent a window at a time and builds a pool's bookkeeping on first use. A start killed by SIGKILL is
+now a memory failure, so the spill entry runs. The uncapped Flash-Next peak fell from 79.1 to 66.9 GiB, and its start
+from 195 to 136 s.
+
 ## 10. Questions for the owner
 
 1. **Reserve.** 1 GiB on a shared card: accept?
