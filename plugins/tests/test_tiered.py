@@ -11,9 +11,11 @@ from holon_std.tiered.residency import ResidencyMap
 
 
 def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch):
-    """Unaligned extents in any order, adjacent, overlapping a window's end, larger than a window, at the file's
-    end, from two files."""
+    """Unaligned extents in any order, adjacent, overlapping a window's end, larger than a window (read a window at a
+    time), at the file's end, from two files."""
     monkeypatch.setattr(files, "WINDOW", 3 * files.ALIGN)
+    sizes, real = [], os.preadv
+    monkeypatch.setattr(files.os, "preadv", lambda fd, bufs, at: sizes.append(bufs[0].nbytes) or real(fd, bufs, at))
     data = {p: np.random.default_rng(i).integers(0, 256, 9 * files.ALIGN + 77, dtype=np.uint8)
             for i, p in enumerate((tmp_path / "a", tmp_path / "b"))}
     for p, d in data.items():
@@ -24,6 +26,7 @@ def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch
     files.read(jobs)
     for extent, dst in jobs:
         assert np.array_equal(dst, data[type(tmp_path)(extent.path)][extent.offset:extent.offset + extent.nbytes])
+    assert max(sizes) <= files.WINDOW + files.ALIGN
     assert os.O_DIRECT                                      # the reader asks for it (Linux)
 
 
