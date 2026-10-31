@@ -64,14 +64,14 @@ def main() -> None:
     for seqs in a.seqs:
         seen = {"peaks": [], "graphs": None}
 
-        def peak_(device, fn, seen=seen):
+        def peak_(device, fn, out_=None, seen=seen):      # (`out_`: the core's overshoot, D2)
             torch.cuda.synchronize()
             torch.cuda.empty_cache()
             reserved = torch.cuda.memory_reserved(device)
             tracing = a.peak and not seen["peaks"]               # the worst step, the first one profiled
             if tracing:
                 torch.cuda.memory._record_memory_history(max_entries=2_000_000, stacks="python")
-            out = peak(device, fn)
+            out = peak(device, fn, out_)
             if tracing:
                 seen["top_at_peak"] = top_at_peak(torch.cuda.memory._snapshot())
                 torch.cuda.memory._record_memory_history(enabled=None)
