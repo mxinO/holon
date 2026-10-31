@@ -162,6 +162,17 @@ def test_a_refusal_says_what_to_do_and_a_restart_is_admitted_against_its_own_ent
         assert got is config
 
 
+def test_a_pool_viewed_whole_keeps_no_unit_bookkeeping():
+    """A host table of many rows (Qwen3.8-Flash-Next's PLE: 320M of 90 B) costs its bytes only: the free list and the
+    refcounts, ≈ 40 B a unit outside the budget, are built on first use, and again after a resize."""
+    pool = Ledger(torch.device("cpu"), host_memory=GiB).plugin_pool("rows", unit_bytes=1, min_units=1 << 20,
+                                                                    pref_units=1 << 20, device="host")
+    assert "_free" not in vars(pool) and "_refs" not in vars(pool)
+    assert list(pool.alloc(2)) == [0, 1] and pool.num_free == (1 << 20) - 2 and pool.refcount([1]) == [1]
+    pool._set(4)
+    assert pool.num_free == 4 and "_refs" not in vars(pool)
+
+
 def test_a_spill_entry_is_rolled_back_to_only_for_memory_and_restarts_are_admitted_per_entry(capsys):
     sup = Supervisor([("defaults", None), ("spill", "l"), ("lock", "l")], memory_only={1: "(spilled: x)"})
     assert sup._roll_back() and sup.version == 0                           # crashes skip the spill
