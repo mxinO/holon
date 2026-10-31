@@ -10,6 +10,16 @@
     python -m holon_judge gate     --model <hf dir or id | .gguf> --original <hf dir or id> [--json <file>]
                                    # per-tensor NMSE against the bf16 original (docs/dev/m06-lowp.md §4.8)
     python -m holon_judge compare  --golden <file> --candidate <file> [--floor <file>] [--json <file>]
+    python -m holon_judge compare  --reference <file> --candidate <file> [--json <file>]
+                                   # L2's reference form (docs/dev/v1-glm.md D15a): the budgets beside the reference
+    python -m holon_judge reference --model <.gguf | hf dir> --prompts <jsonl> --out <file> --oracle <repo path>
+                                   --engine-args "<engine flags>" [--k 20]
+                                   # a bf16 GPU reference: Holon all-resident on a card that holds the model
+    python -m holon_judge score    --model <.gguf | hf dir> --prompts <jsonl> --out <file> --engine-args "<flags>"
+                                   [--plant <bug>] [--reference <file> [--json <file>]]
+                                   # a recording at any engine flags; with --reference, judged by its budgets
+    python -m holon_judge budgets  --reference <file> --pair <name> <a> <b> [--pair ...] [--check <name> <a> <b>]
+                                   # the reference's budgets from pairs that should agree (written beside it)
     python -m holon_judge l2       --model <hf dir or id | .gguf> --prompts <jsonl> --golden <file> --floor <file>
                                    [--source gguf_dense] [--max-step-tokens N] [--kv q8_0|fp8] [--plant <bug>]
                                    [--dtype bfloat16] [--k 20] [--save <file>] [--json <file>] [--ceiling 1e-4]
@@ -80,8 +90,77 @@ def _report(result: Result, json_out: str | None) -> int:
 
 
 def _compare(a: argparse.Namespace) -> int:
+    if a.reference:
+        if a.golden or a.floor:
+            raise SystemExit("compare: --reference replaces --golden and --floor")
+        return _report(_judge_reference(a.reference, Recording.load(a.candidate)), a.json)
+    if not a.golden:
+        raise SystemExit("compare: --golden (with --floor for a verdict) or --reference")
     floors = [Recording.load(f) for f in a.floor or ()]
     return _report(compare(Recording.load(a.golden), Recording.load(a.candidate), floors), a.json)
+
+
+def _judge_reference(path: str, cand: Recording):
+    from . import reference
+
+    budgets = reference.Budgets.load(reference.budgets_path(path))
+    return reference.judge(Recording.load(path), cand, budgets, reference.sha256(path))
+
+
+def _engine_recording(a: argparse.Namespace, meta: dict) -> Recording:
+    """`a.prompts` scored through an engine built from `a.engine_args` on `a.model` (its context fits the longest
+    prompt), the meta recording the card, the step, the plan."""
+    from holon.core import plans
+    from holon.core.cli import engine_config, engine_flags
+    from holon.core.engine import Engine
+
+    from . import gguf
+    from .engine import score
+
+    path, prompts = golden.resolve_model(a.model), PromptSet.load(a.prompts)
+    flags = argparse.ArgumentParser()
+    engine_flags(flags)
+    config = engine_config(str(path), flags.parse_args(shlex.split(a.engine_args)))
+    need = max(len(p.ids) for p in prompts.prompts) + 1
+    config = dataclasses.replace(config, max_model_len=max(config.max_model_len, need))
+    with PLANTS[a.plant]() if getattr(a, "plant", None) else contextlib.nullcontext():
+        engine = Engine(config)
+        info = (gguf.file_meta(path) if path.suffix == ".gguf" else golden.model_meta(path)) | {
+            "weight_source": engine.source.kind, "max_step_tokens": config.max_step_tokens,
+            "max_seqs": config.max_seqs, "gpu_class": engine.ctx.fingerprint.gpu,
+            "dtype": str(config.dtype).removeprefix("torch."), "device": torch.device(config.device).type,
+            "hardware": golden.hardware(torch.device(config.device)), "torch": torch.__version__,
+            "plan_id": plans.plan_of(engine).plan_id, "plant": getattr(a, "plant", None)}
+        return score(engine, prompts, a.k, info | meta)
+
+
+def _reference(a: argparse.Namespace) -> int:
+    from . import reference
+
+    rec = _engine_recording(a, {"kind": "reference", "oracle": a.oracle})
+    if failed := reference.oracle_failures(rec.meta):
+        raise SystemExit(f"reference: {'; '.join(failed)}")
+    rec.save(a.out)
+    print(json.dumps({k: v for k, v in rec.meta.items() if k not in ("seq_ids", "categories")}, indent=1))
+    return 0
+
+
+def _score(a: argparse.Namespace) -> int:
+    rec = _engine_recording(a, {})
+    rec.save(a.out)
+    return _report(_judge_reference(a.reference, rec), a.json) if a.reference else 0
+
+
+def _budgets(a: argparse.Namespace) -> int:
+    from . import reference
+
+    def pairs(given):
+        return [(name, Recording.load(x), Recording.load(y)) for name, x, y in given or ()]
+    budgets = reference.calibrate(a.reference, pairs(a.pair), pairs(a.check))
+    out = reference.budgets_path(a.reference)
+    budgets.save(out)
+    print(out.read_text())
+    return 0
 
 
 def _l2(a: argparse.Namespace) -> int:
@@ -529,11 +608,36 @@ def main(argv: list[str] | None = None) -> int:
     g.set_defaults(run=_golden)
 
     c = sub.add_parser("compare", help="compare a recording with the golden; with --floor, pass/fail")
-    c.add_argument("--golden", required=True)
+    c.add_argument("--golden")
     c.add_argument("--candidate", required=True)
     c.add_argument("--floor", nargs="+", help="floor recording(s); several: one per kernel path the run takes")
+    c.add_argument("--reference", help="a reference recording (D15a), judged by the budgets beside it")
     c.add_argument("--json", help="write the machine-readable result here")
     c.set_defaults(run=_compare)
+
+    for name, run, what in (("reference", _reference, "a bf16 GPU reference: Holon all-resident (D15a)"),
+                            ("score", _score, "a recording at any engine flags; with --reference, judged")):
+        r = sub.add_parser(name, help=what)
+        r.add_argument("--model", required=True, help="a .gguf file, an HF checkpoint directory or hub id")
+        r.add_argument("--prompts", required=True)
+        r.add_argument("--out", required=True)
+        r.add_argument("--engine-args", default="", help="engine flags, as `holon serve` takes them")
+        r.add_argument("--k", type=int, default=20)
+        if name == "reference":
+            r.add_argument("--oracle", required=True,
+                           help="the model's tiny-model HF match: a test or evidence file tracked in this repository")
+        else:
+            r.add_argument("--plant", choices=sorted(PLANTS))
+            r.add_argument("--reference", help="judge the recording against this reference's budgets")
+            r.add_argument("--json")
+        r.set_defaults(run=run)
+
+    b = sub.add_parser("budgets", help="a reference's budgets from pairs of recordings that should agree (D15a)")
+    b.add_argument("--reference", required=True)
+    b.add_argument("--pair", nargs=3, action="append", metavar=("NAME", "A", "B"), required=True,
+                   help="a source pair: the budgets follow the worst")
+    b.add_argument("--check", nargs=3, action="append", metavar=("NAME", "A", "B"), help="a pair reported only")
+    b.set_defaults(run=_budgets)
 
     e = sub.add_parser("l2", help="score the prompt set through a Holon engine and judge it")
     e.add_argument("--model", required=True, help="HF checkpoint directory or hub id, or a .gguf file")

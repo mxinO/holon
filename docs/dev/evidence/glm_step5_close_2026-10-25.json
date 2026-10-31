@@ -1,0 +1,765 @@
+{
+ "date": "2026-10-25",
+ "doc": "docs/dev/v1-glm.md §9 step 5, acceptance 1(b)-(f) and 2, §6.2, §13 (step 5)",
+ "model": "Maya-S v2 IQ2_XXS (3 shards; sha256 verified at step 0)",
+ "gate_c": {
+  "bars": {
+   "kl_mean": 0.13,
+   "kl_p50": 0.007
+  },
+  "prompts": "judge/prompts/v1-long-glm5_next.jsonl",
+  "rtx_5090_final_deployment_32k_reference": {
+   "clean": {
+    "decode": {
+     "kl_mean": 0.05821446339502922,
+     "kl_p50": 0.004641749262189018,
+     "kl_p99": 1.1436396057249918,
+     "pass": true
+    },
+    "chunked": {
+     "kl_mean": 0.058438845753665744,
+     "kl_p50": 0.004542904572548075,
+     "kl_p99": 1.0906125899235877,
+     "pass": true
+    }
+   },
+   "dsa_decode_select_shift": {
+    "decode": {
+     "kl_mean": 0.158621635572234,
+     "kl_p50": 0.013902712299913435,
+     "kl_p99": 3.816433866418393,
+     "pass": false
+    },
+    "chunked": {
+     "kl_mean": 0.058438845753665744,
+     "kl_p50": 0.004542904572548075,
+     "kl_p99": 1.0906125899235877,
+     "pass": true
+    }
+   },
+   "kda_state_not_carried": {
+    "decode": {
+     "kl_mean": 0.44087156358655993,
+     "kl_p50": 0.0511976434569282,
+     "kl_p99": 5.412671228990296,
+     "pass": false
+    },
+    "chunked": {
+     "kl_mean": 0.2488462454331862,
+     "kl_p50": 0.07509868559473748,
+     "kl_p99": 2.640476619819603,
+     "pass": false
+    }
+   }
+  },
+  "earlier_runs_16k_reference": {
+   "5090": {
+    "clean": {
+     "decode": {
+      "n": 48421,
+      "kl_mean": 0.05821446339502922,
+      "kl_p50": 0.004641749262189018,
+      "kl_p99": 1.1436396057249918,
+      "worst_band_dnll": -0.10741023858996002,
+      "pass": true
+     },
+     "chunked": {
+      "n": 48421,
+      "kl_mean": 0.058438845753665744,
+      "kl_p50": 0.004542904572548075,
+      "kl_p99": 1.0906125899235877,
+      "worst_band_dnll": 0.09181655450757731,
+      "pass": true
+     },
+     "prefill_step": 16384
+    },
+    "dsa_decode_select_shift": {
+     "decode": {
+      "n": 48421,
+      "kl_mean": 0.158621635572234,
+      "kl_p50": 0.013902712299913435,
+      "kl_p99": 3.816433866418393,
+      "worst_band_dnll": -0.17296001308574183,
+      "pass": false
+     },
+     "prefill_step": 16384
+    },
+    "kda_state_not_carried": {
+     "chunked": {
+      "n": 48421,
+      "kl_mean": 0.2488462454331862,
+      "kl_p50": 0.07509868559473748,
+      "kl_p99": 2.640476619819603,
+      "worst_band_dnll": 0.42769232332229185,
+      "pass": false
+     },
+     "prefill_step": 16384
+    }
+   },
+   "pro6000": {
+    "clean": {
+     "decode": {
+      "n": 48421,
+      "kl_mean": 0.05872077685412278,
+      "kl_p50": 0.00452002958103228,
+      "kl_p99": 1.0562870826460573,
+      "worst_band_dnll": -0.14151911876504997,
+      "pass": true
+     },
+     "chunked": {
+      "n": 48421,
+      "kl_mean": 0.058223945429141104,
+      "kl_p50": 0.004490901162404788,
+      "kl_p99": 1.0404735434786212,
+      "worst_band_dnll": -0.09690399412016015,
+      "pass": true
+     },
+     "prefill_step": 16384
+    },
+    "dsa_decode_select_shift": {
+     "decode": {
+      "n": 48421,
+      "kl_mean": 0.15530647705711365,
+      "kl_p50": 0.013475408386080332,
+      "kl_p99": 3.718977109149968,
+      "worst_band_dnll": -0.1416977275461777,
+      "pass": false
+     },
+     "prefill_step": 16384
+    },
+    "kda_state_not_carried": {
+     "chunked": {
+      "n": 48421,
+      "kl_mean": 0.248312866983616,
+      "kl_p50": 0.073422193472388,
+      "kl_p99": 2.6644493887407164,
+      "worst_band_dnll": 0.47618514829639624,
+      "pass": false
+     },
+     "prefill_step": 16384
+    }
+   }
+  },
+  "verdicts": {
+   "kda_state_not_carried": "pre-registered (chunked p50 0.073-0.075: 10.5-10.7x the 0.007 bound)",
+   "dsa_decode_select_shift": "not pre-registrable for (c) (decode p50 0.0135-0.0139: 1.9-2.0x the bound); the cover's"
+  }
+ },
+ "gate_f": {
+  "5090": {
+   "clean": {
+    "failed": [],
+    "metrics": {
+     "dsa.worst_gap": 0.0,
+     "dsa.pooled_err": 1.0103691039375917e-07,
+     "dsa.attend_prompt_rel_l2": 3.7997094750608085e-06,
+     "dsa.attend_decode_rel_l2": 4.465069196157856e-06,
+     "router.picks_off": 0.0,
+     "router.weight_rel_err": 1.2056257219228428e-06,
+     "kda.out_err_at_step_starts": 0.013035531155765057,
+     "kda.out_err_elsewhere": 0.02113969996571541,
+     "kda.out_err_decode": 0.005700838752090931,
+     "kda.state_err_at_step_starts": 0.0015323326224461198,
+     "mhc.comb_abs_err": 9.5367431640625e-07,
+     "mhc.x_rel_err": 0.00021681013458874077,
+     "mhc.r_rel_err": 6.184532441722013e-09,
+     "mhc.writeback_rel_err": 3.692464645155269e-08
+    }
+   },
+   "dsa_decode_select_shift": {
+    "failed": [
+     "dsa.worst_gap"
+    ],
+    "detector": {
+     "metric": "dsa.worst_gap",
+     "value": 1.92232788063943,
+     "bound": 2e-06,
+     "times_bound": 961163.9403197151
+    }
+   },
+   "dsa_pool_ape_off": {
+    "failed": [
+     "dsa.pooled_err"
+    ],
+    "detector": {
+     "metric": "dsa.pooled_err",
+     "value": 0.1470298320055008,
+     "bound": 1.2e-06,
+     "times_bound": 122524.860004584
+    }
+   },
+   "kda_gate_softplus": {
+    "failed": [
+     "kda.out_err_decode",
+     "kda.state_err_at_step_starts"
+    ],
+    "detector": {
+     "metric": "kda.out_err_decode",
+     "value": 1.4433631896972656,
+     "bound": 0.06,
+     "times_bound": 24.056053161621094
+    }
+   },
+   "kda_state_not_carried": {
+    "failed": [
+     "kda.out_err_at_step_starts",
+     "kda.out_err_elsewhere",
+     "kda.out_err_decode",
+     "kda.state_err_at_step_starts"
+    ],
+    "detector": {
+     "metric": "kda.out_err_at_step_starts",
+     "value": 1.8019063472747803,
+     "bound": 0.14,
+     "times_bound": 12.870759623391287
+    }
+   },
+   "mhc_comb_transposed": {
+    "failed": [
+     "mhc.comb_abs_err",
+     "mhc.x_rel_err",
+     "mhc.r_rel_err",
+     "mhc.writeback_rel_err"
+    ],
+    "detector": {
+     "metric": "mhc.r_rel_err",
+     "value": 0.0712767168879509,
+     "bound": 1e-07,
+     "times_bound": 712767.168879509
+    }
+   },
+   "mhc_sinkhorn_short": {
+    "failed": [
+     "mhc.comb_abs_err"
+    ],
+    "detector": {
+     "metric": "mhc.comb_abs_err",
+     "value": 0.004790216684341431,
+     "bound": 1e-05,
+     "times_bound": 479.021668434143
+    }
+   },
+   "router_bias_in_weights": {
+    "failed": [
+     "router.weight_rel_err"
+    ],
+    "detector": {
+     "metric": "router.weight_rel_err",
+     "value": 45.47057342529297,
+     "bound": 1.4e-05,
+     "times_bound": 3247898.1018066406
+    }
+   }
+  },
+  "pro6000": {
+   "clean": {
+    "failed": [],
+    "metrics": {
+     "dsa.worst_gap": 0.0,
+     "dsa.pooled_err": 1.1582297076984105e-07,
+     "dsa.attend_prompt_rel_l2": 3.6862525121250656e-06,
+     "dsa.attend_decode_rel_l2": 2.8753167953254888e-06,
+     "router.picks_off": 0.0,
+     "router.weight_rel_err": 1.3258994613352115e-06,
+     "kda.out_err_at_step_starts": 0.013822612352669239,
+     "kda.out_err_elsewhere": 0.020381366834044456,
+     "kda.out_err_decode": 0.004925591871142387,
+     "kda.state_err_at_step_starts": 0.0014640162698924541,
+     "mhc.comb_abs_err": 7.748603820800781e-07,
+     "mhc.x_rel_err": 0.00029461810481734574,
+     "mhc.r_rel_err": 5.063323982312795e-09,
+     "mhc.writeback_rel_err": 3.5237864182136036e-08
+    }
+   },
+   "dsa_decode_select_shift": {
+    "failed": [
+     "dsa.worst_gap"
+    ],
+    "detector": {
+     "metric": "dsa.worst_gap",
+     "value": 1.7091368263557407,
+     "bound": 2e-06,
+     "times_bound": 854568.4131778704
+    }
+   },
+   "dsa_pool_ape_off": {
+    "failed": [
+     "dsa.pooled_err"
+    ],
+    "detector": {
+     "metric": "dsa.pooled_err",
+     "value": 0.1470104604959488,
+     "bound": 1.2e-06,
+     "times_bound": 122508.71707995734
+    }
+   },
+   "kda_gate_softplus": {
+    "failed": [
+     "kda.out_err_decode",
+     "kda.state_err_at_step_starts"
+    ],
+    "detector": {
+     "metric": "kda.out_err_decode",
+     "value": 1.113576889038086,
+     "bound": 0.06,
+     "times_bound": 18.559614817301433
+    }
+   },
+   "kda_state_not_carried": {
+    "failed": [
+     "kda.out_err_at_step_starts",
+     "kda.out_err_elsewhere",
+     "kda.out_err_decode",
+     "kda.state_err_at_step_starts"
+    ],
+    "detector": {
+     "metric": "kda.out_err_at_step_starts",
+     "value": 1.807315468788147,
+     "bound": 0.14,
+     "times_bound": 12.90939620562962
+    }
+   },
+   "mhc_comb_transposed": {
+    "failed": [
+     "mhc.comb_abs_err",
+     "mhc.x_rel_err",
+     "mhc.r_rel_err",
+     "mhc.writeback_rel_err"
+    ],
+    "detector": {
+     "metric": "mhc.r_rel_err",
+     "value": 0.06034253165125847,
+     "bound": 1e-07,
+     "times_bound": 603425.3165125847
+    }
+   },
+   "mhc_sinkhorn_short": {
+    "failed": [
+     "mhc.comb_abs_err"
+    ],
+    "detector": {
+     "metric": "mhc.comb_abs_err",
+     "value": 0.0047808438539505005,
+     "bound": 1e-05,
+     "times_bound": 478.08438539505
+    }
+   },
+   "router_bias_in_weights": {
+    "failed": [
+     "router.weight_rel_err"
+    ],
+    "detector": {
+     "metric": "router.weight_rel_err",
+     "value": 46.815589904785156,
+     "bound": 1.4e-05,
+     "times_bound": 3343970.707484654
+    }
+   }
+  }
+ },
+ "reports": {
+  "5090": {
+   "clamp_bind": {
+    "dense": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 8755
+    },
+    "shared": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 8755
+    },
+    "routed": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 128,
+     "note": "corrected at step 6: 128 rows of one MoE layer (layer 5) was too thin a sample; over gate (c)'s 48,421 decode positions every routed layer's calls the clamp binds in 17 of 42 routed layers (worst gate 24.2, |up| 29.1; docs/dev/spikes/glm5/clamp.py on the RTX PRO 6000), and decode without it is not bitwise the clamped run"
+    }
+   },
+   "comb_logit_spread": {
+    "p50_p90_p99": [
+     6.067,
+     11.279,
+     16.773
+    ],
+    "max": 22.09931755065918,
+    "frac_ge_8": 0.3259239196777344
+   },
+   "dsa_rows": 509,
+   "ties_per_1000": 0.0,
+   "zero_ties_per_1000": 0.0
+  },
+  "pro6000": {
+   "clamp_bind": {
+    "dense": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 8755
+    },
+    "shared": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 8755
+    },
+    "routed": {
+     "gate_elements": 0.0,
+     "up_elements": 0.0,
+     "rows": 0.0,
+     "rows_seen": 128,
+     "note": "corrected at step 6: 128 rows of one MoE layer (layer 5) was too thin a sample; over gate (c)'s 48,421 decode positions every routed layer's calls the clamp binds in 17 of 42 routed layers (worst gate 24.2, |up| 29.1; docs/dev/spikes/glm5/clamp.py on the RTX PRO 6000), and decode without it is not bitwise the clamped run"
+    }
+   },
+   "comb_logit_spread": {
+    "p50_p90_p99": [
+     6.067,
+     11.324,
+     17.027
+    ],
+    "max": 22.09436798095703,
+    "frac_ge_8": 0.3282608687877655
+   },
+   "dsa_rows": 509,
+   "ties_per_1000": 0.0,
+   "zero_ties_per_1000": 0.0
+  }
+ },
+ "attend_dots": {
+  "step": 16384,
+  "gpu": "NVIDIA RTX PRO 6000 Blackwell Max-Q Workstation Edition",
+  "3_dots": {
+   "kl_mean": 0.056115537675479034,
+   "kl_p50": 0.0042672791643600435,
+   "kl_p99": 1.0260016116591775
+  },
+  "2_dots": {
+   "kl_mean": 0.05465891403890267,
+   "kl_p50": 0.00415591488298428,
+   "kl_p99": 0.9712791911125774
+  }
+ },
+ "gate_d_e": {
+  "gate": "docs/dev/v1-glm.md acceptance 1(d), (e); §6.2",
+  "tool": "judge/tasks/{build.py,run.py}; judge/tasks/glm_tasks.jsonl (72 items: FN's set, the recall filler at GLM's 8K / 31K tokens)",
+  "setup": {
+   "card": "RTX 5090",
+   "file": "Maya-S v2 IQ2_XXS (the node's copy, sha256 checked)",
+   "decoding": "greedy, thinking on (the template's default), at most 16,384 new tokens, GLM's end-of-turn ids",
+   "holon": "mode (i): std.moe.offload@1, ring_lend tail, lend_peak require, ggml_cuda.pass_rows 16384, stream_tokens 2048, pipeline 8, token_embd on the host; max_step_tokens 32768, memory_fraction 0.985, 92 GiB host; 4 sequences at once",
+   "maya": "v1.1.27 --serve, its step-0 default arm (--glm-pack, --expert-cache auto, --prefill auto, --kv-streaming on, its expert profile; loop breakers off, as the bench arms), one request at a time"
+  },
+  "totals": {
+   "holon": {
+    "correct": 69,
+    "of": 72,
+    "degenerate": 3,
+    "tokens": 109475,
+    "run_wall_s": 3003.2,
+    "code": 13,
+    "math": 22,
+    "multiturn": 6,
+    "reasoning": 16,
+    "recall": 12
+   },
+   "maya": {
+    "correct": 69,
+    "of": 72,
+    "degenerate": 3,
+    "tokens": 114384,
+    "run_wall_s": 3513.5,
+    "code": 14,
+    "math": 23,
+    "multiturn": 6,
+    "reasoning": 14,
+    "recall": 12
+   }
+  },
+  "bar": {
+   "tolerance_items": 5,
+   "difference": 0,
+   "degenerate_rates": [
+    0.041666666666666664,
+    0.041666666666666664
+   ],
+   "holon_only_degenerate": [
+    "code-13"
+   ],
+   "pass": true
+  },
+  "items_either_wrong_or_degenerate (correct, degenerate, tokens)": {
+   "math-04": {
+    "holon": [
+     false,
+     true,
+     16384
+    ],
+    "maya": [
+     false,
+     true,
+     16384
+    ]
+   },
+   "math-15": {
+    "holon": [
+     false,
+     false,
+     389
+    ],
+    "maya": [
+     true,
+     false,
+     350
+    ]
+   },
+   "code-12": {
+    "holon": [
+     false,
+     true,
+     16384
+    ],
+    "maya": [
+     true,
+     true,
+     16384
+    ]
+   },
+   "code-13": {
+    "holon": [
+     true,
+     true,
+     16384
+    ],
+    "maya": [
+     true,
+     false,
+     2371
+    ]
+   },
+   "reasoning-05": {
+    "holon": [
+     true,
+     false,
+     1537
+    ],
+    "maya": [
+     false,
+     true,
+     16384
+    ]
+   },
+   "reasoning-14": {
+    "holon": [
+     true,
+     false,
+     255
+    ],
+    "maya": [
+     false,
+     false,
+     351
+    ]
+   }
+  },
+  "note": "code-13: Holon hit the limit inside its reasoning (degenerate) but the reasoning's last python block passes the tests (FN's scorer reads the whole text when no </think>); Maya answered it in 2,371 tokens",
+  "samples": "local/tmp/glm/s5-tasks/samples.md (Holon's 8 answers)",
+  "wall_s": {
+   "holon (4 sequences)": 3003.2,
+   "maya (one at a time)": 3513.5
+  }
+ },
+ "exactness": {
+  "trace": "holon_judge.snapshot.trace over v1-long tokenized by GLM's tokenizer (local), long request 24,000 tokens + its prefix-hit extension + 62 short requests; max_seqs 4; judge/exact.py --pools own",
+  "rtx_5090 (32K steps; mode (i) deployment: offload store, ring_lend tail, lend_peak require, pass_rows 16,384)": {
+   "run_identity": "3/3 identical (625 steps)",
+   "vs the deployment's first run": {
+    "capped cache (moe.cache=*=0.25)": "identical",
+    "F10 spares (placement.promote@1)": "identical",
+    "loan off (lend_peak off)": "identical",
+    "ring coldest, loan off": "identical",
+    "ring off, loan off": "identical",
+    "RAM short: exclusive tiers + the file (moe.ram=*=0.5, F11, moe.split=on)": "identical",
+    "RAM short under F10": "identical"
+   },
+   "plants": {
+    "exclusive_lent_not_demoted (RAM short)": "differs (step 6)",
+    "tail-unmap-undone": "caught by the store's loan-leak check (the plant's own counter tensor outlives the loan), not by a trace difference: inconclusive as a trace plant"
+   },
+   "16K steps vs the RTX PRO 6000's all-resident 16K": "differs (step 1; cross-card)",
+   "32K vs 16K steps on the 5090": "tokens identical for all 64 requests, step deltas differ (step size changes bits, as D9 states)"
+  },
+  "rtx_pro_6000 (all-resident std.moe)": {
+   "32K": "does not fit (OOM at the startup profile: §7.3's ≈ 0.1 GB slack gone with max_seqs 4 and 2 GiB of state)",
+   "16K": "run-identical 2/2 (626 steps)",
+   "8K": "1 run (627 steps)",
+   "8K with measured state pools (memory_fraction 0.99)": "OOM 512 MiB inside a trace step (a routed expert pass's buffer) after the startup profile: the profiled reserve did not cover a step (open)"
+  },
+  "rtx_5080": {
+   "8K, lend_peak off": "run-identical 3/3 (629 steps)",
+   "lend_peak on (8K and 4K)": "garbage: every greedy token 0 after prompts ≥ 3,000 tokens; runs differ (staging layout, cache at its 296-slot minimum: the loan in the pool's own tail)",
+   "16K": "OOM at the startup profile (lend_peak require and on)",
+   "lend_peak require at 8K": "refused: this layout stages (its cache cannot lend a prompt step's staging)",
+   "vs the RTX PRO 6000 at 8K": "differs (step 2; cross-card)"
+  },
+  "slice (Maya-S blocks 0-3, 32K steps)": {
+   "RTX PRO 6000: resident vs store vs capped store": "identical",
+   "RTX 5080: resident vs store": "identical",
+   "RTX 5080 vs RTX PRO 6000 (resident)": "differs (step 0)",
+   "first differing module (one 3,000-token step)": "KDA layer 0: f_b(f_a(x)) and b_proj (Q8_0, outputs 128 / 8,192 / 64 wide) differ; q/k/v projections (24,576 wide), the conv and the input norm bitwise equal",
+   "cause (confirmed from source + this localization)": "dense mmq's stream-k: kernels.ggml_cuda's patched mmq.cuh tiles only with ids or at >= 90% tile efficiency, else splits K over nsm blocks; nsm differs per card (5080 84, 5090 170, PRO 6000 188)"
+  },
+  "lending's effect on h (RTX 5090, mode (i), 32K steps, max_seqs 1, 256 decode tokens after each of 3 natural-text prompts per context)": {
+   "lend (ring tail + loan)": {
+    "h_mean 4K": 0.7511,
+    "h_mean 32K": 0.7622,
+    "gate_up cache slots": 3256
+   },
+   "no lend (loan off, ring off)": {
+    "h_mean 4K": 0.6976,
+    "h_mean 32K": 0.7295,
+    "gate_up cache slots": 2712
+   },
+   "reading": "the loan frees the activation reserve for cache (+544 gate/up slots), which outweighs the displacement after each prompt; mode (ii) not measured"
+  },
+  "follow-ups (after 61729529)": {
+   "plants (RTX 5090, RAM short: exclusive tiers + the file, moe.ram=*=0.5, moe.split=on; vs the deployment's first run, RAM holding every expert; controls ram-short and ram-short-promote identical, on a second 5090 of the class)": {
+    "promote_spare_unlogged (F10)": "raised: the store's error word at step 49 (kernel_errors.0 = 4; an earlier run: step 13)",
+    "promote_victim_code (F10)": "raised: an illegal memory access (CUDA)",
+    "landing_reuse_unfenced (32K, reads ahead)": "differs at step 0",
+    "keep_copy_skipped": "differs at step 19",
+    "ondemand_round_unjoined (250-token steps, long request 8,192; holds-all 250 vs ram-short 250 identical)": "differs at step 1 (fired 32,550 rounds)",
+    "ssd_slots_in_ring": "not built: under exclusive tiers the ring and its parts are off as built (resolver: parts 1, mode never ring; the lead's call 1 during step 1 defers them to step 7), so no SSD entry can land in a ring slot",
+    "tiny GPU MoE (test_moe_engine's, exclusive tiers)": "each of the five differs from the resident store; unplanted equal (local/tmp/glm/s5-exact/tiny/test_plants_tiny.py)"
+   },
+   "RTX 5080, 8K, moe.lend_peak=on": "refused at build: \"moe: the arena (5.36 GiB) cannot hold its classes' staging (2.82 GiB) below its own tail (4.16 GiB, the large passes' buffers and the step-peak loan, moe.lend_peak): give the store more memory (--memory-fraction), a smaller max_step_tokens, or moe.lend_peak = off\"",
+   "RTX 5080 run-identity": "unchanged: 3/3 at 8K, lend_peak off",
+   "RTX PRO 6000, 16K, memory_fraction 0.98": {
+    "all-resident vs the offload store (exclusive tiers + the file, moe.ram=*=0.1, moe.cache=*=0.9, host_memory 12 GiB)": "byte-identical (626 steps)",
+    "host pinning": "12 GiB registered without a stall",
+    "state pools": "measured per engine (resident kv 4,054 units, store 30,293): an explicit budget would skip the startup profile; no preemption in either"
+   }
+  }
+ },
+ "routes": {
+  "prompts": 60,
+  "tokens": 128,
+  "flags": [
+   "--max-step-tokens",
+   "32768",
+   "--memory-fraction",
+   "0.985",
+   "--host-memory",
+   "98784247808",
+   "--plugin-options",
+   "moe.store=std.moe.offload@1",
+   "moe.ring_lend=tail",
+   "moe.lend_peak=require",
+   "ggml_cuda.pass_rows=16384",
+   "moe.stream_tokens=2048",
+   "moe.pipeline=8",
+   "rows.place=token_embd:host"
+  ],
+  "profile": "GLM-5.3-Flash-Maya-S-v2-IQ2_XXS-00001-of-00003.profile.json",
+  "decode_tokens": 7620,
+  "distinct_experts_a_layer": {
+   "1": 7.94,
+   "2": 13.91,
+   "3": 19.2,
+   "4": 24.04
+  },
+  "maya_n2": {
+   "1": 8,
+   "2": 13.9,
+   "3": 19.1,
+   "4": 23.9
+  }
+ },
+ "memory_fraction": {
+  "note": "docs/dev/spikes/glm5/frag.py on the RTX 5090 mode (i) deployment (32K steps, 4 sequences): the snapshot trace, the bench plan's shapes (1K/4K/32K prompts, 256 decode), 2K-12K prompts with prompt logprobs",
+  "before (proportional loan)": {
+   "0.99": {
+    "phase": "trace",
+    "error": "CUDA out of memory. Tried to allocate 128.00 MiB. GPU 0 has a total capacity of 31.45 GiB of which 103.06 MiB is free. Including non-PyTorch memory, this process has 31.18 GiB memory in use. Of the allocated memory 30.53 GiB is allocated by PyTorch, with 443.15 MiB allocated in private pools (e.g., "
+   },
+   "0.985": {
+    "phase": "bench",
+    "error": "CUDA out of memory. Tried to allocate 152.00 MiB. GPU 0 has a total capacity of 31.45 GiB of which 115.06 MiB is free. Including non-PyTorch memory, this process has 31.17 GiB memory in use. Of the allocated memory 30.76 GiB is allocated by PyTorch, with 923.24 MiB allocated in private pools (e.g., "
+   }
+  },
+  "token floor 8192 (superseded: follows max_model_len)": {
+   "0.99_8192": {
+    "oom": null
+   },
+   "0.985_8192": {
+    "oom": null
+   }
+  },
+  "moe.loan_fixed_mib 1536 at 0.99": {
+   "oom": null,
+   "slack_gib": 0.314,
+   "trace": {
+    "least_free_gib": 0.47,
+    "loan_overflow_gib": 0.0
+   },
+   "bench": {
+    "least_free_gib": 0.468,
+    "loan_overflow_gib": 0.0
+   },
+   "prompt_logprobs": {
+    "least_free_gib": 0.483,
+    "loan_overflow_gib": 0.0
+   }
+  },
+  "gate (c)'s reference shape (max_model_len 20488, 1 sequence, 20 prompt logprobs, 5K-20K prompts) at 0.99": "token floor: 5,451 tokens overflowed 332 MiB, 7,722 ran out of memory; fixed 1,536 MiB: no overflow, 529-537 MiB free",
+  "guard": "plugins/tests/test_reserve.py::test_glm_a_fragmenting_sequence_fits_at_the_locks_fraction (12-block slice, 0.99 and 0.985, 20 prompt logprobs): passes with the fixed bytes (least free 299 / 459 MiB on the A5000), out of memory without"
+ },
+ "lending_effect_on_h (RTX 5090, mode (i), max_seqs 1, 256 decode tokens after each of 3 natural-text prompts)": {
+  "lend (ring tail + loan), 0.985": {
+   "4K": 0.751,
+   "32K": 0.762
+  },
+  "lend with the loan's fixed bytes, 0.99": {
+   "4K": 0.752,
+   "32K": 0.763
+  },
+  "no lend, 0.985": {
+   "4K": 0.698,
+   "32K": 0.73
+  },
+  "no lend, 0.99, blocking launches": {
+   "4K": 0.704,
+   "32K": 0.734
+  }
+ },
+ "open": {
+  "no-lend illegal address": "the no-lend configuration (lend_peak off, ring coldest, ring_tokens 0) at --memory-fraction 0.99 on the RTX 5090 hits an illegal memory access during a 32K-context step (reported at DSA's einsum), twice; with CUDA_LAUNCH_BLOCKING=1 it completes; not reproduced on the 12-block slice on the A5000; at 0.985 it completed. Not the deployment's path (it lends)."
+ },
+ "exactness_lock_config (step 5's review A M1)": {
+  "flags": "32K steps, --memory-fraction 0.99, moe.lend_peak require, moe.loan_fixed_mib 1536, the rest as the deployment; 4 sequences",
+  "ref": "step 5's deployment run (deploy.0)",
+  "runs": [
+   {
+    "run": 0,
+    "identical": true,
+    "first_difference": null
+   },
+   {
+    "run": 1,
+    "identical": true,
+    "first_difference": null
+   },
+   {
+    "run": 2,
+    "identical": true,
+    "first_difference": null
+   }
+  ],
+  "pass": true,
+  "state_pools_equal": true,
+  "steps": 625
+ }
+}

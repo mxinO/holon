@@ -71,9 +71,16 @@ CUDA_VISIBLE_DEVICES=<gpu> python -m holon_tools propagate Qwen/Qwen3-0.6B \
 # pin the fastest provider per decode op on this GPU, then the same checks as propagate
 ... tune <model> [--ops attention.paged_decode rmsnorm …] [--batch 8] [--tokens 64] --golden … --floor …
 
-# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it)
-python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [engine flags]
+# an offload lock's routing profile, written beside the model file (the store's warm start; outputs never depend on it),
+# its engine from the model's lock for this card under the flags given; --ship imports a profile into std's shipped ones
+python -m holon_tools profile <model file> [--prompts …] [--max-tokens 64] [--name <stem>.profile.json] [--no-lock]
+                              [--plans plans] [engine flags: --host-memory …]
+python -m holon_tools profile <profile.json> --ship
 ```
+
+The tools build engines in process, which never derive a deployment value (docs/dev/v1-auto-config.md P2): an offload
+or tier lock's runs pass `--host-memory BYTES` (its pools' bytes; a start refuses with what they need), and
+`--memory-fraction` keeps its 0.9 default unless given.
 
 Common flags: `--plans <dir>` (default `plans`), `--class C` (start from that class's newest lock; default this
 machine's class, else the nearest class's), `--prompts` (prompt set of L2 and of the snapshot trace; default
@@ -100,7 +107,9 @@ moves, against the
 golden and floor recorded before (`--golden`, `--floor`); propagation never records a golden. A deployment whose
 quantized calls take two kernel paths (an offload store's short passes beside its long ones) gives a floor per path
 (`--floor <mmq floor> <mmvq floor>`): each call must take a path one of them emulates, and L2 must pass every
-floor's budgets. `--snapshot-runs 3`
+floor's budgets. A model with no fp32 golden is judged in L2's reference form instead (`--reference <ref>...`,
+one bf16 GPU reference per prompt set, each by the budgets beside it: `docs/dev/v1-glm.md` D15a); the lock records
+how it was judged in a `[judged]` table, which a lock advanced without L2 inherits. `--snapshot-runs 3`
 asks for a third identical run, for race-prone features. Propagation runs at a release or a milestone's close only
 (`docs/dev/release.md` §22). A plan with uncovered sites may have no run-identical trace; its lock then records no
 snapshot and every change goes through L2. The commit does not count as a change: a lock committed in commit C can

@@ -7,8 +7,8 @@ license = "Apache-2.0"
 core_abi = ">=1.0,<2.0"
 
 [resources]
-provides = ["kernel.hc_gr_mix@1", "kernel.hc_gr_combine@1"]
-requires = ["op.hc_gr_mix@1", "op.hc_gr_combine@1"]
+provides = ["kernel.hc_gr_mix@1", "kernel.hc_gr_combine@1", "kernel.hc_mhc_mix@1", "kernel.hc_mhc_writeback@1"]
+requires = ["op.hc_gr_mix@1", "op.hc_gr_combine@1", "op.hc_mhc_mix@1", "op.hc_mhc_writeback@1"]
 
 [properties]
 numerics = "bounded"

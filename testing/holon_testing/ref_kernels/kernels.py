@@ -42,11 +42,11 @@ class Rope:
 
 
 class SiluMul:
-    def __init__(self, ctx, *, inter: int, dtype: str) -> None:
-        self.inter = inter
+    def __init__(self, ctx, *, inter: int, dtype: str, glu_limit: float = 0.0) -> None:
+        self.inter, self.limit = inter, glu_limit
 
     def __call__(self, gate_up):
-        return ffn.silu_mul(gate_up[..., : self.inter], gate_up[..., self.inter:])
+        return ffn.silu_mul(gate_up[..., : self.inter], gate_up[..., self.inter:], self.limit)
 
 
 class PagedAttention:
@@ -149,10 +149,10 @@ class LinearExperts:
     a chunk's), then written into `out`, so a buffer lent where it should not be shows in the outputs."""
 
     def __init__(self, ctx, *, layout: str, experts: int, out: int, glu: str, out_dtype: str, top_k: int,
-                 **facts) -> None:
+                 glu_limit: float = 0.0, **facts) -> None:
         self.quantized = None if layout.startswith("dense/") else _Dequantized(ctx, layout=layout)
         self.experts, self.out, self.glu, self.out_dtype = experts, out, glu, getattr(torch, out_dtype)
-        self.top_k, self.out_y = top_k, out // 2 if glu == "swiglu" else out
+        self.top_k, self.out_y, self.limit = top_k, out // 2 if glu == "swiglu" else out, glu_limit
         self._stacks: dict[tuple, tuple[torch.Tensor, torch.Tensor]] = {}   # stack -> (its bytes, their decode)
         self.errors = torch.zeros(1, dtype=torch.int32)        # `linear_experts_arena@1`'s word: never set here
         steps = ctx.options.get("max_step_tokens") or PASS_ROWS
@@ -181,7 +181,7 @@ class LinearExperts:
     def _chunk(self, x, parts, ids):
         if self.quantized is None:
             weight = parts["weight"]
-            y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype)
+            y = moe.linear_experts(x, weight, ids, self.glu, operand_dtype=weight.dtype, glu_limit=self.limit)
         else:
             first = next(iter(parts.values()))
             if len(first) * self.out * x.shape[-1] * 4 <= CACHE_BYTES:
@@ -195,7 +195,7 @@ class LinearExperts:
                 experts = ids.unique().tolist()
                 stack = x.new_zeros(len(first), self.out, x.shape[-1], dtype=torch.float32)
                 stack[experts] = self._decode(parts, experts)
-            y = moe.linear_experts(x, stack, ids, self.glu)
+            y = moe.linear_experts(x, stack, ids, self.glu, glu_limit=self.limit)
         return y.to(self.out_dtype)
 
     def _decode(self, parts, experts) -> torch.Tensor:
@@ -225,19 +225,21 @@ def _check_buffers(x: torch.Tensor, out, scratch, shape: tuple, nbytes: int) -> 
 
 
 class MoeTopk:
-    def __init__(self, ctx, *, experts: int, top_k: int, renormalize: bool) -> None:
-        self.top_k, self.renormalize = top_k, renormalize
+    def __init__(self, ctx, *, experts: int, top_k: int, renormalize: bool, scoring: str = "softmax",
+                 bias: bool = False, scale: float = 1.0) -> None:
+        self.top_k, self.renormalize, self.scoring, self.scale = top_k, renormalize, scoring, scale
 
-    def __call__(self, logits):
-        return moe.moe_topk(logits, self.top_k, self.renormalize)
+    def __call__(self, logits, bias=None):
+        return moe.moe_topk(logits, self.top_k, self.renormalize, self.scoring, bias, self.scale)
 
 
 class MoeRouter:
-    def __init__(self, ctx, *, top_k: int, renormalize: bool, **facts) -> None:
-        self.top_k, self.renormalize = top_k, renormalize
+    def __init__(self, ctx, *, top_k: int, renormalize: bool, scoring: str = "softmax", bias: bool = False,
+                 scale: float = 1.0, **facts) -> None:
+        self.top_k, self.renormalize, self.scoring, self.scale = top_k, renormalize, scoring, scale
 
-    def __call__(self, x, router):
-        return moe.moe_router(x, router, self.top_k, self.renormalize)
+    def __call__(self, x, router, bias=None):
+        return moe.moe_router(x, router, self.top_k, self.renormalize, self.scoring, bias, self.scale)
 
 
 class MoeCombine:
@@ -273,8 +275,8 @@ class ExpertFetch:
     def __init__(self, ctx, *, unit_bytes: int, staging: int) -> None:
         pass
 
-    def __call__(self, fetch, n, src, dst):
-        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst))
+    def __call__(self, fetch, n, src, dst, runs=None):
+        dst.copy_(moe.expert_fetch(fetch, int(n[0]), src, dst, runs))
 
 
 class ExpertPrefetch:
@@ -294,7 +296,7 @@ class CpuTask:
     def __init__(self, ctx, *, pool: str) -> None:
         self.tasks, self.errors = [], ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
 
-    def bind(self, task) -> int:
+    def bind(self, task, urgent: bool = False) -> int:          # (`urgent`: a hint; a task runs at its signal)
         self.tasks.append(task)
         return len(self.tasks) - 1
 
@@ -311,34 +313,39 @@ class CpuTask:
 class CpuExperts:
     """`cpu_experts@1`'s oracle; a task over fixed buffers runs it (synchronous only: no `native`)."""
 
-    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, **facts) -> None:
-        self.gate_up, self.down, self.inter, self.top_k = gate_up, down, inter, top_k
+    def __init__(self, ctx, *, gate_up: str, down: str, inter: int, top_k: int, glu_limit: float = 0.0,
+                 **facts) -> None:
+        self.gate_up, self.down, self.inter, self.top_k, self.limit = gate_up, down, inter, top_k, glu_limit
 
     def __call__(self, jobs, x, gate_up, down, rows, threads: int = 1) -> None:
-        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k))
+        rows.copy_(moe.cpu_experts(jobs, x, gate_up, down, rows, self.gate_up, self.down, self.inter, self.top_k,
+                                   self.limit))
 
     def task(self, jobs, x, gate_up, down, rows):
         return lambda: self(jobs, x, gate_up, down, rows)
 
 
 class MoeTiers:
-    """`moe_tiers@1`'s oracle, writing in place what the contract writes."""
+    """`moe_tiers@2`'s oracle, writing in place what the contract writes."""
 
     def __init__(self, ctx, **facts) -> None:
         pass
 
     def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                 owner, capacity, heat, io, moves, n_moves) -> None:
+                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp=None,
+                 clock=None) -> None:
         records = [tuple(r) for r in delta[int(start[0]):int(n_delta[0])].tolist()]
         out = moe.moe_tiers(ids, kinds, group, fetch, n_fetch, stage, records, residency, host, piece, classes, owner,
-                            capacity, heat)
+                            capacity, heat, rows, ahead, stamp, clock)
         for name, t in (("fetch", fetch), ("residency", residency), ("host", host), ("owner", owner),
-                        ("moves", moves), ("n_moves", n_moves)):
+                        ("moves", moves), ("n_moves", n_moves), ("ssd", ssd), ("n_ssd", n_ssd), ("n_ram", n_ram),
+                        ("hit", hit), ("n_hit", n_hit)) + ((("stamp", stamp), ("clock", clock)) if stamp is not None
+                                                           else ()):
             t.copy_(out[name])
-        for r, rows in enumerate(out["io"]):
-            io[r, 0, 0] = len(rows)
-            for i, row in enumerate(rows):
-                io[r, 1 + i] = torch.tensor(row)
+        for r, lines in enumerate(out["io"]):
+            io[r, 0, 0] = len(lines)
+            for i, line in enumerate(lines):
+                io[r, 1 + i] = torch.tensor(line)
 
 
 class MoePatchRows:
@@ -353,7 +360,7 @@ class MoePatchRows:
 
 
 class CausalConv1d:
-    def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str) -> None:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, dtype: str, weight_dtype: str | None = None) -> None:
         pass
 
     def __call__(self, x, weight, state, slots, query_start, has_init):
@@ -380,16 +387,27 @@ class GatedDeltaRule:
                                     snapshot, snaps, out_slots)
 
 
+class KDA(GatedDeltaRule):
+    def __init__(self, ctx, *, heads: int, head_k_dim: int, head_v_dim: int, lower_bound: float, dtype: str,
+                 out_slots: bool = False) -> None:
+        self.lower_bound = lower_bound
+
+    def __call__(self, handle, q, k, v, f, b, a_log, dt_bias, state, slots, has_init, snapshot=None, out_slots=None):
+        query_start, snaps = handle
+        return gdn.kda(q, k, v, f, b, a_log, dt_bias, state, slots, query_start, has_init, self.lower_bound,
+                       snapshot, snaps, out_slots)
+
+
 class GatedRMSNorm:
-    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu") -> None:
-        self.eps, self.out_gate = eps, out_gate
+    def __init__(self, ctx, *, dim: int, eps: float, dtype: str, out_gate: str = "silu", round: str = "model") -> None:
+        self.eps, self.out_gate, self.round = eps, out_gate, round
 
     def __call__(self, o, z, weight):
-        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate)
+        return gdn.gated_rmsnorm(o, z, weight, self.eps, self.out_gate, self.round)
 
 
 class GDNRewind:
-    def __init__(self, ctx, *, channels: int, kernel_size: int, heads_v: int, dtype: str) -> None:
+    def __init__(self, ctx, *, channels: int, kernel_size: int, heads_v: int, dtype: str, gate_width: int = 0) -> None:
         pass
 
     def __call__(self, state, window, x, a, b, slots, accepted, width):
@@ -412,6 +430,23 @@ class HcCombine:
         hyper.hc_gr_combine(r, y, w)
 
 
+class HcMhcMix:
+    def __init__(self, ctx, *, streams: int, hidden: int, eps: float, hc_eps: float, iters: int, dtype: str) -> None:
+        self.streams, self.eps, self.hc_eps, self.iters, self.dtype = streams, eps, hc_eps, iters, getattr(torch, dtype)
+
+    def __call__(self, r, fn, base, scale, y_prev, post_prev, comb_prev):
+        return hyper.hc_mhc_mix(r, fn, base, scale, y_prev, post_prev, comb_prev, self.streams, self.eps,
+                                self.hc_eps, self.iters, self.dtype)
+
+
+class HcMhcWriteback:
+    def __init__(self, ctx, *, streams: int, hidden: int, dtype: str) -> None:
+        pass
+
+    def __call__(self, r, y, post, comb):
+        hyper.hc_mhc_writeback(r, y, post, comb)
+
+
 class QsaIndex:
     def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, rotary_dim: int, max_positions: int,
                  eps: float, dtype: str) -> None:
@@ -422,11 +457,29 @@ class QsaIndex:
 
 
 class QsaSelect:
-    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int) -> None:
+    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int,
+                 head_weights: bool = False) -> None:
         self.ratio, self.budget = ratio, budget
 
-    def __call__(self, q, pooled, table, seq, positions):
-        return qsa.qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget)
+    def __call__(self, q, pooled, table, seq, positions, w=None):
+        return qsa.qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget, w)
+
+
+class DsaIndex:
+    def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, dtype: str) -> None:
+        self.ratio = ratio
+
+    def __call__(self, k, gate, raw, gates, pooled, ape, table, seq, positions):
+        qsa.dsa_index(k, gate, raw, gates, pooled, ape, table, seq, positions, self.ratio)
+
+
+class MlaAttend:
+    def __init__(self, ctx, *, heads: int, latent: int, ratio: int, width: int, page: int, scale: float,
+                 q_dtype: str, kv_dtype: str) -> None:
+        self.ratio, self.scale = ratio, scale
+
+    def __call__(self, q, kv, blocks, table, seq, positions):
+        return qsa.mla_attend(q, kv, blocks, table, seq, positions, self.ratio, self.scale)
 
 
 class QsaAttend:
@@ -463,7 +516,9 @@ BY_OP = {"rmsnorm": RMSNorm, "add_rmsnorm": AddRMSNorm, "rope": Rope, "silu_mul"
          "moe_topk": MoeTopk, "moe_router": MoeRouter, "moe_combine": MoeCombine, "moe_resolve": MoeResolve,
          "expert_fetch": ExpertFetch, "expert_prefetch": ExpertPrefetch, "cpu_task": CpuTask, "cpu_experts": CpuExperts,
          "moe_patch_rows": MoePatchRows, "moe_tiers": MoeTiers,
-         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm,
+         "causal_conv1d": CausalConv1d, "gated_delta_rule": GatedDeltaRule, "gated_rmsnorm": GatedRMSNorm, "kda": KDA,
          "gdn_rewind": GDNRewind, "kv_write": KvWrite, "hc_gr_mix": HcMix, "hc_gr_combine": HcCombine,
-         "qsa_index": QsaIndex, "qsa_select": QsaSelect, "qsa_attend": QsaAttend, "qwen4_exp.ple_rows": PleRows,
+         "hc_mhc_mix": HcMhcMix, "hc_mhc_writeback": HcMhcWriteback,
+         "qsa_index": QsaIndex, "qsa_select": QsaSelect,
+         "dsa_index": DsaIndex, "mla_attend": MlaAttend, "qsa_attend": QsaAttend, "qwen4_exp.ple_rows": PleRows,
          "qwen4_exp.ple_block": PleBlock}

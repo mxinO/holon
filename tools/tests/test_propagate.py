@@ -46,6 +46,10 @@ class Scripted:
         self.calls.append("l2")
         return self.l2_passed, "L2 " + ("PASS" if self.l2_passed else "FAIL")
 
+    def judged(self):
+        return {"form": "reference", "recordings": ["m/v1-reference.safetensors@" + "ab" * 32],
+                "budgets": ["m/v1-reference.budgets.json@" + "cd" * 32]}
+
 
 @pytest.fixture
 def current():
@@ -146,6 +150,22 @@ def test_write_stores_lock_and_snapshot(tmp_path, current):
     assert propagate.write(tmp_path, out, allow_approx=True).name == "2.lock"
 
 
+def test_a_lock_records_how_it_was_judged_and_an_advance_inherits_it(tmp_path, current):
+    """D15a (B-M1): the L2 that judged a lock is its `[judged]` table, beside `holon.api.Lock` (unchanged); a lock
+    advanced without L2 carries its predecessor's byte for byte, its digest still checking; none passes none on."""
+    first = propagate.write(tmp_path, propagate.decide(None, Scripted(_plan(), [_snap(), _snap()]), 86))
+    judged = locks.judged_of(first)
+    assert judged == Scripted(_plan(), []).judged() and plans.read(first).plan.plan_id == _plan().plan_id
+    advanced = propagate.decide(plans.read(first), Scripted(_plan(src="bbbb", commit="c2"), [_snap(), _snap()]), 86)
+    assert advanced.verdict == "advance" and advanced.judged is None
+    second = propagate.write(tmp_path, advanced, inherited=locks.judged_of(first))
+    table = lambda p: p.read_text().partition("[judged]")[2].partition("\n\n")[0]       # noqa: E731
+    assert table(second) == table(first) != "" and plans.read(second).plan.units["kern"].src == "bbbb"
+    bare = propagate.write(tmp_path, propagate.decide(plans.read(second), Scripted(
+        _plan(src="cccc", commit="c3"), [_snap(), _snap()]), 86))
+    assert locks.judged_of(bare) is None and plans.read(bare).plan.units["kern"].src == "cccc"
+
+
 def test_snapshot_engines_share_one_pool_size(monkeypatch):
     # Pool sizes set the schedule a trace records: every snapshot engine gets the first one's pools (a later build would
     # measure less free memory), or those of the lock's stored snapshot (recorded in another process). A host pool has
@@ -164,12 +184,34 @@ def test_snapshot_engines_share_one_pool_size(monkeypatch):
         def has_work(self):
             return False
 
+        def close(self):
+            closed.append(len(built))
+
+    closed = []
     monkeypatch.setattr(propagate, "Engine", Measuring)
     checks = propagate.EngineChecks(EngineConfig(model="m"), [], None)
     first, again = checks.snapshot(), checks.snapshot()
     assert built == [None, 1000] and first.meta["pool_bytes"] == again.meta["pool_bytes"] == 1000
+    assert closed == [1]               # the first engine closed before the second was built (its host pools gone)
     propagate.EngineChecks(EngineConfig(model="m"), [], None, pool_bytes=990).snapshot()
     assert built[-1] == 990
+    # a check engine whose steps overflowed an activation loan is refused (docs/dev/v1-glm.md D8w)
+    class Overflowing(Measuring):
+        def __init__(self, config):
+            super().__init__(config)
+            self.ctx = type("Ctx", (), {"shared_objects": {"moe": type("S", (), {"loan_overflows": 2,
+                                                                                  "loan_overflow_most": 5 << 20})()}})()
+    monkeypatch.setattr(propagate, "Engine", Overflowing)
+    with pytest.raises(RuntimeError, match="2 check steps overflowed their activation loan, by up to 5 MiB"):
+        propagate.EngineChecks(EngineConfig(model="m"), [], None).snapshot()
+    monkeypatch.setattr(propagate, "Engine", Measuring)
+    # a deployment that lends its step-peak loan measures every engine's pools (its loan, and the activation_loan@1
+    # site a real start selects, come from that profile)
+    for lend in ("on", "require"):
+        lent = EngineConfig(model="m", plugin_options={"moe.lend_peak": lend})
+        checks = propagate.EngineChecks(lent, [], None, pool_bytes=990)
+        checks.snapshot(), checks.snapshot()
+        assert built[-2:] == [None, None], lend
 
 
 @pytest.mark.slow
@@ -217,3 +259,38 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert pools[-1] is None                                    # another class's pools may not fit here: measured
     assert run(away, "--approve") == 0
     assert plans.newest(away, lock.plan.model_id, lock.plan.fingerprint_class).snapshot == lock.snapshot
+
+
+@pytest.mark.slow
+def test_cli_first_lock_in_the_reference_form(tiny_checkpoint, tiny_prompts_file, cpu_flags, tmp_path, monkeypatch,
+                                               capsys):
+    """D15a end to end on CPU: a reference (the engine's own run, `kind: reference` with its oracle) and budgets from
+    a pair that differs in bits; `--reference` writes the first lock with its `[judged]` table naming both files, and
+    is refused beside `--golden`."""
+    from holon.core.engine import Engine
+    from holon_judge import reference
+    from holon_judge.engine import score
+    from holon_judge.recording import PromptSet
+
+    prompts = PromptSet.load(tiny_prompts_file)
+    monkeypatch.setattr(propagate, "PROMPTS", tiny_prompts_file.parent)       # where a reference's prompt set lies
+    engine = cpu_flags | {"max_model_len": 128, "state_memory": 4 << 20}
+
+    def recording(**kw):
+        return score(Engine(EngineConfig(**{"model": str(tiny_checkpoint)} | engine | kw)), prompts,
+                     meta={"kind": "reference", "oracle": "tools/tests/test_propagate.py"})
+    ref = tmp_path / "tiny-reference.safetensors"
+    recording().save(ref)
+    reference.calibrate(ref, [("bf16", reference.Recording.load(ref), recording(dtype=torch.bfloat16))]).save(
+        reference.budgets_path(ref))
+    flags = [f"--{k.replace('_', '-')}={str(v).removeprefix('torch.')}" for k, v in engine.items()]
+    base = ["propagate", str(tiny_checkpoint), "--plans", str(tmp_path / "plans"), "--prompts",
+            str(tiny_prompts_file), *flags, "--new-model", "--approve"]
+    with pytest.raises(SystemExit, match="--reference replaces"):
+        main([*base, "--reference", str(ref), "--golden", str(ref)])
+    assert main([*base, "--reference", str(ref)]) == 0
+    assert "L2 (reference form)" in capsys.readouterr().out
+    (lock,) = (tmp_path / "plans").rglob("*.lock")
+    judged = locks.judged_of(lock)
+    assert judged["form"] == "reference" and judged["recordings"] == [f"{ref.name}@{reference.sha256(ref)}"]
+    assert judged["budgets"] == [f"{ref.stem}.budgets.json@{reference.sha256(reference.budgets_path(ref))}"]

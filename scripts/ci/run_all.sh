@@ -5,7 +5,7 @@ root="$(cd "$(dirname "$0")/../.." && pwd)"   # the checks import this checkout'
 export PYTHONPATH="$root/core:$root/std:$root/plugins:$root/judge:$root/testing:$root/tools${PYTHONPATH:+:$PYTHONPATH}"
 cd "$root/scripts/ci"
 rc=0
-for c in check_core_denylist.py check_core_loc.py check_no_env.py check_torch_cuda.py check_private.py check_locks.py check_provenance.py \
+for c in check_core_denylist.py check_core_loc.py check_no_env.py check_torch_cuda.py check_events.py check_private.py check_locks.py check_provenance.py \
          check_manifest_deps.py check_docs.py check_version.py; do
   python3 "$c" || rc=1
 done
@@ -19,5 +19,6 @@ python3 check_commit_messages.py "${1:-origin/main}" || rc=1                    
 (cd ../.. && uv lock --check -q) || rc=1                                         # uv.lock matches the pyprojects
 bash check_core_diff.sh "${1:-origin/main}" || true
 python3 check_lock_impact.py "${1:-origin/main}" || true                         # warns: the locks a merge outdates
-if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1; else echo "skip import contracts (import-linter not installed)"; fi
+if command -v lint-imports >/dev/null; then (cd ../.. && lint-imports) || rc=1   # the import contracts: required
+else echo "FAIL import contracts: lint-imports not found (activate the dev venv: import-linter)"; rc=1; fi
 exit $rc

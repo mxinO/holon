@@ -21,24 +21,11 @@ import argparse
 import contextlib
 import json
 import pathlib
-import shlex
 
 import torch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PLE_TOL, QSA_TOL = 1e-5, 0.98       # a row's PLE error (clean 8e-7 on the A5000); rows selecting the same blocks
-
-
-def engine(model: str, flags: str, **base):
-    """An engine from `holon serve`-style flags over `base` (the flags win; `plugin_options` given in `base` merge on
-    top of theirs)."""
-    from holon.core.cli import engine_flags, engine_settings, layered
-    from holon.core.engine import Engine, EngineConfig
-    parser = argparse.ArgumentParser()
-    engine_flags(parser, given_only=True)
-    extra = base.pop("plugin_options", None)
-    cfg = layered(base, engine_settings(parser.parse_args(shlex.split(flags))))
-    return Engine(EngineConfig(model, **(layered(cfg, {"plugin_options": extra}) if extra else cfg)))
 
 
 class _PLE:
@@ -133,6 +120,7 @@ def main() -> None:
     a = ap.parse_args()
     from holon.api import SamplingParams
     from holon_judge import planted
+    from holon_judge.engine import from_flags
     from holon_judge.recording import PromptSet
     from holon_plugins.models.qwen4_exp.units import PLE
     from holon_std.mixers.qsa import units as qsa_units
@@ -145,7 +133,7 @@ def main() -> None:
     ids = max(PromptSet.load(a.prompts).prompts, key=lambda p: len(p.ids)).ids[:a.ctx]
     with (planted.PLANTS[a.plant]() if a.plant else contextlib.nullcontext()), \
             mock_init(qsa_units.QSA, qsa_init):
-        e = engine(a.model, a.flags, max_seqs=1, max_model_len=max(a.ctx + 64, 4096), prefix_cache=False)
+        e = from_flags(a.model, a.flags, {"max_seqs": 1, "max_model_len": max(a.ctx + 64, 4096), "prefix_cache": False})
         step = e.cfg.max_step_tokens
         modules = list(e.executor.model.modules())
         ples = [_PLE(m) for m in modules if isinstance(m, PLE)]

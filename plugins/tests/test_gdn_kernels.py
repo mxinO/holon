@@ -11,8 +11,9 @@ build context, on Qwen3.8-27B's shapes (Hk 16, Hv 48: head ratio 3, conv channel
   and of the final state within 2× that of HF's bf16 torch path on the same inputs (transformers' own functions:
   l2norm and β in bf16, f32 core, bf16 output; its chunked path for prefill rows, its recurrent one for decode),
   for one step and for decode steps continuing a prefill.
-- `causal_conv1d` within `l0.check(bf16, K)` of the oracle (in f32, unrounded) and its state bitwise; `gated_rmsnorm`
-  within `l0.check(dtype, dim)` of the oracle.
+- `causal_conv1d` within `l0.check(bf16, K)` of the oracle (in f32, unrounded) and its state bitwise, with f32
+  weights too (KDA's); `gated_rmsnorm` within `l0.check(dtype, dim)` of the oracle, and KDA's unrounded form (`round
+  = "none"`) told apart from the default.
 - Exactness: a 64-aligned split (128 then 72 tokens) bitwise equal to one shot (both ops); a decode step (conv, rule,
   norm) replayed from a CUDA graph with new inputs bitwise equal to eager; runs repeat bitwise; plan and call
   never sync with the host.
@@ -35,6 +36,7 @@ from holon_judge import l0
 from holon_plugins.kernels.fla import plugin as fla_plugin
 from holon_plugins.kernels.fla.vendor import fused_sigmoid_gating
 from holon_std.mixers.gdn import reference as ref
+from holon_std.mixers.gdn.kernels import MASKED
 
 pytestmark = [pytest.mark.l0, pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")]
 hf = pytest.importorskip("transformers.models.qwen3_5.modeling_qwen3_5")
@@ -443,6 +445,37 @@ def test_gated_rmsnorm_matches_the_oracle(t, h, d, gate, dtype):
         print(f"gated_rmsnorm {t}x{h}x{d} {dtype} weight {weight.dtype}: usage {r.usage:.3f}")
 
 
+def test_gated_rmsnorm_unrounded_for_kda():
+    """KDA's o_norm (`round = "none"`, docs/dev/v1-glm.md D4): f32 through the f32 weight and the sigmoid gate, rounded
+    once — the oracle's bits on ≥ 99.9% of elements (the rest one rsqrt ulp off); the default rounding (the norm
+    rounded before the weight) matches only ≈ 74%, so the two forms are told apart."""
+    t, h, d = 300, 64, 128
+    o, z = (torch.randn(t, h, d, device="cuda") * 3).bfloat16(), torch.randn(t, h, d, device="cuda").bfloat16()
+    w = 1 + 0.2 * torch.randn(d, device="cuda")
+    norm = select("gated_rmsnorm@1", dim=d, eps=1e-5, dtype="bfloat16", out_gate="sigmoid", round="none")
+    got = norm(o, z, w)
+    for form, at_least in (("none", 0.999), ("model", None)):
+        want = ref.gated_rmsnorm(o, z, w, 1e-5, "sigmoid", form)
+        same = (got == want).float().mean().item()
+        assert l0.check(got, want, torch.bfloat16, d).passed
+        assert same >= at_least if at_least else same < 0.9, (form, same)
+
+
+def test_conv1d_with_f32_weights_for_kda():
+    """KDA's convs keep their f32 weights (D4: `weight_dtype`, given when not the model dtype): the kernel reads them
+    unrounded, as the oracle does, at GLM's channels (3 × 64 × 128) and the tiny fixture's."""
+    for c in (3 * 64 * 128, 3 * 2 * 128):
+        x, _, state = conv_case(c, LENS, INIT, SLOTS)
+        w = torch.randn(c, KERNEL, device="cuda") * 0.5                       # f32, not bf16-representable
+        y_want, s_want = conv_oracle(x, w, state, SLOTS, LENS, INIT)
+        kernel = select("causal_conv1d@1", channels=c, kernel_size=KERNEL, dtype="bfloat16", weight_dtype="float32")
+        y = kernel(x, w, state, dev(SLOTS), query_start(LENS), dev(INIT, torch.bool))
+        r = l0.check(y, y_want, torch.bfloat16, KERNEL)
+        assert r.passed, r
+        assert torch.equal(state.view(torch.int16), s_want.view(torch.int16))
+        print(f"causal_conv1d f32 weights {c}: usage {r.usage:.3f}")
+
+
 # --- a decode step in a CUDA graph -----------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("order", ["grouped", "tiled"])
@@ -590,7 +623,7 @@ def test_snapshots_must_fall_inside_their_row_on_a_chunk():
 STATE_ULPS = 8
 
 
-def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
+def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None, masked=MASKED):
     """A verify step over rows of q tokens (written to `sink`, else to the rows' units) and its masked replay."""
     n = len(slots)
     init = dev([True] * n, torch.bool)
@@ -599,10 +632,10 @@ def _verify_replay(rule, x, g, s0, slots, accepted, q, sink=None):
         out = rule(rule.plan([q] * n, per_token=True), *rows(x, 0, n * q).values(), g["a_log"], g["dt_bias"], s0,
                    dev(slots), init, out_slots=dev([sink] * n))
     keep = torch.arange(q, device="cuda")[None, :] < 1 + torch.tensor(accepted, device="cuda")[:, None]
-    masked = dict(rows(x, 0, n * q))
+    masked_rows = dict(rows(x, 0, n * q))
     for name in ("a", "b"):
-        masked[name] = masked[name].masked_fill(~keep.reshape(-1, 1), -1e4)
-    rule(rule.plan([q] * n, per_token=True), *masked.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
+        masked_rows[name] = masked_rows[name].masked_fill(~keep.reshape(-1, 1), masked)   # (−inf: the contract's)
+    rule(rule.plan([q] * n, per_token=True), *masked_rows.values(), g["a_log"], g["dt_bias"], s0, dev(slots), init,
          out_slots=dev(slots))
     return out
 
@@ -640,8 +673,10 @@ def test_verify_rows_replay_bitwise_to_the_accepted_tokens(shape, order):
     others = [u for u in range(UNITS) if u != sink]
     assert torch.equal(state[others], keep_s0[others])               # the verify step moved nothing but the sink
 
-    replay = s0.clone()
+    replay, before = s0.clone(), s0.clone()
     _verify_replay(rule, x, g, replay, slots, accepted, q)
+    _verify_replay(rule, x, g, before, slots, accepted, q, masked=-1e4)   # docs/dev/v1-glm.md D4: −inf, −1e4's bits
+    assert torch.equal(replay, before)
     alone = s0.clone()
     take = torch.cat([torch.arange(r * q, r * q + 1 + n, device="cuda") for r, n in enumerate(accepted)])
     rule(rule.plan([1 + n for n in accepted], per_token=True),

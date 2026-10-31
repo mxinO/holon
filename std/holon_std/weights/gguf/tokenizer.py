@@ -3,8 +3,9 @@ which drops the USER_DEFINED tokens and the eos.
 
 Byte-level BPE from `tokenizer.ggml.tokens` + `merges`; CONTROL tokens are special added tokens, USER_DEFINED ones
 atomic added tokens, UNUSED ones (padding entries) unreachable. The pre-tokenizer comes from `tokenizer.ggml.pre`:
-llama.cpp keeps one table of them, and so do we. Each entry is the original tokenizer's normalizer and split regex —
-including NFC for `qwen2`, which llama.cpp skips, so decomposed input encodes as the model was trained.
+llama.cpp keeps one table of them, and so do we. Each entry is the original tokenizer's normalizer (or none), split
+regex and BPE `ignore_merges` — including NFC for `qwen2`, which llama.cpp skips, so decomposed input encodes as the
+model was trained.
 """
 from __future__ import annotations
 
@@ -14,12 +15,15 @@ from tokenizers import AddedToken, Regex, Tokenizer, decoders, models, normalize
 
 CONTROL, USER_DEFINED = 3, 4                     # llama.cpp token types
 
-_PRE = {   # tokenizer.ggml.pre -> (normalizer, split regex), copied from the model's own tokenizer.json
-          # (qwen2: Qwen2/Qwen3; qwen35: Qwen3.5/3.8, marks joining letters; Apache-2.0)
+_PRE = {   # tokenizer.ggml.pre -> (normalizer, split regex, ignore_merges), copied from the model's own tokenizer.json
+          # (qwen2: Qwen2/Qwen3; qwen35: Qwen3.5/3.8, marks joining letters; glm4: GLM-5.3-Flash, numbers in threes,
+          # a word already in the vocabulary taken whole; Apache-2.0 / MIT)
     "qwen2": (normalizers.NFC(), r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}"
-                                 r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"),
+                                 r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+", False),
     "qwen35": (normalizers.NFC(), r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?[\p{L}\p{M}]+|\p{N}"
-                                  r"| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"),
+                                  r"| ?[^\s\p{L}\p{M}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+", False),
+    "glm4": (None, r"(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}"
+                   r"| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+", True),
 }
 
 
@@ -30,9 +34,11 @@ def build(tokens: list[str], merges: list[str], types: list[int], pre: str, chat
 
     if pre not in _PRE:
         raise ValueError(f"GGUF pre-tokenizer {pre!r} is not supported (known: {sorted(_PRE)})")
-    normalizer, regex = _PRE[pre]
-    tok = Tokenizer(models.BPE({t: i for i, t in enumerate(tokens)}, [tuple(m.split(" ", 1)) for m in merges]))
-    tok.normalizer = normalizer
+    normalizer, regex, ignore_merges = _PRE[pre]
+    tok = Tokenizer(models.BPE({t: i for i, t in enumerate(tokens)}, [tuple(m.split(" ", 1)) for m in merges],
+                               ignore_merges=ignore_merges))
+    if normalizer is not None:
+        tok.normalizer = normalizer
     tok.pre_tokenizer = pre_tokenizers.Sequence([
         pre_tokenizers.Split(Regex(regex), behavior="isolated"),
         pre_tokenizers.ByteLevel(add_prefix_space=False, use_regex=False)])

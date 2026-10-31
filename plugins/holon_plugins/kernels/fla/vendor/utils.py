@@ -34,6 +34,13 @@ PINNED: dict[str, dict] = {
     "recompute_w_u_fwd_kernel": dict(kwargs={}, num_warps=2, num_stages=3),
     "chunk_gated_delta_rule_fwd_kernel_h_blockdim64": dict(kwargs={"BV": 32}, num_warps=4, num_stages=3),
     "chunk_fwd_kernel_o": dict(kwargs={"BK": 64, "BV": 64}, num_warps=4, num_stages=2),
+    # KDA's chunked kernels (kda.py; GLM-5.3-Flash, docs/dev/v1-glm.md D4): triton's autotune over kda.py's lists at
+    # 64 heads x 128, T = 4096 and 1024, sm_86. A name another module shares is keyed by its module too.
+    "chunk_kda_scaled_dot_kkt_fwd_kernel_intra_sub_inter": dict(kwargs={"BK": 32}, num_warps=1, num_stages=2),
+    "chunk_kda_scaled_dot_kkt_fwd_kernel_intra_sub_intra": dict(kwargs={}, num_warps=1, num_stages=3),
+    "kda.recompute_w_u_fwd_kernel": dict(kwargs={}, num_warps=4, num_stages=2),
+    "chunk_gla_fwd_kernel_o": dict(kwargs={"BK": 64, "BV": 128}, num_warps=4, num_stages=3),
+    "kda_gate_cumsum_fwd_kernel": dict(kwargs={"BD": 64}, num_warps=4, num_stages=3),
 }
 
 
@@ -42,7 +49,7 @@ def autotune(configs: list, key: list[str], **_: object):
     first call and every run launches the same configuration."""
 
     def wrap(fn):
-        pinned = PINNED.get(fn.__name__)
+        pinned = PINNED.get(f"{fn.__module__.rsplit('.', 1)[-1]}.{fn.__name__}") or PINNED.get(fn.__name__)
         return triton.autotune(configs=[triton.Config(**pinned) if pinned else configs[0]], key=key)(fn)
 
     return wrap

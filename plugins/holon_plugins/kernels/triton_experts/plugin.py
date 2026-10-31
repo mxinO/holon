@@ -20,7 +20,7 @@ class LinearExperts:
 
 def _supports(f: dict) -> bool:
     return (f["layout"] in ("dense/bfloat16", "dense/float16") and f["out_dtype"] == "float32"
-            and f["glu"] in ("none", "swiglu") and f["rows_per_token"] in (1, f["top_k"]))
+            and f["glu"] in ("none", "swiglu") and f["rows_per_token"] in (1, f["top_k"]) and "glu_limit" not in f)
 
 
 class Plugin:

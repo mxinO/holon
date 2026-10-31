@@ -333,5 +333,80 @@ def _kinds(value: Any) -> set[str]:
     return {{float: "number", str: "string", list: "array", dict: "object", type(None): "null"}[type(value)]}
 
 
+ARG_KEY, END_ARG_KEY, ARG_VALUE, END_ARG_VALUE = "<arg_key>", "</arg_key>", "<arg_value>", "</arg_value>"
+
+
+class GlmXML(QwenXML):
+    """glm_xml@1 (GLM-5.3-Flash, docs/dev/v1-glm.md D13): `<tool_call>NAME<arg_key>KEY</arg_key><arg_value>VALUE
+    </arg_value>…</tool_call>`, no newlines. The arguments stream as JSON a pair at a time, as qwen_xml@2's: the
+    template writes strings raw and other values as JSON (`tojson`); a value that does not read as one of its
+    schema's types stays a string. Without a schema type, a raw string that parses as JSON (`123`, `true`) reads as
+    typed: the format writes strings unquoted, so it cannot tell them apart."""
+
+    MARKERS = {"name": (ARG_KEY, END_CALL), "args": (ARG_KEY, END_CALL), "key": (END_ARG_KEY,),
+               "open": (ARG_VALUE,), "value": (END_ARG_VALUE,)}
+
+    def feed(self, text: str, final: bool = False) -> list[ParseEvent]:
+        out: list[ParseEvent] = []
+        while True:
+            if self.state == "text":
+                before, marker, rest = _split(self.buf + text, (CALL,), final)
+                if before:
+                    out.append(Text(before))
+                if marker is None:
+                    self.buf = rest
+                    return out
+                self.buf, text, self.n_args = "", rest, 0
+                self._expect("name")
+            hit = self.held.push(text)
+            if hit is None:
+                if not final:
+                    return out
+                if self.state != "name":                     # the text ended in the call: what it has, closed
+                    out += [ToolArgsDelta(self.calls, "}"), ToolCallEnd(self.calls)]
+                    self.calls += 1
+                else:
+                    out.append(Text(CALL + self.held.text()))
+                self.state = "text"
+                return out
+            before, marker, text = hit
+            if self.state == "name":
+                self.function = before.strip()
+                out += [ToolCallStart(self.calls, self.function), ToolArgsDelta(self.calls, "{")]
+            elif self.state == "key":
+                self.key = before
+            elif self.state == "value":
+                sep, pair = ", " if self.n_args else "", [json.dumps(v, ensure_ascii=False) for v in (
+                    self.key, self._value(self.key, before))]
+                out.append(ToolArgsDelta(self.calls, f"{sep}{pair[0]}: {pair[1]}"))
+                self.n_args += 1
+            if marker == END_CALL:
+                out += [ToolArgsDelta(self.calls, "}"), ToolCallEnd(self.calls)]
+                self.calls, self.state = self.calls + 1, "text"
+                continue
+            self._expect({ARG_KEY: "key", END_ARG_KEY: "open", ARG_VALUE: "value", END_ARG_VALUE: "args"}[marker])
+
+    def _expect(self, state: str) -> None:
+        self.state = state
+        self.held = _Until(self.MARKERS[state])
+
+    def _value(self, key: str, text: str) -> Any:
+        properties = self.properties.get(self.function)
+        types = _types(properties.get(key) if isinstance(properties, dict) else None)
+        if types == {"string"}:
+            return text
+        try:
+            value = json.loads(text)
+        except ValueError:
+            return text
+        return value if not types or _kinds(value) & types else text
+
+    @staticmethod
+    def call(tool: dict[str, Any]) -> dict[str, Any]:
+        """The constraint of one call to `tool`: its name, then its arguments' pairs as free text that cannot close
+        the call early (the GLM pair format has no schema-driven grammar in xgrammar's styles yet)."""
+        return _tag(f"{CALL}{tool['function']['name']}", {"type": "any_text", "excludes": [END_CALL]}, END_CALL)
+
+
 REASONING = {"think@1": Think}
-TOOLS = {"hermes@1": Hermes, "qwen_xml@1": QwenXMLString, "qwen_xml@2": QwenXML}
+TOOLS = {"hermes@1": Hermes, "qwen_xml@1": QwenXMLString, "qwen_xml@2": QwenXML, "glm_xml@1": GlmXML}

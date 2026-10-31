@@ -423,6 +423,29 @@ def test_the_large_call_plants_fire_on_the_fixup(ctx, sm):
         assert lib.mmq_fixups() == (1, 1) and not torch.equal(planted, clean) and torch.equal(chunk, one), bits
 
 
+def test_the_reference_forms_card_plants(ctx, sm, monkeypatch):
+    """docs/dev/v1-glm.md D15a's plants, here as if this card were the RTX 5090 (`STREAMK_SMS`): the fixup dropped
+    changes a two-chunk dense call far; the control (the two K halves summed in another order) leaves its values within
+    rounding; neither touches mmvq rows; on another SM count neither fires."""
+    from holon_judge import planted
+
+    monkeypatch.setattr(planted, "STREAMK_SMS", torch.cuda.get_device_properties(0).multi_processor_count)
+    k, rows = 4096, 2 * CHUNK
+    kernel = qlinear(ctx, "q4_k", k, "float32")
+    w, x = {"blocks": device_blocks(random_blocks("q4_k", OUT, k, seed=5))}, activations(rows, k, seed=5)
+    clean, one = kernel(x, w), kernel(x[:1], w)
+    scale = clean.abs().max()
+    with PLANTS["streamk_fixup_dropped"]():
+        dropped, single = kernel(x, w), kernel(x[:1], w)
+    with PLANTS["streamk_fixup_reordered"]():
+        reordered = kernel(x, w)
+    assert (dropped - clean).abs().max() > 0.1 * scale and torch.equal(single, one)
+    assert not torch.equal(reordered, clean) and (reordered - clean).abs().max() < 1e-3 * scale
+    monkeypatch.setattr(planted, "STREAMK_SMS", -1)
+    with PLANTS["streamk_fixup_dropped"](), PLANTS["streamk_fixup_reordered"]():
+        assert torch.equal(kernel(x, w), clean)
+
+
 def _launches(kernel, x: torch.Tensor, w: dict[str, torch.Tensor]) -> set[str]:
     """The names of the CUDA kernels one call launches."""
     from torch.profiler import ProfilerActivity, profile

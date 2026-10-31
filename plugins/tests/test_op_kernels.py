@@ -71,6 +71,27 @@ def test_silu_mul(dtype):
     _close(fast(gate_up), ref(gate_up))
 
 
+@pytest.mark.parametrize("dtype", DTYPES)
+def test_silu_mul_clamped(dtype):
+    """docs/dev/v1-glm.md D6's clamp (`glu_limit` 10, GLM's): silu(min(gate, 10)) · clamp(up, −10, 10) within the plain
+    form's budget of the oracle, binding on a sizeable share of both halves (the unclamped kernel misses it); the input
+    unmodified; NaN kept, as the oracle's clamp; a limit the dtype does not hold exactly is not served."""
+    facts = {"inter": 1536, "dtype": str(dtype).removeprefix("torch."), "glu_limit": 10.0}
+    fast, ref = _pair("silu_mul@1", **facts)
+    gate_up = 12 * torch.randn(17, 2 * 1536, device="cuda", dtype=dtype)
+    gate_up[0, 0] = gate_up[1, 1536] = float("nan")
+    assert (gate_up[:, :1536] > 10).float().mean() >= 0.05 and (gate_up[:, 1536:].abs() > 10).float().mean() >= 0.05
+    before, got = gate_up.clone(), fast(gate_up)
+    assert torch.equal(gate_up.nan_to_num(), before.nan_to_num()), "silu_mul@1 wrote its input"
+    want = ref(gate_up)
+    assert got[0, 0].isnan() and got[1, 0].isnan() and want[0, 0].isnan() and want[1, 0].isnan()
+    _close(got[2:], want[2:])
+    plain, _ = _pair("silu_mul@1", inter=1536, dtype=facts["dtype"])
+    assert (plain(gate_up[2:]) - want[2:]).abs().max() > 1
+    ctx = BuildContext(PluginSet(discover()), torch.device("cuda"))
+    assert all(c.provider != "kernels.flashinfer" for c in ctx.candidates("silu_mul@1", facts | {"glu_limit": 10.3}))
+
+
 @pytest.mark.slow
 def test_prebuilt_modules_load_without_compiling(tmp_path):
     """`holon prebuild`'s FlashInfer modules are what a first start loads: FlashInfer runs each module's own ninja build

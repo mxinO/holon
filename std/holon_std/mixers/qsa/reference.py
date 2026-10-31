@@ -55,7 +55,7 @@ def qsa_index(k: torch.Tensor, raw: torch.Tensor, pooled: torch.Tensor, table: t
 
 
 def qsa_select(q: torch.Tensor, pooled: torch.Tensor, table: torch.Tensor, seq: torch.Tensor, positions: torch.Tensor,
-               ratio: int, budget: int) -> torch.Tensor:
+               ratio: int, budget: int, w: torch.Tensor | None = None) -> torch.Tensor:
     page = pooled.shape[1] * ratio
     top = budget // ratio
     out = torch.full((len(q), top + 1), -1, dtype=torch.int32)
@@ -67,13 +67,64 @@ def qsa_select(q: torch.Tensor, pooled: torch.Tensor, table: torch.Tensor, seq: 
         if n:
             first = torch.arange(n) * ratio                          # each block's first position
             keys = pooled[table[int(seq[t]), first // page].long(), (first % page) // ratio].double()
-            scores = (keys @ q[t].double().T).relu().sum(-1) / math.sqrt(q.shape[-1])
+            heads = (keys @ q[t].double().T).relu()                  # [n, Hi]
+            heads = heads if w is None else heads * w[t].double()
+            scores = heads.sum(-1) / math.sqrt(q.shape[-1])
             scores = scores.float()                                  # the contract's float32 scores
             chosen = stable_topk(scores, min(top, n)).indices.sort().values
             out[t, :len(chosen)] = chosen.int()
         if (p + 1) % ratio:
             out[t, min(top, n)] = n
     return out
+
+
+def dsa_index(k: torch.Tensor, gate: torch.Tensor, raw: torch.Tensor, gates: torch.Tensor, pooled: torch.Tensor,
+              ape: torch.Tensor, table: torch.Tensor, seq: torch.Tensor, positions: torch.Tensor, ratio: int) -> None:
+    """HF's pooling (`get_pooled_states`, transformers 5.19.0 `models/glm5_next/modeling_glm5_next.py:977-1033`) on
+    paged state: per complete block, the gate-and-APE softmax over its tokens per channel, the keys' weighted sum,
+    f32."""
+    page = raw.shape[1]
+    for t in range(len(k)):
+        if seq[t] >= 0:
+            unit, off = _where(table, int(seq[t]), int(positions[t]), page)
+            raw[unit, off], gates[unit, off] = k[t], gate[t]
+    for t in range(len(k)):
+        p = int(positions[t])
+        if seq[t] < 0 or p % ratio != ratio - 1:
+            continue
+        start = p - ratio + 1
+        at = [_where(table, int(seq[t]), start + i, page) for i in range(ratio)]
+        keys = torch.stack([raw[u, o] for u, o in at]).float()
+        logits = torch.stack([gates[u, o] for u, o in at]).float() + ape.float()
+        unit, off = at[0]
+        pooled[unit, off // ratio] = (logits.softmax(dim=0) * keys).sum(0)
+
+
+def mla_attend(q: torch.Tensor, kv: torch.Tensor, blocks: torch.Tensor, table: torch.Tensor, seq: torch.Tensor,
+               positions: torch.Tensor, ratio: int, scale: float) -> torch.Tensor:
+    """Absorbed MQA over the latent: per query softmax(scale · q cᵀ) c over its selected blocks' tokens, f32."""
+    page = kv.shape[1]
+    out = torch.zeros_like(q)
+    for t in range(len(q)):
+        if seq[t] < 0:
+            continue
+        p = int(positions[t])
+        tokens = torch.tensor([ratio * int(b) + i for b in blocks[t] if b >= 0 for i in range(ratio)
+                               if ratio * int(b) + i <= p])
+        c = kv[table[int(seq[t]), tokens // page].long(), tokens % page].float()          # [n, Dc]
+        scores = (q[t].float() @ c.T) * scale                                             # [H, n]
+        out[t] = (scores.softmax(-1) @ c).to(q.dtype)
+    return out
+
+
+def all_blocks(positions: torch.Tensor, ratio: int, width: int) -> torch.Tensor:
+    """`qsa_select@1`'s output where a query selects every block it sees (D5: the dense path is the sparse kernel over
+    every pool): its n complete blocks ascending, the open one, then −1 (n < width by the dense rule)."""
+    n = (positions + 1) // ratio
+    j = torch.arange(width, device=positions.device)
+    opened = (positions + 1) % ratio != 0
+    out = torch.where(j[None] < n[:, None], j[None], -1)
+    return torch.where((j[None] == n[:, None]) & opened[:, None], n[:, None], out).int()
 
 
 def _kv(kv) -> torch.Tensor:

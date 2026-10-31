@@ -56,13 +56,14 @@ from __future__ import annotations
 import collections
 import dataclasses
 import re
+import sys
 import threading
 import time
 from typing import Any
 
 import numpy as np
 import torch
-from holon.api import BlockRecord, Payload, Ref
+from holon.api import BlockRecord, OutOfUnits, Payload, Ref
 
 from .iothreads import IoThreads, Ticket
 from .kernels import STATE_COPY
@@ -189,21 +190,27 @@ class HostTier:
                                + "; raise recurrent.checkpoints or give the state pools that much more memory")
         if self.level is not None:                                   # loads read back into host units
             floor |= {k: ctx.max_seqs * load[k] for k in pages}
-        short = {k: (int(self.host_bytes * share[k] // self.dev[k].unit_bytes), f) for k, f in floor.items()
-                 if self.host_bytes * share[k] // self.dev[k].unit_bytes < f}
-        if short:
-            raise RuntimeError("state_tier.host.bytes too small for the loads in flight: " + ", ".join(
+        nbytes = self.host_bytes
+        if (left := getattr(ctx, "host_left", lambda: None)()) is not None and left < nbytes:
+            nbytes = max(0, left)        # `holon serve` fits the level to this machine (docs/dev/v1-auto-config.md D1)
+            print(f"holon: state tier host level {self.host_bytes / 2**30:.1f} → {nbytes / 2**30:.1f} GiB (the host "
+                  "memory left)", file=sys.stderr, flush=True)
+        short = {k: (int(nbytes * share[k] // self.dev[k].unit_bytes), f) for k, f in floor.items()
+                 if nbytes * share[k] // self.dev[k].unit_bytes < f}
+        if short:                         # "memory": a refusal every retry repeats (the supervisor rolls back at once)
+            raise OutOfUnits("state_tier.host.bytes too small for the loads in flight: " + ", ".join(
                 f"{k} gets {n} units, needs {f}" for k, (n, f) in short.items()))
         self.unit_major = set(pages) if self.level is not None else set()
-        units = {k: int(self.host_bytes * share[k] // p.unit_bytes) for k, p in self.dev.items()}
+        units = {k: int(nbytes * share[k] // p.unit_bytes) for k, p in self.dev.items()}
         try:
             self.host = {k: ctx.host_pool(f"state_tier.{k}", unit_bytes=p.unit_bytes,
                                           segments=1 if k in self.unit_major else p.segments, units=units[k],
                                           mapped=True)
                          for k, p in self.dev.items()}
-        except Exception as e:            # host memory is a deployment's (`--host-memory`), never in a lock
+        except OutOfUnits as e:           # host memory is a deployment's (`--host-memory`), never in a lock
             need = sum(n * self.dev[k].unit_bytes for k, n in units.items())
-            raise RuntimeError(f"state_tier: the host level (state_tier.host.bytes) takes {need} bytes of pinned "
+            # the same type: the core's out-of-memory refusal stays one (every start would fail alike: no retry)
+            raise type(e)(f"state_tier: the host level (state_tier.host.bytes) takes {need} bytes of pinned "
                                f"host memory: launch with --host-memory {need}, plus what other plugins' host "
                                f"pools hold if any ({e})") from e
         self.free = {k: collections.deque(range(p.capacity)) for k, p in self.host.items()}

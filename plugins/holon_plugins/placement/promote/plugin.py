@@ -15,16 +15,30 @@ from . import reference
 OP = "moe_resolve.promote"
 
 
+BUDGET = 1        # RAM -> VRAM promotions displacing a resident, a layer a decode call (docs/dev/v1-glm.md D8t: Maya
+#                   admits every miss; one keeps the hit rate and halves the promoted bytes, replayed on GLM's decode
+#                   routes); filling an empty slot displaces nothing and is not counted
+
+
 class Promote:
     resolve_variant = OP + "@1"
     device_owned = True                       # the whole cache, spares included: no host edits
+    exclusive_flag = "exclusive"              # the device state the store sets under exclusive tiers
+    heat = "last"                             # what RAM's coldest is by under exclusive tiers: the least recent
+    reserved = reference.SPARES               # each layer's spares: cache slots a step's lending never takes
+    prompt_admissions = False                 # decode misses only (a prompt step's staged pieces never move)
 
     def __init__(self, ctx, *, items: int, roles: int, **site) -> None:
         self.items, self.roles = items, roles
+        # D8t: at most BUDGET RAM misses a layer promotes a decode call over a resident (SSD misses, spare owners and
+        # fills of empty slots besides), the resolve contract's `budget` fact; a test's admit-all arm sets BUDGET
+        # None: Maya's promote-on-fetch
+        self.resolve_facts = {} if BUDGET is None else {"budget": BUDGET}
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         return {"last": ((self.items,), "int32"), "clock": ((1,), "int32"),
-                "spare": ((reference.SPARES, 1 + self.roles), "int32")}
+                "spare": ((reference.SPARES, 1 + self.roles), "int32"),
+                "exclusive": ((1,), "int32")}         # 1 under exclusive tiers (the store's): refills, returns logged
 
     def seed(self, profile: np.ndarray, budget) -> list[tuple[int, int]]:
         return [(g, i) for g, i in budget.warm_start(profile) if budget.take(g, i)]
@@ -36,13 +50,14 @@ class Promote:
 class Resolve:
     """The CPU provider: the oracle, writing what the contract writes in place."""
 
-    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
-        self.staging = staging
+    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int, budget: int | None = None) -> None:
+        self.staging, self.budget = staging, budget
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, last, clock, spare):
+                 errors, delta, n_delta, group, plan, jobs, last, clock, spare, exclusive):
         out = reference.moe_resolve_promote(ids, kinds, residency, host, limits, self.staging, last, clock, spare,
-                                            group, ring, stage, empty, int(n_empty[0]), plan)
+                                            group, ring, stage, empty, int(n_empty[0]), plan, bool(exclusive[0]),
+                                            budget=self.budget)
         counts += out["counts"]
         routed |= out["routed"]
         misses.clamp_(min=int(out["n_fetch"].max()))
@@ -62,8 +77,11 @@ class Resolve:
             jobs[1 + i, :len(row)] = torch.tensor(row)
         return out["slots"], out["fetch"], out["n_fetch"], out["cpu"]
 
-    def lend(self, need, residency, classes, last, clock, spare) -> torch.Tensor:
+    def lend(self, need, residency, classes, last, clock, spare, **state) -> torch.Tensor:
         return reference.lend(need.cpu().numpy(), residency, classes, last, clock, spare)
+
+    def lend_tail(self, cls, n, residency, classes, limits, spare, **state) -> torch.Tensor:
+        return reference.release_tail(cls, n, residency, classes, limits, spare)
 
 
 class Plugin:

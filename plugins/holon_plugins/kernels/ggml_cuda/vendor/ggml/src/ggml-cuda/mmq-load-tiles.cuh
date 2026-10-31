@@ -4,13 +4,13 @@
 
 #include "mmq.cuh"
 
-// Holon: `split` (docs/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
+// Holon: `split` (docs/dev/v1-moe-prefill.md D4), added to the row offset of the tile's lower half (rows I/2 and up): a
 // fused gate/up tile loads gate rows i... in its upper half and the matching up rows (split rows on) in its lower half;
-// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/v1-moe-prefill.md D8): `split` in every
+// 0 everywhere else, where the loads are upstream's. Signature plumbing (docs/dev/v1-moe-prefill.md D8): `split` in every
 // loader's signature and row offset, marked at each signature only; T6's `tail` in its loaders' template parameters,
 // marked at each use
 
-// Holon: T6 (docs/v1-moe-prefill.md §10). `tail`: the instance for rows of `stride` blocks whose width is not a
+// Holon: T6 (docs/dev/v1-moe-prefill.md §10). `tail`: the instance for rows of `stride` blocks whose width is not a
 // multiple of MMQ_ITER_K (mul_mat_q_case picks it at launch; every other row width runs upstream's loads, `tail`
 // false): the last K step's blocks past the row re-read the row's last block, not the next row's (or past the
 // buffer). The activations there are q8_1's zero padding, so those products are 0 either way: the same bits as
@@ -1116,7 +1116,7 @@ template <ggml_type type, int J, bool fallback> static __device__ __forceinline_
     }
 }
 
-// Holon: IQ1_M's tile loader (docs/v1-moe-prefill.md D9), in IQ2_XS / IQ2_S's layout. A weight is
+// Holon: IQ1_M's tile loader (docs/dev/v1-moe-prefill.md D9), in IQ2_XS / IQ2_S's layout. A weight is
 // d·(2s + 1)·(g + delta) with g in {0, 1, 2} and delta = -1 ± 1/8, so 8·(g + delta) = 8·g - 7 or 8·g - 9 is an int8 in
 // {±1, ±7, ±9}, and the per-16 scale d·(2s + 1)/8 (fp16 d times at most 4 bits, over a power of two) is exact as the
 // f32 x_df. With D4 activations the q8_0_16 vec dots then take the quantized values' exact products: no stored sums.

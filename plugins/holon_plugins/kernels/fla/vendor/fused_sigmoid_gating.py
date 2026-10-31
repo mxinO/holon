@@ -33,6 +33,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     dt_bias,
     beta,
     threshold,
+    lower_bound,  # Holon: KDA's bounded gate (docs/dev/v1-glm.md D4), with USE_LOWER_BOUND
     q,
     k,
     v,
@@ -73,6 +74,7 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
     STORE_FINAL_ONCE: tl.constexpr,  # Holon: store only the final state, to out_indices[i_n] (multi-token rows)
     IS_KDA: tl.constexpr,
     V_HEAD_TILED: tl.constexpr,  # Holon: GGUF value-head order, v head j reads q/k head j % H
+    USE_LOWER_BOUND: tl.constexpr,  # Holon: g = lower_bound * sigmoid(exp(A_log) * (a + dt_bias)) (GLM's KDA)
 ):
     i_k, i_v, i_nh = tl.program_id(0), tl.program_id(1), tl.program_id(2)
     i_n, i_hv = i_nh // HV, i_nh % HV
@@ -145,10 +147,13 @@ def fused_sigmoid_gating_delta_rule_update_kernel(
 
         # If the model is loaded in fp16, without the .float() here, A might be -inf
         x = tl.load(p_a).to(tl.float32) + tl.load(p_dt_bias).to(tl.float32)
-        softplus_x = tl.where(
-            beta * x <= threshold, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x
-        )
-        b_g = -tl.exp(tl.load(p_A_log).to(tl.float32)) * softplus_x
+        if USE_LOWER_BOUND:
+            b_g = lower_bound * tl.sigmoid(tl.exp(tl.load(p_A_log).to(tl.float32)) * x)
+        else:
+            softplus_x = tl.where(
+                beta * x <= threshold, (1 / beta) * tl.log(1 + tl.exp(beta * x)), x
+            )
+            b_g = -tl.exp(tl.load(p_A_log).to(tl.float32)) * softplus_x
 
         # compute beta_output = sigmoid(b)
         b_beta = tl.sigmoid(b_b.to(tl.float32))
@@ -225,6 +230,7 @@ def fused_sigmoid_gating_delta_rule_update(
     has_initial_state: torch.Tensor | None = None,
     v_head_tiled: bool = False,
     out_indices: torch.Tensor | None = None,
+    lower_bound: float | None = None,  # Holon: KDA's bounded gate (is_kda only)
 ):
     """
     Fused triton implementation of sigmoid gating delta rule update.
@@ -270,7 +276,7 @@ def fused_sigmoid_gating_delta_rule_update(
     # Holon: q, k, v, a and b read in place where each token's row is contiguous and the tokens evenly strided (views
     # of the projection's or the conv's wider rows); a copy otherwise
     (q, stride_q), (k, stride_k), (v, stride_v) = (_rows(x, 2) for x in (q, k, v))
-    (a, stride_a), (b, stride_b) = (_rows(x, 2 if is_kda else 1) for x in (a, b))
+    (a, stride_a), (b, stride_b) = _rows(a, 2 if is_kda else 1), _rows(b, 1)  # (KDA's a: per channel; b: per head)
     grid = (NK, NV, N * HV)
     fused_sigmoid_gating_delta_rule_update_kernel[grid](
         A_log=A_log,
@@ -279,6 +285,7 @@ def fused_sigmoid_gating_delta_rule_update(
         dt_bias=dt_bias,
         beta=beta,
         threshold=threshold,
+        lower_bound=lower_bound or 0.0,
         q=q,
         k=k,
         v=v,
@@ -313,6 +320,7 @@ def fused_sigmoid_gating_delta_rule_update(
         USE_QK_L2NORM_IN_KERNEL=use_qk_l2norm_in_kernel,
         IS_KDA=is_kda,
         V_HEAD_TILED=v_head_tiled,
+        USE_LOWER_BOUND=lower_bound is not None,
         num_warps=num_warps,
         num_stages=num_stages,
     )

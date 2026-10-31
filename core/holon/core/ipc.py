@@ -21,6 +21,7 @@ import multiprocessing
 import os
 import pathlib
 import shutil
+import signal
 import sys
 import tempfile
 import uuid
@@ -272,14 +273,17 @@ class EngineProcess:
     async def start(cls, config: Any, target: Callable[..., None] = engine_main, lock: str | None = None
                     ) -> EngineProcess:
         """Launch an engine for `config` (configured from `lock`, if one) and wait until it is ready; raises
-        RuntimeError (StartFailed when the engine reports why) if it fails to start. `target` runs in the child (tests
-        substitute engines that fail on purpose)."""
+        RuntimeError (StartFailed when the engine reports why, or "memory" when it was killed: the OOM killer's
+        SIGKILL) if it fails to start. `target` runs in the child (tests substitute engines that fail on purpose)."""
         proc, endpoints = launch(config, target, lock)
         engine = cls(proc, endpoints, Client(endpoints, alive=proc.is_alive))
         try:
             await engine.client.wait_ready()
-        except BaseException:
+        except BaseException as e:
             await engine.stop(graceful=False)
+            if type(e) is RuntimeError and proc.exitcode == -signal.SIGKILL:     # it died before stop killed it
+                raise StartFailed("memory", "the engine was killed while starting (SIGKILL): out of memory, most "
+                                  "likely (the OOM killer)") from e
             raise
         ready = engine.client.ready
         if "plan_id" in ready:

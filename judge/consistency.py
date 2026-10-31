@@ -1,5 +1,6 @@
-"""FN's self-consistency gate (docs/dev/v1-flash-next.md §18 (c)): Holon's paths against each other on the full model,
-no golden. On four `v1-long` prompts (natural text and recall, 6K-20K tokens):
+"""The self-consistency gate (FN: docs/dev/v1-flash-next.md §18 (c); GLM: docs/dev/v1-glm.md acceptance 1(c), §6.2):
+Holon's paths against each other on the full model, no golden. On four `v1-long` prompts (natural text and recall,
+5K-20K tokens; `--prompts` the set tokenized for the model, e.g. `judge/prompts/v1-long-glm5_next.jsonl`):
 
 - `decode`: the prompts scored teacher-forced in 1-token steps (every quantized matmul on mmvq, GDN's recurrent
   kernel, the GEMV HC mix, QSA's decode kernels) against one prefill step per prompt;
@@ -16,10 +17,14 @@ noise between correct paths (§17.2, the fixed mix, IQ2_XS and IQ3_S on all of `
 the clean pairs' (KL mean 0.0020 / 0.0044, p99 0.023 / 0.063 on the RTX 5080 / 5090, 5346d3a) — KL mean ≤ 0.02 and p99
 ≤ 0.3 over at least 100 agreeing positions, on 8 chat prompts (the four's and `MTP_MORE`); `--plant
 linear_rows_swap` (verify passes only) and `shexp_gate_off` must fail. The pair runs at the reference's step
-(`--prefill-step`, the deployment's).
+(`--prefill-step`, the deployment's); it needs `--pack` (the MTP head) and runs only on a model that has one (GLM's
+gate: `--parts decode,chunked`, D7 defers MTP; its plants `dsa_decode_select_shift` and `kda_state_not_carried`).
 
-    python judge/consistency.py --model <...-00001-of-00002.gguf> --pack <mtp-q2_0.gguf> --out <json> [--plant P]
-        [--holon-flags '<engine flags>'] [--prefill-step N]
+The engines run 8 sequences with the prefix cache on unless `--holon-flags` say otherwise (GLM's gate: `--max-seqs 1
+--no-prefix-cache`); the decode and chunked steps win over the flags' `--max-step-tokens`.
+
+    python judge/consistency.py --model <...-00001-of-00002.gguf> [--pack <mtp-q2_0.gguf>] --out <json> [--plant P]
+        [--holon-flags '<engine flags>'] [--prefill-step N] [--parts decode,chunked,mtp] [--prompts <set.jsonl>]
 """
 from __future__ import annotations
 
@@ -41,24 +46,11 @@ MTP_MORE = ("chat-explain", "code-lru", "agent-csv", "chat-zh")   # v1-qwen3_5's
 
 
 def engine(a, **kw):
-    from holon.core.cli import layered
-    from holon.core.engine import Engine, EngineConfig
+    from holon_judge.engine import from_flags
     if kw.pop("mtp", False):
         kw |= {"max_draft_tokens": DRAFTS, "plugin_options": {"spec.k": str(DRAFTS), "mtp.path": a.pack},
                "slots": {"drafter": "drafters.mtp", "draft_policy": "std.spec.fixed_k", "verifier": "std.spec.greedy"}}
-    base = layered({"max_model_len": a.max_len, "max_seqs": 8}, flags(a.holon_flags))
-    return Engine(EngineConfig(a.model, **layered(base, kw)))
-
-
-def flags(text: str) -> dict:
-    """`holon serve`-style engine flags (e.g. an offload deployment's) as EngineConfig settings: only those given."""
-    import argparse
-    import shlex
-
-    from holon.core.cli import engine_flags, engine_settings
-    parser = argparse.ArgumentParser()
-    engine_flags(parser, given_only=True)
-    return engine_settings(parser.parse_args(shlex.split(text)))
+    return from_flags(a.model, a.holon_flags, {"max_model_len": a.max_len, "max_seqs": 8}, kw)
 
 
 def scored(a, prompts, step: int):
@@ -84,7 +76,8 @@ def compare(ref, rec) -> dict:
         s, e = o[i], o[i + 1]
         b = [d[s + lo:min(s + lo + 1024, e)].mean().item() for lo in range(0, e - s, 1024)]
         bands += b
-        per[p] = {"dnll": d[s:e].mean().item(), "kl_mean": kl[s:e].mean().item(), "worst_band": max(b, key=abs)}
+        per[p] = {"dnll": d[s:e].mean().item(), "kl_mean": kl[s:e].mean().item(), "kl_p50": kl[s:e].median().item(),
+                  "worst_band": max(b, key=abs)}
     out = {"n": len(kl), "kl_mean": kl.mean().item(), "kl_p50": kl.median().item(), "kl_p99": kl.quantile(0.99).item(),
            "dnll": d.mean().item(), "worst_band_dnll": max(bands, key=abs), "prompts": per}
     out["pass"] = out["kl_mean"] <= BARS["kl_mean"] and out["kl_p50"] <= BARS["kl_p50"]   # judged by KL (owner,
@@ -127,33 +120,44 @@ def mtp_vs_plain(a, chats: list[list[int]]) -> dict:
     return out
 
 
+def chats(a) -> list[list[int]]:
+    """The MTP pair's 8 chat prompts (§22.8): the four's and `MTP_MORE`."""
+    def rows(path):
+        return {r["id"]: r for r in map(json.loads, pathlib.Path(path).read_text().splitlines())}
+    four, more = rows(a.prompts), rows(a.mtp_prompts)
+    return [four[p]["ids"][:four[p]["gen_start"]] for p in PROMPTS] + \
+        [more[p]["ids"][:more[p]["gen_start"]] for p in MTP_MORE]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--model", required=True)
-    ap.add_argument("--pack", required=True)
+    ap.add_argument("--pack", help="the MTP head (the mtp pair's)")
     ap.add_argument("--tokens", type=int, default=256)
     ap.add_argument("--max-len", type=int, default=20480)
     ap.add_argument("--plant", help="a judge plant, e.g. qsa_decode_select_shift (must fail)")
+    ap.add_argument("--prompts", default=str(ROOT / "judge/prompts/v1-long.jsonl"), help="the four prompts' set")
+    ap.add_argument("--mtp-prompts", default=str(ROOT / "judge/prompts/v1-qwen3_5.jsonl"), help="MTP_MORE's set")
     ap.add_argument("--holon-flags", default="", help="engine flags over the defaults (an offload deployment's)")
     ap.add_argument("--prefill-step", type=int, default=0, help="the reference's step (default: whole prompts)")
     ap.add_argument("--out", required=True)
     ap.add_argument("--parts", default="decode,chunked,mtp", help="the pairs to run (a plant: its pair)")
     a = ap.parse_args()
+    parts = a.parts.split(",")
+    if "mtp" in parts and not a.pack:
+        ap.error("the mtp pair needs --pack")
     from holon_judge import planted
     from holon_judge.recording import PromptSet
-    full = PromptSet.load(ROOT / "judge/prompts/v1-long.jsonl")
+    full = PromptSet.load(a.prompts)
     keep = {p.id: p for p in full.prompts}
     prompts = PromptSet(full.name, full.sha256, [keep[p] for p in PROMPTS])
-    rows = {r["id"]: r for r in map(json.loads, (ROOT / "judge/prompts/v1-long.jsonl").read_text().splitlines())}
-    chats = [rows[p]["ids"][:rows[p]["gen_start"]] for p in PROMPTS]
-    more = {r["id"]: r for r in map(json.loads, (ROOT / "judge/prompts/v1-qwen3_5.jsonl").read_text().splitlines())}
-    chats += [more[p]["ids"][:more[p]["gen_start"]] for p in MTP_MORE]    # the MTP pair's 8 prompts (§22.8)
     a.max_len = max(a.max_len, max(len(p.ids) for p in prompts.prompts) + a.tokens + 8)
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=ROOT).stdout.strip()
-    out = {"name": "fn7_consistency", "date": datetime.date.today().isoformat(), "gpu": torch.cuda.get_device_name(),
-           "model": pathlib.Path(a.model).name, "plant": a.plant, "prompts": PROMPTS, "bars": BARS, "commit": commit}
+    out = {"name": "consistency", "date": datetime.date.today().isoformat(), "gpu": torch.cuda.get_device_name(),
+           "model": pathlib.Path(a.model).name, "plant": a.plant, "prompts": PROMPTS,
+           "set": pathlib.Path(a.prompts).name, "bars": BARS, "commit": commit, "flags": a.holon_flags,
+           "prefill_step": a.prefill_step or a.max_len}
     with planted.PLANTS[a.plant]() if a.plant else contextlib.nullcontext():
-        parts = a.parts.split(",")
         if "decode" in parts or "chunked" in parts:
             prefill = scored(a, prompts, a.prefill_step or a.max_len)
         if "decode" in parts:
@@ -161,7 +165,7 @@ def main() -> None:
         if "chunked" in parts:
             out["chunked"] = compare(prefill, scored(a, prompts, 250))
         if "mtp" in parts:
-            out["mtp"] = mtp_vs_plain(a, chats)
+            out["mtp"] = mtp_vs_plain(a, chats(a))
     out["pass"] = all(out[k]["pass"] for k in parts)
     pathlib.Path(a.out).write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps({k: (v if not isinstance(v, dict) else {x: y for x, y in v.items() if x != "prompts"})

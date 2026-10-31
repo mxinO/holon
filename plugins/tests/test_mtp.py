@@ -12,7 +12,7 @@ import torch
 from holon.api import SamplingParams
 from holon.core.engine import Engine, EngineConfig
 from holon_testing.qwen3_5_files import can_convert, convert, save, tiny_hf
-from safetensors.torch import load_file
+from safetensors.torch import load_file, save_file
 from transformers.models.qwen3_5 import modeling_qwen3_5 as hf
 
 GREEDY = SamplingParams(temperature=0.0, max_tokens=16, ignore_eos=True)
@@ -115,3 +115,20 @@ def test_mtp_from_gguf_drafts_as_from_hf(tmp_path):
         plain = _engine(source, max_draft_tokens=0, source=kind).generate([prompt], GREEDY)
         assert _engine(source, source=kind).generate([prompt], GREEDY) == plain
     torch.testing.assert_close(seen["gguf"], seen["hf"], rtol=1e-4, atol=1e-4)
+
+
+def test_a_missing_mtp_pack_is_named(tiny, tmp_path):
+    """A target whose files hold no MTP head (Qwen3.8-Flash-Next's GGUF: its lock names a pack of its own) and no
+    `mtp.path`: the start fails with the resolver's error (no retry would serve), saying where the pack comes from
+    and how to serve without it; `mtp.path` naming no file says so."""
+    from holon.core.plugins import PluginError
+
+    _, path, _, _ = tiny
+    (tmp_path / "config.json").write_bytes((path / "config.json").read_bytes())
+    weights = load_file(path / "model.safetensors")
+    save_file({k: v for k, v in weights.items() if not k.startswith("mtp.")}, tmp_path / "model.safetensors",
+              metadata={"format": "pt"})
+    with pytest.raises(PluginError, match=r"no pack of its own is named \(mtp.path\).*--max-draft-tokens 0"):
+        _engine(tmp_path)
+    with pytest.raises(FileNotFoundError, match=r"no MTP pack .*absent.gguf \(mtp.path\).*Strata's pack"):
+        _engine(path, plugin_options={"spec.k": "3", "mtp.path": str(tmp_path / "absent.gguf")})

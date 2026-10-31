@@ -1,6 +1,7 @@
-"""FN's task-accuracy set (docs/dev/v1-flash-next.md §18 (d)): 72 items with checkable answers, all synthetic — written
-for this repository or generated here from a fixed seed, so they carry the repository's license (Apache-2.0) and no
-third-party text. Every item is a chat (`messages`) with an `answer` and a `check`:
+"""The task-accuracy set (FN: docs/dev/v1-flash-next.md §18 (d); GLM: docs/dev/v1-glm.md acceptance 1(d)): 72 items
+with checkable answers, all synthetic — written for this repository or generated here from a fixed seed, so they
+carry the repository's license (Apache-2.0) and no third-party text. Every item is a chat (`messages`) with an
+`answer` and a `check`:
 
 - `math` (24): multi-step problems from eight templates (CRT, digit sums of powers, inclusion-exclusion counts,
   modular recurrences, 3×3 integer linear systems, lattice paths around a blocked point, change from bulk pricing,
@@ -13,9 +14,12 @@ third-party text. Every item is a chat (`messages`) with an `answer` and a `chec
   ledgers) of about 8K and 32K tokens.
 - `multiturn` (6): facts given and changed over three user turns with fixed assistant replies, then a question.
 
-Answers end with a line `Final answer: <value>` (the prompts ask for it); `run.py` scores them.
+Answers end with a line `Final answer: <value>` (the prompts ask for it); `run.py` scores them. The one
+model-specific part is the filler's size, counted by `--tokenizer` (the model's GGUF): every other item is the same
+draw for every model, and `run.py` renders each chat with the model's own template.
 
     python judge/tasks/build.py --tokenizer <a Qwen3.8-Flash-Next .gguf> --out judge/tasks/fn_tasks.jsonl
+    python judge/tasks/build.py --tokenizer <a GLM-5.3-Flash .gguf> --out judge/tasks/glm_tasks.jsonl
 """
 from __future__ import annotations
 
@@ -350,7 +354,7 @@ def multiturn_items(r: random.Random) -> list[dict]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--tokenizer", required=True, help="a Qwen3.8-Flash-Next GGUF (its tokenizer sizes the filler)")
+    ap.add_argument("--tokenizer", required=True, help="the model's GGUF (its tokenizer sizes the filler)")
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     from holon.core.assembly import resolve_model
@@ -360,10 +364,12 @@ def main() -> None:
     tokenizer = plugin.bundle(source).tokenizer
     r = random.Random(SEED)
     items = [*math_items(r), *code_items(), *reasoning_items(r), *recall_items(r, tokenizer), *multiturn_items(r)]
-    meta = {"name": "fn_tasks", "built": datetime.date.today().isoformat(), "items": len(items), "source": SOURCE}
+    meta = {"name": pathlib.Path(a.out).stem, "built": datetime.date.today().isoformat(), "items": len(items),
+            "source": SOURCE}
     pathlib.Path(a.out).write_text("\n".join(json.dumps(x) for x in [meta, *items]) + "\n")
     print(json.dumps(meta), {c: sum(x["category"] == c for x in items) for c in dict.fromkeys(x["category"]
-                                                                                              for x in items)})
+                                                                                              for x in items)},
+          [x.get("context_tokens") for x in items if x["category"] == "recall"])
 
 
 if __name__ == "__main__":

@@ -25,9 +25,17 @@ class PlacementPolicy(Protocol):
     """Built with the store's group shape (`items`, `roles`: keyword arguments after the Ref's own)."""
 
     resolve_variant: str | None   # the resolve contract its device state needs; None: `moe_resolve@1`
+    resolve_facts: dict           # (optional) facts its resolve contract takes beyond the store's (F10's `budget`)
     device_owned: bool            # the device's resolver owns the whole cache: the host seeds it, never edits it
     heat: str | None              # (optional) the device state an exclusive RAM tier ranks experts by (D10: "hotter")
+    exclusive_flag: str | None    # (optional) a device state [1] int32 the store sets to 1 under exclusive tiers: its
+    #                               resolve then logs what they must place (F10's refills: docs/dev/v1-glm.md D8a)
     frozen: bool                  # (optional) a host policy that never swaps after the seed
+    reserved: int                 # (optional) cache slots a group holds in each of its roles' classes outside what a
+    #                               step can lend (F10's spares): the store's layout lends only the rest
+    prompt_admissions: bool       # (optional, default True) its resolve may admit a prompt row's misses; False (F10:
+    #                               decode misses only) lets a staging step under exclusive tiers stage in rounds
+    #                               (docs/dev/v1-glm.md D8s): no staged piece outlives its round
 
     def device_state(self) -> dict[str, tuple[tuple[int, ...], str]]:
         """Device buffers its resolve contract keeps across steps, per group: name -> (shape, dtype). The store holds

@@ -65,7 +65,8 @@ class CpuShare:
         elif hidden != self.hidden:
             raise ValueError(f"std.moe.cpu: layers of hidden {self.hidden} and {hidden}")
         facts = {"gate_up": gate_up.layout_fact(ctx), "down": down.layout_fact(ctx), "hidden": hidden, "inter": inter,
-                 "top_k": self.top_k, "tokens": self.tokens, "jobs": self.jobs_max}
+                 "top_k": self.top_k, "tokens": self.tokens, "jobs": self.jobs_max} | (
+            {"glu_limit": float(gate_up.glu_limit)} if gate_up.glu_limit else {})     # only when set (D6)
         site = "std.moe.cpu[" + ",".join(f"{k}={v}" for k, v in facts.items()) + "]"
         layer = _Layer(ctx.select_kernel(kernels.CPU_EXPERTS, site=site, **facts).impl(ctx, **facts), gate_up.cls,
                        down.cls)

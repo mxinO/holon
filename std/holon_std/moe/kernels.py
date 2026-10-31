@@ -1,17 +1,22 @@
 """Op contracts std.moe owns (docs/dev/m02-moe.md D2). Their oracles are in `reference.py`; kernels come from kernel
 plugins. Kernel instances are stateless across steps and safe to call inside CUDA graphs; any `T` ≥ 0.
 
-- `moe_topk@1`: instance `(logits [T, E] f32) -> (weights [T, k] f32, ids [T, k] int32)`, both contiguous: softmax
-  over E in f32, the k largest (ties to the lower index), divided by their sum (clamped at 6.1e-5) when
-  `renormalize`. Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and
-  unspecified weights. Facts: experts, top_k, renormalize.
+- `moe_topk@1`: instance `(logits [T, E] f32, bias [E] f32 | None = None) -> (weights [T, k] f32, ids [T, k]
+  int32)`, both contiguous: the scores, softmax over E in f32 (or, with the fact `scoring = "sigmoid"`, the sigmoid of
+  each logit), the k largest — by score, or with the fact `bias` (true; then `bias` is given) by score + bias, the
+  bias choosing the experts only — ties to the lower index; their weights the scores (never the bias), divided by
+  their sum (clamped at 6.1e-5, i.e. `× 1 / max(Σ, 6.1e-5)`) when `renormalize`, then times the fact `scale` (absent:
+  1). Ids are unique and in range in every row; a row with any NaN or +inf logit gets such ids and unspecified
+  weights. Facts: experts, top_k, renormalize[, scoring, bias, scale] (docs/dev/v1-glm.md D6: the last three only when
+  not the default — softmax, no bias, scale 1 — so the facts every other site records stay as they were).
 - `moe_router@1`: instance `(x [T, H] of dtype, router [E, H] f32, or bf16 under the fact router_dtype = bfloat16 —
-  its values, exactly) -> (weights [T, k] f32, ids [T, k] int32)`: the
+  its values, exactly, bias [E] f32 | None = None) -> (weights [T, k] f32, ids [T, k] int32)`: the
   router and `moe_topk@1` in one op — `moe_topk@1`'s result, in its terms, for the logits `x · routerᵀ` summed in f32
   from x's exact f32 values, in an order the provider fixes (deterministic; it may depend on the call's row count, as a
   linear's kernel path does), not necessarily the f32 `linear`'s bits (bounded against the composition). std.moe uses it
   where a provider serves its facts, else composes the f32 `linear` and `moe_topk@1`. Facts: hidden, experts, top_k,
-  renormalize, dtype. An instance may define `route_prepare(x, router, experts) -> (weights, ids, x_experts)`: its
+  renormalize, dtype[, router_dtype, scoring, bias, scale] (`moe_topk@1`'s, with the same defaults). An instance may
+  define `route_prepare(x, router, experts, bias=None) -> (weights, ids, x_experts)`: its
   result and the experts' input for `x`, `x[:, None]` or a handle standing for it that the `linear_experts@2` (or
   `linear_experts_arena@1`) instance `experts` reads — x made ready for it in the router's own launch (as qlinear@2's
   `prepare_input`, std.ops.kernels: the provider's, keyed and generation-checked, falling back to the handle's x).
@@ -23,14 +28,15 @@ plugins. Kernel instances are stateless across steps and safe to call inside CUD
   `QTensor.parts`, per expert (`{"blocks": [E, out, row_bytes]}` for ggml layouts, where @1 took [E·out, row_bytes];
   `{"weight": [E, out, in]}` for `dense/<dtype>`). With `glu = "swiglu"` the stack is a merged gate/up stack (per expert
   `out/2` gate rows, then `out/2` up rows; a part with one value per expert is [2, E], gate's row then up's) and `y =
-  silu(gate) · up` in f32 (out_y = out/2); with `glu = "none"`, out_y = out. A dense layout's activation operand is
+  silu(gate) · up` in f32 (out_y = out/2) — with the fact `glu_limit` L > 0, `silu(min(gate, L)) · clamp(up, −L, L)`
+  (docs/dev/v1-glm.md D6; given only when set); with `glu = "none"`, out_y = out. A dense layout's activation operand is
   rounded to the weight dtype before the product, with f32 accumulation. An instance may accept, in place of `x`, a
   handle its own provider's `moe_router@1` prepared for it (`route_prepare`; once stale, it reads the handle's x).
   Every such handle exposes `.x`, the tensor it stands for, so a consumer that does not know the handle (another
   provider's instance, a composition) falls back on `handle.x`.
   Facts: layout, experts, in, out, top_k, rows_per_token, glu, act_dtype, out_dtype, act_quant (`ACT_QUANT` for
-  quantized layouts, as `qlinear@2`'s; `a16` for dense ones). An instance may define `prepare` as `qlinear@2`'s (logical
-  shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
+  quantized layouts, as `qlinear@2`'s; `a16` for dense ones)[, glu_limit]. An instance may define `prepare` as
+  `qlinear@2`'s (logical shape [E, out, in]); a spec's `config["act"]` is refused under mixed steps as `qlinear@2`'s.
   An instance may expose `pass_rows` (an int, a multiple of `CHUNK`; `CHUNK` without it), the most rows a call may
   carry at its `CHUNK`-row calls' bits (docs/dev/v1-moe-prefill.md D0, §4): for every n ≥ 1 with n·`CHUNK` ≤
   `pass_rows`, a
@@ -81,7 +87,7 @@ then `staging` slots, then cache slots.
   resident expert gets its slot, a ring piece its ring slot — a cache slot, in [k + staging, limits[r]); any other is
   corrupt: the entry gets null slot j and `errors[0]` |= `RANGE` —; the layer's distinct missing pieces of role r
   (neither resident nor in the ring), by expert id ascending, are fetch entries i: `fetch[r, 0, i]` = `host[e, r]` (or
-  −2 − e where it is −1: a piece no device-readable tier holds, for `moe_tiers@1` to provide),
+  −2 − e where it is −1: a piece no device-readable tier holds, for `moe_tiers@2` to provide),
   `fetch[r, 1, i]` the slot it is gathered into, here `stage[r, i]` (the entries read it; the caller's staging slots, or
   slots lent for the call: distinct). `n_fetch[r]` counts them all, even past F (the caller must prevent it:
   `misses[0]` becomes the largest `n_fetch` it has seen, and a miss past F reads `stage[r, F − 1]`). `counts[e]` += 1
@@ -124,12 +130,13 @@ then `staging` slots, then cache slots.
   int64, limits [G, R] int32, **state of every group) -> picked [G, E] bool` (docs/dev/v1-moe-prefill.md D11), on the
   device without a host sync: the experts holding any of class `cls`'s last `n` slots (a role r of class `cls` at a
   slot ≥ `limits[g, r]` − n, the class's arena size less n), whole — the caller evicts them in every role, unmaps,
-  logs and returns them as `lend`'s —, after the policy has released its own slots in that range that no expert maps
-  (spares: such a slot stops being one). The caller lends the range itself to the step's expert passes (D10's `out`
-  and `scratch`), and the experts' other slots and the layer's empty slots outside it to the step's ring and staging,
-  until the step's end. Its class is the store's choice, the same under every policy: the largest class arena — the
-  class of the first role (gate/up) that the most layers have, ties to the lower class index. A policy without
-  `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
+  logs and returns them as `lend`'s —, after the policy has released its own slots that no expert maps (spares) in
+  that range or anywhere in a lending layer: each mapped back to an expert it picks, so the slots are lent and return
+  to the layer's empty stack at the step's end (none leaks). The caller lends the range itself to the step's expert
+  passes (D10's `out` and `scratch`), and the experts' other slots and the layer's empty slots outside it to the
+  step's ring and staging, until the step's end. Its class is the store's choice, the same under every policy: the
+  largest class arena — the class of the first role (gate/up) that the most layers have, ties to the lower class
+  index. A policy without `lend_tail` cannot lend a tail (the store refuses `moe.ring_lend = tail` under it).
 - `moe_route_transform@1` (signature only; `approx`, bound by the explicit option `moe.route_transform = <name>`,
   never by kernel priority): instance `(ids [T, k] int32, weights [T, k] f32, residency [E, R] int32) -> (ids, weights)`
   between `moe_topk@1` and the resolve, with the layer's map as the resolve reads it (after the step's lending, its
@@ -138,37 +145,57 @@ then `staging` slots, then cache slots.
   `moe_route_transform.<name>@1`, with its own oracle and provider (docs/dev/v1-offload.md D3). Facts: experts, top_k.
 - `expert_fetch@1`: instance `(fetch [2, F] int32, n [1] int32, src [U, unit] uint8, dst [S, unit] uint8)`: copies unit
   `src[fetch[0, i]]` to slot `dst[fetch[1, i]]` for i < min(n, F), in the graph (`src` may be a mapped host pool's
-  device view: a zero-copy gather); the slots are distinct. Facts: unit_bytes, staging. Optional member
+  device view: a zero-copy gather); the slots are distinct. `dst`'s rows may be strided (`dst.stride(0)` ≥ unit, a
+  multiple of 16 bytes: landing rows as `rows[:, :unit]`, docs/dev/v1-glm.md D8x). Facts: unit_bytes, staging. An
+  optional `runs [U, X, 2] int64` reads landing rows (docs/dev/v1-glm.md D8f; `src [U, row]` of its own width): the
+  slot gets row `fetch[0, i]`'s extents `runs[row, x] = (offset in the row, nbytes)` back to back. An instance with
+  `beside = True` also takes `beside=True`: the same copy on few SMs, for one off the critical path beside other work.
+  Optional member
   `gather_roles(fetch [R, 2, F], n [R], srcs, dsts)`: every role's copy of a group at once (srcs[r] → dsts[r] as the
-  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True`
-  also takes `part, parts` there: only each role's entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ (a
-  pipelined pass's fetch, part by part). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as
-  they are in `out` (a pipelined pass computes each part's entries into one `out`).
+  instance's copy, role r's list), so a store issues one call for a group's roles; an instance with `parts = True` also
+  takes `part` and exactly one of `parts` and `size` there: only each role's entries [part·q, (part + 1)·q), q =
+  ⌈min(n[r], F) / parts⌉ (a pipelined pass's fetch, part by part) or q = `size` (an SSD round); and `runs`, one per role
+  (landing rows). A `linear_experts_arena@1` call skips an entry whose id is −1, its rows left as they are in `out` (a
+  pipelined pass computes each part's entries into one `out`); an instance with `sparse = True` also takes
+  `sparse=True`, a call whose live entries are few (one part of a pass, docs/dev/v1-glm.md D8g): the same rows,
+  its cost its live entries' where the instance can (kernels.ggml_cuda: q8_1 activations — the activations of the
+  others not quantized; its native FP4 quantize ignores `sparse`).
 - `expert_prefetch@1` (D8's ring, eager steps only): an instance has `start(key: int, fetch [2, F] int32, n [1] int32,
-  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy on the provider's own stream, after all the work
+  src [U, unit] uint8, dst [S, unit] uint8)` — `expert_fetch@1`'s copy (its `dst` rows unit wide, unstrided: the strided
+  rows are `expert_fetch@1`'s only) on the provider's own stream, after all the work
   enqueued on the current stream so far, returning at once —; and `wait(key)`: the current stream's later work waits
   until key's copies have landed (each key waited for once). Facts: unit_bytes, copy — the copy list's placement an
   instance serves: `sm`, `fetch` and `n` on the device and `src` a mapped host pool's device view (no host sync);
   `dma`, them on the host and `src` the pinned host pool (copy engines). A provider declares the modes it supports.
+  Optional: a `dma` instance with `runs = True` also takes `start(..., runs [U, X, 2] int64)` on the host — `src`
+  landing rows [U, row] then, entry i's piece the extents `runs[fetch[0, i], x] = (offset in the row, nbytes)` name
+  there, back to back in its slot (docs/dev/v1-glm.md D8g).
 
 - `activation_loan@1` (FN step 7: a tail step's activations from its lent tail, the core's ActivationLender): an
   instance has `use(range [N] uint8)` — a context in which every device allocation of the calling thread is cut from
   `range` (device memory the caller lends for the span; its earlier allocations released first, none of them alive)
-  — `release()`: the range free again, and `held() -> int`, after it, the bytes still out (a block alive past its
-  use keeps them; 0: none). An allocation the range cannot hold fails.
+  — `release()`: the range free again, and `held() -> int`, after it, the bytes still out (a block alive past its use
+  keeps them; 0: none). An allocation the range cannot hold fails, or (a provider with `overflow() -> int`) takes the
+  device's own memory, `overflow()` then the most bytes out that way at once in the current use. Optional:
+  `use_ranges(ranges [list of [N] uint8])`, `use` over several ranges, none overlapping, an allocation cut from the
+  first in the given order that holds it (docs/dev/v1-glm.md D8w: a whole-expert tail, one range per class with a
+  tail). No range may start where a device allocation of torch's starts (its caching allocator keys blocks by
+  address).
 
 Host tiers past RAM (F9 and the exclusive RAM tier, docs/dev/v1-offload.md D10): when RAM holds fewer pieces than the
 store, a piece lives in exactly one of VRAM, RAM (map code −1, `host` its unit) and the SSD (code −2: the checkpoint's
 file, always valid), and each layer call runs `moe_resolve → moe_tiers → [the SSD reads: cpu_task@1's copy task;
 signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (moves)`:
 
-- `moe_tiers@1`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
+- `moe_tiers@2`: instance `(ids [T, k] int32, kinds [T] uint8, group: int, fetch [R, 2, F] int32, n_fetch [R] int32,
   stage [R, F] int32, delta [D, 3] int32, start [1] int32, n_delta [1] int32, residency [G, E, R] int32, host [G, E, R]
-  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | None,
-  io [R, 1 + F, 2] int32, moves [R, 4, F] int32, n_moves [R, 2] int32)`, one layer call after its resolve (the
-  resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
+  int32, piece [G, E, R] int32, classes [G, R] int32, owner [C, U] int32, capacity [C] int32, heat [G, E] f32 | int32 |
+  None, io [R, 1 + F, 3] int32, moves [R, 4, F] int32, n_moves [R, 2] int32, ssd [R, 2, F] int32, n_ssd [R] int32, n_ram
+  [R] int32, rows: int, ahead [E] int32 | None, hit [R, 2, F] int32, n_hit [R] int32)`, one layer call after its resolve
+  (the resolve's `fetch`, its records `delta[start : n_delta]`): every layer's map, RAM units and class piece indices,
   each layer's role classes, each class's RAM units (`owner[c, u]`: the piece g·E + e, −1 free; units [0,
-  `capacity[c]`), then the class's I/O staging units capacity[c] + i), and the policy's heat (None: no displacement).
+  `capacity[c]`)), and the policy's heat (None: no displacement); SSD reads land in the class's landing rows
+  (docs/dev/v1-glm.md D8f), `rows` of them a round.
   It provides the call's pieces no device-readable tier holds and keeps its RAM tier exclusive, in this order (ties
   by expert id; one writer: a call's decisions see the earlier ones):
   1. Its admissions (the records (group, a, b ≥ 0), in order): a is staged — its fetch entry gathers into a staging
@@ -177,42 +204,58 @@ signal; wait] → expert_fetch → expert_fetch (demotions) → expert_fetch (mo
      b's slot → that unit, after the fetch read it), else a free unit of each of its classes, else the units of RAM's
      coldest expert of its classes (least heat, then group, then id; not routed by the call, not placed by it) when b
      is strictly hotter — that expert goes to the SSD —, else the SSD. An admission into an empty slot (b ≤ −2) needs
-     no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them).
+     no move. An admitted a's RAM units go to b, or are freed for the next call (the gather still reads them). An
+     admission whose b already left VRAM (a spare's owner: code −2, or −1 with RAM units) is one into empty slots.
+     A policy with spares (docs/dev/v1-glm.md D8a) logs `(group, SPARE = −4, b)`: b's slots became its spare, b still
+     mapped — b is placed as a victim is and its slots demoted into its units —; and `(group, OWN = −5, b)`: b took
+     its spare back — its RAM units are freed.
   2. Its SSD misses (fetch sources −2 − e) routed by a `DECODE` row and not admitted, in a call with one: kept in RAM
      (D10's keep rule) as b would be placed (free units, else the coldest when strictly colder), else not.
-  3. The SSD reads: per role the pieces (`piece`) and the units they land in — a kept piece its RAM unit, any other
-     the staging unit capacity[c] + i of its fetch entry i — in `io[r]` (n, then (piece, unit) pairs); those fetch
-     entries read that unit.
+  3. The SSD reads: the call's j-th SSD miss by id lands in landing row j % `rows` (round ⌊j / rows⌋): per role
+     `io[r]` (n, then (piece, row, keep) rows: keep its RAM unit if kept, else −1) and `ssd[r, :, j]` = (row, its
+     fetch entry's slot), `n_ssd[r]` of them; `fetch[r]`'s first `n_ram[r]` entries are its RAM entries, in order. An
+     SSD miss the layer read ahead (`ahead[e]` ≥ 0, its landing row) is neither read nor kept nor counted in j:
+     `hit[r, :, h]` = (that row, its slot), `n_hit[r]` of them.
   The map, `host` and `owner` take the call's result (a resident, b and kept pieces in RAM or on the SSD, displaced
-  experts on the SSD). `n_moves[r]` = (demotions, moves). Deterministic. Facts: experts, top_k, roles.
+  experts on the SSD). `n_moves[r]` = (demotions, moves). Optional trailing `stamp [C, U] int32, clock [1] int32`
+  (a caller whose moves run beside its next calls, docs/dev/v1-glm.md §13 step 7): with them RAM's coldest is never an
+  expert holding a unit the previous call demoted into — `stamp[c, u]` is the clock + 1 of the call that last demoted
+  into it, a unit pending while clock + 1 − stamp ≤ 1 (uint32) — since that copy may still run; each demotion stamps
+  its units clock + 1, and the call ends with clock += 1. Deterministic. Facts: experts, top_k, roles.
 
 The CPU's share of the misses (F5b, docs/dev/v1-offload.md D5–D7): per layer the graph runs `moe_resolve → [publish the
 CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → [wait] → moe_patch_rows → moe_combine`.
 
-- `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task) -> slot` (at
-  build), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
+- `cpu_task@1` (D6): an instance (facts: `pool`, the worker's kind: `compute`, `io`) has `bind(task, urgent=False) ->
+  slot` (at build; `urgent` a hint: a worker serves an urgent slot's request before requests it has not yet started, and
+  may ignore it), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
   reaches the signal, the device's writes before it visible to the task; work after the wait runs once the task has
   answered, its writes visible), and `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
-  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers
-  at once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph
-  never waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now),
-  with `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI
-  (kernels.cpu_task's csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has
-  `copy(roles) -> task`, the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8,
-  requests [1 + F, 2] int32)` (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them;
-  the request table `moe_tiers@1`'s `io[r]`): each requested piece's extents read in order into its unit. The oracle
-  runs a task.
+  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers at
+  once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph never
+  waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now), with
+  `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI (kernels.cpu_task's
+  csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has `copy(roles) -> task`,
+  the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8, requests [1 + F, 2] int32)`
+  (host tensors; a piece's extents (fd, O_DIRECT, offset, nbytes), nbytes 0 past them; the request table `moe_tiers@2`'s
+  `io[r]`): each requested piece's extents read in order into its unit. A role may add `runs [U, X, 2] int64` and `keep
+  [K, unit] uint8` (docs/dev/v1-glm.md D8f): its units are then landing rows, each O_DIRECT extent's 4 KiB-aligned
+  superset read in place at the row's next aligned offset and (offset in the row, nbytes) of its bytes written to
+  `runs[row, x]` (no copy); with requests `[1 + F, 3]` (piece, row, keep), a piece whose keep is ≥ 0 is also copied,
+  canonical, into keep unit `keep` before the request is answered. The oracle runs a task.
 - `cpu_experts@1` (a CPU kernel): instance `(jobs [1 + J, 4 + T] int32, x [T, hidden] f32, gate_up [U, gu_unit] uint8,
   down [V, down_unit] uint8, rows [T·k, hidden] f32, threads: int = 1)`, host tensors: for each job (`moe_resolve@1`'s
   table) the expert whose gate/up piece is unit `gate_up[u]` (gate's `inter` rows, then up's, as the GGUF stores them)
   and down piece `down[v]`, applied to x[entry // k] for each of its entries, into `rows[entry]`; rows of other entries
   are left as they are. Each input row is quantized to gate/up's ggml-cpu `vec_dot_type` (Q8_K for the k- and
   i-quants, Q8_0 for Q4_0, Q5_0, Q8_0, IQ4_NL), each (weight row, token) one ggml-cpu dot, `silu(g) · u` in f32 as
-  `g / (1 + exp(−g)) · u`, quantized to down's `vec_dot_type`, one dot per (row, token). A token's row is bitwise the
-  same whatever the other tokens of its job, the other jobs and the thread count (rows are split across threads,
-  never K): D7. `task(jobs, x, gate_up, down, rows)`: a `cpu_task@1` task over those buffers (host memory the device
-  maps, fixed for the engine's life). Facts: gate_up, down (their layouts), hidden, inter, top_k, tokens (T), jobs
-  (J). Providers carry the CPU's tier (`Constraint.cpu_isa`): ggml-cpu's reductions differ by ISA. The oracle
+  `g / (1 + exp(−g)) · u` (with the fact `glu_limit` L, given only when set: g = min(g, L), u = clamp(u, −L, L)
+  first, as `linear_experts@2`'s; docs/dev/v1-glm.md D6), quantized to down's `vec_dot_type`, one dot per (row, token).
+  A token's row is bitwise the same whatever the other tokens of its job, the other jobs and the thread count (rows are
+  split across threads, never K): D7. `task(jobs, x, gate_up, down, rows)`: a `cpu_task@1` task over those buffers
+  (host memory the device maps, fixed for the engine's life). Facts: gate_up, down (their layouts), hidden, inter,
+  top_k, tokens (T), jobs (J)[, glu_limit]. Providers carry the CPU's tier (`Constraint.cpu_isa`): ggml-cpu's
+  reductions differ by ISA. The oracle
   (`reference.cpu_experts`) dequantizes the weights and quantizes the activations as ggml-cpu does, accumulating in
   float64: it bounds a kernel within the L0 budget; ggml-cpu itself is the bitwise reference.
 - `moe_patch_rows@1`: instance `publish(x [T, H], cpu [T, k] int32, out [T', H] f32)`: `out[t]` = x[t] in f32 for every
@@ -227,7 +270,7 @@ MOE_ROUTER = "moe_router@1"
 MOE_RESOLVE, EXPERT_FETCH, LINEAR_EXPERTS_ARENA = "moe_resolve@1", "expert_fetch@1", "linear_experts_arena@1"
 EXPERT_PREFETCH, ACTIVATION_LOAN = "expert_prefetch@1", "activation_loan@1"
 CPU_TASK, CPU_EXPERTS, MOE_PATCH_ROWS = "cpu_task@1", "cpu_experts@1", "moe_patch_rows@1"
-MOE_TIERS = "moe_tiers@1"
+MOE_TIERS = "moe_tiers@2"
 PADDING, DECODE, PREFILL = 0, 1, 2   # `moe_resolve@1`'s row kinds
 RANGE, OVERFLOW, JOBS = 1, 2, 8      # error bits: a resident slot outside the arena's cache slots; a delta record past
                                      # the log (the variants); the CPU's share past its job table

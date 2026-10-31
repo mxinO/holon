@@ -17,11 +17,18 @@ chunks), each from the state the one before left — the same chunks in the same
 a quarter of the temporaries, the largest part of a prompt step's activation peak (FN §23.3), whatever the step's rows
 (the startup profile measures a one-row step; two prompts' chunks in one step must not need more, §22.9).
 
+`kda@1` (GLM-5.3-Flash's Kimi delta attention, docs/dev/v1-glm.md D4) is the same rule with a per-channel gate: the same
+plans, rows, state units, snapshots and calls; its recurrent rows through the fused kernel's `IS_KDA` branch (patched:
+the bounded gate `lower_bound · σ(exp(A_log) · (f + dt_bias))`), its chunks through vLLM's `chunk_kda` with the fused
+gate and chunk-local cumsum (vendored `kda.py`; FLA's 16-row sub-chunks keep the in-chunk decay exponents finite at
+the −5 bound).
+
 Also `gdn_rewind@1` (`rewind.py`, ours): a verify step's rewind glue for every GDN layer in one launch (D5)."""
 from __future__ import annotations
 
 import dataclasses
 import itertools
+import types
 
 import torch
 import torch.nn.functional as F
@@ -29,9 +36,10 @@ from holon.api import Constraint, KernelSpec
 
 from . import rewind
 from .vendor import chunk_gated_delta_rule, fused_sigmoid_gating_delta_rule_update
+from .vendor.kda import chunk_kda_with_fused_gate
 from .vendor.utils import FLA_CHUNK_SIZE
 
-OP, REWIND = "gated_delta_rule", "gdn_rewind"
+OP, KDA_OP, REWIND = "gated_delta_rule", "kda", "gdn_rewind"
 SUB_TOKENS = 1024                     # a one-row step's sub-chunk (a multiple of FLA_CHUNK_SIZE)
 
 
@@ -131,27 +139,24 @@ class GatedDeltaRule:
             # once after the last token.
             once = None if out_slots is None and h.tokens == len(slots) else (slots if out_slots is None else out_slots)
             o, _ = fused_sigmoid_gating_delta_rule_update(
-                a_log, a, b, dt_bias, q[None], k[None], v[None], initial_state=state, inplace_final_state=True,
-                cu_seqlens=h.cu_seqlens, ssm_state_indices=slots, use_qk_l2norm_in_kernel=True,
-                has_initial_state=has_init, v_head_tiled=self.tiled, out_indices=once)
+                a_log, self._gate_rows(a), b, dt_bias, q[None], k[None], v[None], initial_state=state,
+                inplace_final_state=True, cu_seqlens=h.cu_seqlens, ssm_state_indices=slots,
+                use_qk_l2norm_in_kernel=True, has_initial_state=has_init, v_head_tiled=self.tiled, out_indices=once,
+                **self._recurrent)
             return o[0]
         if out_slots is not None:
             raise ValueError("out_slots needs a per-token plan (the chunked path writes the rows' own units)")
         if h.live is not None:
             slots, has_init = slots.index_select(0, h.live), has_init.index_select(0, h.live)
         units, init = slots.long(), ~has_init.bool().view(-1, 1, 1, 1)
-        g = -a_log.float().exp() * F.softplus(a.float() + dt_bias.float())
-        beta = torch.sigmoid(b.float()).to(v.dtype)      # the chunk kernels' operand dtype (as vLLM and HF feed it)
+        g = self._chunk_gates(a, a_log, dt_bias)
+        beta = self._beta(b, v)
         o = torch.empty(v.shape, dtype=v.dtype, device=v.device)
         if h.snap is not None and (snapshot is None or not snapshot.is_contiguous() or snapshot.dtype != torch.float32):
             raise ValueError("a plan with snapshots needs a contiguous f32 payload view to store them in")
         if h.subs is None:                             # one call over every row
-            _, final = chunk_gated_delta_rule(
-                q[None], k[None], v[None], g[None], beta[None],
-                initial_state=state.index_select(0, units).masked_fill_(init, 0.0), output_final_state=True,
-                cu_seqlens=h.cu_seqlens, chunk_indices=h.chunk_indices, chunk_offsets=h.chunk_offsets,
-                use_qk_l2norm_in_kernel=True, core_attn_out=o[None], v_head_tiled=self.tiled,
-                snapshot=None if h.snap is None else (snapshot, *h.snap))
+            final = self._chunk(h, slice(None), q, k, v, g, beta, a_log, dt_bias,
+                                state.index_select(0, units).masked_fill_(init, 0.0), o, snapshot)
             state.index_copy_(0, units, final)
             return o
         cur = None                                     # call by call: whole rows, or one row's sub-chunks in turn
@@ -160,15 +165,65 @@ class GatedDeltaRule:
                 cur = state.index_select(0, units[i0:i1]).masked_fill_(init[i0:i1], 0.0)
             if at_start is not None:                   # its snapshot at this sub-chunk's start: the state carried
                 snapshot[at_start].copy_(cur[0])
-            part = slice(s0, s0 + tokens)
-            _, cur = chunk_gated_delta_rule(
-                q[None, part], k[None, part], v[None, part], g[None, part], beta[None, part], initial_state=cur,
-                output_final_state=True, cu_seqlens=sub.cu_seqlens, chunk_indices=sub.chunk_indices,
-                chunk_offsets=sub.chunk_offsets, use_qk_l2norm_in_kernel=True, core_attn_out=o[None, part],
-                v_head_tiled=self.tiled, snapshot=None if sub.snap is None else (snapshot, *sub.snap))
+            cur = self._chunk(sub, slice(s0, s0 + tokens), q, k, v, g, beta, a_log, dt_bias, cur, o, snapshot)
             if ends:
                 state.index_copy_(0, units[i0:i1], cur)
         return o
+
+    # The rule's gate, by path: GDN's scalar gate per v-head.
+    _recurrent: types.MappingProxyType = types.MappingProxyType({})   # the fused recurrent kernel's gate arguments
+
+    @staticmethod
+    def _gate_rows(a: torch.Tensor) -> torch.Tensor:
+        return a
+
+    @staticmethod
+    def _chunk_gates(a, a_log, dt_bias) -> torch.Tensor:
+        return -a_log.float().exp() * F.softplus(a.float() + dt_bias.float())
+
+    @staticmethod
+    def _beta(b, v) -> torch.Tensor:
+        return torch.sigmoid(b.float()).to(v.dtype)     # the chunk kernels' operand dtype (as vLLM and HF feed it)
+
+    def _chunk(self, h: _Handle, part: slice, q, k, v, g, beta, a_log, dt_bias, initial, o, snapshot) -> torch.Tensor:
+        """One chunked call over tokens `part` from the rows' `initial` states: their final states."""
+        _, final = chunk_gated_delta_rule(
+            q[None, part], k[None, part], v[None, part], g[None, part], beta[None, part], initial_state=initial,
+            output_final_state=True, cu_seqlens=h.cu_seqlens, chunk_indices=h.chunk_indices,
+            chunk_offsets=h.chunk_offsets, use_qk_l2norm_in_kernel=True, core_attn_out=o[None, part],
+            v_head_tiled=self.tiled, snapshot=None if h.snap is None else (snapshot, *h.snap))
+        return final
+
+
+class KDA(GatedDeltaRule):
+    """`kda@1`: `gated_delta_rule`'s plans and calls with KDA's per-channel bounded gate (f [T, H·Dk], A_log [H],
+    dt_bias [H·Dk]); no head grouping."""
+
+    def __init__(self, ctx, *, heads: int, head_k_dim: int, head_v_dim: int, lower_bound: float, dtype: str,
+                 out_slots: bool = False) -> None:
+        super().__init__(ctx, heads_k=heads, heads_v=heads, head_k_dim=head_k_dim, head_v_dim=head_v_dim,
+                         v_head_order="grouped", dtype=dtype, out_slots=out_slots)
+        self.heads, self.dk, self.lower_bound = heads, head_k_dim, float(lower_bound)
+        self._recurrent = types.MappingProxyType({"is_kda": True, "lower_bound": self.lower_bound})
+
+    def _gate_rows(self, f: torch.Tensor) -> torch.Tensor:
+        return f.view(f.shape[0], self.heads, self.dk)            # per token, per head, per key channel
+
+    def _chunk_gates(self, f, a_log, dt_bias) -> torch.Tensor:
+        return self._gate_rows(f)                       # raw: the chunk call fuses the gate into its cumsum
+
+    @staticmethod
+    def _beta(b, v) -> torch.Tensor:
+        return torch.sigmoid(b.float())                 # f32, as the recurrent path computes it (D4)
+
+    def _chunk(self, h: _Handle, part: slice, q, k, v, f, beta, a_log, dt_bias, initial, o, snapshot) -> torch.Tensor:
+        _, final = chunk_kda_with_fused_gate(
+            q[None, part], k[None, part], v[None, part], f[None, part], beta[None, part], a_log, dt_bias,
+            initial_state=initial, output_final_state=True, lower_bound=self.lower_bound,
+            use_qk_l2norm_in_kernel=True, cu_seqlens=h.cu_seqlens, chunk_indices=h.chunk_indices,
+            chunk_offsets=h.chunk_offsets, snapshot=None if h.snap is None else (snapshot, *h.snap),
+            core_attn_out=o[None, part])
+        return final
 
 
 def _supports(f: dict) -> bool:
@@ -177,8 +232,14 @@ def _supports(f: dict) -> bool:
             and f["v_head_order"] in ("grouped", "tiled"))
 
 
+def _supports_kda(f: dict) -> bool:
+    return (f["dtype"] == "bfloat16" and f["head_k_dim"] in (64, 128) and f["head_v_dim"] in (64, 128)
+            and f["lower_bound"] < 0)                           # any `out_slots` fact: supported
+
+
 class Plugin:
     def register(self, regs) -> None:
-        for op, impl, supports in ((OP, GatedDeltaRule, _supports), (REWIND, rewind.GDNRewind, rewind.supports)):
+        for op, impl, supports in ((OP, GatedDeltaRule, _supports), (KDA_OP, KDA, _supports_kda),
+                                   (REWIND, rewind.GDNRewind, rewind.supports)):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.fla", impl=impl, requires=Constraint(sm_min=80),
                                             supports=supports, props=frozenset({"graph_safe", "deterministic"})))

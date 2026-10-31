@@ -4,6 +4,7 @@
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
                                     [--snapshot-runs 2] [--golden <fp32 golden> --floor <floor>...]
+                                    [--reference <bf16 GPU reference>...]   # instead of the golden (D15a)
                                     [--prompts judge/prompts/v1.jsonl]
                                     [engine flags: --device --dtype --max-seqs ...]
     python -m holon_tools tune <model> [--ops op ...] [--batch 8] [--tokens 64] [--cpu-split] [--no-lock]
@@ -32,7 +33,7 @@ import torch
 from holon.api import Lock, parse_versioned
 from holon.core import plans, platform
 from holon.core.assembly import resolve_model
-from holon.core.cli import engine_config, engine_flags
+from holon.core.cli import engine_config, engine_flags, engine_settings, layered
 from holon.core.engine import Engine, EngineConfig
 from holon.core.plugins import PluginSet, discover
 from holon_judge.golden import resolve_model as checkpoint_dir
@@ -97,7 +98,10 @@ def _pins(lock: Lock) -> dict[str, str]:
 def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_id: str) -> int:
     """Check `config` against `start` and write the new lock if the outcome allows."""
     prompts = PromptSet.load(a.prompts)
-    l2 = propagate.L2Inputs(prompts, a.golden, tuple(a.floor)) if a.golden and a.floor else None
+    if a.reference and (a.golden or a.floor):
+        raise SystemExit("--reference replaces --golden and --floor (D15a)")
+    l2 = (propagate.L2Inputs(prompts, references=tuple(a.reference)) if a.reference else
+          propagate.L2Inputs(prompts, a.golden, tuple(a.floor)) if a.golden and a.floor else None)
     stored = start and start.snapshot and propagate.snapshot_path(a.plans, start.plan, start.snapshot)
     previous = Snapshot.load(stored) if stored and stored.is_file() else None
     fp = platform.fingerprint(torch.device(config.device))
@@ -110,8 +114,10 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_
     outcome = propagate.decide(start, checks, sm, previous, a.snapshot_runs)
     print(propagate.report(outcome))
     if outcome.verdict == "advance" or (outcome.verdict == "approve" and a.approve):
+        found = start and plans.history(a.plans, start.plan.model_id, start.plan.fingerprint_class)
+        inherited = locks.judged_of(found[-1]) if found and start.plan.fingerprint_class == fp.cls else None
         try:
-            print(f"wrote {propagate.write(a.plans, outcome, a.allow_approx)}")
+            print(f"wrote {propagate.write(a.plans, outcome, a.allow_approx, inherited)}")
         except ValueError as e:
             raise SystemExit(str(e)) from None
         return 0
@@ -185,9 +191,18 @@ def _tune(a: argparse.Namespace) -> int:
 
 
 def _profile(a: argparse.Namespace) -> int:
-    model = checkpoint_dir(a.model)
-    counts, directory = profile.profile(engine_config(str(model), a),
-                                        [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
+    if a.ship:
+        print(f"shipped {profile.ship(pathlib.Path(a.model))}")
+        return 0
+    model = str(checkpoint_dir(a.model))
+    flags = {k: v for k, v in engine_settings(a).items() if k != "max_model_len" or v != "auto"}
+    found = None if a.no_lock else plans.nearest_class(
+        a.plans, plans.history_id(a.plans, resolve_model(PluginSet(discover()), EngineConfig(model))[0].identity()),
+        platform.fingerprint(torch.device(flags.get("device", "cuda"))))
+    if found is not None:
+        print(f"from {found[2]}, under the flags given")
+    config = EngineConfig(model=model, **layered(plans.lock_overrides(found[0]) if found else {}, flags))
+    counts, directory = profile.profile(config, [p.ids for p in PromptSet.load(a.prompts).prompts], a.max_tokens)
     name = a.name or profile.default_name(pathlib.Path(model))
     print(f"wrote {profile.write(directory, name, counts)}: moe.placement.profile={name}")
     return 0
@@ -218,6 +233,9 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--golden", type=pathlib.Path, help="fp32 reference recording (judge golden)")
         p.add_argument("--floor", type=pathlib.Path, nargs="+",
                        help="judge floor recording(s) for the activation dtype; several: one per kernel path")
+        p.add_argument("--reference", type=pathlib.Path, nargs="+",
+                       help="L2's reference form instead (D15a): bf16 GPU reference recording(s), one per prompt "
+                            "set, each judged by the budgets beside it")
         engine_flags(p)
         p.set_defaults(run=run)
         if name == "tune":
@@ -240,7 +258,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--prompts", default=str(DEFAULT_PROMPTS), help="prompt set whose generations are counted")
     f.add_argument("--max-tokens", type=int, default=64, help="greedy tokens generated per prompt")
     f.add_argument("--name", help="the profile's file name, beside the checkpoint (default: <stem>.profile.json)")
-    engine_flags(f)
+    f.add_argument("--plans", default="plans", help="the lock histories: the engine settings start from the model's "
+                                                     "lock for this card (or the nearest class's)")
+    f.add_argument("--no-lock", action="store_true", help="the engine flags alone")
+    f.add_argument("--ship", action="store_true", help="<model> is a profile file: import it into std's shipped "
+                                                       "profiles, which `holon serve` seeds from without one beside "
+                                                       "the checkpoint (docs/dev/v1-auto-config.md D4)")
+    engine_flags(f, given_only=True)
     f.set_defaults(run=_profile)
 
     a = ap.parse_args(argv)

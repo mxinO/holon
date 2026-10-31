@@ -11,6 +11,7 @@ import json
 import pathlib
 import re
 import subprocess
+import tomllib
 from typing import Any
 
 from holon.api import Lock, Plan, canonical_hash
@@ -29,7 +30,9 @@ def uncovered(plan: Plan) -> tuple[str, ...]:
     return tuple(sorted(s for s, b in plan.sites.items() if "deterministic" not in b.config.get("props", ())))
 
 
-def dumps(lock: Lock) -> str:
+def dumps(lock: Lock, judged: dict | None = None) -> str:
+    """The lock's text; `judged` (how its plan was judged, D15a: the L2 form and the recordings that decided it) is a
+    `[judged]` table after `[snapshot]`, which `plans.loads` does not read and the digest covers."""
     p = lock.plan
     doc: dict[str, Any] = {"plan_id": p.plan_id, "model_id": p.model_id, "fingerprint_class": p.fingerprint_class,
                            "sm": lock.sm, "recipe": p.recipe, "deploy": {"commit": p.commit, "uv_lock": p.uv_lock},
@@ -37,6 +40,8 @@ def dumps(lock: Lock) -> str:
                            "snapshot": {"trace": lock.snapshot, "uncovered": list(lock.uncovered)}}
     if lock.snapshot is None:
         del doc["snapshot"]["trace"]
+    if judged:
+        doc["judged"] = dict(sorted(judged.items()))
     if p.sources:
         doc["sources"] = dict(sorted(p.sources.items()))
     doc["units"] = {k: {f: v for f, v in dataclasses.asdict(u).items() if v is not None}
@@ -53,14 +58,19 @@ def dumps(lock: Lock) -> str:
     return text
 
 
-def append(plans: str | pathlib.Path, lock: Lock) -> pathlib.Path:
-    """Write `lock` as the next entry of its history."""
+def judged_of(path: str | pathlib.Path) -> dict | None:
+    """A lock file's `[judged]` table (`dumps`), or None."""
+    return tomllib.loads(pathlib.Path(path).read_text()).get("judged")
+
+
+def append(plans: str | pathlib.Path, lock: Lock, judged: dict | None = None) -> pathlib.Path:
+    """Write `lock` as the next entry of its history (`judged`: `dumps`')."""
     found = history(plans, lock.plan.model_id, lock.plan.fingerprint_class)
     path = pathlib.Path(plans, lock.plan.model_id, lock.plan.fingerprint_class,
                         f"{int(found[-1].stem) + 1 if found else 1}.lock")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("x") as f:                 # exclusive: a concurrent writer fails instead of overwriting
-        f.write(dumps(lock))
+        f.write(dumps(lock, judged))
     return path
 
 

@@ -30,6 +30,7 @@ Same GPU, same model, same requests; every engine in its own environment; client
 | `timeline.py` | where a verify pass's CPU share sits against the GPU's work on graphed steps, under nsys (`run`, then `summarize`; docs/dev/v1-flash-next.md §21) |
 | `placement_replay.py` | M6's offline replay of expert placement policies over routing traces, CPU only (`--selfcheck`; docs/dev/v1-offload.md §8; the placement plugins' references) |
 | `fn_oracle.py` | FN N4's streamed fp32 oracle run on the CPU; `--capture` saves the QSA indexer inputs `fn_kernels.py` reads (docs/dev/v1-flash-next.md N4) |
+| `loan_need.py` | the fixed bytes an offload deployment's prompt step needs past its tokens' share of the activation loan, per prompt size and prompt-logprob count, from the store's own overflow counter (docs/dev/v1-glm.md step 7) |
 
 `workloads.py`, `driver.py` and `worker.py` are stdlib-only so they run unchanged in every engine's environment. The
 HTTP backends fit the same protocol: `add` posts a streaming request, `step` returns the tokens that arrived.

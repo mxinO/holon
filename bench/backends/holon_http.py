@@ -10,6 +10,7 @@ import shlex
 import sys
 
 from backends import http
+from run import SUPERVISOR
 
 PACKAGES = ("torch", "triton", "flashinfer-python")
 
@@ -28,10 +29,10 @@ class Backend(http.Backend):
 
     def stats(self) -> dict[str, int]:
         """The engine's counters (/metrics): prefix hits, mixed steps, preemptions, and real drafts and verify rows by
-        drafts accepted; the frontend process's CPU time."""
+        drafts accepted; the supervisor's (`run.SUPERVISOR`); the frontend process's CPU time."""
         metrics = self.server.get("/metrics")
         kept = {k: v for k, v in metrics.items() if k in ("prefix_tokens_saved", "mixed_steps", "preemptions")
-                or k.startswith("spec_")}
+                or k.startswith("spec_") or k in SUPERVISOR}
         return kept | {"frontend_cpu_ms": round(self.server.cpu_ms())}
 
 

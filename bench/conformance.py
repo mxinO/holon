@@ -37,6 +37,8 @@ import re
 import statistics
 import time
 
+from run import SUPERVISOR  # beside max_gap_ms: a restart's gap is in it, these say it was one
+
 SUBSETS = ("Github_easy", "Github_medium", "Github_hard", "Glaiveai2K", "JsonSchemaStore", "Kubernetes", "Snowplow",
            "WashingtonPost")
 UNSATISFIABLE = {   # Glaive schemas no document satisfies (JSONSchemaBench issue 16: a oneOf over required names)
@@ -75,7 +77,10 @@ def precompile(args) -> None:
     tok = AutoTokenizer.from_pretrained(args.tokenizer)
     config = json.loads((pathlib.Path(args.tokenizer) / "config.json").read_text())
     vocab = config.get("vocab_size") or config["text_config"]["vocab_size"]
-    stops = sorted({tok.convert_tokens_to_ids(t) for t in ("<|im_end|>", "<|endoftext|>")})
+    gen = pathlib.Path(args.tokenizer) / "generation_config.json"     # the model's end tokens, else Qwen's two
+    eos = json.loads(gen.read_text()).get("eos_token_id") if gen.is_file() else None
+    stops = sorted(set(eos if isinstance(eos, list) else [eos]) if eos is not None else
+                   {i for t in ("<|im_end|>", "<|endoftext|>") if (i := tok.convert_tokens_to_ids(t)) is not None})
     info = xgr.TokenizerInfo.from_huggingface(tok, vocab_size=vocab, stop_token_ids=stops)
     vetting = Vetting(info.serialize_json(), vocab, stops)          # the plugin's defaults: two workers, 10 s, caps
     out, todo, pending = [], list(schemas(args.jsb, args.sample, args.sample_seed)), {}
@@ -270,6 +275,7 @@ def summarize_pass(rows: list[dict], meta: dict) -> dict:
     before, after = meta["metrics_before"], meta["metrics_after"]
     out["engine_counters"] = {k: after[k] - before.get(k, 0) for k in after
                               if isinstance(after[k], int) and (k.startswith("spec_") or "." in k)}
+    out["supervisor"] = {k: after.get(k, 0) - before.get(k, 0) for k in SUPERVISOR}
     if out["engine_counters"].get("spec_drafted"):
         refused = out["engine_counters"].get("grammar.xgrammar.drafts_refused", 0)
         out["refused_draft_share"] = round(refused / out["engine_counters"]["spec_drafted"], 4)

@@ -4,6 +4,7 @@ entry."""
 import os
 
 import numpy as np
+import pytest
 import torch
 from holon.api import Extent
 from holon_std.tiered import files
@@ -11,9 +12,11 @@ from holon_std.tiered.residency import ResidencyMap
 
 
 def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch):
-    """Unaligned extents in any order, adjacent, overlapping a window's end, larger than a window, at the file's
-    end, from two files."""
+    """Unaligned extents in any order, adjacent, overlapping a window's end, larger than a window (read a window at a
+    time), at the file's end, from two files."""
     monkeypatch.setattr(files, "WINDOW", 3 * files.ALIGN)
+    sizes, real = [], os.preadv
+    monkeypatch.setattr(files.os, "preadv", lambda fd, bufs, at: sizes.append(bufs[0].nbytes) or real(fd, bufs, at))
     data = {p: np.random.default_rng(i).integers(0, 256, 9 * files.ALIGN + 77, dtype=np.uint8)
             for i, p in enumerate((tmp_path / "a", tmp_path / "b"))}
     for p, d in data.items():
@@ -24,7 +27,27 @@ def test_extents_read_back_bitwise_through_aligned_windows(tmp_path, monkeypatch
     files.read(jobs)
     for extent, dst in jobs:
         assert np.array_equal(dst, data[type(tmp_path)(extent.path)][extent.offset:extent.offset + extent.nbytes])
+    assert max(sizes) <= files.WINDOW + files.ALIGN
     assert os.O_DIRECT                                      # the reader asks for it (Linux)
+    with pytest.raises(ValueError, match=r"shape \(10, 10\)"):    # windows slice a destination by bytes: 1-D only
+        files.read([(Extent(str(tmp_path / "a"), 0, 100), np.zeros((10, 10), dtype=np.uint8))])
+
+
+def test_a_window_reads_no_gap_past_gap_bytes(tmp_path, monkeypatch):
+    """Pieces far apart are read as their own windows, not through the bytes between them (a scattered seed would
+    read the file whole); pieces close together still share one."""
+    path = tmp_path / "f"
+    data = np.random.default_rng(0).integers(0, 256, 64 * files.ALIGN, dtype=np.uint8)
+    path.write_bytes(data.tobytes())
+    monkeypatch.setattr(files, "GAP", 4 * files.ALIGN)
+    reads, real = [], os.preadv
+    monkeypatch.setattr(files.os, "preadv", lambda fd, bufs, at: reads.append(at) or real(fd, bufs, at))
+    jobs = [(Extent(str(path), off, 100), np.zeros(100, dtype=np.uint8))
+            for off in (10, 2 * files.ALIGN, 60 * files.ALIGN)]
+    files.read(jobs)
+    assert sorted(reads) == [0, 60 * files.ALIGN]
+    for extent, dst in jobs:
+        assert np.array_equal(dst, data[extent.offset:extent.offset + 100])
 
 
 class _Ctx:

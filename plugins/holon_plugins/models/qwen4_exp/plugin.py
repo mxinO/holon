@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import torch
 
-from . import kernels
+from . import deploy, kernels
 from . import reference as ref
 from .recipe import draft_head, recipe
 from .units import PLE
@@ -15,6 +15,8 @@ from .units import PLE
 class Plugin:
     recipe = staticmethod(recipe)
     draft_head = staticmethod(draft_head)
+    spill = staticmethod(deploy.spill)                  # `holon serve` (docs/dev/v1-auto-config.md D1, D5)
+    source_hint = staticmethod(deploy.source_hint)
 
     @staticmethod
     def trained_context(cfg, source) -> int | None:

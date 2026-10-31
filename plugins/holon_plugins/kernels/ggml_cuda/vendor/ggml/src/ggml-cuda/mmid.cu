@@ -6,7 +6,7 @@
 #include <cub/device/device_radix_sort.cuh>
 #include <cub/device/device_scan.cuh>
 
-// Holon: the helper is rewritten (docs/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
+// Holon: the helper is rewritten (docs/dev/v1-offload.md D4). Both paths order the compact rows as ggml does, slots
 // ascending and each slot's (token, iex) pairs in order, give every pair its own row (a slot repeated inside a row
 // included), put pairs with an id outside [0, n_experts) last (no slot lists them), and report a violated
 // precondition in `errors` (GGML_CUDA_MM_IDS_ERR_*, or'd; NULL: none) — but a negative id is a pair the call skips on

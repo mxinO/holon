@@ -66,7 +66,8 @@ class GGUFSource:
         self.arch = f"gguf.{self._arch}"
         tokens, types = self._value("tokenizer.ggml.tokens") or [], self._value("tokenizer.ggml.token_type") or []
         ends = {i for i, (t, k) in enumerate(zip(tokens, types, strict=True)) if k == 3 and t in _END_OF_TURN}
-        named = (self._value(f"tokenizer.ggml.{k}_token_id") for k in ("eos", "eot"))
+        named = (self._value(f"tokenizer.ggml.{k}_token_id") for k in ("eos", "eot", "eom"))   # (eom: GLM's
+        #                                                                     <|observation|>, docs/dev/v1-glm.md D13)
         self.eos_token_ids = frozenset(ends | {i for i in named if i is not None})
 
     def _value(self, key: str) -> Any:

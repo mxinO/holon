@@ -26,14 +26,16 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
   the mean in float32 rounded once to the model dtype, then a zero-centred RMSNorm (x · rsqrt(mean(x²) + eps) ·
   (1 + weight)) and a neox rotation of the first `rotary_dim` dims at position ratio·b (`cos_sin`: `rope@1`'s table),
   both in float32, stored float32. Facts: head_dim, ratio, page, rotary_dim, max_positions, eps, dtype.
-- `qsa_select@1`: instance `(q [T, Hi, Dk], pooled, table, seq, positions) -> blocks [T, budget / ratio + 1] int32`:
-  per query (q normed and rotated by the unit, any float dtype), the scores of its n complete blocks
-  `s_b = Σ_h relu(⟨q_h, pooled_b⟩) / √Dk` in float32 with IEEE products, and its top min(budget / ratio, n) blocks, ties
+- `qsa_select@1`: instance `(q [T, Hi, Dk], pooled, table, seq, positions, w [T, Hi] f32 | None = None) -> blocks
+  [T, budget / ratio + 1] int32`: per query (q normed and rotated by the unit, any float dtype), the scores of its n
+  complete blocks `s_b = Σ_h relu(⟨q_h, pooled_b⟩) / √Dk` — with the fact `head_weights` (true; GLM's DSA indexer,
+  docs/dev/v1-glm.md D5; given only then) `Σ_h w_h · relu(⟨q_h, pooled_b⟩) / √Dk`, `w` the row's signed head weights —
+  in float32 with IEEE products, and its top min(budget / ratio, n) blocks, ties
   to the lower block (D2's rule); written ascending, then the open block n when there is one, then −1. A query with
   n ≤ budget / ratio thus selects every block (dense). Rows of padding tokens are all −1. Score workspaces are
   sub-batched (at most 512 queries per pass). **Shape-invariant:** a query's scores, and so its selection, are the same
   bits alone and inside any call, whatever its other rows and their number. Facts: heads, head_dim, ratio, budget,
-  page.
+  page[, head_weights].
 - `qsa_attend@1` (prefill, decode and verify rows alike): instance `(q [T, Hq, D], kv, blocks, table, seq, positions,
   gate [T, Hq, D] | None) -> [T, Hq, D]` of q's dtype: per query, softmax(q k^T / √D) v over exactly the tokens of its
   `blocks` (all `ratio` of a complete block; the open block's up to p), kv heads shared by Hq / Hkv query heads,
@@ -45,10 +47,27 @@ padding token, which reads nothing and writes nothing), and `positions` [T] int6
 
 A step whose rows all have host-known lengths ≤ (budget / ratio) · ratio + ratio − 1 (2,051) runs the dense gqa ops
 instead (D6).
+
+GLM-5.3-Flash's DSA (docs/dev/v1-glm.md D5; HF's `Glm5NextTextIndexer` and absorbed `Glm5NextTextAttention`) shares the
+blocks (pools of `ratio` = 4), the addressing and `qsa_select@1` (with head weights); its state is a latent `"kv"`
+spec — per unit `[page, Dc]` in the model dtype, one copy read as both keys and values — and an `"idx"` spec — per
+unit its raw keys [page, Dk] and gates [page, Dk] (model dtype) and pooled keys [page / ratio, Dk] float32:
+
+- `dsa_index@1`: instance `(k [T, Dk], gate [T, Dk], raw, gates, pooled, ape [ratio, Dk] f32, table, seq, positions)
+  -> None`: stores each token's k and gate at its position, then, for every token that completes a block, pools that
+  block **from the raw keys and gates as stored after the call** (as `qsa_index@1`): `pooled[b] = Σ_c softmax_c(gate_c
+  + ape_c) · k_c` per channel over the block's `ratio` tokens c, in float32 (the softmax over the tokens, per channel),
+  stored float32. Facts: head_dim, ratio, page, dtype.
+- `mla_attend@1` (prefill, decode and verify rows alike): instance `(q [T, H, Dc], kv [units, page, Dc], blocks,
+  table, seq, positions) -> [T, H, Dc]` of q's dtype: per query the absorbed attention over the latent —
+  `softmax(scale · q · cᵀ) · c` over exactly the tokens of its `blocks` (as `qsa_attend@1`'s), in float32, one rounding;
+  `scale` the fact (1 / √(the query-key head dim)). A padding token's output is 0. Facts: heads, latent, ratio, width,
+  page, scale, q_dtype, kv_dtype.
 """
 from __future__ import annotations
 
 INDEX, SELECT, ATTEND = "qsa_index@1", "qsa_select@1", "qsa_attend@1"
+DSA_INDEX, MLA_ATTEND = "dsa_index@1", "mla_attend@1"
 
 
 def width(budget: int, ratio: int) -> int:

@@ -13,6 +13,7 @@ import sys
 
 from backends import http, text
 from backends.holon_http import served
+from run import SUPERVISOR
 
 PACKAGES = ("torch", "triton", "flashinfer-python")
 TOOLS = [{"type": "function", "function": {"name": name, "description": f"{name} a file or command",
@@ -53,4 +54,5 @@ class Backend(http.Backend):
             "p99": round(gaps[int(0.99 * (len(gaps) - 1))], 1), "max": round(gaps[-1], 1)} if gaps else None}
 
     def stats(self) -> dict[str, int]:
-        return {"frontend_cpu_ms": round(self.server.cpu_ms())}
+        metrics = self.server.get("/metrics")
+        return {k: metrics.get(k, 0) for k in SUPERVISOR} | {"frontend_cpu_ms": round(self.server.cpu_ms())}

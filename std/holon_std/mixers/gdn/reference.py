@@ -81,14 +81,49 @@ def gated_delta_rule(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, a: torch
     return o.to(v.dtype)
 
 
+def kda(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, f: torch.Tensor, b: torch.Tensor, a_log: torch.Tensor,
+        dt_bias: torch.Tensor, state: torch.Tensor, slots: torch.Tensor, query_start: torch.Tensor,
+        has_init: torch.Tensor, lower_bound: float, snapshot: torch.Tensor | None = None,
+        snaps: dict[int, tuple[int, int]] | None = None, out_slots: torch.Tensor | None = None) -> torch.Tensor:
+    """The Kimi delta rule per row, token by token in f32 (HF's `recurrent_kimi_delta_attention`, transformers 5.19.0
+    `models/glm5_next/modeling_glm5_next.py:464-515`, in the kernels' [H, Dv, Dk] state layout); state updated in
+    place (into `out_slots[r]` when given); `snaps` as `gated_delta_rule`'s. Every per-token quantity is computed for
+    its token alone, so a row of n tokens is bitwise n one-token calls."""
+    heads, dv, dk = state.shape[1:]
+    o = torch.empty(v.shape, dtype=torch.float32, device=v.device)
+    decay = a_log.float().exp()[:, None]                                            # [H, 1]
+    for r, (lo, hi) in enumerate(_rows(query_start)):
+        if hi == lo:
+            continue
+        unit = int(slots[r])
+        s = state[unit].clone() if bool(has_init[r]) else state.new_zeros(heads, dv, dk)
+        for t in range(lo, hi):
+            qt, kt = q[t].float(), k[t].float()
+            qn = qt / torch.sqrt((qt * qt).sum(-1, keepdim=True) + L2_EPS) * dk ** -0.5
+            kn = kt / torch.sqrt((kt * kt).sum(-1, keepdim=True) + L2_EPS)
+            g = lower_bound * torch.sigmoid(decay * (f[t].float() + dt_bias.float()).view(heads, dk))   # [H, Dk]
+            beta = torch.sigmoid(b[t].float())
+            s = s * g.exp()[:, None, :]
+            delta = beta[:, None] * (v[t].float() - (s * kn[:, None, :]).sum(-1))       # [H, Dv]
+            s = s + delta[:, :, None] * kn[:, None, :]
+            o[t] = (s * qn[:, None, :]).sum(-1)
+            if snaps and r in snaps and t + 1 - lo == snaps[r][0]:
+                snapshot[snaps[r][1]] = s
+        state[unit if out_slots is None else int(out_slots[r])] = s
+    return o.to(v.dtype)
+
+
 def gated_rmsnorm(o: torch.Tensor, z: torch.Tensor, weight: torch.Tensor, eps: float,
-                  out_gate: str = "silu") -> torch.Tensor:
+                  out_gate: str = "silu", round: str = "model") -> torch.Tensor:
     """HF's `RMSNormGated`: the norm in f32 cast to o's dtype, times the weight, times act(z) in f32 (silu, or
-    sigmoid: `out_gate`)."""
+    sigmoid: `out_gate`); `round = "none"` (KDA's, GLM's HF form): the norm in f32 through the weight (read in f32)
+    and the gate, rounded once."""
     x = o.float()
-    normed = (x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)).to(o.dtype)
+    normed = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
     gate = F.silu(z.float()) if out_gate == "silu" else torch.sigmoid(z.float())
-    return ((weight * normed).float() * gate).to(o.dtype)
+    if round == "none":
+        return (weight.float() * normed * gate).to(o.dtype)
+    return ((weight * normed.to(o.dtype)).float() * gate).to(o.dtype)
 
 
 def gdn_rewind(state: torch.Tensor, window: torch.Tensor, x: torch.Tensor, a: torch.Tensor, b: torch.Tensor,

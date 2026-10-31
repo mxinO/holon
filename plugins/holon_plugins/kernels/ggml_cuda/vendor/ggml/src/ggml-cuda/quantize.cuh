@@ -24,7 +24,8 @@ void quantize_row_q8_1_cuda(
 void quantize_mmq_q8_1_cuda(
         const void * x, ggml_type type_x, const int32_t * ids, void * vy, // Holon: x is f32 or bf16
         ggml_type type_src0, int64_t ne00, int64_t s01, int64_t s02, int64_t s03,
-        int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3, cudaStream_t stream);
+        int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3, cudaStream_t stream,
+        const int32_t * live = nullptr); // Holon: rows from *live on skipped (a sparse call's dead pairs: D8g)
 
 void quantize_mmq_fp4_cuda(const float *   x,
                              const int32_t * ids,
@@ -67,4 +68,5 @@ void quantize_scatter_mmq_q8_1_cuda(const void *    x, ggml_type type_x, // Holo
                                     int64_t         n_tokens,
                                     int64_t         nrows_dst,
                                     int             n_expert_used,
-                                    cudaStream_t    stream);
+                                    cudaStream_t    stream,
+                                    const int32_t * live = nullptr);

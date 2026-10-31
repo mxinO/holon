@@ -337,3 +337,18 @@ def test_kernels_are_selected_by_the_cpu_tier_and_name_it_in_the_lock_class():
         assert ctx.select_kernel("toy@1", site="s").provider == chosen
         assert plans.lock_class(ctx.fingerprint, ctx.cpu_kernels) == (
             f"rtx-5080+{tier}/{ctx.fingerprint.toolchain}" if chosen != "plain" else ctx.fingerprint.cls)
+
+
+@CUDA
+def test_the_profiles_peak_is_what_the_allocator_maps():
+    """GLM step 6: an RTX 5090 at --memory-fraction 0.99 kept 3 MiB free after 32K steps, the caching allocator's
+    segments past the allocated peak the startup profile measured. The profile's peak is the allocator's reserved
+    growth: here 64 1-MiB blocks, every other one freed, then a 40 MiB block the holes cannot hold — 72 MiB allocated
+    at most, at least 104 MiB mapped."""
+    device = torch.device("cuda")
+
+    def fragmenting():
+        blocks = [torch.empty(1 << 20, dtype=torch.uint8, device=device) for _ in range(64)]
+        del blocks[::2]
+        return torch.empty(40 << 20, dtype=torch.uint8, device=device)
+    assert platform.peak_memory(device, fragmenting) >= 104 << 20

@@ -1,4 +1,4 @@
-// Holon: IQ1_M's mmq instance (docs/v1-moe-prefill.md D9); upstream has none, so this file is Holon's own.
+// Holon: IQ1_M's mmq instance (docs/dev/v1-moe-prefill.md D9); upstream has none, so this file is Holon's own.
 
 #include "../mmq.cuh"
 

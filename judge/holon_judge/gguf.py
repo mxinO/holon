@@ -16,6 +16,8 @@ import gguf
 import numpy as np
 import torch
 
+from . import archs
+
 GATE = 0.5          # NMSE(dequantized, HF bf16) per tensor: a correct quant explains at least half the energy
 GATES = {"mxfp4": 0.1, "q8_0": 1e-3}     # docs/dev/m06-lowp.md §4.8: FP4 experts; Q8_0 from its prediction (≈ 5e-5)
 # llama.cpp's tensor names (src/llama-arch.cpp) for the dense-transformer tensors -> HF Qwen3 names.
@@ -54,14 +56,29 @@ _QWEN4EXP = {f"hc_{g}_{p}.weight": f"{h}_hyper_connection.{w}.weight" for g, h i
     "indexer.k_norm.weight": "self_attn.indexer.k_layernorm.weight"}
 _INDEXER = {"indexer.q_proj.weight": "q", "indexer.k_proj.weight": "k"}
 PLE_TABLE = "per_layer_token_embd.weight"
-NAME_MAP_HASH = hashlib.sha256(json.dumps([_GLOBAL, _LAYER, _EXPERTS, _QWEN35, _QWEN4EXP_GLOBAL, _QWEN4EXP, _INDEXER],
-                                          sort_keys=True).encode()).hexdigest()[:16]
+_MAPS = [_GLOBAL, _LAYER, _EXPERTS, _QWEN35, _QWEN4EXP_GLOBAL, _QWEN4EXP, _INDEXER]
+NAME_MAP_HASH = hashlib.sha256(json.dumps(_MAPS, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def hf_name(name: str) -> str:
+def _arch(fields) -> str:
+    return bytes(fields["general.architecture"].parts[-1]).decode()
+
+
+def name_map_hash(arch: str = "") -> str:
+    """The name map's hash a golden records: the shared maps', with an architecture module's own maps
+    (`archs.GGUF_ARCHS`) where it has one — so adding one architecture leaves the others' provenance as it was."""
+    m = archs.gguf_module(arch)
+    if m is None:
+        return NAME_MAP_HASH
+    return hashlib.sha256(json.dumps([*_MAPS, m.GGUF_NAMES, m.GGUF_FUSED], sort_keys=True).encode()).hexdigest()[:16]
+
+
+def hf_name(name: str, arch: str = "") -> str:
+    m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
+    if m is not None and (mod := archs.gguf_module(arch)) is not None and m[2] in mod.GGUF_NAMES:
+        return f"model.layers.{m[1]}.{mod.GGUF_NAMES[m[2]]}"
     if name in _GLOBAL or name in _QWEN4EXP_GLOBAL:
         return _GLOBAL.get(name) or _QWEN4EXP_GLOBAL[name]
-    m = re.fullmatch(r"blk\.(\d+)\.(.+)", name)
     if m is not None and (m[2] in _QWEN35 or m[2] in _QWEN4EXP):
         return f"model.layers.{m[1]}.{_QWEN35.get(m[2]) or _QWEN4EXP[m[2]]}"
     m = re.fullmatch(r"blk\.(\d+)\.(\w+)\.weight", name)
@@ -159,7 +176,8 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
     file's keys as the n-gram embedding's int64 buffers (`ple_buffers`)."""
     pending: dict[str, dict[str, torch.Tensor]] = {}
     fields = gguf.GGUFReader(path).fields
-    q35 = _qwen35(fields)
+    q35, arch = _qwen35(fields), _arch(fields)
+    mod = archs.gguf_module(arch)
     for t in _tensors(path):
         if q35 is not None and re.match(rf"blk\.{q35['layers']}\.", t.name):
             continue                                   # the MTP block (M0.4)
@@ -169,9 +187,12 @@ def hf_state(path: str | pathlib.Path, select: Callable[[str], bool] = lambda na
         x = torch.from_numpy(x.reshape([int(n) for n in reversed(t.shape)]).copy())
         if q35 is not None:
             x = _qwen35_value(t.name, x, q35)
+        if mod is not None and (made := mod.gguf_tensor(t.name, x, pending)) is not None:
+            yield from made                            # (an architecture's conversion undone, fused parts joined)
+            continue
         m = re.fullmatch(r"blk\.(\d+)\.(ffn_(?:gate|up|down)_exps|indexer\.[qk]_proj)\.weight", t.name)
         if m is None:
-            yield hf_name(t.name), x
+            yield hf_name(t.name, arch), x
         elif m[2].startswith("indexer."):
             pending.setdefault(f"{m[1]}.indexer", {})[_INDEXER[f"{m[2]}.weight"]] = x
             if len(pending[f"{m[1]}.indexer"]) == 2:
@@ -220,6 +241,7 @@ class PleRows:
 def hf_types(path: str | pathlib.Path) -> dict[str, str]:
     """The ggml type (lowercase) of each HF state entry `hf_state` makes (a fused gate/up stack: gate's)."""
     out = {}
+    arch = _arch(gguf.GGUFReader(path).fields)
     for t in _tensors(path):
         if m := re.fullmatch(r"blk\.(\d+)\.ffn_(gate|up|down)_exps\.weight", t.name):
             name = f"model.layers.{m[1]}.mlp.experts.{'down' if m[2] == 'down' else 'gate_up'}_proj"
@@ -227,7 +249,7 @@ def hf_types(path: str | pathlib.Path) -> dict[str, str]:
                 continue
         else:
             try:
-                name = hf_name(t.name)
+                name = hf_name(t.name, arch)
             except KeyError:
                 continue                                       # the MTP block, which hf_state skips
         out[name] = t.tensor_type.name.lower()
@@ -476,7 +498,8 @@ def file_meta(path: str | pathlib.Path) -> dict:
     with open(gguf.quants.__file__, "rb") as f:
         quants = hashlib.file_digest(f, "sha256").hexdigest()[:16]
     return {"model": model, "gguf_sha256": digests[0], **({"shards_sha256": digests} if len(digests) > 1 else {}),
-            "gguf_py": version("gguf"), "gguf_py_quants": quants, "name_map": NAME_MAP_HASH}
+            "gguf_py": version("gguf"), "gguf_py_quants": quants,
+            "name_map": name_map_hash(_arch(gguf.GGUFReader(shards(p)[0]).fields))}
 
 
 def _digest(p: pathlib.Path) -> str:

@@ -78,6 +78,12 @@ void matmul(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at
 
 void check_f32(const at::Tensor & t, const char * name) { TORCH_CHECK(t.scalar_type() == at::kFloat, name, ": float32"); }
 
+// The routing kernels' expert counts: topk-moe.cu's instances (a power of 2 up to 512, or 288)
+void check_experts(int64_t experts) {
+    TORCH_CHECK(experts == 288 || (experts > 0 && experts <= 512 && (experts & (experts - 1)) == 0),
+                "experts: a power of 2 <= 512, or 288");
+}
+
 // x [tokens, 1 or k, in], ids [tokens, k] int32, y [tokens, k, out_y] f32; the stack `w` [E·out, row_bytes] with
 // out = 2·out_y for the fused SwiGLU (mmvq only), else out_y.
 void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
@@ -85,7 +91,7 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
              const std::optional<at::Tensor> & up_scale, at::Tensor & ws, int64_t slots = 0,
              const std::optional<at::Tensor> & errors = std::nullopt,
              const std::optional<at::Tensor> & xq = std::nullopt, int64_t ids_j_tokens = INT64_MAX,
-             int64_t null_slots = 0) {
+             int64_t null_slots = 0, double glu_limit = 0.0, bool sparse = false) {
     const c10::cuda::CUDAGuard guard(x.device());
     TORCH_CHECK(x.dim() == 3 && ids.dim() == 2 && y.dim() == 3, "x, ids, y: 3, 2 and 3 dimensions");
     const int64_t tokens = ids.size(0), k = ids.size(1), rows = x.size(1), in = x.size(2), out_y = y.size(2);
@@ -100,13 +106,14 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
     check_blocks(type, w, x, w.size(0), in);
     TORCH_CHECK(ws.scalar_type() == at::kByte && ws.device() == x.device() && ws.is_contiguous(), "workspace: uint8");
     TORCH_CHECK(tokens > 0, "no tokens");
+    TORCH_CHECK(glu_limit >= 0.0 && (swiglu || glu_limit == 0.0), "glu_limit: >= 0, with the fused SwiGLU");
     if (vec) {
         TORCH_CHECK(holon_ggml_use_mmvq_id(type, tokens), "mmvq with ids: ", tokens, " tokens is past its limit");
         const int64_t n = w.size(0) / out;
         TORCH_CHECK(swiglu || !gate_scale, "mmvq with ids: a gate scale needs the fused SwiGLU");
         check_q8_1(xq, x, tokens * rows, in);
         holon_ggml_mmvq_id(type, w.data_ptr(), n, out, in, x.data_ptr(), bf16(x, "x"), xq ? xq->data_ptr() : nullptr,
-                           rows, ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), swiglu,
+                           rows, ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), swiglu, float(glu_limit),
                            scale(gate_scale, x, n, "gate_scale"),
                            scale(up_scale, x, n, "up_scale"), int(null_slots), ws.data_ptr(), ws.numel(), stream());
     } else {
@@ -115,8 +122,10 @@ void experts(bool vec, int64_t type, int64_t prec, const at::Tensor & w, const a
         TORCH_CHECK(!swiglu || holon_ggml_mmq_glu(type, prec, out), "mmq with ids: no fused SwiGLU for this stack");
         holon_ggml_mmq_id(type, prec, w.data_ptr(), n, out, in, x.data_ptr(), bf16(x, "x"), rows,
                           ids.data_ptr<int32_t>(), tokens, k, y.data_ptr<float>(), slots,
-                          errors ? errors->data_ptr<int32_t>() : nullptr, swiglu, scale(gate_scale, x, n, "gate_scale"),
-                          scale(up_scale, x, n, "up_scale"), ids_j_tokens, ws.data_ptr(), ws.numel(), stream());
+                          errors ? errors->data_ptr<int32_t>() : nullptr, swiglu, float(glu_limit),
+                          scale(gate_scale, x, n, "gate_scale"),
+                          scale(up_scale, x, n, "up_scale"), ids_j_tokens, ws.data_ptr(), ws.numel(), stream(),
+                          sparse ? 1 : 0);
     }
 }
 
@@ -205,43 +214,45 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("mmvq_id", [](int64_t type, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids, at::Tensor & y,
                         bool swiglu, const std::optional<at::Tensor> & gate_scale,
                         const std::optional<at::Tensor> & up_scale, at::Tensor & ws, const std::optional<at::Tensor> & xq,
-                        int64_t null_slots) {
+                        int64_t null_slots, double glu_limit) {
         TORCH_CHECK(null_slots >= 0 && null_slots <= ids.size(1), "mmvq with ids: null_slots in [0, k]");
         experts(true, type, 0, w, x, ids, y, swiglu, gate_scale, up_scale, ws, 0, std::nullopt, xq, INT64_MAX,
-                null_slots);
+                null_slots, glu_limit);
     }, py::arg("type"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("swiglu"),
        py::arg("gate_scale"), py::arg("up_scale"), py::arg("ws"), py::arg("xq") = py::none(),
-       py::arg("null_slots") = 0);
+       py::arg("null_slots") = 0, py::arg("glu_limit") = 0.0);
     // `ids_j_tokens`: D2's batched-decode rule (the plugin's IDS_J_TOKENS); upstream's (J against the tokens) without
     m.def("mmq_id", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
                        at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
-                       int64_t ids_j_tokens) {
+                       int64_t ids_j_tokens, bool sparse) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
         TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
                     "errors: one int32 on x's device");
         experts(false, type, prec, w, x, ids, y, false, std::nullopt, std::nullopt, ws, slots, errors, std::nullopt,
-                ids_j_tokens);
+                ids_j_tokens, 0, 0.0, sparse);
     }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
-       py::arg("slots") = 0, py::arg("errors") = py::none(), py::arg("ids_j_tokens") = INT64_MAX);
+       py::arg("slots") = 0, py::arg("errors") = py::none(), py::arg("ids_j_tokens") = INT64_MAX,
+       py::arg("sparse") = false);
     m.def("mmq_id_glu", [](int64_t type, int64_t prec, const at::Tensor & w, const at::Tensor & x, const at::Tensor & ids,
                            at::Tensor & y, at::Tensor & ws, int64_t slots, const std::optional<at::Tensor> & errors,
                            const std::optional<at::Tensor> & gate_scale, const std::optional<at::Tensor> & up_scale,
-                           int64_t ids_j_tokens) {
+                           int64_t ids_j_tokens, double glu_limit, bool sparse) {
         TORCH_CHECK(slots > 0, "mmq with ids: slots > 0");
         TORCH_CHECK(!errors || (errors->scalar_type() == at::kInt && errors->device() == x.device() && errors->numel() >= 1),
                     "errors: one int32 on x's device");
         TORCH_CHECK(!gate_scale == !up_scale, "gate_scale and up_scale: both or neither");
         experts(false, type, prec, w, x, ids, y, true, gate_scale, up_scale, ws, slots, errors, std::nullopt,
-                ids_j_tokens);
+                ids_j_tokens, 0, glu_limit, sparse);
     }, py::arg("type"), py::arg("prec"), py::arg("w"), py::arg("x"), py::arg("ids"), py::arg("y"), py::arg("ws"),
        py::arg("slots"), py::arg("errors"), py::arg("gate_scale"), py::arg("up_scale"),
-       py::arg("ids_j_tokens") = INT64_MAX);
+       py::arg("ids_j_tokens") = INT64_MAX, py::arg("glu_limit") = 0.0, py::arg("sparse") = false);
     m.def("mmq_glu", [](int64_t device, int64_t type, int64_t prec, int64_t out) {
         const c10::cuda::CUDAGuard guard(device);
         return holon_ggml_mmq_glu(type, prec, out) != 0;
     });
     m.def("swiglu", [](const at::Tensor & x, at::Tensor & y, const std::optional<at::Tensor> & gate_scale,
-                       const std::optional<at::Tensor> & up_scale, const std::optional<at::Tensor> & ids) {
+                       const std::optional<at::Tensor> & up_scale, const std::optional<at::Tensor> & ids,
+                       double limit) {
         const c10::cuda::CUDAGuard guard(y.device());
         const int64_t n = y.size(-1), rows = n > 0 ? y.numel() / n : 0;
         TORCH_CHECK(x.dim() == y.dim() && x.size(-1) == 2*n && x.numel() == 2*y.numel(), "x: y's shape, last dim 2n");
@@ -262,11 +273,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
             gs = scale(gate_scale, y, gate_scale->numel(), "gate_scale");
             us = scale(up_scale, y, up_scale->numel(), "up_scale");
         }
+        TORCH_CHECK(limit >= 0.0, "limit: >= 0");
         holon_ggml_swiglu(x.data_ptr<float>(), rows, n, gs, us, ids ? ids->data_ptr<int32_t>() : nullptr,
-                          y.data_ptr<float>(), stream());
+                          float(limit), y.data_ptr<float>(), stream());
     }, py::arg("x"), py::arg("y"), py::arg("gate_scale") = py::none(), py::arg("up_scale") = py::none(),
-       py::arg("ids") = py::none());
-    m.def("topk_moe", [](const at::Tensor & logits, at::Tensor & weights, at::Tensor & ids, bool renormalize) {
+       py::arg("ids") = py::none(), py::arg("limit") = 0.0);
+    m.def("topk_moe", [](const at::Tensor & logits, at::Tensor & weights, at::Tensor & ids, bool renormalize,
+                         bool sigmoid, const std::optional<at::Tensor> & bias, double scale_) {
         const c10::cuda::CUDAGuard guard(logits.device());
         TORCH_CHECK(logits.dim() == 2 && ids.dim() == 2, "logits, ids: 2 dimensions");
         const int64_t tokens = logits.size(0), experts = logits.size(1), k = ids.size(1);
@@ -276,13 +289,17 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         check_f32(logits, "logits");
         check_f32(weights, "weights");
         TORCH_CHECK(ids.scalar_type() == at::kInt, "ids: int32");
-        TORCH_CHECK(experts > 0 && experts <= 512 && (experts & (experts - 1)) == 0, "experts: a power of 2 <= 512");
+        check_experts(experts);
         TORCH_CHECK(k > 0 && k <= experts && tokens > 0, "1 <= k <= experts, tokens > 0");
-        holon_ggml_topk_moe(logits.data_ptr<float>(), tokens, experts, k, renormalize, weights.data_ptr<float>(),
+        holon_ggml_topk_moe(logits.data_ptr<float>(), tokens, experts, k, renormalize, sigmoid,
+                            scale(bias, logits, experts, "bias"), float(scale_), weights.data_ptr<float>(),
                             ids.data_ptr<int32_t>(), stream());
-    });
+    }, py::arg("logits"), py::arg("weights"), py::arg("ids"), py::arg("renormalize"), py::arg("sigmoid") = false,
+       py::arg("bias") = py::none(), py::arg("scale") = 1.0);
     m.def("moe_router_rows", [] { return holon_ggml_moe_router_rows(); });
-    m.def("moe_router_partials", [](int64_t experts) { return holon_ggml_moe_router_partials(experts); });
+    m.def("moe_router_partials", [](int64_t experts, int64_t hidden) {
+        return holon_ggml_moe_router_partials(experts, hidden);
+    });
     m.def("moe_router_logits", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & partials,
                                   at::Tensor & logits) {
         const c10::cuda::CUDAGuard guard(x.device());
@@ -290,15 +307,15 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         const int64_t tokens = x.size(0), hidden = x.size(1), experts = router.size(0);
         check(x, x, {tokens, hidden}, "x");
         check(router, x, {experts, hidden}, "router");
-        check(partials, x, {holon_ggml_moe_router_partials(experts), tokens, experts}, "partials");
+        check(partials, x, {holon_ggml_moe_router_partials(experts, hidden), tokens, experts}, "partials");
         check(logits, x, {tokens, experts}, "logits");
         TORCH_CHECK(router.scalar_type() == at::kFloat || router.scalar_type() == at::kBFloat16,
                     "router: f32 or bf16 (its values exactly)");
         check_f32(partials, "partials");
         check_f32(logits, "logits");
         TORCH_CHECK(x.scalar_type() == at::kBFloat16 || x.scalar_type() == at::kFloat, "x: bf16 or f32");
-        TORCH_CHECK(tokens > 0 && hidden % (32*holon_ggml_moe_router_partials(experts)) == 0 && experts % 64 == 0,
-                    "tokens > 0; hidden a multiple of 32 x the chains, experts of 64");
+        TORCH_CHECK(tokens > 0 && hidden % (32*holon_ggml_moe_router_partials(experts, hidden)) == 0 &&
+                    experts % 32 == 0, "tokens > 0; hidden a multiple of 32 x the chains, experts of 32");
         holon_ggml_moe_router_logits(x.data_ptr(), x.scalar_type() == at::kBFloat16, router.data_ptr(),
                                      router.scalar_type() == at::kBFloat16, tokens, hidden, experts,
                                      partials.data_ptr<float>(), logits.data_ptr<float>(), stream());
@@ -306,7 +323,8 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("moe_router_tiles", [](int64_t tokens) { return holon_ggml_moe_router_tiles(tokens); });
     m.def("moe_router", [](const at::Tensor & x, const at::Tensor & router, at::Tensor & logits, at::Tensor & done,
                            at::Tensor & weights, at::Tensor & ids, bool renormalize,
-                           const std::optional<at::Tensor> & xq) {
+                           const std::optional<at::Tensor> & xq, bool sigmoid, const std::optional<at::Tensor> & bias,
+                           double scale_) {
         const c10::cuda::CUDAGuard guard(x.device());
         TORCH_CHECK(x.dim() == 2 && router.dim() == 2 && ids.dim() == 2, "x, router, ids: 2 dimensions");
         const int64_t tokens = x.size(0), hidden = x.size(1), experts = router.size(0), k = ids.size(1);
@@ -324,7 +342,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                     done.numel() >= holon_ggml_moe_router_tiles(tokens), "done: ", holon_ggml_moe_router_tiles(tokens),
                     " int32 counters");
         TORCH_CHECK(hidden % 512 == 0, "hidden: a multiple of 512");
-        TORCH_CHECK(experts > 0 && experts <= 512 && (experts & (experts - 1)) == 0, "experts: a power of 2 <= 512");
+        check_experts(experts);
         TORCH_CHECK(k > 0 && k <= experts && tokens > 0 && tokens <= holon_ggml_moe_router_rows(),
                     "1 <= k <= experts, 0 < tokens <= ", holon_ggml_moe_router_rows());
         TORCH_CHECK(k <= 32, "k <= 32");
@@ -333,11 +351,13 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
                     "x, router: 8-byte (bf16) or 16-byte (f32) aligned; router 16-byte aligned");
         check_q8_1(xq, x, tokens, hidden);
         holon_ggml_moe_router(x.data_ptr(), bf16(x, "x"), router.data_ptr(), router.scalar_type() == at::kBFloat16,
-                              tokens, hidden, experts, k,
-                              renormalize, logits.data_ptr<float>(), reinterpret_cast<uint32_t *>(done.data_ptr<int32_t>()),
-                              weights.data_ptr<float>(), ids.data_ptr<int32_t>(), xq ? xq->data_ptr() : nullptr, stream());
+                              tokens, hidden, experts, k, renormalize, sigmoid, scale(bias, x, experts, "bias"),
+                              float(scale_), logits.data_ptr<float>(),
+                              reinterpret_cast<uint32_t *>(done.data_ptr<int32_t>()), weights.data_ptr<float>(),
+                              ids.data_ptr<int32_t>(), xq ? xq->data_ptr() : nullptr, stream());
     }, py::arg("x"), py::arg("router"), py::arg("logits"), py::arg("done"), py::arg("weights"), py::arg("ids"),
-       py::arg("renormalize"), py::arg("xq") = py::none());
+       py::arg("renormalize"), py::arg("xq") = py::none(), py::arg("sigmoid") = false, py::arg("bias") = py::none(),
+       py::arg("scale") = 1.0);
     m.def("moe_combine", [](const at::Tensor & y, const at::Tensor & weights, at::Tensor & out,
                             const std::optional<at::Tensor> & residual) {
         const c10::cuda::CUDAGuard guard(y.device());

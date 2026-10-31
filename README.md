@@ -32,8 +32,8 @@ Other GPUs: GGUF files refuse at startup (the GGUF kernels are built for SM 86, 
 are untested.
 
 Architectures: Qwen3 (`models.qwen3`), Qwen3-MoE (`models.qwen3_moe`), the Qwen3.5 hybrid (`models.qwen3_5`, which
-also serves Qwen3.8) and Qwen3.8-Flash-Next (`models.qwen4_exp`, GGUF, with its MTP head), from HF safetensors
-directories or GGUF files. The recommended file per card and its lock
+also serves Qwen3.8), Qwen3.8-Flash-Next (`models.qwen4_exp`, GGUF, with its MTP head) and GLM-5.3-Flash
+(`models.glm5_next`, GGUF, text only, its MTP head unused), from HF safetensors directories or GGUF files. The recommended file per card and its lock
 (`holon models` lists them for the card it runs on):
 
 | model file (hub repository) | RTX 5080 | RTX 4090 | RTX 5090 | RTX 3090 |
@@ -51,35 +51,44 @@ directories or GGUF files. The recommended file per card and its lock
 | Qwen3.8-27B UD-Q4_K_M (`unsloth/Qwen3.8-27B-GGUF`) | does not fit (15.3 GiB) | this card's lock | this card's lock, KV tier | this card's lock |
 | Qwen3.8-Flash-Next GSQ-RCO IQ2_XS (`ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`) | this card's lock, offload, MTP | borrowed, unverified | borrowed, unverified | borrowed, unverified |
 | Qwen3.8-Flash-Next GSQ-RCO IQ3_S (`ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF`) | borrowed, unverified | borrowed, unverified | this card's lock, offload, MTP | borrowed, unverified |
+| GLM-5.3-Flash Maya-S-v2 IQ2_XXS (`peasantsmith/GLM-5.3-Flash-Maya-GGUF`) | this card's lock, offload | borrowed, unverified | this card's lock, offload | borrowed, unverified |
 
 **This card's lock**: written and verified on this card (L2 against the judge's floor, the snapshot trace identical
 over three runs), in the release environment (`docs/dev/release.md` §16, §19) or at a later milestone's close
 (`docs/dev/v1-offload.md` "Step 8, part 2", `docs/dev/v1-kv-tiers.md` "Close (2026-10-20)",
-`docs/dev/v1-flash-next.md` §22.7). Every lock but Qwen3.8-Flash-Next's selects the grammar processor. The Qwen3.8-27B
+`docs/dev/v1-flash-next.md` §22.7, `docs/dev/v1-glm.md` §13). GLM-5.3-Flash's locks are judged by L2 in its
+reference form (bf16 references recorded on an RTX PRO 6000, with budgets fixed before their runs; `docs/dev/v1-glm.md`
+D15a). Every lock but Qwen3.8-Flash-Next's selects the grammar processor. The Qwen3.8-27B
 locks serve a context of 49,152 tokens (40,960 on the RTX 5080) without speculation (Known limitations).
 
-**Launch flags.** Host memory is a deployment's, never a lock's: a lock that keeps pools in pinned host RAM starts only
-with `--host-memory BYTES` (Options). These locks need it, and Qwen3.8-Flash-Next needs files of its own:
+**Host RAM.** Start every lock with `holon serve <model>` alone: what a lock keeps in pinned host RAM is pinned from
+what the host has, never from a number you set ([docs/dev/v1-auto-config.md](docs/dev/v1-auto-config.md)). At its
+start the server reads the RAM available once (`MemAvailable`, and a cgroup v2 container's limit less what it holds),
+keeps max(6 GiB, 5% of the RAM) free of pinned memory for the rest of the host, and logs the budget; pinned pages
+cannot be swapped, so the rest of the host would be. These locks pin host RAM (the figures are estimates until
+measured; "other use" counts Holon's own processes, ≈ 3 GiB, est.):
 
-| lock | in pinned host RAM | launch with |
-|---|---|---|
-| Qwen3.8-27B, RTX 5080 and RTX 5090 | a 16 GiB KV tier ([KV tiers](#kv-tiers)) | `--host-memory 17179869184` |
-| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts ([Offload](#offload)) | `--host-memory 21474836480` and its routing profile |
-| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings | `--host-memory 70000000000 --memory-fraction 0.97`, the MTP pack and the routing profile ([Qwen3.8-Flash-Next](#qwen38-flash-next)) |
-| Qwen3.8-Flash-Next IQ3_S, RTX 5090 | the same | `--host-memory 86000000000 --memory-fraction 0.985`, the same |
+| lock | pinned host RAM | RAM for full speed | with less RAM |
+|---|---|---|---|
+| Qwen3.8-27B, RTX 5080 and RTX 5090 | a 16 GiB KV tier ([KV tiers](#kv-tiers)) | 32 GB, ≤ 6 GiB other use | the tier takes what is left, down to its floor; below it, the defaults serve without a tier |
+| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | refused once, with what to do: free the RAM it names, serve this card's UD-IQ3_XXS lock (no pinned RAM), or `--host-memory` |
+| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill), then refused |
+| Qwen3.8-Flash-Next IQ3_S, RTX 5090 | the same, ≈ 74.5 GiB | 96 GB, ≤ ≈ 10 GiB other use | the same |
+| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 128 GB (96 GB with ≤ ≈ 2 GiB other use) | mode (ii): about 62% of the experts in RAM (≈ 50 GiB), the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)), then refused |
+| GLM-5.3-Flash, RTX 5080 | the same | the same | refused once, with what to do |
 
-The tier needs at least its 16 GiB; the tier locks and the Qwen3-30B-A3B offload lock were verified at
-21474836480 (`docs/dev/v1-kv-tiers.md` "Close (2026-10-20)"). Qwen3.8-Flash-Next's values are those its locks were
-measured at (`docs/dev/v1-flash-next.md` §22.7). `--memory-fraction` (default 0.9: the share of the memory left after
-weights that activations and state may take, here mostly the expert cache) is not in a lock either.
+`--host-memory BYTES` sets the budget instead (warned about where it cuts into what is kept free). The GPU's share
+works the same way: `holon serve` sizes an offload lock's expert cache from the startup profile's measured peak and a
+reserve (1 GiB on a card that drives a display or that other processes use, 256 MiB otherwise) and keeps today's 10%
+margin elsewhere; `--memory-fraction F` sets a fixed share.
 
 **Borrowed, unverified.** Locks are found by the checkpoint's build hash, so a file downloaded anywhere, under any
 name, finds its lock. Without a lock for this card, `holon serve` borrows the nearest class's: the same GPU on another
 toolchain, then the same SM, then the same toolchain. A borrowed lock's settings apply as they are and its kernel pins
 become preferences (a provider that cannot run here falls back to the default choice, logged). It was not verified on
 this card. If it does not start with a plugin or memory error, the server falls back to defaults at once. A borrowed
-lock needs the launch flags and files of the lock it borrows (Launch flags above): on an RTX 4090, for example, the
-Qwen3.8-27B UD-IQ3_S borrows the RTX 5080's lock and its KV tier.
+lock pins the host RAM of the lock it borrows (Host RAM above): on an RTX 4090, for example, the Qwen3.8-27B UD-IQ3_S
+borrows the RTX 5080's lock and its KV tier.
 
 **Served without a lock** (defaults, logged): every other checkpoint of these architectures, for example
 Qwen3.5 4B / 9B and the bf16 Qwen3.8-27B and Qwen3-30B-A3B (large-memory paths). Defaults serve at most 8 sequences
@@ -124,23 +133,25 @@ docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0
   serve unsloth/Qwen3.8-27B-GGUF --host 0.0.0.0                            # a hub model, kept in <hf cache dir>
 ```
 
-As another user, give the container a writable home, so the cache of weight-file hashes (`~/.cache/holon/weights`)
-persists across starts instead of each start re-reading the file:
+The image's `HOME` is `/opt/holon/user`, writable by any user, for every tool in it (on `main`; v0.1.1's image has
+none). Mount a directory at `/opt/holon/user/.cache/holon` to keep Holon's own cache across containers: the hashes of
+weight files (each start would otherwise re-read the file) and the files locks name. Containers without a memory
+limit do not see each other's starts: give each a limit (`--memory`), which the server reads.
 
 ```bash
-docker run --gpus all --user "$(id -u):$(id -g)" -e HOME=/cache -v <cache dir>:/cache \
-  -p 8000:8000 -v <model dir>:/models holon:v0.1.1 serve /models/<file> --host 0.0.0.0
+docker run --gpus all --user "$(id -u):$(id -g)" -v <cache dir>:/opt/holon/user/.cache/holon \
+  -p 8000:8000 -v <model dir>:/models holon:<tag> serve /models/<file> --host 0.0.0.0
 ```
 
 ## Quickstart
 
 ```bash
 uv run holon models                                   # the models locked for this card, by name
-uv run holon serve unsloth/Qwen3.8-27B-GGUF --host-memory 17179869184
+uv run holon serve unsloth/Qwen3.8-27B-GGUF
 ```
 
-The second line serves this card's locked file, downloaded into the HF cache; the host memory is for the KV tier of
-the RTX 5080's and RTX 5090's locks, and unused on the other cards.
+The second line serves this card's locked file, downloaded into the HF cache; on the RTX 5080 and RTX 5090 its lock
+keeps a KV tier in host RAM (Host RAM).
 
 `holon serve` takes a local file or directory, or a Hugging Face Hub reference, downloaded into the HF cache once:
 
@@ -152,8 +163,8 @@ the RTX 5080's and RTX 5090's locks, and unused on the other cards.
 | `Qwen/Qwen3-8B` | an HF safetensors checkpoint |
 
 The log names the file chosen and its size; a file larger than the GPU's memory is refused before downloading, unless
-`--host-memory` is given (offload) or `--no-size-check`. The hub's own settings apply: `hf auth login` for gated
-repositories, `HF_HOME` for the cache, and `HF_HUB_OFFLINE=1` to serve cached models without the network (a tag then
+this card has a lock for it (the lock decides), `--host-memory` is given (offload) or `--no-size-check`. The hub's own
+settings apply: `hf auth login` for gated repositories, `HF_HOME` for the cache, and `HF_HUB_OFFLINE=1` to serve cached models without the network (a tag then
 sees only the cached files).
 Offline, a hub name is found through the cache's `refs/main`, which a download writes; in a cache filled another way
 (by revision, or copied without `refs/`) serve the file's path instead,
@@ -259,10 +270,10 @@ lock's is warned about and that lock not used.
   512 prompt tokens, so a long prompt does not stall the streams already decoding. Turn speculation on over such a
   lock (a drafter and `--max-draft-tokens N`) and the same setting instead alternates a prefill step of at most 512
   tokens with a verify step. `--chunk-with-decode 0` turns both off.
-- **Pinned host memory** is a host's, never a lock's: a lock whose plugins keep host pools (a state tier's host level,
-  an offloaded MoE's experts) starts only with `--host-memory BYTES`. Without it the start is refused with the bytes
-  the pools need; a state tier's refusal names the flag and value, e.g. for `state_tier.host.bytes=16GiB`:
-  `holon serve <model> --host-memory 17179869184`.
+- **Pinned host memory** is a host's, never a lock's: `holon serve` budgets it from the RAM available (Host RAM);
+  `--host-memory BYTES` sets the budget. A start whose pools do not fit is refused once with the bytes they need and
+  what to do. One `holon serve` of a user at a time reads the RAM and pins (`~/.cache/holon/pin.lock`): a second start
+  waits for the first to be ready; two users' starts at the same moment are not serialized.
 - **Ignore the lock:** `holon serve <model> --no-lock` serves defaults (`plans/defaults.toml`: the grammar processor)
   and your flags. Use it if a start hangs: the server tries a start that fails other than with a plugin or memory
   error 4 times, each up to 600 s, before falling back to defaults.
@@ -297,40 +308,34 @@ which take 1.6–2.2 GB of host RAM and 3–4 s to start.
 ## Offload
 
 An offload lock serves a Mixture-of-Experts model whose experts do not fit the card (`std.moe.offload@1`,
-[docs/dev/v1-offload.md](docs/dev/v1-offload.md)): the RTX 5080's Qwen3-30B-A3B Q4_K_M lock and both
-Qwen3.8-Flash-Next locks.
+[docs/dev/v1-offload.md](docs/dev/v1-offload.md)): the RTX 5080's Qwen3-30B-A3B Q4_K_M lock, both
+Qwen3.8-Flash-Next locks and both GLM-5.3-Flash locks.
 
 - **How:** every expert lives in pinned host RAM, and a VRAM cache holds the most used ones (`placement.lfu@1`,
   least-frequently-used, seeded at start from a routing profile). A decode step fetches the experts it misses over
   PCIe; a long prompt step streams the missing ones through cache slots it lends for the step.
 - **Exact:** placement never changes a result. The output is byte-identical to the same model served all-resident,
-  checked on an RTX A5000 (Qwen3-30B-A3B, every placement and policy) and an RTX PRO 6000 (Qwen3.8-Flash-Next, which
-  fits there), and identical across cache sizes and placements over three runs on the RTX 5080 and 5090
+  checked on an RTX A5000 (Qwen3-30B-A3B, every placement and policy) and an RTX PRO 6000 (Qwen3.8-Flash-Next and
+  GLM-5.3-Flash, which fit there), and identical across cache sizes and placements over three runs on the RTX 5080 and 5090
   (`docs/dev/v1-offload.md` "Step 8, part 2", acceptance 2; `docs/dev/v1-flash-next.md` §22.3). Like every trace, it is
   run-identical on one machine, not across machines (Known limitations).
-- **Host memory:** `--host-memory BYTES` sizes the pinned pools (values per lock under
+- **Host memory:** pinned from the RAM the host has (Host RAM under
   [Supported GPUs and models](#supported-gpus-and-models)); a start whose pools do not fit is refused with a report per
-  pool.
+  pool and what to do.
 - **One sequence:** the offload locks serve `max_seqs` 1, so concurrent requests queue. More sequences take VRAM from
   the expert cache: on the RTX 5080's Qwen3.8-Flash-Next lock, 26.2% of the experts are cached at 1 sequence and 21.9%
   at 4 (`docs/dev/v1-flash-next.md` §22.7).
-- **Routing profile:** each lock names one (`moe.placement.profile`): a JSON file of routing counts that seeds the
-  cache. It must lie in the directory the model file is read from, its links followed: for a file in the HF cache,
-  the repository's `blobs/` directory, where the snapshot's links point. `python -m holon_tools profile <model file>`
-  runs greedy generations over `judge/prompts/v1.jsonl` (`--prompts`), writes the profile there under the name
-  `<file stem>.profile.json` (`--name` sets another) and prints its path; it is refused on another file. The profile
-  only decides what the cache holds first, so outputs do not depend on it. Without the file the lock fails to start
-  (Known limitations); `holon serve <model> --plugin-options moe.placement.profile=` serves without one, from a cold
-  cache.
-
-The RTX 5080's Qwen3-30B-A3B Q4_K_M lock names `profile_x4_gate.json` (made from held-out chat prompts,
-`docs/dev/spikes/x4_gate/README.md`; any profile serves):
+- **Routing profile:** a JSON file of routing counts that seeds the cache; it only decides what the cache holds
+  first, so outputs do not depend on it. Holon ships the profiles its locks were measured with
+  (`std/holon_std/tiered/profiles/`, matched to the model file); a lock's named profile beside the model file
+  (`moe.placement.profile`) is read first, and without either the cache starts cold, logged
+  (`--plugin-options moe.placement.profile=none` starts it cold on purpose). `python -m holon_tools
+  profile <model file>` makes one from greedy generations over `judge/prompts/v1.jsonl` (`--prompts`), starting from
+  the model's lock for this card, and writes it beside the file as `<file stem>.profile.json` (`--name` sets another);
+  `--ship` imports one into the shipped profiles.
 
 ```bash
-hf download unsloth/Qwen3-30B-A3B-GGUF Qwen3-30B-A3B-Q4_K_M.gguf          # prints the file's path in the HF cache
-uv run python -m holon_tools profile <that path> --name profile_x4_gate.json --max-seqs 8 --max-model-len 4096 \
-  --host-memory 21474836480
-uv run holon serve unsloth/Qwen3-30B-A3B-GGUF:Q4_K_M --host-memory 21474836480
+uv run holon serve unsloth/Qwen3-30B-A3B-GGUF:Q4_K_M       # the RTX 5080's offload lock, its profile shipped
 ```
 
 ## Qwen3.8-Flash-Next
@@ -339,25 +344,22 @@ ISTA-DASLab's GSQ-RCO quantizations of Qwen3.8-Flash-Next (`ISTA-DASLab/Qwen3.8-
 split in two files): IQ2_XS on the RTX 5080 (16 GB), IQ3_S on the RTX 5090 (32 GB). Their locks offload the experts,
 keep the PLE n-gram table (26.8 GiB) and the token embeddings in pinned host RAM, serve 33,792 tokens of context to
 one sequence, and draft three tokens a step with the model's MTP head (`docs/dev/v1-flash-next.md` §20.1, §22.7).
-The GGUF files carry no MTP head: the drafter loads an already-packed head (`mtp.path`) as it is; Holon does not
-pack or quantize it. Strata's public tools make one from the BF16 checkpoint `Qwen/Qwen3.8-Flash-Next` (only the
-head's tensors are downloaded). From the install above (the RTX 5080's file; on the RTX 5090, `IQ3_S`, `86000000000`
-and `0.985`):
+The GGUF files carry no MTP head: the drafter loads an already-packed head as it is; Holon does not pack or quantize
+it. Strata's public tools make one from the BF16 checkpoint `Qwen/Qwen3.8-Flash-Next` (only the head's tensors are
+downloaded). `holon serve` finds it by the identity the locks name, in
+`~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/` (or wherever `--plugin-options mtp.path=FILE` says); make it once
+into that directory (the RTX 5080's file; on the RTX 5090, `IQ3_S`):
 
 ```bash
 uv sync --frozen --group dev                         # the lock tools
-hf download ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --include "IQ2_XS/*"
-
 git clone https://github.com/Niko1221/Strata.git strata && git -C strata checkout 296b59d
 uv run python strata/tools/mtp_fetch.py fetch --out mtp
+mkdir -p ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf
 STRATA_GGUF_PY=$(uv run python -c "import gguf, pathlib; print(pathlib.Path(gguf.__file__).parents[1])") \
-  uv run python strata/tools/mtp_pack.py --src mtp --experts q2_0 --out mtp/mtp-q2_0.gguf
+  uv run python strata/tools/mtp_pack.py --src mtp --experts q2_0 \
+  --out ~/.cache/holon/sources/mtp-q2_0@a22206a4d74eafbf/mtp-q2_0.gguf
 
-uv run python -m holon_tools profile <first file> --max-seqs 1 --max-model-len 4096 --memory-fraction 0.97 \
-  --host-memory 70000000000 --plugin-options rows.place=ple:host,token_embd:host ggml_cuda.pass_rows=4096 \
-  moe.ring_lend=tail
-uv run holon serve ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --host-memory 70000000000 --memory-fraction 0.97 \
-  --plugin-options mtp.path=$PWD/mtp/mtp-q2_0.gguf
+uv run holon serve ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF
 ```
 
 - **The MTP pack.** Strata's `mtp_fetch.py` reads the head's 31 tensors from the checkpoint's pinned revision and
@@ -366,21 +368,51 @@ uv run holon serve ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF --host-memory 700
   (`docs/dev/v1-flash-next.md` §13): the pack the locks name (`mtp-q2_0@a22206a4d74eafbf`). Keep the name
   `mtp-q2_0.gguf`: under another, the start logs `differs from the lock: source:mtp.path`. The pack changes only the
   drafts; the verify decides the output.
-- **The routing profile.** `<first file>` is the `-00001-of-00002.gguf` file `hf download` placed under its snapshot
-  directory, `<HF cache>/hub/models--ISTA-DASLab--Qwen3.8-Flash-Next-GSQ-RCO-GGUF/snapshots/<revision>/IQ2_XS/`; the
-  profile's default name is the one the lock names. The locks were measured with a profile of 60 task prompts, 128
-  tokens each (§20.1); any profile serves the same output.
-- **Without the pack** the drafter finds no head in the model files, the lock's start fails with a plugin error, and
-  the server falls back to defaults, which cannot hold the model: it exits. `--max-draft-tokens 0` serves without
-  drafting, and without the pack.
-- **A host short of RAM** can read the PLE table from the model file on the SSD instead:
-  `--plugin-options rows.place=ple:ssd,token_embd:host cpu_task.io_threads=4`, with the table's 26.8 GiB less of
-  `--host-memory`. The output is byte-identical to the RAM tier's; on the RTX 5090 it cost 16% / 26% of prefill at 1K /
-  4K and 6–7% of decode with MTP (`docs/dev/v1-flash-next.md` §22.1). No lock sets it.
+- **The routing profile.** Holon ships the profiles the locks were measured with (counted with this pack); any profile
+  serves the same output.
+- **Without the pack** the server serves the lock without drafting, warned about once with the cost (decode 24–37%
+  slower on an RTX 5080 and 5090, 1K–32K) and these commands. `--max-draft-tokens 0` serves without drafting and
+  never looks for the pack.
+- **A host short of RAM** reads the PLE table from the model file instead of 26.8 GiB of pinned RAM: `holon serve`
+  retries the lock with `rows.place=ple:ssd,token_embd:host` after a start refused for host memory, unless the file
+  is on a rotating or network disk. The output is byte-identical to the RAM tier's; it costs 66% / 80% / 81% of prefill
+  at 1K / 4K / 32K and 2–3% of decode with MTP on the RTX 5090, and 60% / 71% / 71% of prefill and 2% of decode on the
+  RTX 5080 (`docs/dev/v1-auto-config.md` §9).
 - **Accuracy** (`docs/dev/v1-flash-next.md` §22.4, §22.10): the locks pass L2 against the judge's golden and floors;
   GPU self-consistency (decode against prefill, chunked against one-shot, MTP against plain) passes on both cards; on
   72 hard task items (greedy, thinking on) Holon answered 70 correctly on the RTX 5080 and 72 on the RTX 5090, Strata
   70 on each.
+
+## GLM-5.3-Flash
+
+The Maya-S v2 IQ2_XXS quantization of GLM-5.3-Flash (`peasantsmith/GLM-5.3-Flash-Maya-GGUF`, `Maya-S-v2-IQ2_XXS/`,
+three files, 96.5 GB) on the RTX 5090 (32K-token prompt steps) and the RTX 5080 (8K steps), one sequence of 33,792
+tokens of context, no speculation (`docs/dev/v1-glm.md`). Their locks offload the experts: every expert in pinned host
+RAM, the most used cached in VRAM.
+
+```bash
+uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
+```
+
+- **A 64 GB host (mode (ii)).** On the RTX 5090, a start refused for host memory retries the lock with RAM holding
+  about 62% of the experts and the rest read from the model file on the SSD as they are needed (exclusive tiers,
+  `docs/dev/v1-glm.md` D10; `plugins/holon_plugins/models/glm5_next/deploy.py`), logged with its cost. The output is the same as the lock's
+  (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode tokens,
+  so keep the files on a local NVMe drive. Measured on one RTX 5090 with the job's RAM capped at 64 GiB: 1K–4K prefill
+  about 2.5–2.8×, decode about 1.7–1.9× and 32K prefill about 1.1× slower than the lock (Performance). If it does not
+  fit either, the start is refused; pass the options of `plugins/holon_plugins/models/glm5_next/deploy.py`'s `MODE2` with
+  a smaller `moe.ram` share.
+- **First start:** about a minute to ready on an RTX 5090 at mode (ii), reading about 79 GiB from the drive (the
+  checkpoint about once; `docs/dev/v1-glm.md` §13 step 7). A restart rereads the experts but not the file's hash.
+- **Accuracy** (`docs/dev/v1-glm.md` §13): the locks pass L2 in its reference form on both prompt sets (the RTX 5090:
+  top-1 94.82% / 91.81%, the RTX 5080: 95.15% / 91.91%, against budgets of 91.90% / 86.78%); GPU self-consistency
+  (decode against prefill, chunked against one-shot) and the cover of DSA, the router, KDA and mHC on the model's own
+  inputs pass on both cards; on 72 hard task items (greedy, thinking on) Holon answered 69 correctly on the RTX 5090,
+  Project Maya 69.
+- **Structured output:** the locks select the grammar processor. On a 500-schema sample of JSONSchemaBench it accepts
+  307 schemas, and every constrained output that ran to its end conformed (283; unconstrained, 45.5% of 411 did);
+  7.8% of constrained outputs were truncated at `max_tokens` 2048, against 17.0% unconstrained
+  (`docs/dev/evidence/conformance_glm-5.3-flash-maya-s-v2-iq2_xxs-500_rtx-5090_2026-10-31.json`).
 
 ## KV tiers
 
@@ -388,8 +420,8 @@ The Qwen3.8-27B locks of the RTX 5080 and RTX 5090 keep a host level under the p
 [docs/dev/v1-kv-tiers.md](docs/dev/v1-kv-tiers.md)): the KV pages and recurrent-state checkpoints that VRAM evicts move
 to 16 GiB of pinned host RAM, and a request whose prefix is there loads them back instead of recomputing that part of
 its prompt. The locks also checkpoint the hybrid's recurrent state at branch points and at the end of each answer
-(`recurrent.policy` `prompt_end,branch,answer:1`). Launch with `--host-memory 17179869184` or more; without it the
-lock's start is refused and the server falls back to defaults.
+(`recurrent.policy` `prompt_end,branch,answer:1`). On a host with less RAM free the level takes what is left (logged),
+down to its floor; below it the server falls back to defaults, without a tier.
 
 On an agent trace whose sessions are parked and resumed (`agent_park`; the RTX 5080's Qwen3.8-27B UD-IQ3_S), time to
 first token p50 fell to 0.047× the VRAM-only engine's and throughput rose 2.26×; against `llama-server --cache-ram`
@@ -411,24 +443,23 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
 
 - One GPU per server. Offload covers a MoE model's experts (and Qwen3.8-Flash-Next's PLE table and token
   embeddings); the rest of the model and its KV cache must fit the card.
-- **Host RAM:** the offload and KV-tier locks start only with `--host-memory` (Supported GPUs and models), pinned for
-  the server's lifetime: 70 GB for Qwen3.8-Flash-Next on the RTX 5080 and 86 GB on the RTX 5090, besides what the
-  rest of the host needs.
+- **Host RAM:** the offload and KV-tier locks pin host RAM for the server's lifetime (Host RAM under Supported GPUs
+  and models): ≈ 61 GiB for Qwen3.8-Flash-Next on the RTX 5080 and ≈ 74.5 GiB on the RTX 5090, ≈ 81 GiB for GLM-5.3-Flash (≈ 50 GiB
+  in its mode (ii)) (est.). The budget is
+  read from `MemAvailable` and a cgroup v2 limit: under cgroup v1, or with ZFS (whose ARC `MemAvailable` does not
+  count), pass `--host-memory`. Starts on one host queue behind each other while one reads the RAM and pins. A
+  desktop's systemd-oomd may kill a server whose host runs short regardless.
 - **Offload locks serve one sequence** (`max_seqs` 1): concurrent requests wait their turn. `--max-seqs N` serves
   more at a smaller expert cache, its speed unmeasured; the RTX 5080's Qwen3.8-Flash-Next deployment ran 2 sequences at
   `--memory-fraction 0.9` in its exactness checks and did not start at 64 (`docs/dev/v1-flash-next.md` §22.3).
 - **Context.** The Qwen3.8-27B locks serve 49,152 tokens (40,960 on the RTX 5080); Qwen3.8-Flash-Next's and the RTX
-  5080's Qwen3-30B-A3B offload lock 33,792; the other 8B and 30B locks 8,192 or 16,384 (`holon models` and the lock
+  5080's Qwen3-30B-A3B offload lock and GLM-5.3-Flash's 33,792; the other 8B and 30B locks 8,192 or 16,384 (`holon models` and the lock
   files show each); without a lock, min(the model's trained context, 32768). `holon serve <model> --max-model-len N`
   changes it, and a context that does not fit the card's memory is clamped to what does (logged). Qwen3.8-Flash-Next's
   KV stays in VRAM: streaming a sparse-attention layer's KV through host RAM, as Strata does from 64K contexts, is not
   built (`docs/plan.md` §10, "KV streaming for sparse-attention mixers").
-- **A file a lock names but the host lacks fails the start slowly.** Without its routing profile an offload lock's
-  start fails with an error the server treats as transient: it tries 4 times (each up to 600 s), then falls back to
-  defaults, which cannot hold the model either, and exits. A KV-tier lock without `--host-memory` is retried the same
-  way before the defaults serve. Make the profile and pass the flags first ([Offload](#offload),
-  [Qwen3.8-Flash-Next](#qwen38-flash-next)).
-- **Speculation is off in every lock but Qwen3.8-Flash-Next's** (which drafts with MTP: Performance). On the
+- **Speculation is off in every lock but Qwen3.8-Flash-Next's** (which drafts with MTP: Performance); GLM-5.3-Flash's
+  MTP head is not used. On the
   Qwen3.8-27B, MTP gave 11–45% lower TPOT on a sampled Claude-Code-shaped trace, but a speculating stream's longest
   pauses (p95 per-request maximum gap) grew 1.1–3.1×, past the ≤ 1.10× rule fixed before measuring
   (`docs/dev/release.md` §16.6). Turn it on with the flags under Options.
@@ -450,7 +481,12 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   borrowed locks, unverified on those cards.
 - Under a grammar, an output can run on in whitespace, digits or a string the schema admits until `max_tokens`: on the
   27B with MTP, 2.66% of constrained outputs were truncated against 0.33% unconstrained, over a 2-point gate that was
-  accepted as a recorded shortfall. Guards against such runaways are deferred; set `max_tokens`.
+  accepted as a recorded shortfall; GLM-5.3-Flash truncated 7.8% of constrained outputs at `max_tokens` 2048
+  (17.0% unconstrained, its free outputs running past the JSON). Guards against such runaways are deferred; set
+  `max_tokens`.
+- **GLM-5.3-Flash's mode (ii) is not a lock:** it was measured on one RTX 5090 at a 64 GB host, and the share of
+  experts in RAM is fixed for that host size whatever the host has (`docs/plan.md` §10, GLM's spill sized from the host
+  budget). Its decode is below Project Maya's at 4K and 32K (Performance).
 - DFlash2 speculation is an opt-in, in no lock ([docs/dev/m04-spec.md](docs/dev/m04-spec.md)).
 - Stop the server before a `git pull`: the install is editable, so a supervisor restart would import the new code.
 
@@ -544,6 +580,44 @@ Caveats:
 - **Exact against exact.** Strata's defaults add approximations (a routed-expert tail skip, int8 KV, a suffix
   drafter), with which it decoded faster than its exact arms when first measured (`docs/dev/v1-flash-next.md` §13);
   the close did not measure Holon against them.
+
+### GLM-5.3-Flash against Project Maya
+
+Measured at GLM-5.3-Flash's close on one RTX 5090 with the Maya-S v2 IQ2_XXS file on the node's NVMe drive, with
+`bench/offload_ctx.py`: batch 1, a prompt of natural text of 1K, 4K or 32K tokens, then 256 greedy tokens; 8 prompts
+per context in each of 5 rounds after a warm-up, every arm a fresh process, the arms interleaved and reversed on odd
+rounds, the page cache evicted before each. Project Maya v1.1.27 runs its default settings. Two hosts: **mode (i)**,
+RAM holding every expert (the RTX 5090 lock, `holon serve` with auto-config's values), and **mode (ii)**, a 64 GB host
+(the job's RAM capped at 64 GiB for both engines; Holon at the spill's options ([GLM-5.3-Flash](#glm-53-flash)) entered
+by hand with a fixed `--memory-fraction 0.99` and `--host-memory 59000000000`, where the spill takes auto-config's
+values: about the same VRAM on this headless card, about 100 fewer cached experts on a card that drives a display;
+Maya with its RAM tier at 50 GB). The mode (i) rows ran the RTX 5090 lock one revision before the shipped one, whose
+snapshot trace is byte-identical (a startup-only change between them). A cell is the median over rounds of each round's ratio of medians;
+where the ratio of means differs by more than 2 points it is in parentheses (slow requests are real latency). Holon's
+advantage in tokens per second, above 1 when Holon is faster; the bars, set before measuring, are 1.0 for decode and
+0.9 for prefill ([docs/dev/v1-glm.md](docs/dev/v1-glm.md), `docs/dev/evidence/glm_close_2026-10-31.json`):
+
+| row | 1K / 4K / 32K |
+|---|---|
+| decode, mode (i) | 1.178 / 1.106 / 1.052 |
+| prefill, mode (i) | 1.077 / 1.017 / 1.074 |
+| decode, mode (ii) (64 GB host) | 1.040 (0.985) / 0.982 / 0.923 (0.897) |
+| prefill, mode (ii) (64 GB host) | 1.096 / 1.025 / 1.248 |
+
+Holon decodes at 36–41 tok/s in mode (i) and 19–24 tok/s in mode (ii).
+
+Caveats:
+- **Mode (ii)'s decode misses its bar at 4K and 32K** (a recorded shortfall): the first 32 tokens after a long prompt
+  read from the SSD the experts the prompt displaced from RAM, where Maya's prompt borrows in one pass and leaves part
+  of what it borrows empty, so it displaces fewer (`docs/dev/v1-glm.md` §13 step 7).
+- **Maya's conversation checkpoints** (on by default) cost its 32K prompts: with them off (`MAYA_GLM_CKPT_EVERY=0`) it
+  prefilled 32K at 3,458 tok/s in mode (i) and 3,238 in mode (ii) in earlier sessions of the milestone (not the same
+  session as the table)
+  (`docs/dev/evidence/glm_n1_maya_rtx-5090_2026-10-25.json`, `glm_step7_mode2_d8h_2026-10-28.json`), against which
+  Holon's 32K prefill here is about 0.99 and 0.94.
+- **Maya's CPU lane is not its lead:** with it off (`MAYA_GLM_CPU_LANE=0`) Maya decodes at 0.99 / 1.01 / 1.00 of its
+  default in mode (ii) (`docs/dev/evidence/glm_step7_mode2_d8k_2026-10-28.json`); Holon computes every expert on the GPU.
+- The RTX 5080 (mode (i), 8K steps) was not compared.
 
 ### Qwen3-30B-A3B offload on the RTX 5080
 

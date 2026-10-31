@@ -46,10 +46,14 @@ and contain code copied from https://github.com/fla-org/flash-linear-attention, 
 Songlin Yang, Yu Zhang). License text below and in `plugins/holon_plugins/kernels/fla/vendor/LICENSE`.
 
 - `plugins/holon_plugins/kernels/fla/vendor/` — the Gated DeltaNet Triton kernels (`chunk_gated_delta_rule` and its
-  parts, `fused_sigmoid_gating`, l2norm, index and utility helpers) from the directory's `ops/` and its `LICENSE`,
+  parts, `fused_sigmoid_gating`, l2norm, index and utility helpers) and the Kimi delta attention kernels (`kda.py`:
+  `chunk_kda`, `fused_kda_gate_chunk_cumsum` and their parts) from the directory's `ops/` and its `LICENSE`,
   unmodified upstream files fetched by `plugins/holon_plugins/kernels/fla/vendor.sh`, then modified by
   `plugins/holon_plugins/kernels/fla/vendor.patch` (no vLLM imports or environment reads, one pinned config per
-  kernel, the `v_head_tiled` order, the recurrent kernel's skip sentinel at slot < 0, has-initial-state flags);
+  kernel, keyed by module where two share a name, the `v_head_tiled` order, the recurrent kernel's skip sentinel at
+  slot < 0, has-initial-state flags; in `kda.py` the recurrent functions and the norm layer dropped, the host-built
+  chunk indices and offsets passed through, in-step snapshots and an output buffer; in `fused_sigmoid_gating` KDA's
+  bounded gate and the per-head `b` stride of its `IS_KDA` branch);
   `plugins/holon_plugins/kernels/fla/SHA256SUMS` pins the upstream files.
 
 ### FreeToken (and vLLM, which it adapted) — Apache-2.0

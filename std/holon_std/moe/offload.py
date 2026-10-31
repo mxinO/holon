@@ -21,8 +21,11 @@ the policy's coldest whole experts, X's; `tail`, first the experts holding the l
 a contiguous range its expert passes take their buffers from, then the coldest: docs/dev/v1-moe-prefill.md D10, D11;
 default `coldest`), `moe.stream_tokens` (a step of at least `ring_tokens` prompt tokens streams only from this many:
 below, its large passes stage their routed misses into its lent slots, as Strata's smaller prompts do; default 0),
-`moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's activations come from its lent tail, the engine
-reserving only the worst smaller step's peak; default `off`), `moe.route_transform`
+`moe.read_ahead` (exclusive tiers: the landing rows of a layer's read-ahead set, the first of its SSD-only experts read
+two layers ahead in prompt steps of 2,048 tokens or more; default the graphed steps' staging: docs/dev/v1-glm.md D8f),
+`moe.lend_peak` (`on`: under `ring_lend = tail`, a streaming step's
+activations come from its lent tail, the engine reserving only the worst smaller step's peak; `require`: as `on`,
+and the store refuses to start where it would lend none; default `off`), `moe.route_transform`
 (`approx`: the name of a route transform, whose contract `moe_route_transform.<name>@1` its plugin provides; its
 dropped routes, negative ids, are dropped end to end), `moe.cpu_plan`, `moe.cpu_isa` and `moe.cpu_min_tokens` (F5b,
 the CPU's share of the misses: `cpu.py`)."""
@@ -38,6 +41,9 @@ from .units import ALIGN, CHUNK, ExpertLinear, bind_experts, pass_rows, passed, 
 
 GATE_UP, DOWN = 0, 1                           # roles
 KEY = "std.moe.offload"                        # the store's shared-object key (`ctx.shared`, the engine's lookup)
+BESIDE = "on"       # exclusive tiers: an eager staging step's gathers by copy engines beside the compute, in parts, at
+#                     every size (docs/dev/v1-glm.md D8g: measured and kept; the store's `beside` also takes `stage`,
+#                     `rounds` and `off`, for its tests)
 CPU = "std.moe.cpu"                            # F5b's (`CpuShare`)
 RING_TOKENS = 512                              # D8: a step of this many prompt tokens streams (§13: the 5080's)
 
@@ -53,11 +59,25 @@ def _store(ctx, experts: int, top_k: int):
                         ring_lend=str(opts.get("moe.ring_lend", "coldest")),
                         stream_tokens=int(opts.get("moe.stream_tokens", 0)),
                         pipeline=int(opts.get("moe.pipeline", 1)),
-                        lend_peak=str(opts.get("moe.lend_peak", "off")) == "on",
+                        lend_peak=str(opts.get("moe.lend_peak", "off")),
                         policy=str(opts.get("moe.placement", "")),
                         tiers=tuple(t.strip() for t in str(opts.get("moe.tiers", "std.tiered.pinned@1")).split(",")),
                         cache=str(opts.get("moe.cache", "")), profile=profile,
-                        ram=str(opts.get("moe.ram", ""))))
+                        ram=str(opts.get("moe.ram", "")), read_ahead=int(opts.get("moe.read_ahead", 0)),
+                        loan_fixed=int(opts.get("moe.loan_fixed_mib", 0)) << 20,
+                        ram_heat=float(opts["moe.ram_heat"]) if "moe.ram_heat" in opts else None,
+                        loan_margin=float(opts["moe.loan_margin"]) if "moe.loan_margin" in opts else None,
+                        loan_taper=_taper(opts.get("moe.loan_taper", "")),
+                        loan_largest=float(opts.get("moe.loan_largest", 0.0)),
+                        beside=BESIDE))
+
+
+def _taper(value) -> tuple[int, int] | None:
+    """`moe.loan_taper`: "full,zero" prompt tokens (empty: none)."""
+    if not str(value).strip():
+        return None
+    full, zero = (int(x) for x in str(value).split(","))
+    return full, zero
 
 
 def _rows(ctx) -> int:
@@ -196,6 +216,31 @@ class Offload(nn.Module):
                                               kinds=kinds)
         return slots
 
+    def gathers_once(self, tokens: int) -> bool:
+        """Docs/dev/v1-glm.md D8h: the layer's misses gathered once for a step of `tokens` rows, not once a pass — an
+        eager staging step whose gathers go beside the compute (D8g's stage mode) of more than one pass, every pass
+        pipelined, its staging able to hold the union (`prefill` ≥ min(items, top_k · tokens), A-m1), no route transform
+        (A's code review m1)."""
+        s = self.store
+        return (not self._aux and self._transform is None and s._beside and not s._rounds
+                and tokens > self.pass_tokens(tokens)
+                and s.prefill >= min(s.items, s.top_k * tokens) and self._cpu is None
+                and all(takes_buffers(x.kernel) for x in self._stacks))
+
+    def route_union(self, ids: torch.Tensor, x: torch.Tensor):
+        """`route_pipelined` over every row of the step (`gathers_once`): (slots [R, T, k], part [T, k], landed); where
+        the resolve fetched them at once (not beside the compute), every entry part −1 and no part to land."""
+        self._pending = None
+        out = self._resolver(ids, 0, kinds=self._kinds(len(ids)), parts=2)
+        if len(out) == 3:
+            return out
+        return out[0], torch.full(ids.shape, -1, dtype=torch.int64, device=ids.device), []
+
+    def sparse_parts(self) -> bool:
+        """A pipelined pass's parts are sparse calls (`ArenaExperts.forward`'s `sparse`): in a step whose gathers go
+        beside the compute (docs/dev/v1-glm.md D8g), each part's entries a few of the pass's."""
+        return self.store._beside
+
     def pipelines(self, tokens: int) -> int:
         """The store's fetch parts of a pass of `tokens` (more than one: the pass pipelines, it never splits)."""
         return self.store.pipelines(tokens)
@@ -216,7 +261,8 @@ class Offload(nn.Module):
     def route_split(self, ids: torch.Tensor, first: int, x: torch.Tensor):
         """`route` with the fetched entries apart (`moe_resolve@1`'s `split`): (hits [R, T, k], misses [R, T, k],
         join) — the fetch on a side stream that `join()` makes the current stream wait for —, or (slots, None, None)
-        where the pass does not split (F5b's CPU share: `route`'s; exclusive tiers, a resolve without it)."""
+        where the pass does not split (F5b's CPU share: `route`'s; a resolve without it). Under exclusive tiers
+        `join` also reads the SSD misses (docs/dev/v1-glm.md D8c, D8f)."""
         if self._cpu is not None and self._cpu.takes(len(ids)):
             return self.route(ids, first, x), None, None
         self._pending = None
@@ -255,6 +301,7 @@ class ArenaExperts(nn.Module):
         self._facts, self.layout, self.in_features = like.facts, like.layout, like.in_features   # (not a child)
         self._store = owner.store
         self.glu, self.out, self.out_y = glu, out, out // 2 if glu == "swiglu" else out
+        self.glu_limit = like.glu_limit if glu == "swiglu" else 0.0        # SwiGLU's clamp (docs/dev/v1-glm.md D6)
         name = f"{('gate_up', 'down')[role]}.{like.layout.scheme.elem.removeprefix('ggml.')}.{out}x{like.in_features}"
         if owner._aux:                  # an auxiliary model's pieces in classes of their own (an MTP head's: its draft
             name = f"aux.{name}"        # sub-steps never compete with the target's layers for slots; floored whole)
@@ -282,12 +329,14 @@ class ArenaExperts(nn.Module):
         return self._kernel
 
     def forward(self, x, slots: torch.Tensor, out: torch.Tensor | None = None,
-                scratch: torch.Tensor | None = None) -> torch.Tensor:
+                scratch: torch.Tensor | None = None, sparse: bool = False) -> torch.Tensor:
         """`x` [T, R, in], or a handle a `moe_router@1` instance prepared for this kernel (std.moe.kernels); D10's
-        buffers where the kernel takes them."""
+        buffers where the kernel takes them; `sparse`: one part of a pass, its live entries few (where the kernel
+        takes it: `linear_experts_arena@1`'s optional `sparse`)."""
         arena = self.cls.slots()
+        extra = {"sparse": True} if sparse and getattr(self._kernel, "sparse", False) else {}
         return self._kernel(x, {"blocks": arena.view(len(arena), self.out, -1)}, slots,
-                            **passed(self._kernel, out=out, scratch=scratch))
+                            **passed(self._kernel, out=out, scratch=scratch), **extra)
 
 
 def _extents(stack: ExpertLinear) -> list[Extent]:

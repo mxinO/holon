@@ -113,3 +113,68 @@ class GRBlock(nn.Module):
         x, w_ffn = self.ffn_hc.mix(r, y, w)                  # the attention half's combine, as it reads R
         self.ffn_hc.combine(r, self.ffn(x), w_ffn)           # R complete when the block returns
         return r
+
+
+class _MHC(nn.Module):
+    """One mHC mixer's weights (float32: `fn`, `base`, `scale`, as the release stores them) and kernel instances."""
+
+    def __init__(self, ctx: Any, *, n: int, hidden: int, eps: float, hc_eps: float, iters: int, site: str) -> None:
+        super().__init__()
+        width, dtype = (2 + n) * n, str(ctx.dtype).removeprefix("torch.")
+        self.fn = nn.Parameter(torch.empty(width, n * hidden, dtype=torch.float32), requires_grad=False)
+        self.base = nn.Parameter(torch.empty(width, dtype=torch.float32), requires_grad=False)
+        self.scale = nn.Parameter(torch.empty(3, dtype=torch.float32), requires_grad=False)
+        facts = {"streams": n, "hidden": hidden, "eps": eps, "hc_eps": hc_eps, "iters": iters, "dtype": dtype}
+        self._mix = ctx.select_kernel(kernels.MHC_MIX, site=site, **facts).impl(ctx, **facts)
+        facts = {"streams": n, "hidden": hidden, "dtype": dtype}
+        self._writeback = ctx.select_kernel(kernels.MHC_WRITEBACK, site=site, **facts).impl(ctx, **facts)
+
+    def mix(self, r: torch.Tensor, pending: tuple | None = None):
+        return self._mix(r, self.fn, self.base, self.scale, *(pending or (None, None, None)))
+
+    def writeback(self, r: torch.Tensor, y: torch.Tensor, post: torch.Tensor, comb: torch.Tensor) -> None:
+        self._writeback(r, y, post, comb)
+
+
+class MHCBlock(nn.Module):
+    """One GLM-5.3-Flash layer (docs/dev/v1-glm.md D3): the attention half — mHC mix, RMSNorm (`norms`), mixer — and the
+    FFN half, whose mix applies the attention half's write-back as it reads R (`hc_mhc_mix@1`'s pending write-back),
+    then RMSNorm, the FFN and its own write-back, applied before the block returns: R is complete at every block
+    boundary. Declares no state (the core binds the mixer's). Ignores the `norm` site parameter (the core passes the
+    model's norm: here `std.hyper.mean@1`); `norms` is the halves' own RMSNorm."""
+
+    def __init__(self, ctx, *, layer: int, hidden: int, mixer: Ref, ffn: Ref, norm: Ref, norms: Ref, n: int,
+                 eps: float = 1e-5, hc_eps: float = 1e-6, iters: int = 20) -> None:
+        super().__init__()
+        site = f"std.hyper.mhc_block[layer={layer}]"
+        hc = {"n": n, "hidden": hidden, "eps": eps, "hc_eps": hc_eps, "iters": iters, "site": site}
+        self.attn_hc = _MHC(ctx, **hc)
+        self.input_norm = ctx.unit(norms, dim=hidden)
+        self.mixer = ctx.unit(mixer, layer=layer, hidden=hidden)
+        self.ffn_hc = _MHC(ctx, **hc)
+        self.post_norm = ctx.unit(norms, dim=hidden)
+        self.ffn = ctx.unit(ffn, layer=layer, hidden=hidden)
+
+    def write_kv(self, r: torch.Tensor, ctx: Any) -> None:
+        """The attention half's mix, norm and its mixer's `write_kv` only: the state a later step reads of these
+        tokens. R is left as it was."""
+        self.mixer.write_kv(self.input_norm(self.attn_hc.mix(r)[0]), ctx)
+
+    def forward(self, r: torch.Tensor, ctx: Any) -> torch.Tensor:
+        x, post, comb = self.attn_hc.mix(r)
+        y = self.mixer(self.input_norm(x), ctx)
+        x, post, comb = self.ffn_hc.mix(r, (y, post, comb))     # the attention half's write-back, as it reads R
+        self.ffn_hc.writeback(r, self.ffn(self.post_norm(x)), post, comb)    # R complete when the block returns
+        return r
+
+
+class Mean(nn.Module):
+    """The collapse, as the model's `norm` (docs/dev/v1-glm.md D3): R [T, n·H] → the streams' plain mean in float32,
+    rounded once to the model dtype, then `inner` (the model's RMSNorm)."""
+
+    def __init__(self, ctx: Any, *, dim: int, inner: Ref, n: int) -> None:
+        super().__init__()
+        self.inner, self.n, self.dtype = ctx.unit(inner, dim=dim), n, ctx.dtype
+
+    def forward(self, r: torch.Tensor) -> torch.Tensor:
+        return self.inner(r.view(len(r), self.n, -1).mean(1).to(self.dtype))

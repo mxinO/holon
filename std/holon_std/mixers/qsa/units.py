@@ -22,11 +22,21 @@ from holon.api import Paged, Ref, StateSpec
 from torch import nn
 
 from . import kernels
-from .reference import cos_sin
+from .reference import all_blocks, cos_sin
 
 GQA = "std.mixers.gqa@1"
 LINEAR = "std.ops.linear@1"
 
+
+
+def _call_pages(query_start: torch.Tensor, positions: torch.Tensor, page: int):
+    """Pages made for one call (a model-only build: one table row per sequence, each its whole length): (units, the
+    table [rows, pages] int32, each token's sequence [T] int32, its unit and offset)."""
+    lens = query_start.diff()
+    rows, pages = len(lens), -(-int(lens.max()) // page)
+    table = torch.arange(rows * pages, dtype=torch.int32, device=positions.device).view(rows, pages)
+    seq = torch.repeat_interleave(torch.arange(rows, device=positions.device), lens).to(torch.int32)
+    return rows * pages, table, seq, table[seq.long(), positions // page].long(), positions % page
 
 @dataclasses.dataclass(eq=False)
 class IndexMeta:
@@ -182,21 +192,209 @@ class QSA(nn.Module):
         """A model-only build: dense through gqa when every sequence fits `dense_limit`, else sparse over pages made
         for this call (one table row per sequence)."""
         dev = ctx.batch.dev
-        lens = dev.query_start.diff().tolist()
-        if max(lens) <= self.limit:
+        if max(dev.query_start.diff().tolist()) <= self.limit:
             return self.attn(x, ctx)
-        page, t, rows = self.page, x.shape[0], len(lens)
-        pages = -(-max(lens) // page)
-        table = torch.arange(rows * pages, dtype=torch.int32, device=x.device).view(rows, pages)
-        seq = torch.repeat_interleave(torch.arange(rows, device=x.device), dev.query_start.diff()).to(torch.int32)
-        unit, off = table[seq.long(), dev.positions // page].long(), dev.positions % page
+        page, t = self.page, x.shape[0]
+        units, table, seq, unit, off = _call_pages(dev.query_start, dev.positions, page)
         q, gate, k, v = self.attn.project(x, ctx)
-        kv = x.new_zeros(rows * pages, 2, self.attn.kv_heads, page, self.attn.head_dim)
+        kv = x.new_zeros(units, 2, self.attn.kv_heads, page, self.attn.head_dim)
         kv[unit, 0, :, off], kv[unit, 1, :, off] = k, v
-        raw = x.new_zeros(rows * pages, page, self.dk)
-        pooled = torch.zeros(rows * pages, page // self.ratio, self.dk, device=x.device)
+        raw = x.new_zeros(units, page, self.dk)
+        pooled = torch.zeros(units, page // self.ratio, self.dk, device=x.device)
         iq, ik = self._indexer(x, dev.positions)
         self._index(ik, raw, pooled, table, seq, dev.positions, self.index_k_norm, self.cos_sin)
         blocks = self._select(iq, pooled, table, seq, dev.positions)
         o = self._attend(q.contiguous(), kv, blocks, table, seq, dev.positions, gate)
         return self.attn.o_proj(o.reshape(t, -1))
+
+
+@dataclasses.dataclass(eq=False)
+class LatentMeta:
+    """One step's latent-cache metadata for every DSA layer: its pages and each token's (unit, offset) to write."""
+
+    pages: Any
+    graph_key: Any
+    write_unit: torch.Tensor | None = None
+    write_off: torch.Tensor | None = None
+
+
+class LatentPlanner:
+    """The DSA latent group's: the step's pages and write positions (the attention reads the selected tokens
+    itself)."""
+
+    mixes_row_kinds = True
+
+    def plan_bounds(self, batch, pages) -> LatentMeta:
+        plan = batch.plan
+        lens = plan.n_query.tolist()
+        uniform = bool(lens) and not plan.n_decode and len(set(lens)) == 1 and (
+            lens[0] == 1 or bool((plan.n_logits == plan.n_query).all()))
+        return LatentMeta(pages, ("dsa", len(lens), lens[0]) if uniform else None)
+
+    def prepare_device(self, meta: LatentMeta, ctx) -> None:
+        pages = meta.pages
+        meta.write_unit, meta.write_off = pages.write_index // pages.page, pages.write_index % pages.page
+
+
+class DSAMLA(nn.Module):
+    """`std.mixers.dsa_mla@1`: GLM-5.3-Flash's DSA attention (docs/dev/v1-glm.md D5; HF's `Glm5NextTextAttention` and
+    `Glm5NextTextIndexer`), NoPE MLA absorbed over its latent, the indexer reading MLA's query residual `q_r`.
+
+    Per step: `q_r = norm(q_a(x))`, the latent `c = norm(kv_a(x))` written at the tokens' positions (spec `"kv"`); the
+    indexer's keys `LayerNorm(wk(x))` (its weight and bias, eps `index_eps`) and gates `W_g(x)` stored and pooled
+    (`dsa_index@1`, spec `"idx"`), its queries `wq_b(q_r)` and signed head weights `weights_proj(x) / √Hi` choosing each
+    query's blocks (`qsa_select@1` with head weights); a step whose rows all end within `dense_limit` attends over every
+    block it sees through the same kernel (the planner's `dense` only skips scoring, D5), so a row's bits do not depend
+    on its step's other rows. Then `q = q_b(q_r)` per head, absorbed `q̃_h = W_k,hᵀ q_h` (`k_b`), `mla_attend@1` over
+    the latent, `o_h = W_v,h ctx_h` (`v_b`), `o_proj`. With `rows` > 0 the query path (`q_b`, `q̃`, the attention, `v_b`,
+    `o_proj`) runs in sub-batches of `rows` queries, every key in place (D9). `k_b` / `v_b` are held in the model dtype
+    (D5: the release's BF16)."""
+
+    @classmethod
+    def state_specs(cls, params: dict, layers: tuple[int, ...], ctx) -> list[StateSpec]:
+        page, ratio, dk = ctx.options.get("page_size", 16), params["ratio"], params["index_head_dim"]
+        if page % ratio:
+            raise ValueError(f"std.mixers.dsa_mla: page_size {page} must be a multiple of the ratio {ratio}")
+        latent = page * params["kv_lora"] * ctx.dtype.itemsize
+        idx = 2 * page * dk * ctx.dtype.itemsize + page // ratio * dk * 4           # raw keys and gates, pooled f32
+        n = len(layers)
+        return [StateSpec("kv", "paged@1", Paged(latent * n, page), layers, "dsa.kv", segments=n),
+                StateSpec("idx", "paged@1", Paged(idx * n, page), layers, "dsa.idx", segments=n)]
+
+    @classmethod
+    def planner(cls, params: dict, specs: list[StateSpec], ctx) -> Any:
+        if specs[0].layout.endswith("idx"):
+            return IndexPlanner(kernels.dense_limit(params["budget"], params["ratio"]))
+        return LatentPlanner()
+
+    def __init__(self, ctx, *, layer: int, hidden: int, heads: int, q_lora: int, kv_lora: int, nope: int, v: int,
+                 index_heads: int, index_head_dim: int, ratio: int, budget: int, norm: Ref, index_eps: float = 1e-6,
+                 rows: int = 0) -> None:
+        super().__init__()
+        lin = lambda i, o: ctx.unit(Ref(LINEAR, in_features=i, out_features=o))       # noqa: E731
+        self.h, self.dc, self.nope, self.v, self.rows = heads, kv_lora, nope, v, rows
+        self.hi, self.dk, self.ratio, self.budget = index_heads, index_head_dim, ratio, budget
+        self.limit, self.index_eps = kernels.dense_limit(budget, ratio), index_eps
+        self.q_a, self.q_a_norm = lin(hidden, q_lora), ctx.unit(norm, dim=q_lora)
+        self.q_b = lin(q_lora, heads * nope)
+        self.kv_a, self.kv_a_norm = lin(hidden, kv_lora), ctx.unit(norm, dim=kv_lora)
+        self.k_b = nn.Parameter(torch.empty(heads, kv_lora, nope, dtype=ctx.dtype), requires_grad=False)
+        self.v_b = nn.Parameter(torch.empty(heads, v, kv_lora, dtype=ctx.dtype), requires_grad=False)
+        self.o_proj = lin(heads * v, hidden)
+        self.wq_b, self.wk = lin(q_lora, index_heads * index_head_dim), lin(hidden, index_head_dim)
+        self.weights_proj, self.compress_gate = lin(hidden, index_heads), lin(hidden, index_head_dim)
+        f32 = lambda *s: nn.Parameter(torch.empty(*s, dtype=torch.float32), requires_grad=False)   # noqa: E731
+        self.k_norm_weight, self.k_norm_bias = f32(index_head_dim), f32(index_head_dim)
+        self.ape = f32(ratio, index_head_dim)
+        self.scale = nope ** -0.5                                         # 1 / √(the NoPE query-key head dim)
+        dtype, site = str(ctx.dtype).removeprefix("torch."), f"std.mixers.dsa_mla[layer={layer}]"
+        kv, idx = ctx.state("kv", layer), ctx.state("idx", layer)
+        page = kv[0].shape.tokens_per_unit if kv is not None else ctx.options.get("page_size", 16)
+        self._kv = None if kv is None else (kv[1], kv[0].layers.index(layer), len(kv[0].layers))
+        self._idx = None if idx is None else (idx[1], idx[0].layers.index(layer), len(idx[0].layers))
+        self.page, self.width = page, kernels.width(budget, ratio)
+        facts = {"head_dim": index_head_dim, "ratio": ratio, "page": page, "dtype": dtype}
+        self._index = ctx.select_kernel(kernels.DSA_INDEX, site=site, **facts).impl(ctx, **facts)
+        facts = {"heads": index_heads, "head_dim": index_head_dim, "ratio": ratio, "budget": budget, "page": page,
+                 "head_weights": True}
+        self._select = ctx.select_kernel(kernels.SELECT, site=site, **facts).impl(ctx, **facts)
+        facts = {"heads": heads, "latent": kv_lora, "ratio": ratio, "width": self.width, "page": page,
+                 "scale": self.scale, "q_dtype": "float32", "kv_dtype": dtype}       # (q̃ f32, D5)
+        self._attend = ctx.select_kernel(kernels.MLA_ATTEND, site=site, **facts).impl(ctx, **facts)
+        self._dtype = ctx.dtype
+
+    def adopt_weights(self, ctx, name: str, q, index: int | None = None) -> bool:
+        """A quantized `k_b` / `v_b` (the release's Q6_K) dequantized at load into the model dtype (D5: a recorded
+        rounding, as Maya's pack makes; gguf-py's dequantization, the GGUF oracle). Here, not as a value transform:
+        the core refuses transforms on quantized tensors, so this is the core-free path (B3 nit)."""
+        if name not in ("k_b", "v_b") or index is not None or not q.layout.scheme.elem.startswith("ggml."):
+            return False
+        import gguf
+
+        qtype = gguf.GGMLQuantizationType[q.layout.scheme.elem.removeprefix("ggml.").upper()]
+        x = gguf.quants.dequantize(q.parts["blocks"].cpu().numpy(), qtype)
+        shape = tuple(getattr(self, name).shape)
+        if x.size != torch.Size(shape).numel():
+            return False
+        dense = torch.from_numpy(x.reshape(shape).copy()).to(device=ctx.device, dtype=self._dtype)
+        setattr(self, name, nn.Parameter(dense, requires_grad=False))
+        return True
+
+    def _latent(self, pool=None) -> torch.Tensor:
+        """This layer's latent pages [units, page, Dc] (model dtype)."""
+        pool, index, n = self._kv if pool is None else (pool, self._kv[1], self._kv[2])
+        return pool.view(self._dtype, (n, pool.capacity, self.page, self.dc))[index]
+
+    def _idx_layer(self) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """This layer's raw keys and gates [units, page, Dk] (model dtype) and pooled keys [units, page / ratio, Dk]
+        f32."""
+        pool, index, n = self._idx
+        units = pool.view(torch.uint8, (n, pool.capacity, pool.unit_bytes // n))[index]
+        half = self.page * self.dk * self._dtype.itemsize
+        view = lambda a, b: units[:, a:b].view(self._dtype).view(-1, self.page, self.dk)     # noqa: E731
+        pooled = units[:, 2 * half:].view(torch.float32).view(-1, self.page // self.ratio, self.dk)
+        return view(0, half), view(half, 2 * half), pooled
+
+    def _indexer(self, x: torch.Tensor, q_r: torch.Tensor):
+        """The indexer's queries [T, Hi, Dk], signed head weights [T, Hi] f32 (÷ √Hi), keys and gates [T, Dk]."""
+        k = torch.nn.functional.layer_norm(self.wk(x).float(), (self.dk,), self.k_norm_weight, self.k_norm_bias,
+                                           self.index_eps).to(self._dtype)
+        w = self.weights_proj(x).float() * self.hi ** -0.5
+        return self.wq_b(q_r).reshape(len(x), self.hi, self.dk), w, k, self.compress_gate(x)
+
+    def _attention(self, q_r: torch.Tensor, kv: torch.Tensor, blocks: torch.Tensor, table: torch.Tensor,
+                   seq: torch.Tensor, positions: torch.Tensor) -> torch.Tensor:
+        """The query path for its rows: q, absorbed q̃, the latent attention, v_b, o_proj."""
+        t = len(q_r)
+        q = self.q_b(q_r).reshape(t, self.h, self.nope)
+        q_abs = torch.einsum("thn,hcn->thc", q.float(), self.k_b.float())             # q̃ in f32 (D5: decode's)
+        ctx_ = self._attend(q_abs, kv, blocks, table, seq, positions)
+        o = torch.einsum("thc,hvc->thv", ctx_.float(), self.v_b.float()).to(self._dtype)
+        return self.o_proj(o.reshape(t, self.h * self.v))
+
+    def forward(self, x: torch.Tensor, ctx) -> torch.Tensor:
+        if self._kv is None:
+            return self._whole_sequences(x, ctx)
+        dev, meta, latent_meta = ctx.batch.dev, ctx.meta("idx"), ctx.meta("kv")
+        q_r = self.q_a_norm(self.q_a(x))
+        kv = self._latent()
+        kv[latent_meta.write_unit, latent_meta.write_off] = self.kv_a_norm(self.kv_a(x)).to(kv.dtype)
+        iq, w, k, gate = self._indexer(x, q_r)
+        raw, gates, pooled = self._idx_layer()
+        self._index(k, gate, raw, gates, pooled, self.ape, meta.pages.table, meta.seq, dev.positions)
+        blocks = (all_blocks(dev.positions, self.ratio, self.width) if meta.dense else
+                  self._select(iq, pooled, meta.pages.table, meta.seq, dev.positions, w))
+        table, step = latent_meta.pages.table, self.rows or len(x)
+        if step >= len(x):
+            return self._attention(q_r, kv, blocks, table, meta.seq, dev.positions)
+        out = x.new_empty(x.shape)                          # into one output: a piece's at a time (C-m5)
+        for a in range(0, len(x), step):
+            out[a:a + step] = self._attention(q_r[a:a + step], kv, blocks[a:a + step], table, meta.seq[a:a + step],
+                                              dev.positions[a:a + step])
+        return out
+
+    def write_kv(self, x: torch.Tensor, ctx) -> None:
+        """The step's latent and index keys written at its positions, without attending."""
+        dev, meta, latent_meta = ctx.batch.dev, ctx.meta("idx"), ctx.meta("kv")
+        q_r = self.q_a_norm(self.q_a(x))
+        kv = self._latent()
+        kv[latent_meta.write_unit, latent_meta.write_off] = self.kv_a_norm(self.kv_a(x)).to(kv.dtype)
+        _, _, k, gate = self._indexer(x, q_r)
+        raw, gates, pooled = self._idx_layer()
+        self._index(k, gate, raw, gates, pooled, self.ape, meta.pages.table, meta.seq, dev.positions)
+
+    def _whole_sequences(self, x: torch.Tensor, ctx) -> torch.Tensor:
+        """A model-only build: each sequence over pages made for this call."""
+        dev, page = ctx.batch.dev, self.page
+        units, table, seq, unit, off = _call_pages(dev.query_start, dev.positions, page)
+        kv = x.new_zeros(units, page, self.dc)
+        q_r = self.q_a_norm(self.q_a(x))
+        kv[unit, off] = self.kv_a_norm(self.kv_a(x)).to(kv.dtype)
+        iq, w, k, gate = self._indexer(x, q_r)
+        raw, gates = x.new_zeros(units, page, self.dk), x.new_zeros(units, page, self.dk)
+        pooled = torch.zeros(units, page // self.ratio, self.dk, device=x.device)
+        self._index(k, gate, raw, gates, pooled, self.ape, table, seq, dev.positions)
+        dense = int(dev.query_start.diff().max()) <= self.limit
+        blocks = (all_blocks(dev.positions, self.ratio, self.width) if dense else
+                  self._select(iq, pooled, table, seq, dev.positions, w))
+        return self._attention(q_r, kv, blocks, table, seq, dev.positions)

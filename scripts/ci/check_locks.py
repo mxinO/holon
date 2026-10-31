@@ -10,6 +10,8 @@
   `choices`, so `holon serve` serves a committed lock without a warning and never drops it;
 - `defaults.toml` (the settings `holon serve` starts from without a lock) sets EngineConfig fields only, selects
   installed plugins of the slots it names, and sets declared plugin options;
+- a lock's `[judged]` table (how L2 judged it, docs/dev/v1-glm.md D15a) names files under `judge/goldens/` that exist
+  with the sha256 it records, so a moved or re-recorded reference or golden does not leave the claim dangling;
 - no lock carries a CPU tier (a class `<gpu>+<cpu tier>/…`, F5b's split) until the lead decides the policy for
   benchmark-only and tier locks: the lookup ranks a lock of the host's tier first, so a committed one would become the
   default of every host of that tier (docs/plan.md §10, "F5b locks").
@@ -21,8 +23,10 @@ from __future__ import annotations
 
 import collections
 import dataclasses
+import hashlib
 import pathlib
 import sys
+import tomllib
 
 from _common import ROOT, fail
 from holon.core import cli, plans
@@ -44,6 +48,13 @@ for path in sorted(PLANS.rglob("*.lock")):
     if "+" in path.parents[1].name or "+" in lock.plan.fingerprint_class:
         msgs.append(f"{name}: carries a CPU tier ({lock.plan.fingerprint_class}): no tier locks until their policy is "
                     "decided (docs/plan.md §10, F5b locks)")
+    judged = tomllib.loads(path.read_text()).get("judged") or {}
+    for named in [v for k in ("recording", "recordings", "floors", "budgets") for v in
+                  ([judged[k]] if isinstance(judged.get(k), str) else judged.get(k, []))]:
+        file, _, digest = named.rpartition("@")
+        found = ROOT / "judge" / "goldens" / file
+        if not found.is_file() or hashlib.sha256(found.read_bytes()).hexdigest() != digest:
+            msgs.append(f"{name}: judged by {file}, which judge/goldens/ does not hold with sha256 {digest[:12]}…")
     options = lock.plan.engine.get("plugin_options", {})
     msgs += [f"{name}: no installed plugin declares the option {key}" for key in options if key not in declared]
     msgs += [f"{name}: {bad}" for bad in cli.outside_choices(options, declared)]

@@ -1,10 +1,16 @@
 """Tiny GGUF files for tests: an HF Qwen3 or Qwen3-MoE checkpoint written with gguf-py's writer, as llama.cpp's
-converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in])."""
+converter would (its tensor names, NEOX order kept, F32 norms and router, expert tensors stacked [E, out, in]); the
+plumbing the tiny-model tools share (`tokenizer_dir`, `copy_tokenizer`, `convert`: llama.cpp's own converter;
+`load_fixtures`); and `slice_blocks`, a real file's first blocks as one file (its kernels' real shapes and types, few
+layers)."""
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
+import subprocess
+import sys
 
 import gguf
 import numpy as np
@@ -16,6 +22,72 @@ LAYER = {"input_layernorm": "attn_norm", "post_attention_layernorm": "ffn_norm",
          "self_attn.k_proj": "attn_k", "self_attn.v_proj": "attn_v", "self_attn.o_proj": "attn_output",
          "self_attn.q_norm": "attn_q_norm", "self_attn.k_norm": "attn_k_norm", "mlp.gate_proj": "ffn_gate",
          "mlp.up_proj": "ffn_up", "mlp.down_proj": "ffn_down"}
+
+
+def tokenizer_dir(repo: str, revision: str) -> pathlib.Path:
+    """A hub snapshot's directory in the local cache (`HF_HUB_CACHE`, else `HF_HOME`/hub, else ~/.cache)."""
+    hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
+                                                                       "~/.cache/huggingface").expanduser() / "hub")
+    return hub / f"models--{repo.replace('/', '--')}" / "snapshots" / revision
+
+
+def copy_tokenizer(source: pathlib.Path, path: pathlib.Path, names: tuple[str, ...]) -> None:
+    """The model's tokenizer files `names` from `source` into the checkpoint directory `path` (the converter reads
+    the full vocabulary there)."""
+    for name in names:
+        (path / name).write_bytes((source / name).read_bytes())
+
+
+def convert(path: pathlib.Path, llama: pathlib.Path, name: str) -> pathlib.Path:
+    """The checkpoint directory `path` converted by llama.cpp's `convert_hf_to_gguf.py` to f32 (`general.name`
+    `name`, which it would default to the directory's), as `<path>/<name>-f32.gguf`."""
+    out = path / f"{name}-f32.gguf"
+    subprocess.run([sys.executable, str(llama / "convert_hf_to_gguf.py"), str(path), "--outtype", "f32",
+                    "--model-name", name, "--outfile", str(out)],
+                   env=os.environ | {"PYTHONPATH": str(llama / "gguf-py")}, check=True)
+    return out
+
+
+def load_fixtures(path: pathlib.Path) -> tuple[dict, dict[str, str]]:
+    """A committed fixture file: its tensors and metadata."""
+    from safetensors import safe_open
+
+    with safe_open(str(path), "pt") as f:
+        return load_file(str(path)), f.metadata()
+
+
+def slice_blocks(first: pathlib.Path, out: pathlib.Path, blocks: int) -> pathlib.Path:
+    """A (split) GGUF's first `blocks` blocks as one file at `out`: every key as stored, but `block_count` (and a
+    per-block array, truncated) set to `blocks`, `nextn_predict_layers` to 0 and the split keys dropped; the tensors
+    outside `blk.` and `blk.<i>.*` for i < `blocks`, their bytes and types as stored."""
+    shards = sorted(first.parent.glob(re.sub(r"-00001-of-(\d+)\.gguf$", r"-*-of-\1.gguf", first.name)))
+    readers = [gguf.GGUFReader(f) for f in shards or [first]]
+    head = readers[0]
+    arch = head.fields[gguf.Keys.General.ARCHITECTURE].contents()
+    old = int(head.fields[f"{arch}.block_count"].contents())
+    writer = gguf.GGUFWriter(out, arch)
+    for field in head.fields.values():
+        if field.name in (gguf.Keys.General.ARCHITECTURE,) or field.name.startswith(("GGUF.", "split.")):
+            continue
+        kind, value = field.types[0], field.contents()
+        sub = field.types[-1] if kind == gguf.GGUFValueType.ARRAY else None
+        if field.name == f"{arch}.block_count":
+            value = blocks
+        elif field.name == f"{arch}.nextn_predict_layers":
+            value = 0
+        elif sub is not None and isinstance(value, list) and len(value) == old and field.name.startswith(arch):
+            value = value[:blocks]
+        writer.add_key_value(field.name, value, kind, sub_type=sub)
+    keep = re.compile(rf"blk\.({'|'.join(map(str, range(blocks)))})\.")
+    for reader in readers:
+        for t in reader.tensors:
+            if not t.name.startswith("blk.") or keep.match(t.name):
+                writer.add_tensor(t.name, np.asarray(t.data), raw_dtype=t.tensor_type)    # (bytes: their rows')
+    writer.write_header_to_file()
+    writer.write_kv_data_to_file()
+    writer.write_tensors_to_file()
+    writer.close()
+    return out
 
 
 EXPERT = re.compile(r"model\.layers\.(\d+)\.mlp\.experts\.(\d+)\.(gate|up|down)_proj\.weight")

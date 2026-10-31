@@ -17,24 +17,25 @@ from holon.api import Constraint, KernelSpec
 from . import extension
 
 OP, RESOLVE = "moe_resolve.promote", "moe_resolve@1"
-SHARED_BYTES = 48 << 10                     # the promotion CTA's four [E] tables, beside its static words
+SHARED_BYTES = 48 << 10                     # the promotion CTA's five [E] tables, beside its static words
 
 
 class Resolve:
-    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int) -> None:
+    def __init__(self, ctx, *, experts: int, top_k: int, roles: int, staging: int, budget: int | None = None) -> None:
         self.lib, self.experts, self.top_k, self.staging = extension.load(ctx.fingerprint.sm), experts, top_k, staging
+        self.budget = -1 if budget is None else budget          # (−1: the fact absent, every miss as F10 had it)
         facts = {"experts": experts, "top_k": top_k, "roles": roles, "staging": staging}
         self.resolve = ctx.select_kernel(RESOLVE, site="kernels.promote", **facts).impl(ctx, **facts)
 
     def __call__(self, ids, kinds, residency, host, limits, counts, routed, ring, stage, empty, n_empty, misses,
-                 errors, delta, n_delta, group, plan, jobs, last, clock, spare):
+                 errors, delta, n_delta, group, plan, jobs, last, clock, spare, exclusive):
         out = torch.empty(1 + self.experts, dtype=torch.int32, device=ids.device)   # the promoted, in order
         self.lib.promote(ids, kinds, residency, limits, empty, n_empty, routed, errors, delta, n_delta, group, last,
-                         clock, spare, out, self.staging)
+                         clock, spare, out, self.staging, exclusive, host, self.budget)
         slots, fetch, n_fetch, cpu = self.resolve(ids, kinds, residency, host, limits, counts, routed, ring, stage,
                                                   empty, n_empty, misses, errors, delta, n_delta, group, plan, jobs)
         self.lib.settle(out, residency, host, limits, empty, n_empty, fetch, n_fetch, misses, last, clock, spare,
-                        self.top_k, self.staging)
+                        self.top_k, self.staging, exclusive, delta, n_delta, group, errors)
         return slots, fetch, n_fetch, cpu
 
     def lend(self, need: torch.Tensor, residency: torch.Tensor, classes: torch.Tensor, last: torch.Tensor,
@@ -51,11 +52,29 @@ class Resolve:
         picked = torch.zeros_like(whole).scatter_(0, order, take)
         return picked.view(experts, groups).t()
 
+    def lend_tail(self, cls: int, n: int, residency: torch.Tensor, classes: torch.Tensor, limits: torch.Tensor,
+                  spare: torch.Tensor, **state) -> torch.Tensor:
+        """The experts holding class `cls`'s last n slots (docs/dev/v1-glm.md D8a), and the owners of the spares of
+        every layer with a role of class `cls`, released: absent, the owners mapped back to their slots so the caller
+        lends them with the range's holders and returns the slots at the step's end. Device ops, no host sync."""
+        groups, experts, roles = residency.shape
+        slots = spare[..., 1:]                                                # [G, S, R]
+        freed = (classes == cls).any(1)[:, None] & (spare[..., 0] > 0)       # [G, S]
+        owner = torch.arange(groups, device=spare.device)[:, None] * experts + spare[..., 0].long() - 1
+        flat = torch.cat([residency.view(-1, roles), residency.new_zeros(1, roles)])     # (+ a sink row)
+        flat.index_copy_(0, torch.where(freed, owner, groups * experts).view(-1), slots.reshape(-1, roles))
+        residency.view(-1, roles).copy_(flat[:-1])
+        released = torch.zeros(groups * experts + 1, dtype=torch.bool, device=spare.device)
+        released.index_fill_(0, torch.where(freed, owner, groups * experts).view(-1), True)
+        spare.masked_fill_(freed[..., None], 0)
+        tail = ((classes[:, None, :] == cls) & (residency >= (limits - n)[:, None, :])).any(-1)
+        return tail | released[:-1].view(groups, experts)
+
 
 class Plugin:
     def register(self, regs) -> None:
         def supports(f) -> bool:
-            return 4 * f["experts"] * 4 + 64 <= SHARED_BYTES
+            return 5 * f["experts"] * 4 + 64 <= SHARED_BYTES
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.promote", impl=Resolve,
                                         requires=Constraint(sms=frozenset(extension.ARCHS)), supports=supports,
                                         props=frozenset({"graph_safe", "deterministic"}), priority=10))

@@ -40,6 +40,10 @@ from .residency import RETURN
 BUFFERS = 2                                   # the ring's halves: layer l streams while layer l − 1 computes
 ROUNDS = 4                                    # `lend` calls of a ring step, 1…ROUNDS (one suffices for staging)
 SHORT = 4                                     # the store's error bit: a step's lent slots fell short of its use
+ROUND_SLOTS = 32                              # D8s: a round's RAM (and read-ahead) slots a class
+STAGE_PARTS = 6                               # D8g: a stage call's front parts (the 32K sweep with sparse parts, RTX
+#                                               5090: 1 11.70 s, 2 11.28, 3 11.21-11.29, 6 11.07, 12 11.11; D8g)
+PSEUDO = -(1 << 20)                           # D8s: a rounds step's stage entry i is PSEUDO − i until its part's slot
 
 
 class Lent:
@@ -48,10 +52,17 @@ class Lent:
         # to the ring and staging (its arena's end, the tail's start); `parts`: a staging step's ring of parts
         self.store, self.mode, self.tail, self.parts = store, mode, tail, parts
         self.width: torch.Tensor | None = None      # a staging ring's slots per class (its `want`), once lent
+        # D8s: a staging step under exclusive tiers whose misses go in rounds through a fixed set of slots a class —
+        # ROUND_SLOTS for the RAM misses and read-ahead hits, the landing rows' for the SSD reads (`rounds_q`,
+        # `fixed`: [classes, Q + A] those slots), its stage entries PSEUDO − i until a part's slot replaces them
+        self.rounds = store._rounds
+        self.fixed: torch.Tensor | None = None
         self.end = store.lend_ends
         if tail is not None:                # this step's tail (its own passes' size): the rest of the class lends
             self.end = self.end.clone()
             self.end[tail[0]] -= tail[1]
+            for c, m in store._step_down.items():       # a whole-expert tail's other classes (D8w): their tails
+                self.end[c] -= m
 
     # -- at the step's first resolve -----------------------------------------------------------------------------------
     def begin(self) -> None:
@@ -74,28 +85,33 @@ class Lent:
         else:
             held = self._held(classes)
         # an auxiliary model's classes are not lent to (their layers never borrow: `done`)
-        # a ring's halves, or a staging ring's two parts, follow the misses lending makes: `ROUNDS` rounds
-        sized = self.mode == "ring" or self.parts > 1
+        # a ring's halves, or a staging ring's two parts, follow the misses lending makes: `ROUNDS` rounds; so does a
+        # staging step's single buffer under exclusive tiers (step 7: a layer's most missing pieces, not a pass of
+        # every expert — fewer experts lent, parked and read back)
+        single = self.mode == "stage" and self.parts == 1 and s.exclusive
+        sized = self.mode == "ring" or self.parts > 1 or single
+        buffers = 1 if single else BUFFERS
         stage = torch.where(s.lending_classes, s.prefill, 0)
-        for k in range(1, 1 + (ROUNDS if sized else 1)):
-            want = self._want(res, classes) if sized else stage
+        fixed = torch.where(s.lending_classes, s.rounds_q + s.landing_rows, 0) if self.rounds else None
+        for k in range(1, 1 + (ROUNDS if sized and not self.rounds else 1)):
+            want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
             if k == ROUNDS:                                                  # the last: the worst case
-                want = torch.where(held < want, BUFFERS * -(-experts // self.parts), want)
-            if self.parts > 1:                                               # (a pass's worth: no ring needed)
+                want = torch.where(held < want, buffers * -(-experts // self.parts), want)
+            if self.parts > 1 or single:                                     # (a pass's worth: no ring needed)
                 want = want.clamp(max=s.prefill)
             s.lend_needs[k] = (want - held).clamp_min(0)
             picked = s.lend(s.lend_needs[k], k).long()
             for r in range(roles):
                 held.index_add_(0, classes[:, r], picked.sum(1))
-        want = self._want(res, classes) if sized else stage
-        if self.parts > 1:
+        want = fixed if self.rounds else self._want(res, classes, buffers) if sized else stage
+        if self.parts > 1 or single:
             want = want.clamp(max=s.prefill)
         # Per class: the ring where its lent slots hold both halves, else its layers stage into them (a small class —
         # a type few layers share, FN's IQ1_M gate/up of 3 layers — cannot lend twice a layer's misses: it no longer
         # stages every class). `ring_ok`: 1 every class streamed, 2 some, 0 none.
         ok = held >= want if self.mode == "ring" else torch.zeros_like(held, dtype=torch.bool)
         s.ring_ok.copy_((ok.all().int() + (ok.any() & ~ok.all()).int() * 2).view(1))
-        s.errors.bitwise_or_(((~ok) & (held < (want if self.parts > 1 else stage))).any().int() * SHORT)
+        s.errors.bitwise_or_(((~ok) & (held < (want if self.parts > 1 or single else stage))).any().int() * SHORT)
         self._pool(res, classes)
         # a pass's misses past the ring (an earlier pass's admissions unmapped them) go to the graphed steps' staging
         # slots; a staged class's to its pool's first ones (a ring of parts: its first `want`, over and over)
@@ -109,6 +125,11 @@ class Lent:
         ringed = ok[classes]                                                # [G, R]
         ringed[s.borrowing_groups:] = False                                 # (an auxiliary layer: none)
         s.stage_tab.copy_(torch.where(ringed[..., None], graphed[None], lent))
+        if self.rounds:                         # the fixed slots; each borrowing layer's stage entry i: PSEUDO − i
+            self.fixed = s.pool[:, :s.rounds_q + s.landing_rows].clone()
+            s.errors.bitwise_or_(((self.fixed < 0) & s.lending_classes[:, None]).any().int() * SHORT)
+            pseudo = PSEUDO - torch.arange(s.prefill, dtype=torch.int32, device=res.device)
+            s.stage_tab[:s.borrowing_groups].copy_(pseudo.expand_as(s.stage_tab[:s.borrowing_groups]))
         if self.mode == "ring":
             self._ring(res, classes, want // BUFFERS, ringed)
             if s.ring_copy == "dma":            # the step's one host sync: the second copy waits, after the first
@@ -119,14 +140,14 @@ class Lent:
                 self._start(g)
         s.stage_width.copy_(torch.where(ok.all(), s.staging, s.prefill).view(1))
 
-    def _want(self, res: torch.Tensor, classes: torch.Tensor) -> torch.Tensor:
-        """Per class: twice the most pieces a layer of it misses (the target's layers) — a part of them, in a staging
-        ring of parts."""
+    def _want(self, res: torch.Tensor, classes: torch.Tensor, buffers: int = BUFFERS) -> torch.Tensor:
+        """Per class: `buffers` times the most pieces a layer of it misses (the target's layers) — a part of them, in
+        a staging ring of parts."""
         missing = (res < 0).sum(1)                                           # [G, R]
         missing[self.store.borrowing_groups:] = 0
         want = torch.zeros(len(self.store.classes), dtype=torch.int64, device=res.device)
         most = want.scatter_reduce_(0, classes.reshape(-1), missing.reshape(-1), "amax")
-        return -(-most // self.parts) * BUFFERS
+        return -(-most // self.parts) * buffers
 
     def _lent(self, classes: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Per layer and role, its empty stack's slots and its experts' lent slots [G, R, 2E], and which of them serve

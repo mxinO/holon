@@ -7,9 +7,10 @@ import pytest
 import torch
 from holon.core.build import BuildContext
 from holon_plugins.transforms.tail_skip import reference
+from holon_std.moe.offload import KEY
 
+from .moe_engine_common import _gpu_engine, _served
 from .test_expert_io import DEVICES, ROLES, E, K, plugins  # noqa: F401
-from .test_moe_engine import KEY, _gpu_engine, _served, gpu_moe  # noqa: F401
 
 PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
 
@@ -43,7 +44,7 @@ def test_tail_skip_matches_the_oracle(plugins, device, tokens, rank):  # noqa: F
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
-def test_tail_skip_on_the_gpu(gpu_moe):  # noqa: F811
+def test_tail_skip_on_the_gpu(gpu_moe):
     """The route transform on the native path at a quarter of the experts cached: at `tail_skip.rank` 2 (top-2: no
     rank reaches it) the streams and prompt logprobs are the resident store's, bit for bit; at rank 1 the missed
     experts only ever routed second are dropped — fewer routes counted, the outputs no longer the resident store's —

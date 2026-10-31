@@ -10,7 +10,7 @@ import pytest
 import torch
 from holon.api import SamplingParams
 from holon.core.engine import BLOCKED_POLL_S, EngineConfig
-from holon.core.ipc import engine_process
+from holon.core.ipc import EngineProcess, StartFailed, engine_process
 
 from .test_engine import GREEDY, tiny_case, tiny_checkpoint  # noqa: F401 — fixtures
 
@@ -135,3 +135,18 @@ def test_a_killed_engine_ends_open_streams(tiny_checkpoint, tiny_case):  # noqa:
 
     stats, rest = asyncio.run(asyncio.wait_for(run(), timeout=60))
     assert len(stats) == 3 and rest[-1].finish_reason == "error" and "exited" in rest[-1].error
+
+
+
+def _killed_engine(config, endpoints, lock=None):
+    """Engine-process target killed while starting, as by the OOM killer (runs in the spawned child)."""
+    import os
+    import signal
+    os.kill(os.getpid(), signal.SIGKILL)
+
+
+@pytest.mark.slow
+def test_an_engine_killed_while_starting_is_a_memory_failure():
+    with pytest.raises(StartFailed, match="SIGKILL") as got:
+        asyncio.run(EngineProcess.start(None, _killed_engine))
+    assert got.value.kind == "memory"

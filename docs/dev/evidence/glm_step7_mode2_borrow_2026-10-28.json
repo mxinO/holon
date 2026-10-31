@@ -1,0 +1,162 @@
+{
+ "date": "2026-10-28",
+ "doc": "docs/dev/v1-glm.md §13 (step 7: the capped mode (ii) table after the 32K borrow)",
+ "card": "RTX 5090 desktop, the job step capped at 64 GiB (cgroup v2, enforced), the hygiene wrap",
+ "config": {
+  "holon": "4ef014de (D8w, D8s below 8K, the seed fix): the mode (ii) override set with moe.loan_fixed_mib 1024, moe.loan_margin 1.12, moe.loan_taper 8192,32768, moe.loan_largest 0.55; the loan fix (b1c34cce) not in",
+  "maya": "default and checkpoints-off (ckpt0) arms, 50 GB RAM tier",
+  "workload": "D11: a warm-up round, then 3 rounds of 8 x 1K, 8 x 4K, 8 x 32K prompts, 256 tokens each",
+  "bars": {
+   "prefill": 0.9,
+   "decode": 1.0
+  },
+  "reference": "Maya's default arm; at 32K the faster of its two",
+  "ratio": "per round, Holon's median over a cell's 8 requests over the reference's; the median of the 3 rounds",
+  "loan_need_sweep": "the built options at the flags: 0 MiB overflow at 1K, 2K, 4K, 8K, 12K, 16K, 24K and 32K prompts x prompt logprobs none / 1 / 20"
+ },
+ "ratio_to_maya": {
+  "median_of_round_ratios": {
+   "prefill": {
+    "1k": 0.88,
+    "4k": 1.028,
+    "32k": 0.767
+   },
+   "decode": {
+    "1k": 0.95,
+    "4k": 0.875,
+    "32k": 0.786
+   }
+  },
+  "per_round": {
+   "prefill": {
+    "1k": [
+     0.882,
+     0.873,
+     0.88
+    ],
+    "4k": [
+     1.03,
+     1.028,
+     1.025
+    ],
+    "32k": [
+     0.767,
+     0.777,
+     0.754
+    ]
+   },
+   "decode": {
+    "1k": [
+     0.978,
+     0.926,
+     0.95
+    ],
+    "4k": [
+     0.875,
+     0.869,
+     0.899
+    ],
+    "32k": [
+     0.802,
+     0.786,
+     0.768
+    ]
+   }
+  }
+ },
+ "before_borrow_ratio_to_maya": {
+  "prefill": {
+   "1k": 0.887,
+   "4k": 1.014,
+   "32k": 0.753
+  },
+  "decode": {
+   "1k": 0.971,
+   "4k": 0.879,
+   "32k": 0.727
+  }
+ },
+ "tok_s_median": {
+  "maya_default_64g": {
+   "prefill_tok_s": {
+    "1k": 268.8,
+    "4k": 762.4,
+    "32k": 2464.3
+   },
+   "decode_tok_s": {
+    "1k": 24.1,
+    "4k": 22.1,
+    "32k": 21.0
+   }
+  },
+  "maya_ckpt0_64g": {
+   "prefill_tok_s": {
+    "1k": 267.9,
+    "4k": 763.0,
+    "32k": 3287.7
+   },
+   "decode_tok_s": {
+    "1k": 24.1,
+    "4k": 21.4,
+    "32k": 21.3
+   }
+  },
+  "holon_mode2_borrow": {
+   "prefill_tok_s": {
+    "1k": 236.7,
+    "4k": 784.6,
+    "32k": 2536.2
+   },
+   "decode_tok_s": {
+    "1k": 22.9,
+    "4k": 19.3,
+    "32k": 16.8
+   }
+  }
+ },
+ "ssd": {
+  "nvme_gib_a_pass_of_24_requests": {
+   "holon": [
+    693,
+    693,
+    693,
+    693
+   ],
+   "maya_default": [
+    652,
+    655,
+    656,
+    655
+   ],
+   "maya_ckpt0": [
+    587,
+    577,
+    582,
+    573
+   ],
+   "note": "the device's read counters around each arm (warm-up first); Holon's include its start's ≈ 79 GiB"
+  },
+  "holon_prompt_gib": {
+   "1k": 8.75,
+   "4k": 11.91,
+   "32k": 20.17
+  },
+  "holon_decode_mb_a_token": {
+   "1k": 33.0,
+   "4k": 45.6,
+   "32k": 59.3
+  }
+ },
+ "memory": {
+  "holon_least_free_mib": 521,
+  "holon_alloc_retries": 0,
+  "peak_vram_mib": {
+   "holon": [
+    31694,
+    31682,
+    31676
+   ]
+  }
+ },
+ "verdict": "4K prefill passes (1.028); 1K prefill 0.880 (2.2% short); 32K decode +8% (0.727 -> 0.786); 1K decode 0.950, 4K decode 0.875, 32K prefill 0.767 below"
+}

@@ -9,6 +9,7 @@
 #include <climits>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <cstdint>
 #include <vector>
 
@@ -19,9 +20,9 @@ constexpr int RANGE = 1, OVERFLOW = 2, JOBS = 8;       // error bits: a corrupt 
                                                        // the CPU's share past its job table
 constexpr int RESOLVE_THREADS = 512;                   // 16 warps: the block scans the fetch lists
 constexpr int FETCH_CTAS = 8, FETCH_THREADS = 256, FETCH_UNROLL = 8;   // step 0's M1: saturates PCIe
-// The ring's copies run beside a prefill pass's compute, so they hold as few SMs as still keep PCIe near full (one
-// small CTA per class, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
-constexpr int BESIDE_CTAS = 1, BESIDE_UNROLL = 16;
+// Copies beside other work (the ring's beside a prefill pass's compute, a store's moves) hold as few SMs as still keep
+// the link near full (few CTAs, many reads in flight; A5000: more CTAs slow the pass's mmq by more than they gain)
+constexpr int BESIDE_UNROLL = 16;
 
 // The resolve's policies: `moe_resolve@1`, and the variants of the placement plugins kernels.expert_io serves
 // (`moe_resolve.lfu@1`: F11, `moe_resolve.lru@1`: F4; their contracts and oracles are the plugins').
@@ -382,7 +383,7 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
             }
             if (seen < L.F) {
                 const int32_t unit = L.host[e * roles + r];
-                units[seen] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@1's
+                units[seen] = unit >= 0 ? unit : -2 - e;   // no device-readable tier holds it: moe_tiers@2's
                 dst[seen] = v == 1 ? stage[min(staged, L.F - 1)] : -2 - v;
             }
             ++seen;
@@ -432,15 +433,16 @@ __global__ void k_resolve(const int32_t * __restrict__ ids, const uint8_t * __re
 }
 
 // Every CTA walks every fetched unit; its threads move UNROLL 16-byte words each per trip, all loads before all
-// stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory).
+// stores, so a CTA keeps blockDim * UNROLL * 16 bytes of reads in flight (zero-copy reads of host memory). A unit is
+// `words` words; the destination's rows `dst_words` apart (at least `words`: strided rows).
 template <int UNROLL>
 __global__ void k_fetch(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const uint4 * __restrict__ src,
-                        uint4 * __restrict__ dst, int64_t words, int staging) {
+                        uint4 * __restrict__ dst, int64_t words, int64_t dst_words, int staging) {
     const int count = min(*n, staging);
     const int64_t stride = int64_t(gridDim.x) * blockDim.x * UNROLL;
     for (int b = 0; b < count; ++b) {
         const uint4 * __restrict__ s = src + int64_t(fetch[b]) * words;
-        uint4 * __restrict__ d = dst + int64_t(fetch[staging + b]) * words;
+        uint4 * __restrict__ d = dst + int64_t(fetch[staging + b]) * dst_words;
         for (int64_t base = int64_t(blockIdx.x) * blockDim.x * UNROLL + threadIdx.x; base < words;
              base += stride) {
             uint4 v[UNROLL];
@@ -473,7 +475,29 @@ struct Roles {
     int64_t words[MAX_ROLES];
     int roles, staging;
     int part = 0, parts = 1;           // the call copies part `part` of `parts` of each role's list: its entries
-};                                     // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group)
+                                       // [part·q, (part + 1)·q), q = ⌈n / parts⌉ (a pipelined pass's group) —
+    int size = 0;                      // or, `size` > 0, q = size (docs/dev/v1-glm.md D8f's rounds)
+    // A role read from landing rows (D8f): runs[r][row, x] = (offset in the row, nbytes) of extent x of the piece
+    // there; the slot gets the extents back to back. The row's width is its own (`row_bytes`).
+    const int64_t * runs[MAX_ROLES] = {};
+    int extents[MAX_ROLES] = {};
+    int64_t row_bytes[MAX_ROLES] = {};
+};
+
+// One extent of a landing row into its place in a slot: 16-byte words where offsets and length allow, else bytes.
+__device__ __forceinline__ void copy_run(const uint8_t * __restrict__ s, uint8_t * __restrict__ d, int64_t nbytes,
+                                         int64_t c, int64_t step) {
+    if (((reinterpret_cast<uintptr_t>(s) | reinterpret_cast<uintptr_t>(d) | uint64_t(nbytes)) & 15) == 0) {
+        const int64_t words = nbytes / 16, base = c * step + threadIdx.x;
+        for (int64_t i = base; i < words && i < (c + 1) * step; i += blockDim.x) {
+            reinterpret_cast<uint4 *>(d)[i] = reinterpret_cast<const uint4 *>(s)[i];
+        }
+    } else {
+        for (int64_t i = c * step * 16 + threadIdx.x; i < nbytes && i < (c + 1) * step * 16; i += blockDim.x) {
+            d[i] = s[i];
+        }
+    }
+}
 
 template <int UNROLL>
 __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t * __restrict__ n, const Roles p) {
@@ -481,11 +505,28 @@ __global__ void k_fetch_roles(const int32_t * __restrict__ fetch, const int32_t 
     const int64_t step = int64_t(blockDim.x) * UNROLL;
     int64_t flat = 0;
     for (int r = 0; r < p.roles; ++r) {
-        const int all = min(n[r], p.staging), q = (all + p.parts - 1) / p.parts;
+        const int all = min(n[r], p.staging), q = p.size > 0 ? p.size : (all + p.parts - 1) / p.parts;
         const int first = min(all, p.part * q), count = min(all, first + q) - first;
         const int64_t chunks = (p.words[r] + step - 1) / step;
         const int32_t * f = fetch + int64_t(r) * 2 * p.staging;
         const int64_t grid = gridDim.x;
+        if (p.runs[r] != nullptr) {                          // landing rows: (entry, extent, chunk) by the flat walk
+            const int X = p.extents[r];
+            for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * X * chunks;
+                 c += grid) {
+                const int b = first + int(c / (X * chunks)), x = int(c / chunks % X);
+                const int64_t * run = p.runs[r] + (int64_t(f[b]) * X) * 2;
+                int64_t at = 0;                              // the extent's place in the slot: the ones before it
+                for (int y = 0; y < x; ++y) {
+                    at += run[2 * y + 1];
+                }
+                const auto * row = reinterpret_cast<const uint8_t *>(p.src[r]) + int64_t(f[b]) * p.row_bytes[r];
+                auto * slot = reinterpret_cast<uint8_t *>(p.dst[r] + int64_t(f[p.staging + b]) * p.words[r]);
+                copy_run(row + run[2 * x], slot + at, run[2 * x + 1], c % chunks, step);
+            }
+            flat += int64_t(count) * X * chunks;
+            continue;
+        }
         for (int64_t c = ((int64_t(blockIdx.x) - flat) % grid + grid) % grid; c < int64_t(count) * chunks;
              c += grid) {                                    // global chunk flat + c falls to CTA (flat + c) % grid
             const int b = first + int(c / chunks);
@@ -588,7 +629,7 @@ void resolve(int64_t policy, const at::Tensor & ids, const at::Tensor & kinds, a
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-// moe_tiers@1 (std.moe.kernels): one CTA after a layer call's resolve keeps the RAM tier exclusive and provides the
+// moe_tiers@2 (std.moe.kernels): one CTA after a layer call's resolve keeps the RAM tier exclusive and provides the
 // pieces no device-readable tier holds. Decisions run in order (admissions in record order, then the SSD misses by id)
 // on thread 0; the searches they need (a class's first free RAM unit, RAM's coldest expert of the layer's classes) are
 // block-wide reductions every thread joins, in lockstep (the loop conditions read shared memory only).
@@ -597,12 +638,24 @@ struct Tiers {
     const int32_t * piece, * classes;                  // [G, E, R], [G, R]
     int32_t * owner;                                   // [C, U]
     const int32_t * capacity;                          // [C]
-    const float * heat;                                // [G, E] or null
-    int32_t * io, * moves, * n_moves;                  // [R, 1 + F, 2], [R, 4, F], [R, 2]
-    int groups, units;
-};
+    const float * heat;                                // [G, E] or null (or, int32, `heat_i`: the fact heat = i32)
+    const int32_t * heat_i;
+    int32_t * io, * moves, * n_moves;                  // [R, 1 + F, 3], [R, 4, F], [R, 2]
+    int32_t * ssd, * n_ssd, * n_ram;                   // [R, 2, F], [R], [R]: the landing rows' fetch list, the RAM's
+    const int32_t * ahead;                             // [E] or null: the layer's read-ahead row of each expert, or −1
+    int32_t * hit, * n_hit;                            // [R, 2, F], [R]: the misses read ahead (row, slot)
+    int groups, units, rows;                           // rows: the on-demand landing rows (a round's)
+    int32_t * stamp, * clock;                          // [C, U], [1] or null: the call each unit was last demoted into
+};                                                     // by, and the calls so far (moves beside the next calls)
 
-constexpr int TIER_THREADS = 256;
+// A unit the previous call demoted into (or this one): its copy may still be running beside this call (`stamp`).
+__device__ __forceinline__ bool pending(const Tiers & T, int c, int u) {
+    return T.stamp != nullptr && uint32_t(T.clock[0]) + 1u - uint32_t(T.stamp[c * T.units + u]) <= 1u;
+}
+
+constexpr int TIER_THREADS = 1024;                     // (D8t: its scans and sweeps took ≈ twice as long at 256)
+constexpr int SPARE = -4, OWN = -5;                    // records of a policy with spares (F10): b's slots a spare; b
+                                                       // took its spare back
 constexpr int FREED = -2;                              // an owner freed by the call: reusable from the next one
 
 // The first free unit of class c (-1: none), every thread joining.
@@ -629,19 +682,23 @@ __device__ int first_free(const Tiers & T, int c, int * red) {
 
 // RAM's coldest whole expert of layer g's classes, strictly colder than `than`, not routed by the call in layer g and
 // not placed by it (-1: none): its index g' * E + e', least (heat, index).
-__device__ int coldest(const Tiers & T, int g, int roles, int experts, float than, const int32_t * flags,
-                       float * hk, int * ik) {
-    float bh = INFINITY;
+__device__ __forceinline__ double heat_at(const Tiers & T, int x) {     // (an int32 heat exact in a double)
+    return T.heat_i ? double(T.heat_i[x]) : double(T.heat[x]);
+}
+
+__device__ int coldest(const Tiers & T, int g, int roles, int experts, double than, const int32_t * flags,
+                       double * hk, int * ik) {
+    double bh = INFINITY;
     int bi = INT_MAX;
     for (int x = threadIdx.x; x < T.groups * experts; x += blockDim.x) {
         const int gg = x / experts, e = x % experts;
         bool ok = !(gg == g && flags[e] & (1 | 4));    // routed by the call (1), placed by it (4)
         for (int r = 0; r < roles && ok; ++r) {
             ok = T.classes[gg * roles + r] == T.classes[g * roles + r] && T.residency[x * roles + r] == -1 &&
-                 T.host[x * roles + r] >= 0;
+                 T.host[x * roles + r] >= 0 && !pending(T, T.classes[gg * roles + r], T.host[x * roles + r]);
         }
         if (ok) {
-            const float h = T.heat[x];
+            const double h = heat_at(T, x);
             if (h < bh || (h == bh && x < bi)) {
                 bh = h;
                 bi = x;
@@ -653,7 +710,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
     __syncthreads();
     for (int w = blockDim.x / 2; w > 0; w /= 2) {
         if (threadIdx.x < w) {
-            const float h = hk[threadIdx.x + w];
+            const double h = hk[threadIdx.x + w];
             const int i = ik[threadIdx.x + w];
             if (h < hk[threadIdx.x] || (h == hk[threadIdx.x] && i < ik[threadIdx.x])) {
                 hk[threadIdx.x] = h;
@@ -662,7 +719,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
         }
         __syncthreads();
     }
-    const float h = hk[0];
+    const double h = hk[0];
     const int i = ik[0];
     __syncthreads();
     return i != INT_MAX && h < than ? i : -1;
@@ -671,7 +728,7 @@ __device__ int coldest(const Tiers & T, int g, int roles, int experts, float tha
 // Expert e of layer g into RAM: `given` units (one per role) if not null, else free units of every class, else the
 // coldest's (displaced to the SSD), else the SSD. Thread 0 writes; `units` gets the result (-1: the SSD).
 __device__ void place(const Tiers & T, int g, int e, int roles, int experts, const int * given, int32_t * flags,
-                      int * units, int * red, float * hk) {
+                      int * units, int * red, double * hk) {
     __shared__ int ok;
     if (given == nullptr) {
         if (threadIdx.x == 0) {
@@ -686,7 +743,8 @@ __device__ void place(const Tiers & T, int g, int e, int roles, int experts, con
             __syncthreads();
         }
         if (!ok) {
-            const int x = T.heat ? coldest(T, g, roles, experts, T.heat[g * experts + e], flags, hk, red) : -1;
+            const int x = T.heat || T.heat_i ? coldest(T, g, roles, experts, heat_at(T, g * experts + e), flags, hk,
+                                                       red) : -1;
             if (threadIdx.x == 0) {
                 for (int r = 0; r < roles; ++r) {
                     units[r] = x >= 0 ? T.host[x * roles + r] : -1;
@@ -719,12 +777,13 @@ __device__ void place(const Tiers & T, int g, int e, int roles, int experts, con
     __syncthreads();
 }
 
-__global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, int g, int32_t * fetch,
-                        const int32_t * n_fetch, const int32_t * stage, const int32_t * delta, const int32_t * start,
-                        const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
+__global__ void __launch_bounds__(TIER_THREADS, 1)
+k_tiers(const int32_t * __restrict__ ids, const uint8_t * __restrict__ kinds, int g, int32_t * fetch,
+        const int32_t * n_fetch, const int32_t * stage, const int32_t * delta, const int32_t * start,
+        const int32_t * n_delta, Tiers T, int tokens, int k, int experts, int roles, int F) {
     extern __shared__ int32_t flags[];                 // [experts]: 1 routed, 2 by a DECODE row, 4 placed, 8 admitted,
     __shared__ int red[TIER_THREADS];                  // 16 an SSD miss
-    __shared__ float hk[TIER_THREADS];
+    __shared__ double hk[TIER_THREADS];
     __shared__ int units[8], src[8], staged[8], n_adm;
     const int tid = threadIdx.x, entries = tokens * k, n_rec = *n_delta - *start;
     for (int e = tid; e < experts; e += blockDim.x) {
@@ -757,16 +816,65 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
         for (int r = 0; r < roles; ++r) {
             staged[r] = n_fetch[r] - n_adm;
             T.n_moves[r * 2] = T.n_moves[r * 2 + 1] = 0;
-            T.io[r * (1 + F) * 2] = 0;
+            T.io[r * (1 + F) * 3] = 0;
         }
     }
     __syncthreads();
     int j = 0;
+    __shared__ int gone;
     for (int i = 0; i < n_rec; ++i) {                  // 1. admissions (uniform: every thread reads the same record)
         const int * rec = delta + (*start + i) * 3;
-        const int a = rec[1], b = rec[2];
+        const int a = rec[1];
+        int b = rec[2];
+        if (a == SPARE) {                              // b's slots became a policy's spare: b placed, demoted
+            __shared__ int victim[8];
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    victim[r] = T.residency[(g * experts + b) * roles + r];
+                }
+            }
+            __syncthreads();
+            place(T, g, b, roles, experts, nullptr, flags, units, red, hk);
+            if (tid == 0 && units[0] >= 0) {
+                for (int r = 0; r < roles; ++r) {
+                    const int m = T.n_moves[r * 2]++;
+                    T.moves[(r * 4) * F + m] = victim[r];
+                    T.moves[(r * 4 + 1) * F + m] = units[r];
+                    if (T.stamp != nullptr) {
+                        T.stamp[T.classes[g * roles + r] * T.units + units[r]] = T.clock[0] + 1;
+                    }
+                }
+            }
+            __syncthreads();
+            continue;
+        }
+        if (a == OWN) {                                // b took its spare back: its RAM units free
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    const int u = T.host[(g * experts + b) * roles + r];
+                    if (u >= 0) {
+                        T.owner[T.classes[g * roles + r] * T.units + u] = -1;
+                    }
+                    T.host[(g * experts + b) * roles + r] = -1;
+                }
+            }
+            __syncthreads();
+            continue;
+        }
         if (a < 0) {
             continue;
+        }
+        if (tid == 0) {                                // b left VRAM before (a spare's owner): a as into empty slots
+            bool in_ram = b >= 0, on_ssd = b >= 0;
+            for (int r = 0; r < roles && b >= 0; ++r) {
+                in_ram = in_ram && T.host[(g * experts + b) * roles + r] >= 0;
+                on_ssd = on_ssd && T.residency[(g * experts + b) * roles + r] == -2;
+            }
+            gone = in_ram || on_ssd;
+        }
+        __syncthreads();
+        if (gone) {
+            b = -2;
         }
         if (tid == 0) {
             for (int r = 0; r < roles; ++r) {
@@ -810,6 +918,9 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                     const int m = T.n_moves[r * 2]++;
                     T.moves[(r * 4) * F + m] = victim[r];
                     T.moves[(r * 4 + 1) * F + m] = units[r];
+                    if (T.stamp != nullptr) {
+                        T.stamp[T.classes[g * roles + r] * T.units + units[r]] = T.clock[0] + 1;
+                    }
                 }
             }
             ++j;
@@ -821,8 +932,28 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
         }
         __syncthreads();
     }
-    for (int e = 0; e < experts; ++e) {                // 2. keeps, 3. the reads (uniform: shared flags)
+    // 2. keeps, 3. the reads (uniform: shared flags): the j-th SSD miss by id into landing row j % rows (its round
+    // ⌊j / rows⌋), its io row (piece, row, keep: its RAM unit if kept, else −1) and its landing fetch entry (row, slot);
+    // the fetch list keeps the RAM entries, in order (n_ram)
+    int j3 = 0, h3 = 0;
+    for (int e = 0; e < experts; ++e) {
         if (!(flags[e] & 16)) {
+            continue;
+        }
+        if (T.ahead != nullptr && T.ahead[e] >= 0) {     // read ahead: its row as it is (no read, never kept)
+            if (tid == 0) {
+                for (int r = 0; r < roles; ++r) {
+                    int at = 0;
+                    while (fetch[(r * 2) * F + at] != -2 - e) {
+                        ++at;
+                    }
+                    T.hit[(r * 2) * F + h3] = T.ahead[e];
+                    T.hit[(r * 2 + 1) * F + h3] = fetch[(r * 2 + 1) * F + at];
+                    fetch[(r * 2) * F + at] = INT_MIN;
+                }
+            }
+            ++h3;
+            __syncthreads();
             continue;
         }
         bool kept = false;
@@ -836,15 +967,34 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
                 while (fetch[(r * 2) * F + at] != -2 - e) {
                     ++at;
                 }
-                const int unit = kept ? units[r] : T.capacity[T.classes[g * roles + r]] + at;
-                int32_t * io = T.io + r * (1 + F) * 2;
+                const int row = j3 % T.rows;
+                int32_t * io = T.io + r * (1 + F) * 3;
                 const int n = io[0]++;
-                io[2 + 2 * n] = T.piece[(g * experts + e) * roles + r];
-                io[3 + 2 * n] = unit;
-                fetch[(r * 2) * F + at] = unit;
+                io[3 + 3 * n] = T.piece[(g * experts + e) * roles + r];
+                io[4 + 3 * n] = row;
+                io[5 + 3 * n] = kept ? units[r] : -1;
+                T.ssd[(r * 2) * F + j3] = row;
+                T.ssd[(r * 2 + 1) * F + j3] = fetch[(r * 2 + 1) * F + at];
+                fetch[(r * 2) * F + at] = INT_MIN;     // (out of the RAM list, below)
             }
         }
+        ++j3;
         __syncthreads();
+    }
+    if (tid == 0) {
+        for (int r = 0; r < roles; ++r) {
+            int w = 0;
+            for (int i = 0; i < min(n_fetch[r], F); ++i) {
+                if (fetch[(r * 2) * F + i] != INT_MIN) {
+                    fetch[(r * 2) * F + w] = fetch[(r * 2) * F + i];
+                    fetch[(r * 2 + 1) * F + w] = fetch[(r * 2 + 1) * F + i];
+                    ++w;
+                }
+            }
+            T.n_ram[r] = w;
+            T.n_ssd[r] = j3;
+            T.n_hit[r] = h3;
+        }
     }
     for (int r = 0; r < roles; ++r) {                  // the units freed by the call: free from the next one
         int32_t * owner = T.owner + T.classes[g * roles + r] * T.units;
@@ -854,13 +1004,19 @@ __global__ void k_tiers(const int32_t * __restrict__ ids, const uint8_t * __rest
             }
         }
     }
+    __syncthreads();
+    if (tid == 0 && T.clock != nullptr) {
+        T.clock[0] += 1;
+    }
 }
 
 void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::Tensor & fetch, const at::Tensor & n_fetch,
            const at::Tensor & stage, const at::Tensor & delta, const at::Tensor & start, const at::Tensor & n_delta,
            at::Tensor & residency, at::Tensor & host, const at::Tensor & piece, const at::Tensor & classes,
            at::Tensor & owner, const at::Tensor & capacity, const c10::optional<at::Tensor> & heat, at::Tensor & io,
-           at::Tensor & moves, at::Tensor & n_moves) {
+           at::Tensor & moves, at::Tensor & n_moves, at::Tensor & ssd, at::Tensor & n_ssd, at::Tensor & n_ram,
+           int64_t rows, const c10::optional<at::Tensor> & ahead, at::Tensor & hit, at::Tensor & n_hit,
+           const c10::optional<at::Tensor> & stamp, const c10::optional<at::Tensor> & clock) {
     const c10::cuda::CUDAGuard guard(ids.device());
     const int64_t tokens = ids.size(0), k = ids.size(1), groups = residency.size(0), experts = residency.size(1),
                   roles = residency.size(2), F = stage.size(1);
@@ -879,18 +1035,42 @@ void tiers(const at::Tensor & ids, const at::Tensor & kinds, int64_t group, at::
     check(classes, ids, at::kInt, {groups, roles}, "classes");
     check(owner, ids, at::kInt, {owner.size(0), owner.size(1)}, "owner");
     check(capacity, ids, at::kInt, {owner.size(0)}, "capacity");
-    check(io, ids, at::kInt, {roles, 1 + F, 2}, "io");
+    check(io, ids, at::kInt, {roles, 1 + F, 3}, "io");
+    check(ssd, ids, at::kInt, {roles, 2, F}, "ssd");
+    check(n_ssd, ids, at::kInt, {roles}, "n_ssd");
+    check(n_ram, ids, at::kInt, {roles}, "n_ram");
+    TORCH_CHECK(rows >= 1, "rows >= 1");
+    check(hit, ids, at::kInt, {roles, 2, F}, "hit");
+    check(n_hit, ids, at::kInt, {roles}, "n_hit");
+    const int32_t * ah = nullptr;
+    if (ahead.has_value()) {
+        check(*ahead, ids, at::kInt, {experts}, "ahead");
+        ah = ahead->data_ptr<int32_t>();
+    }
     check(moves, ids, at::kInt, {roles, 4, F}, "moves");
     check(n_moves, ids, at::kInt, {roles, 2}, "n_moves");
     const float * h = nullptr;
-    if (heat.has_value()) {
-        check(*heat, ids, at::kFloat, {groups, experts}, "heat");
-        h = heat->data_ptr<float>();
+    const int32_t * hi = nullptr;
+    if (heat.has_value()) {                            // f32, or int32 (the fact heat = i32)
+        check(*heat, ids, heat->scalar_type() == at::kInt ? at::kInt : at::kFloat, {groups, experts}, "heat");
+        if (heat->scalar_type() == at::kInt) {
+            hi = heat->data_ptr<int32_t>();
+        } else {
+            h = heat->data_ptr<float>();
+        }
     }
     Tiers T{residency.data_ptr<int32_t>(), host.data_ptr<int32_t>(), piece.data_ptr<int32_t>(),
-            classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h,
-            io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), int(groups),
-            int(owner.size(1))};
+            classes.data_ptr<int32_t>(), owner.data_ptr<int32_t>(), capacity.data_ptr<int32_t>(), h, hi,
+            io.data_ptr<int32_t>(), moves.data_ptr<int32_t>(), n_moves.data_ptr<int32_t>(), ssd.data_ptr<int32_t>(),
+            n_ssd.data_ptr<int32_t>(), n_ram.data_ptr<int32_t>(), ah, hit.data_ptr<int32_t>(),
+            n_hit.data_ptr<int32_t>(), int(groups), int(owner.size(1)), int(rows), nullptr, nullptr};
+    TORCH_CHECK(stamp.has_value() == clock.has_value(), "stamp and clock: both or neither");
+    if (stamp.has_value()) {
+        check(*stamp, ids, at::kInt, {owner.size(0), owner.size(1)}, "stamp");
+        check(*clock, ids, at::kInt, {1}, "clock");
+        T.stamp = stamp->data_ptr<int32_t>();
+        T.clock = clock->data_ptr<int32_t>();
+    }
     k_tiers<<<1, TIER_THREADS, experts * sizeof(int32_t), stream()>>>(
         ids.data_ptr<int32_t>(), kinds.data_ptr<uint8_t>(), int(group), fetch.data_ptr<int32_t>(),
         n_fetch.data_ptr<int32_t>(), stage.data_ptr<int32_t>(), delta.data_ptr<int32_t>(), start.data_ptr<int32_t>(),
@@ -955,32 +1135,36 @@ void patch(at::Tensor & y, const at::Tensor & rows, const at::Tensor & cpu) {
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, bool beside) {
+void gather(const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, at::Tensor & dst, int64_t beside) {
     const c10::cuda::CUDAGuard guard(dst.device());
-    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && dst.size(1) % 16 == 0,
-                "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
+    TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) && src.size(1) % 16 == 0 &&
+                    dst.stride(1) == 1 && dst.stride(0) >= dst.size(1) && dst.stride(0) % 16 == 0,
+                "src [U, unit], dst [S, unit] (its rows may be strided: stride(0) >= unit) with unit and the stride "
+                "multiples of 16 bytes");
     TORCH_CHECK(fetch.dim() == 2 && fetch.size(0) == 2, "fetch [2, staging]");
     check(fetch, dst, at::kInt, {2, fetch.size(1)}, "fetch");
     check(n, dst, at::kInt, {1}, "n");
     check(src, dst, at::kByte, {src.size(0), src.size(1)}, "src");
-    check(dst, dst, at::kByte, {dst.size(0), dst.size(1)}, "dst");
+    TORCH_CHECK(dst.scalar_type() == at::kByte, "dst: uint8");
     TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 && reinterpret_cast<uintptr_t>(dst.data_ptr()) % 16 == 0,
                 "src and dst 16-byte aligned");
     const auto * f = fetch.data_ptr<int32_t>();
     const auto * from = reinterpret_cast<const uint4 *>(src.data_ptr());
     auto * to = reinterpret_cast<uint4 *>(dst.data_ptr());
-    if (beside) {
-        k_fetch<BESIDE_UNROLL><<<BESIDE_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
-                                                                          int(fetch.size(1)));
+    TORCH_CHECK(beside >= 0, "beside: a CTA count, or 0");
+    if (beside) {                                      // beside other work: on `beside` CTAs, many reads in flight
+        k_fetch<BESIDE_UNROLL><<<int(beside), FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
+                                                                          dst.stride(0) / 16, int(fetch.size(1)));
     } else {
-        k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, dst.size(1) / 16,
-                                                                         int(fetch.size(1)));
+        k_fetch<FETCH_UNROLL><<<FETCH_CTAS, FETCH_THREADS, 0, stream()>>>(f, n.data_ptr<int32_t>(), from, to, src.size(1) / 16,
+                                                                         dst.stride(0) / 16, int(fetch.size(1)));
     }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at::Tensor> srcs,
-                  std::vector<at::Tensor> dsts, int64_t ctas, int64_t part, int64_t parts) {
+                  std::vector<at::Tensor> dsts, int64_t ctas, int64_t part, int64_t parts, int64_t size,
+                  std::vector<at::Tensor> runs) {
     TORCH_CHECK(!dsts.empty() && dsts.size() == srcs.size() && int(dsts.size()) <= MAX_ROLES, "1 to ", MAX_ROLES,
                 " roles, a src and dst each");
     const c10::cuda::CUDAGuard guard(dsts[0].device());
@@ -991,14 +1175,26 @@ void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at
     Roles p{};
     p.roles = int(roles);
     p.staging = int(fetch.size(2));
-    TORCH_CHECK(parts >= 1 && 0 <= part && part < parts, "part ", part, " of ", parts);
+    TORCH_CHECK(size > 0 ? part >= 0 : (parts >= 1 && 0 <= part && part < parts), "part ", part, " of ", parts,
+                " (size ", size, ")");
     p.part = int(part);
     p.parts = int(parts);
+    p.size = int(size);
+    TORCH_CHECK(runs.empty() || runs.size() == dsts.size(), "runs: one per role, or none");
     for (int64_t r = 0; r < roles; ++r) {
         const at::Tensor & src = srcs[r];
         const at::Tensor & dst = dsts[r];
-        TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && dst.size(1) == src.size(1) &&
-                    dst.size(1) % 16 == 0, "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
+        if (!runs.empty()) {                                 // landing rows of their own width
+            const at::Tensor & run = runs[r];
+            TORCH_CHECK(run.scalar_type() == at::kLong && run.dim() == 3 && run.size(0) == src.size(0) &&
+                        run.size(2) == 2 && run.is_contiguous() && run.device() == dst.device(),
+                        "runs [U, X, 2] int64 beside the rows (a mapped host pool's device view)");
+            p.runs[r] = run.data_ptr<int64_t>();
+            p.extents[r] = int(run.size(1));
+            p.row_bytes[r] = src.size(1);
+        }
+        TORCH_CHECK(dst.is_cuda() && dst.dim() == 2 && src.dim() == 2 && (!runs.empty() || dst.size(1) == src.size(1))
+                    && dst.size(1) % 16 == 0, "src [U, unit], dst [S, unit] with unit a multiple of 16 bytes");
         check(src, dsts[0], at::kByte, {src.size(0), src.size(1)}, "src");
         check(dst, dsts[0], at::kByte, {dst.size(0), dst.size(1)}, "dst");
         TORCH_CHECK(reinterpret_cast<uintptr_t>(src.data_ptr()) % 16 == 0 &&
@@ -1015,10 +1211,17 @@ void gather_roles(const at::Tensor & fetch, const at::Tensor & n, std::vector<at
 // expert_prefetch@1 from the host's copy list: unit src[fetch[0, i]] -> slot dst[fetch[1, i]] for i < n, as one batch
 // of copy-engine DMA on `stream`, a run of consecutive units into consecutive slots one copy. `src` is pinned host
 // memory; the list is read before this returns.
-void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at::Tensor & dst, int64_t stream_handle) {
+// `runs` (docs/dev/v1-glm.md D8g): src is landing rows [rows, row], entry i's piece the extents runs[fetch[0, i], x] =
+// (offset in the row, nbytes) name there, back to back in its slot; a copy per extent
+void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at::Tensor & dst, int64_t stream_handle,
+                const std::optional<at::Tensor> & runs) {
     TORCH_CHECK(!src.is_cuda() && src.is_pinned() && dst.is_cuda() && src.dim() == 2 && dst.dim() == 2 &&
-                src.size(1) == dst.size(1) && src.is_contiguous() && dst.is_contiguous() && src.scalar_type() == at::kByte &&
-                dst.scalar_type() == at::kByte, "src [U, unit] pinned host bytes, dst [S, unit] CUDA bytes");
+                (runs || src.size(1) == dst.size(1)) && src.is_contiguous() && dst.is_contiguous() &&
+                src.scalar_type() == at::kByte && dst.scalar_type() == at::kByte,
+                "src [U, unit] (with runs [U, row]) pinned host bytes, dst [S, unit] CUDA bytes");
+    TORCH_CHECK(!runs || (!runs->is_cuda() && runs->scalar_type() == at::kLong && runs->dim() == 3 &&
+                          runs->size(0) == src.size(0) && runs->size(2) == 2 && runs->is_contiguous()),
+                "runs [U, X, 2] int64 on the host");
     TORCH_CHECK(!fetch.is_cuda() && fetch.scalar_type() == at::kInt && fetch.dim() == 2 && fetch.size(0) == 2 &&
                 n <= fetch.size(1), "fetch [2, F] int32 on the host, n <= F");
     const c10::cuda::CUDAGuard guard(dst.device());
@@ -1031,7 +1234,28 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
     std::vector<void *> dsts;
     std::vector<const void *> srcs;
     std::vector<size_t> sizes;
-    for (int64_t i = 0; i < n;) {
+    if (runs) {
+        const int64_t X = runs->size(1), row = src.size(1);
+        const int64_t * r = runs->data_ptr<int64_t>();
+        for (int64_t i = 0; i < n; ++i) {
+            TORCH_CHECK(u[i] >= 0 && u[i] < src.size(0) && s[i] >= 0 && s[i] < dst.size(0), "copy ", i,
+                        " outside src or dst");
+            int64_t at = 0;
+            for (int64_t x = 0; x < X; ++x) {
+                const int64_t off = r[(int64_t(u[i]) * X + x) * 2], nbytes = r[(int64_t(u[i]) * X + x) * 2 + 1];
+                if (!nbytes) {
+                    continue;
+                }
+                TORCH_CHECK(off >= 0 && off + nbytes <= row && at + nbytes <= unit, "copy ", i, ": a run past its row "
+                            "or slot");
+                dsts.push_back(to + int64_t(s[i]) * unit + at);
+                srcs.push_back(from + int64_t(u[i]) * row + off);
+                sizes.push_back(size_t(nbytes));
+                at += nbytes;
+            }
+        }
+    }
+    for (int64_t i = 0; i < (runs ? 0 : n);) {
         int64_t run = 1;
         while (i + run < n && u[i + run] == u[i] + run && s[i + run] == s[i] + run) {
             ++run;
@@ -1066,29 +1290,47 @@ void copy_batch(const at::Tensor & fetch, int64_t n, const at::Tensor & src, at:
 #endif
 }
 
-// `activation_loan@1`: torch's pluggable-allocator entry points over the one device range `loan_set` names (a
-// MemPool of the caching allocator asks them for its segments): first fit over the range's free extents, 512-byte
-// aligned, coalesced when a segment comes back. A segment the range cannot hold (the caching allocator's segments
-// for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each stream its own) is the
-// device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that way. (Failing it
-// instead does not make torch 2.11 return a MemPool's cached segments and ask again: the step stops, out of memory.)
-struct Loan {
+// `activation_loan@1`: torch's pluggable-allocator entry points over the device ranges `loan_set_ranges` names, in
+// their order (`use_ranges`: the smallest first, so small segments fill the small ranges; `loan_set`: one range) — a
+// MemPool of the caching allocator asks them for its segments: first fit over a range's free extents, the ranges in
+// order, 512-byte aligned, coalesced within its range when a segment comes back. A segment no range can hold (the
+// caching allocator's segments for a step can outgrow its allocations' peak: 20 MiB ones for 1–10 MiB blocks, each
+// stream its own) is the device's (cudaMalloc), freed when it comes back; `loan_overflow` keeps the most bytes out that
+// way. (Failing it instead does not make torch 2.11 return a MemPool's cached segments and ask again: the step stops,
+// out of memory.)
+struct LoanRange {
     char * base = nullptr;
     size_t cap = 0;
     std::map<size_t, size_t> free;                     // offset -> bytes
+};
+struct Loan {
+    std::vector<LoanRange> ranges;
     int64_t live = 0, live_bytes = 0, outside = 0, most = 0;   // segments out; their bytes
 };
 Loan loan;
 
 size_t loan_round(ssize_t size) { return (size_t(size) + 511) & ~size_t(511); }
 
-void loan_set(int64_t ptr, int64_t nbytes) {
+void loan_set_ranges(const std::vector<int64_t> & ptrs, const std::vector<int64_t> & sizes) {
     TORCH_CHECK(loan.live == 0, "activation_loan@1: ", loan.live, " segments of the loan are still out");
-    loan.base = reinterpret_cast<char *>(ptr);
-    loan.cap = size_t(nbytes) & ~size_t(511);
-    loan.free.clear();
-    loan.free[0] = loan.cap;
+    TORCH_CHECK(ptrs.size() == sizes.size(), "activation_loan@1: ", ptrs.size(), " ranges, ", sizes.size(), " sizes");
+    loan.ranges.clear();
+    for (size_t i = 0; i < ptrs.size(); ++i) {
+        LoanRange r;
+        r.base = reinterpret_cast<char *>(ptrs[i]);
+        r.cap = size_t(sizes[i]) & ~size_t(511);
+        for (const auto & o : loan.ranges) {
+            TORCH_CHECK(r.base + r.cap <= o.base || o.base + o.cap <= r.base, "activation_loan@1: ranges overlap");
+        }
+        if (r.cap) {
+            r.free[0] = r.cap;
+        }
+        loan.ranges.push_back(std::move(r));
+    }
+    loan.most = 0;                                                   // `loan_overflow`: per use
 }
+
+void loan_set(int64_t ptr, int64_t nbytes) { loan_set_ranges({ptr}, {nbytes}); }
 
 int64_t loan_live() { return loan.live; }
 
@@ -1101,16 +1343,18 @@ int64_t loan_overflow() { return loan.most; }
 extern "C" {
 void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
     const size_t n = loan_round(size);
-    for (auto it = loan.free.begin(); it != loan.free.end(); ++it) {
-        if (it->second >= n) {
-            const size_t at = it->first, left = it->second - n;
-            loan.free.erase(it);
-            if (left) {
-                loan.free[at + n] = left;
+    for (auto & r : loan.ranges) {
+        for (auto it = r.free.begin(); it != r.free.end(); ++it) {
+            if (it->second >= n) {
+                const size_t at = it->first, left = it->second - n;
+                r.free.erase(it);
+                if (left) {
+                    r.free[at + n] = left;
+                }
+                ++loan.live;
+                loan.live_bytes += int64_t(n);
+                return r.base + at;
             }
-            ++loan.live;
-            loan.live_bytes += int64_t(n);
-            return loan.base + at;
         }
     }
     void * out = nullptr;
@@ -1128,44 +1372,72 @@ void * holon_loan_malloc(ssize_t size, int, cudaStream_t) {
 void holon_loan_free(void * ptr, ssize_t size, int, cudaStream_t) {
     char * p = static_cast<char *>(ptr);
     loan.live_bytes -= int64_t(loan_round(size));
-    if (p < loan.base || p >= loan.base + loan.cap) {                // the device's
+    LoanRange * r = nullptr;
+    for (auto & o : loan.ranges) {
+        if (p >= o.base && p < o.base + o.cap) {
+            r = &o;
+        }
+    }
+    if (r == nullptr) {                                              // the device's
         cudaFree(ptr);
         loan.outside -= int64_t(loan_round(size));
         --loan.live;
         return;
     }
-    size_t at = size_t(p - loan.base), n = loan_round(size);
-    auto next = loan.free.lower_bound(at);
-    if (next != loan.free.end() && at + n == next->first) {          // the extent after it
+    size_t at = size_t(p - r->base), n = loan_round(size);
+    auto next = r->free.lower_bound(at);
+    if (next != r->free.end() && at + n == next->first) {            // the extent after it
         n += next->second;
-        next = loan.free.erase(next);
+        next = r->free.erase(next);
     }
-    if (next != loan.free.begin()) {                                 // the extent before it
+    if (next != r->free.begin()) {                                   // the extent before it
         auto prev = std::prev(next);
         if (prev->first + prev->second == at) {
             at = prev->first;
             n += prev->second;
-            loan.free.erase(prev);
+            r->free.erase(prev);
         }
     }
-    loan.free[at] = n;
+    r->free[at] = n;
     --loan.live;
 }
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("loan_set", &loan_set, "activation_loan@1: the range the loan's segments are cut from (none out)");
+    m.def("loan_set_ranges", &loan_set_ranges, "activation_loan@1: the ranges the loan's segments are cut from, in "
+          "order (none out; none overlapping)");
     m.def("loan_live", &loan_live, "activation_loan@1: the loan's segments out");
     m.def("loan_live_bytes", &loan_live_bytes, "activation_loan@1: the bytes of the loan's segments out");
-    m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once");
+    m.def("loan_overflow", &loan_overflow, "activation_loan@1: the most bytes of segments outside the range at once, "
+          "since the last loan_set");
     m.def("resolve", &resolve, "moe_resolve@1 (policy 0) or a variant into slots, fetch, n_fetch (and the counts, misses, "
           "errors, delta log, map and state in place)");
-    m.def("tiers", &tiers, "moe_tiers@1: the call's admissions and SSD misses through the exclusive RAM tier");
+    m.def("tiers", &tiers, "moe_tiers@2: the call's admissions and SSD misses through the exclusive RAM tier",
+          pybind11::arg("ids"), pybind11::arg("kinds"), pybind11::arg("group"), pybind11::arg("fetch"),
+          pybind11::arg("n_fetch"), pybind11::arg("stage"), pybind11::arg("delta"), pybind11::arg("start"),
+          pybind11::arg("n_delta"), pybind11::arg("residency"), pybind11::arg("host"), pybind11::arg("piece"),
+          pybind11::arg("classes"), pybind11::arg("owner"), pybind11::arg("capacity"), pybind11::arg("heat"),
+          pybind11::arg("io"), pybind11::arg("moves"), pybind11::arg("n_moves"), pybind11::arg("ssd"),
+          pybind11::arg("n_ssd"), pybind11::arg("n_ram"), pybind11::arg("rows"), pybind11::arg("ahead"),
+          pybind11::arg("hit"), pybind11::arg("n_hit"), pybind11::arg("stamp") = pybind11::none(),
+          pybind11::arg("clock") = pybind11::none());
     m.def("publish", &publish, "moe_patch_rows@1's publish: x's rows with a CPU entry into the CPU's mapped rows");
     m.def("patch", &patch, "moe_patch_rows@1: y[t, j] = rows[cpu[t, j]] where it is >= 0");
-    m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream");
+    m.def("copy_batch", &copy_batch, "expert_prefetch@1 from the host's list: copy-engine DMA on a stream (`runs`: "
+          "from landing rows, a copy per extent)", pybind11::arg("fetch"), pybind11::arg("n"), pybind11::arg("src"),
+          pybind11::arg("dst"), pybind11::arg("stream"), pybind11::arg("runs") = std::nullopt);
     m.def("fetch_roles", &gather_roles, "expert_fetch@1's gather_roles: every role's fetch of a group in one launch "
-          "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging)");
-    m.def("fetch", &gather, "expert_fetch@1 (beside: expert_prefetch@1's, on few SMs): dst[fetch[1, i]] = src[fetch[0, i]] "
-          "for i < min(n, staging)");
+          "on `ctas` CTAs: dsts[r][fetch[r, 1, i]] = srcs[r][fetch[r, 0, i]] for i < min(n[r], staging); one part of "
+          "the lists (`parts`, or a fixed `size`); `runs`: srcs are landing rows (D8f)",
+          pybind11::arg("fetch"), pybind11::arg("n"), pybind11::arg("srcs"), pybind11::arg("dsts"), pybind11::arg("ctas"),
+          pybind11::arg("part") = 0, pybind11::arg("parts") = 1, pybind11::arg("size") = 0,
+          pybind11::arg("runs") = std::vector<at::Tensor>{});
+    m.def("fetch_runs", [](const at::Tensor & fetch, const at::Tensor & n, const at::Tensor & src, const at::Tensor & dst,
+                           const at::Tensor & runs) {
+              gather_roles(fetch.unsqueeze(0), n, {src}, {dst}, FETCH_CTAS, 0, 1, 0, {runs});
+          }, "expert_fetch@1 from landing rows: dst[fetch[1, i]] = the extents runs[fetch[0, i]] name in src[fetch[0, i]]");
+    m.def("fetch", &gather, "expert_fetch@1 (beside > 0: on that many CTAs, beside other work — expert_prefetch@1's "
+          "ring, a store's moves): dst[fetch[1, i]] = src[fetch[0, i]] for i < min(n, staging) (dst's rows may be "
+          "strided)");
 }

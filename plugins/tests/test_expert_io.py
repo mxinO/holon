@@ -360,6 +360,12 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
     fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, dst)
     assert torch.equal(dst.cpu(), want)
     assert torch.equal(want[K + 29], data[2]) and not torch.equal(want[K + 4], data[0])
+    wide = torch.randint(0, 256, (K + staging + 30, unit + 4096), dtype=torch.uint8, generator=g)   # (D8x: strided
+    want = reference.expert_fetch(units, n, data, wide[:, :unit])              # rows, landing rows' first bytes)
+    rows = wide.to(device)
+    fetch_(units.to(device), torch.tensor([n], dtype=torch.int32, device=device), src, rows[:, :unit])
+    assert torch.equal(rows[:, :unit].cpu(), want) and torch.equal(want[K + 29], data[2])
+    assert torch.equal(rows[:, unit:].cpu(), wide[:, unit:])
     if hasattr(fetch_, "gather_roles"):         # both roles in one launch: each its own list, units and slots
         dst2 = torch.randint(0, 256, (K + staging + 30, unit + 16), dtype=torch.uint8, generator=g)
         data2 = torch.randint(0, 256, (10, unit + 16), dtype=torch.uint8, generator=g)
@@ -379,6 +385,43 @@ def test_fetch_gathers_the_listed_units(plugins, device, mapped):
                     assert torch.equal(d2[units2[1, :4].long()].cpu(), data2[units2[0, :4].long()])
                     assert not d2[units2[1, 4:].long()].any()
             assert torch.equal(d2[units2[1].long()].cpu(), data2[units2[0].long()])
+            d2.zero_()                         # an SSD round's fixed size: entries [r·4, (r + 1)·4)
+            fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                [data2.to(device)], [d2], part=1, size=4)
+            assert torch.equal(d2[units2[1, 4:].long()].cpu(), data2[units2[0, 4:].long()])
+            assert not d2[units2[1, :4].long()].any()
+            with pytest.raises(ValueError, match="not both"):
+                fetch_.gather_roles(units2[None].to(device), torch.tensor([6], dtype=torch.int32, device=device),
+                                    [data2.to(device)], [d2], part=0, parts=2, size=4)
+
+
+@pytest.mark.parametrize("device", DEVICES)
+def test_fetch_reads_landing_rows_by_their_runs(plugins, device):
+    """docs/dev/v1-glm.md D8f: from landing rows (each piece's extents at their offsets in an aligned superset, `runs`),
+    a slot gets the extents back to back, as the oracle does — 16-byte-aligned runs and unaligned ones — through the
+    instance's call and, both roles at once, `gather_roles`; landing rows wider than the slots."""
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    unit, row = 4096 + 48, 2 * 4096 + 8192
+    fetch_ = kernel(plugins, device, EXPERT_FETCH, provider, unit_bytes=unit, staging=4)
+    g = torch.Generator().manual_seed(1)
+    rows = torch.randint(0, 256, (5, row), dtype=torch.uint8, generator=g)
+    runs = torch.tensor([[[32, 2048], [8192 + 32, unit - 2048]], [[16, 4096], [4096 + 4096, 48]],
+                         [[7, 1000], [9000, unit - 1000]], [[0, unit], [0, 0]], [[100, 3], [200, unit - 3]]],
+                        dtype=torch.int64)
+    dst = torch.randint(0, 256, (K + 8, unit), dtype=torch.uint8, generator=g)
+    units = torch.tensor([[2, 0, 4, 1], [K + 1, K + 3, K, K + 7]], dtype=torch.int32)
+    want = reference.expert_fetch(units, 4, rows, dst.clone(), runs)
+    assert torch.equal(want[K + 3, :2048], rows[0, 32:32 + 2048])
+    d = dst.to(device)
+    fetch_(units.to(device), torch.tensor([4], dtype=torch.int32, device=device), rows.to(device), d, runs.to(device))
+    assert torch.equal(d.cpu(), want)
+    if hasattr(fetch_, "gather_roles"):
+        d, d2 = dst.to(device), dst.to(device)
+        units2 = torch.tensor([[3, 1, 0, 2], [K + 2, K + 4, K + 5, K + 6]], dtype=torch.int32)
+        fetch_.gather_roles(torch.stack([units, units2]).to(device), torch.tensor([4, 3], dtype=torch.int32,
+                            device=device), [rows.to(device)] * 2, [d, d2], runs=[runs.to(device)] * 2)
+        assert torch.equal(d.cpu(), want)
+        assert torch.equal(d2.cpu(), reference.expert_fetch(units2, 3, rows, dst.clone(), runs))
 
 
 def test_prefetch_is_selected_for_its_copy_mode():
@@ -476,14 +519,72 @@ def _tiered(seed: int, groups: int = 3, experts: int = 32, free: int = 3) -> dic
 
 
 @pytest.mark.parametrize("device", DEVICES)
+@pytest.mark.parametrize("free", [0, 2])
+def test_tiers_place_a_policys_spares_by_its_int_heat(plugins, device, free):
+    """docs/dev/v1-glm.md D8a: a policy with spares (F10) under exclusive tiers — a spare refilled, its owner still
+    mapped (`(g, SPARE, b)`): b placed as a victim is (free units, else over RAM's coldest by the int32 heat, else the
+    SSD), its slots demoted; an owner back in its spare (`(g, OWN, b)`): its RAM units free; a promotion into a spare
+    whose owner left VRAM before: as into empty slots (no staging, no placement) — the oracle's, exactly."""
+    experts, layer = 32, 2
+    t = _tiered(5, free=free)
+    heat = (t["heat"] * 2).int()                                # an int32 heat (placement.promote's `last`)
+    res = t["residency"][layer]
+    vram = (res >= 0).all(-1).nonzero().flatten().tolist()
+    ram = ((res == -1).all(-1) & (t["host"][layer] >= 0).all(-1)).nonzero().flatten().tolist()
+    v, back, gone = vram[0], ram[0], ram[1]                     # a refill victim; an owner back; a spare's owner
+    res[back] = K + E + 100                                     # (back in its spare's slots)
+    a = (res == -2).all(-1).nonzero().flatten()[0].item()       # promoted into gone's spare, from the SSD
+    res[a] = K + E + 101
+    ids = torch.tensor([[a, v]], dtype=torch.int32)
+    kinds = torch.tensor([DECODE], dtype=torch.uint8)
+    fetch = torch.full((ROLES, 2, E), -1, dtype=torch.int32)
+    fetch[:, 0, 0], fetch[:, 1, 0] = -2 - a, K + E + 101
+    n_fetch = torch.ones(ROLES, dtype=torch.int32)
+    stage = (K + torch.arange(E)).expand(ROLES, E).int().contiguous()
+    records = [(layer, -5, back), (layer, a, gone), (layer, -4, v)]
+    want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
+                               t["piece"], t["classes"], t["owner"], t["capacity"], heat, 4)
+    provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
+    tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
+    delta = torch.tensor(records, dtype=torch.int32)
+    dev = {n: x.clone().to(device) for n, x in (t | {"fetch": fetch, "n_fetch": n_fetch, "stage": stage, "ids": ids,
+                                                     "kinds": kinds, "delta": delta, "heat": heat}).items()}
+    out = {"io": torch.zeros(ROLES, 1 + E, 3, dtype=torch.int32), "moves": torch.zeros(ROLES, 4, E, dtype=torch.int32),
+           "n_moves": torch.zeros(ROLES, 2, dtype=torch.int32), "ssd": torch.full((ROLES, 2, E), -1, dtype=torch.int32),
+           "n_ssd": torch.zeros(ROLES, dtype=torch.int32), "n_ram": torch.zeros(ROLES, dtype=torch.int32),
+           "hit": torch.full((ROLES, 2, E), -1, dtype=torch.int32), "n_hit": torch.zeros(ROLES, dtype=torch.int32)}
+    out = {n: x.to(device) for n, x in out.items()}
+    tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
+          torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([3], dtype=torch.int32, device=device),
+          dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"], dev["heat"],
+          out["io"], out["moves"], out["n_moves"], out["ssd"], out["n_ssd"], out["n_ram"], 4, None, out["hit"],
+          out["n_hit"])
+    for name in ("residency", "host", "owner"):
+        assert torch.equal(dev[name].cpu(), want[name]), name
+    assert torch.equal(out["n_moves"].cpu(), want["n_moves"]) and torch.equal(out["ssd"][:, :, :1].cpu(),
+                                                                              want["ssd"][:, :, :1])
+    assert (want["host"][layer, back] == -1).all() and not (want["owner"] == layer * experts + back).any()
+    assert int(want["n_moves"][0, 1]) == 0 and want["ssd"][0, 1, 0] == K + E + 101    # a: straight into its slots
+    assert (want["residency"][layer, v] < 0).all() and int(want["n_moves"][0, 0]) == int(
+        (want["residency"][layer, v] == -1).all())                                     # v placed, demoted if in RAM
+
+
+@pytest.mark.parametrize("device", DEVICES)
 @pytest.mark.parametrize("policy", ["lfu", ""])
-@pytest.mark.parametrize("tokens, free", [(1, 0), (6, 3), (12, 0), (40, 20)])
-def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
-    """`moe_tiers@1` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
+@pytest.mark.parametrize("tokens, free, ahead", [(1, 0, False), (6, 3, False), (12, 0, True), (40, 20, False),
+                                                 (40, 20, True), (6, 0, False)])
+def test_tiers_match_the_oracle(plugins, device, policy, tokens, free, ahead):
+    """`moe_tiers@2` after a resolve (F11's, or @1's) with exclusive tiers: admissions staged and moved into their
     victims' slots, victims demoted into the admitted's RAM units, free units or RAM's coldest expert's (displaced to
     the SSD) or sent to the SSD; decode SSD misses kept the same way; every SSD read listed with its unit; the map, RAM
     units, owners, fetch list, reads, demotions and moves the oracle's, exactly. Without heat (@1) nothing is
-    displaced."""
+    displaced. SSD reads land in landing rows (docs/dev/v1-glm.md D8f): the j-th by id in row j % rows (rows 3: rounds),
+    its io row (piece, row, keep unit), its own fetch list; the RAM entries stay in the fetch list, in order. A miss
+    the layer read ahead (`ahead`: every other SSD-only expert) is listed with its row, not read, never kept — with
+    decode rows and free RAM units beside it (docs/dev/v1-glm.md D8f; step 1's review A S1-m2, C S1-m3). With heat,
+    units stamped by the previous call (a third of them) are never displaced, the call's demotions stamp theirs and the
+    clock advances (docs/dev/v1-glm.md §13 step 7: moves beside the next calls). The layer's RAM experts all equally
+    cold (6 tokens, no free unit: more placements than free units, each displacement a tie by index)."""
     from holon_plugins.placement.lfu.reference import moe_resolve_lfu
 
     experts, layer = 32, 2
@@ -503,24 +604,53 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
         fetch, n_fetch = reference.moe_resolve(ids, kinds, residency, t["host"][layer], limits, E, stage=stage)[1:3]
         records, after = [], residency
     t["residency"][layer] = after
+    if tokens == 6 and not free and policy:             # RAM's experts of the layer all equally cold: ties by index
+        ram = (after == -1).all(-1) & (t["host"][layer] >= 0).all(-1)
+        t["heat"][layer][ram] = t["heat"][layer].min() - 1
     heat = t["heat"] if policy else None
+    rows = 3
+    sets = torch.full((experts,), -1, dtype=torch.int32)
+    if ahead:                                           # every other SSD-only expert of the layer, rows 3 on
+        only = (t["residency"][layer] == -2).all(-1).nonzero().flatten()[::2]
+        sets[only] = rows + torch.arange(len(only), dtype=torch.int32)
+    stamps = None
+    if policy:                                          # a third of the units demoted into by the previous call
+        stamp = torch.where(torch.rand(t["owner"].shape, generator=g) < 1 / 3, 5, -1).int()
+        stamps = (stamp, torch.tensor([5], dtype=torch.int32))
     want = reference.moe_tiers(ids, kinds, layer, fetch, n_fetch, stage, records, t["residency"], t["host"],
-                               t["piece"], t["classes"], t["owner"], t["capacity"], heat)
+                               t["piece"], t["classes"], t["owner"], t["capacity"], heat, rows,
+                               sets if ahead else None, *(stamps or ()))
     provider = "testing.ref_kernels" if device == "cpu" else "kernels.expert_io"
     tiers = kernel(plugins, device, MOE_TIERS, provider, experts=experts, top_k=K, roles=ROLES)
     delta = torch.tensor([(layer, a, b) for _, a, b in records] or [[0, 0, 0]], dtype=torch.int32).view(-1, 3)
     dev = {n: v.clone().to(device) for n, v in (t | {"fetch": fetch, "n_fetch": n_fetch, "stage": stage, "ids": ids,
                                                        "kinds": kinds, "delta": delta}).items()}
-    io = torch.zeros(ROLES, 1 + E, 2, dtype=torch.int32, device=device)
+    io = torch.zeros(ROLES, 1 + E, 3, dtype=torch.int32, device=device)
     moves = torch.zeros(ROLES, 4, E, dtype=torch.int32, device=device)
     n_moves = torch.zeros(ROLES, 2, dtype=torch.int32, device=device)
+    ssd = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
+    n_ssd, n_ram, n_hit = (torch.zeros(ROLES, dtype=torch.int32, device=device) for _ in range(3))
+    hit = torch.full((ROLES, 2, E), -1, dtype=torch.int32, device=device)
+    dev_stamps = [x.clone().to(device) for x in stamps or ()]
     tiers(dev["ids"], dev["kinds"], layer, dev["fetch"], dev["n_fetch"], dev["stage"], dev["delta"],
           torch.zeros(1, dtype=torch.int32, device=device), torch.tensor([len(records)], dtype=torch.int32,
                                                                          device=device),
           dev["residency"], dev["host"], dev["piece"], dev["classes"], dev["owner"], dev["capacity"],
-          dev["heat"] if policy else None, io, moves, n_moves)
-    for name in ("fetch", "residency", "host", "owner", "n_moves"):
-        assert torch.equal(dev[name].cpu() if name in dev else n_moves.cpu(), want[name]), name
+          dev["heat"] if policy else None, io, moves, n_moves, ssd, n_ssd, n_ram, rows,
+          sets.to(device) if ahead else None, hit, n_hit, *dev_stamps)
+    if stamps:
+        assert torch.equal(dev_stamps[0].cpu(), want["stamp"]) and int(dev_stamps[1]) == int(want["clock"][0]) == 6
+    for name in ("residency", "host", "owner"):
+        assert torch.equal(dev[name].cpu(), want[name]), name
+    assert torch.equal(n_moves.cpu(), want["n_moves"]) and torch.equal(n_ram.cpu(), want["n_ram"])
+    assert torch.equal(n_ssd.cpu(), want["n_ssd"]) and torch.equal(n_hit.cpu(), want["n_hit"])
+    assert not ahead or int(want["n_hit"][0]) > 0
+    for r in range(ROLES):
+        assert torch.equal(dev["fetch"][r, :, :int(n_ram[r])].cpu(), want["fetch"][r, :, :int(n_ram[r])])
+        assert torch.equal(ssd[r, :, :int(n_ssd[r])].cpu(), want["ssd"][r, :, :int(n_ssd[r])])
+        assert torch.equal(hit[r, :, :int(n_hit[r])].cpu(), want["hit"][r, :, :int(n_hit[r])])
+    if tokens == 6 and not free and policy:             # (a tie was taken: one of the equally cold displaced)
+        assert int(((t["residency"] == -1).all(-1) & (want["residency"] == -2).all(-1)).sum()) > 0
     for r in range(ROLES):
         assert io[r, 0, 0] == len(want["io"][r]) and io[r, 1:1 + len(want["io"][r])].cpu().tolist() == \
             [list(x) for x in want["io"][r]]
@@ -532,9 +662,50 @@ def test_tiers_match_the_oracle(plugins, device, policy, tokens, free):
         held = own[c, :int(t["capacity"][c])]
         assert len(set(held[held >= 0].tolist())) == int((held >= 0).sum())
     assert ((res == -1) == (host >= 0)).all() and ((res >= 0) | (res == -1) | (res == -2)).all()
-    reads = sum(len(x) for x in want["io"])
+    reads = sum(len(x) for x in want["io"]) + int(want["n_hit"].sum())
     assert reads == sum(int((fetch[r, 0, :int(n_fetch[r])] <= -2).sum()) for r in range(ROLES))
+    assert all(int(want["n_ram"][r] + want["n_ssd"][r] + want["n_hit"][r]) == int(n_fetch[r]) for r in range(ROLES))
+    assert all(row == j % rows for x in want["io"] for j, (_, row, _) in enumerate(x))
     if policy and tokens == 1:                                    # (the cases' coverage, checked once)
         assert records and (want["n_moves"][:, 0] > 0).all()         # victims demoted
-    if tokens == 40:
+    if tokens == 40 and free:
         assert (want["residency"] == -2).sum() < (t["residency"] == -2).sum()   # SSD reads kept in free units
+    if ahead:                                                   # a read-ahead hit: no read, never kept in RAM
+        early = (sets >= 0).nonzero().flatten()
+        assert not (want["residency"][layer, early] == -1).any()
+        assert all(not {piece for piece, _, _ in want["io"][r]} & {int(t["piece"][layer, e, r]) for e in early}
+                   for r in range(ROLES))
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
+def test_a_loan_over_several_ranges_fills_them_in_order(plugins):
+    """`activation_loan@1`'s `use_ranges` (docs/dev/v1-glm.md D8w): the caching allocator's segments cut from the ranges
+    in the given order (the smallest first: a segment the first range holds goes there; one only a later range holds
+    goes there), none outside them while they hold it, a returned segment coalesced within its range, a range set
+    refused while segments are out or where two ranges overlap; past every range, the device's own memory, counted."""
+    loan = kernel(plugins, "cuda", "activation_loan@1", "kernels.expert_io")
+    whole = torch.empty(64 << 20, dtype=torch.uint8, device="cuda")
+    # 8 MiB, then 48 MiB, a gap between; neither starting where `whole` does (torch's allocator keys its blocks by
+    # address: a segment there would alias `whole`'s block, freed with the pool)
+    small, large = whole[2 << 20:10 << 20], whole[16 << 20:]
+
+    def inside(t: torch.Tensor, r: torch.Tensor) -> bool:
+        return r.data_ptr() <= t.data_ptr() and t.data_ptr() + t.nbytes <= r.data_ptr() + r.numel()
+    with loan.use_ranges([small, large]):
+        a = torch.empty(512 << 10, dtype=torch.uint8, device="cuda")        # (a 2 MiB segment): the small range
+        b = torch.empty(30 << 20, dtype=torch.uint8, device="cuda")         # only the large range holds it
+    placed = inside(a, small), inside(b, large), loan.lib.loan_overflow()   # (no tensor in an assert: pytest keeps
+    with pytest.raises(RuntimeError, match="still out"):                    # its operands past the pool's release)
+        loan.lib.loan_set_ranges([small.data_ptr()], [small.numel()])
+    del a, b
+    loan.release()
+    assert placed == (True, True, 0)
+    with pytest.raises(RuntimeError, match="overlap"):
+        loan.lib.loan_set_ranges([whole.data_ptr(), small.data_ptr()], [whole.numel(), small.numel()])
+    with loan.use_ranges([small, large]):
+        c = torch.empty(40 << 20, dtype=torch.uint8, device="cuda")         # the large range, whole again
+        d = torch.empty(20 << 20, dtype=torch.uint8, device="cuda")         # no range holds it: the device's
+    placed = inside(c, large), inside(d, small) or inside(d, large), loan.lib.loan_overflow() >= 20 << 20
+    del c, d
+    loan.release()
+    assert placed == (True, False, True)

@@ -6,21 +6,27 @@ time; decode tok/s = (tokens - 1) / (last token - first token). Prompts are span
 every engine and round, so an expert cache sees real routing and no prefix cache can reuse one prompt for another:
 - `--corpus v1` (X): the judge prompt set's token ids, concatenated and cut at fixed, distinct offsets (wrapping),
   one request per context;
-- `--corpus fn` (FN, D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in that order and tokenized with
-  Qwen3.8-Flash-Next's tokenizer (N tokens); context C (index c in `--contexts`) has the candidate starts
-  (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up span (the corpus's last 2,048 tokens)
-  moved past it, and `--spans` picks the candidates timed (default the first 3).
+- `--corpus fn` (FN, D11) / `glm` (GLM, docs/dev/v1-glm.md D11): the text of v1-long, v1-qwen3_5 and v1, concatenated in
+  that order and tokenized with Qwen3.8-Flash-Next's / GLM-5.3-Flash's tokenizer (N tokens); context C (index c in
+  `--contexts`) has the candidate starts (k * (N // 6) + c * (N // 18)) mod N, k = 0..5, a start inside the warm-up
+  span (the corpus's last 2,048 tokens) moved past it, and `--spans` picks the candidates timed (default the first 3).
 The orchestrator writes the warm-up and the timed requests' ids to `requests.json`; workers read only that file.
 
 Engines: `llama` = llama-server (`--server`; its own `timings`: prompt_ms, and predicted_ms over the tokens after the
 first); `freetoken` = FreeToken's offline `LLM` in its own venv (`--python`), timed in process as each token reaches
 the frontend; `strata` = Strata's engine (`--strata`) in its `--serve` mode with raw token ids on stdin, timed in
 this client as each verify window's tokens reach stdout (`--eos-ids 999999`, an id outside the vocabulary, so a
-request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `holon` = Holon's
-`Engine` in process (`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
+request ends only at its length; `--prompt-cache 0`; every request must report 0 reused tokens); `maya` = Project
+Maya's engine (`--maya`, GLM-5.3-Flash) in its `--serve` mode, the same raw-id protocol as Strata's (`--eos-ids
+2147483647`, an id no request produces; `DONE`'s `reused` must be 0); `holon` = Holon's `Engine` in process
+(`--holon-python`), stamped as each token reaches the host, prefix cache off. An arm's flags are
 the engine's own command-line flags (FreeToken's parsed by its `parse_args`, so its CLI defaults apply; Holon's by
-`holon serve`'s), and an arm's `env` its environment. Arms are interleaved: every round runs each arm once, in
-reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is sampled with nvidia-smi.
+`holon serve`'s, with `--auto` the values `holon serve` derives where no flag gives them: the host budget, the GPU
+slack, a tier fitted to the RAM, though no pin lock; without it the engine's own defaults), an arm's `env` its
+environment, its `python` the interpreter its worker runs in (e.g. a Holon arm on another checkout's venv, for an A/B
+against `main`), and its `wrap` a command prefix for the server (Holon's: the worker). Arms are interleaved: every
+round runs each arm once, in reverse order on odd rounds, each after checking that the GPU is idle; peak VRAM is
+sampled with nvidia-smi.
 
     python bench/offload_ctx.py run --name <name> --gpu 0 --model <file.gguf> --arms arms.json --rounds 3 \\
         [--contexts 1024 4096 32768] [--ctx 33792] [--corpus v1|fn] [--spans 0 1 2] [--server <llama-server>] \\
@@ -61,11 +67,13 @@ OUTPUT = 256
 # D11's corpus (docs/dev/v1-flash-next.md): these prompt sets' text, in this order, in Qwen3.8-Flash-Next's tokenizer
 FN_SETS = ("v1-long.jsonl", "v1-qwen3_5.jsonl", "v1.jsonl")
 FN_TOKENIZER = ("Qwen/Qwen3.8-Flash-Next", "de4b8e4d43b917e7706784d8bb445c9af86a3540")
+TOKENIZERS = {"fn": FN_TOKENIZER, "glm": ("zai-org/GLM-5.3-Flash", "46a050bec13002ad29ee795c16e61cf4fa3c4a9c")}
 FN_WARMUP = 2048                                        # the warm-up span: the corpus's last 2,048 tokens
 STRATA_NO_EOS = 999999                                  # an id outside the vocabulary: Strata's ignore-EOS
+MAYA_NO_EOS = 2147483647                                # Maya accepts any id in [0, 2^31 - 1] (generate.cpp:524-543)
 # log lines kept in the record: what each engine resolved (placement, cache size, strategy, hit rates)
 KEEP = re.compile(r"(?i)moe.cache|moe strateg|auto-selected|offloaded \d+/\d+ layers|fit|n_cpu_moe|model buffer size|"
-                  r"kv.?cache size|slots|hit rate|load_mode|expert")
+                  r"kv.?cache size|slots|hit rate|load_mode|expert|glm stat|glm fast|cpu lane|ram tier|^layout")
 
 
 def prompt(corpus: list[int], context: int) -> list[int]:
@@ -77,11 +85,11 @@ def span(corpus: list[int], start: int, n: int) -> list[int]:
     return [corpus[(start + i) % len(corpus)] for i in range(n)]
 
 
-def fn_corpus() -> list[int]:
+def fn_corpus(name: str = "fn") -> list[int]:
     """D11's corpus: the prompt sets' text concatenated and tokenized with the model's tokenizer (special tokens kept
     as the template wrote them)."""
     from tokenizers import Tokenizer
-    repo, rev = FN_TOKENIZER
+    repo, rev = TOKENIZERS[name]
     hub = pathlib.Path(os.environ.get("HF_HUB_CACHE") or pathlib.Path(os.environ.get("HF_HOME") or
                                                                        "~/.cache/huggingface").expanduser() / "hub")
     tok = Tokenizer.from_file(str(hub / f"models--{repo.replace('/', '--')}" / "snapshots" / rev / "tokenizer.json"))
@@ -109,7 +117,7 @@ def plan(a: argparse.Namespace) -> dict:
         reqs = [{"key": str(c), "context": c, "start": OFFSETS.get(c, 0), "ids": prompt(corpus, c)}
                 for c in a.contexts]
     else:
-        corpus = fn_corpus()
+        corpus = fn_corpus(a.corpus)
         warm = {"ids": corpus[-FN_WARMUP:], "output": 64}
         starts = fn_starts(len(corpus), a.contexts, max(6, max(a.spans) + 1))
         reqs = [{"key": f"{c}/{k}", "context": c, "start": starts[c][k], "ids": span(corpus, starts[c][k], c)}
@@ -292,6 +300,89 @@ def strata_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                                          if k in info}}
 
 
+def maya_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
+    """Project Maya's engine (v1.1.27) in `--serve` mode: `READY <ctx> ...`, then `GEN <n> temperature=0 <ids>` on
+    stdin; `T <id>` per token, then `DONE <produced> <prompt_n> <prompt_ms> <decode_ms> <finish> <draft_hits>
+    <draft_steps> <reused> <hits> <lookups>` (My generate.cpp:2063, 2213-2222, 3893-3894, 7005-7041). Its pack is in
+    the arm's flags (`--glm-pack <dir>`); `--kv-resident` equal to the context keeps a 32K configuration unstreamed
+    (docs/dev/v1-glm.md D11). The engine's `glm stat:` stderr lines (decode hit rate, RAM fetches, disk reads, CPU lane,
+    pool and RAM tier use) go to the server log, one after each request (the warm-up's first); each timed request's
+    is kept in its row (`stat`: per decode token, as the engine counts them)."""
+    cmd = [*shlex.split(a.wrap), a.server, "--serve", "--max-context", str(a.ctx), "--kv-resident", str(a.ctx),
+           "--eos-ids", str(MAYA_NO_EOS), *shlex.split(a.flags)]
+    log = open(a.log, "w") if a.log else subprocess.DEVNULL
+    engine = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, text=True, bufsize=1)
+    try:
+        for line in engine.stdout:
+            if line.startswith("READY"):
+                break
+        else:
+            raise RuntimeError(f"maya exited with {engine.wait()} before READY")
+
+        def request(ids: list[int], n: int) -> dict:
+            t0 = time.perf_counter()
+            engine.stdin.write(f"GEN {n} temperature=0 {','.join(map(str, ids))}\n")
+            engine.stdin.flush()
+            stamps, out = [], []
+            for line in engine.stdout:
+                now = time.perf_counter()
+                if line.startswith("T "):
+                    stamps.append(now)
+                    out.append(int(line.split()[1]))
+                elif line.startswith("ERR"):
+                    raise RuntimeError(line.strip())
+                elif line.startswith("DONE "):
+                    f = line.split()
+                    break
+            else:
+                raise RuntimeError(f"maya exited with {engine.wait()} during a request")
+            assert len(stamps) == int(f[1]) == n and f[5] == "length", (len(stamps), f[:6])
+            return {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0]),
+                    "reused": int(f[8]), "hit_rate": int(f[9]) / max(int(f[10]), 1),
+                    "engine_prompt_ms": float(f[3]), "engine_decode_ms": float(f[4]), "ids": out}
+
+        warm, reqs = requests(a, corpus)
+        request(warm["ids"], warm["output"])
+        results = {r["key"]: {k: round(v, 4) if isinstance(v, float) else v
+                              for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+        assert all(r["reused"] == 0 for r in results.values()), "a timed request reused tokens"
+    finally:
+        try:
+            engine.stdin.write("QUIT\n")
+            engine.stdin.flush()
+            engine.wait(300)
+        except (OSError, subprocess.TimeoutExpired):
+            engine.kill()
+            engine.wait()
+        if a.log:
+            log.close()
+    if a.log:                                  # the requests' `glm stat:` lines, in order after the warm-up's
+        stats = [_maya_stat(x) for x in pathlib.Path(a.log).read_text().splitlines() if x.startswith("glm stat:")]
+        if len(stats) == 1 + len(results):
+            for res, st in zip(results.values(), stats[1:], strict=True):
+                res["stat"] = st
+    return {"results": results}
+
+
+def _maya_stat(line: str) -> dict:
+    """A `glm stat:` line's per-token counters (My generate.cpp:2227-2238)."""
+    num = r"([0-9.]+)"
+    keys = (("decode_ms", rf"decode {num} ms/tok"), ("vram_hit_pct", rf"vram hit {num}%"),
+            ("ram_fetches", rf"ram fetches {num}/tok"), ("disk_reads", rf"disk {num} reads/tok"),
+            ("disk_waits", rf"in {num} waits/tok"), ("disk_ms", rf"waits/tok, {num} ms/tok"),
+            ("promotions", rf"promotions {num}/tok"), ("cpu_lane", rf"cpu lane {num}/tok"),
+            ("cpu_lane_ms", rf"cpu lane {num}/tok in {num} ms/tok"))
+    out = {}
+    for k, pat in keys:
+        m = re.search(pat, line)
+        if m:
+            out[k] = float(m.groups()[-1])
+    m = re.search(r"vram (\d+)/(\d+) ram (\d+)/(\d+)", line)
+    if m:
+        out["vram_used"], out["vram_slots"], out["ram_used"], out["ram_slots"] = map(int, m.groups())
+    return out
+
+
 def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     """Holon's `Engine` in process (as milestone X's context spike did), a stamp as each token reaches the host; prefix
     cache off, so no request reuses another's tokens."""
@@ -299,14 +390,27 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
 
     import torch
     from holon.api import SamplingParams
-    from holon.core.cli import engine_config, engine_flags
-    from holon.core.engine import Engine
+    from holon.core.cli import engine_flags, engine_settings
+    from holon.core.engine import Engine, EngineConfig
 
+    # `--auto` in an arm's flags: the values `holon serve` derives (docs/dev/v1-auto-config.md P2) where no flag gives
+    # them: the host budget, the GPU slack, a tier fitted to the RAM; otherwise the engine's own defaults.
+    words = shlex.split(a.flags)
     flags = argparse.ArgumentParser()
-    engine_flags(flags)
-    cfg = engine_config(a.model, flags.parse_args(shlex.split(a.flags)))
+    engine_flags(flags, given_only=True)
+    given = engine_settings(flags.parse_args([w for w in words if w != "--auto"]))
+    if "--auto" in words:
+        from holon.core.cli import host_budget  # (a tree before auto-config has none)
+
+        budget = host_budget(given)
+        given = {"clamp_context": True, "memory_fraction": 0.0} | (
+            {"host_memory": budget} if budget is not None else {}) | given
+    cfg = EngineConfig(model=a.model, **{k: v for k, v in given.items() if v != "auto"})   # the context: --ctx
     engine = Engine(dataclasses.replace(cfg, max_seqs=1, max_model_len=a.ctx, prefix_cache=False))
     store, seen = engine.ctx.shared_objects.get("std.moe.offload"), {"hits": 0, "routed": 0}
+    if store is not None:                    # the layout, for the record: VRAM cache slots and RAM units a class
+        print("layout", json.dumps({n: {"cache": c.size - c.null - c.staging, "ram": c.held}
+                                    for n, c in store.classes.items()}), flush=True)
     if store is not None:                   # an offload deployment: the decode rows' routed experts found resident
         prev = {"map": store.residency.host.copy()}
 
@@ -326,38 +430,57 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
             by[acc] += n
         return sum(n for _, n in rows), sum((acc + 1) * n for acc, n in rows), by
 
+    io = getattr(getattr(getattr(store, "io", None), "service", None), "native", None)    # exclusive tiers' I/O
+
+    def read() -> int:                       # the SSD bytes the store's I/O worker read so far (0: no SSD tier)
+        return io.io_stats()["bytes"] if io is not None else 0
+
     def request(ids: list[int], n: int) -> dict:
-        stamps, done = [], False
+        stamps, done, out = [], False, []
         torch.cuda.synchronize()
         seen.update(hits=0, routed=0)
         rows0, tokens0, by0 = passes()
+        b0 = b1 = read()
+        least, retries = torch.cuda.mem_get_info()[0], torch.cuda.memory_stats()["num_alloc_retries"]
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
         while not done:
-            for d in engine.step():
+            steps = engine.step()
+            least = min(least, torch.cuda.mem_get_info()[0])    # the device's free memory after each step's launch
+            for d in steps:
                 if d.rid == rid:
+                    if not stamps:
+                        b1 = read()          # the prompt's reads (the decode's from here)
                     stamps += [time.perf_counter()] * len(d.token_ids)
+                    out += list(d.token_ids)
                     done = d.finish_reason is not None
         assert len(stamps) == n, (len(stamps), n)
         rows, tokens, by = passes()
-        out = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
+        res = {"prefill_tps": len(ids) / (stamps[0] - t0), "decode_tps": (n - 1) / (stamps[-1] - stamps[0])}
         if rows > rows0:
-            out["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
+            res["tokens_per_pass"] = (tokens - tokens0) / (rows - rows0)
             for d in range(1, 1 + max(by, default=0)):   # draft d accepted, given d - 1 were (Strata's spec depth)
                 tested = sum(n - by0[a] for a, n in by.items() if a >= d - 1)
-                out[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
+                res[f"accept_d{d}"] = sum(n - by0[a] for a, n in by.items() if a >= d) / max(tested, 1)
         if seen["routed"]:
-            out["hit_rate_all"] = seen["hits"] / seen["routed"]
-        return out
+            res["hit_rate_all"] = seen["hits"] / seen["routed"]
+        res |= {"least_free_mib": least >> 20,
+                "alloc_retries": torch.cuda.memory_stats()["num_alloc_retries"] - retries}
+        if io is not None:                   # SSD bytes: the prompt's, and a decode token's after it
+            b2 = read()
+            res |= {"ssd_prompt_bytes": b1 - b0, "ssd_decode_bytes_per_token": (b2 - b1) / max(n - 1, 1)}
+        return res | {"ids": out}
 
     warm, reqs = requests(a, corpus)
     request(warm["ids"], warm["output"])
-    results = {r["key"]: {k: round(v, 4) for k, v in request(r["ids"], OUTPUT).items()} for r in reqs}
+    results = {r["key"]: {k: round(v, 4) if isinstance(v, float) else v for k, v in request(r["ids"], OUTPUT).items()}
+               for r in reqs}
     engine.close()
     return {"results": results}
 
 
-WORKERS = {"llama": llama_worker, "freetoken": freetoken_worker, "strata": strata_worker, "holon": holon_worker}
+WORKERS = {"llama": llama_worker, "freetoken": freetoken_worker, "strata": strata_worker, "maya": maya_worker,
+           "holon": holon_worker}
 
 
 def worker(a: argparse.Namespace) -> None:
@@ -391,12 +514,14 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         time.sleep(10)
     else:
         raise SystemExit(f"GPU {a.gpu} stayed busy: {busy}")
-    py = {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
+    py = arm.get("python") or {"freetoken": a.python, "holon": a.holon_python}.get(arm["engine"], sys.executable)
     cmd = [py, str(pathlib.Path(__file__)), "worker", "--engine", arm["engine"], "--model", a.model, "--ctx",
            str(a.ctx), f"--flags={arm['flags']}", "--requests", str(log.parent / "requests.json")]   # one '-'-led value
-    if arm["engine"] in ("llama", "strata"):
-        cmd += ["--server", a.server if arm["engine"] == "llama" else a.strata,
+    if arm["engine"] in ("llama", "strata", "maya"):
+        cmd += ["--server", {"llama": a.server, "strata": a.strata, "maya": a.maya}[arm["engine"]],
                 "--log", str(log.with_suffix(".server.log")), "--wrap", arm.get("wrap", "")]
+    elif arm.get("wrap"):                    # an in-process engine: the worker itself under the wrap (e.g. hygiene)
+        cmd = shlex.split(arm["wrap"]) + cmd
     env = dict(os.environ, CUDA_VISIBLE_DEVICES=str(a.gpu), CUDA_DEVICE_ORDER="PCI_BUS_ID", **arm.get("env", {}))
     stop, peak = threading.Event(), [0]
     sampler = threading.Thread(target=peak_vram, args=(a.gpu, stop, peak), daemon=True)
@@ -406,7 +531,7 @@ def run_arm(arm: dict, a: argparse.Namespace, log: pathlib.Path) -> dict:
         p = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env)
     stop.set()
     text = log.read_text(errors="replace")
-    if arm["engine"] in ("llama", "strata"):
+    if arm["engine"] in ("llama", "strata", "maya"):
         text = log.with_suffix(".server.log").read_text(errors="replace") + text
     line = next((x for x in text.splitlines() if x.startswith("RESULT ")), None)
     if p.returncode or line is None:
@@ -422,8 +547,10 @@ def summary(rows: list[dict]) -> dict:
     out = {}
     for r in rows:
         for c, m in r.get("results", {}).items():
-            for k, v in m.items():
-                out.setdefault(r["arm"], {}).setdefault(c, {}).setdefault(k, []).append(v)
+            flat = m | {f"stat.{k}": v for k, v in m.get("stat", {}).items()}     # (Maya's `glm stat:` counters)
+            for k, v in flat.items():
+                if isinstance(v, (int, float)):           # (the generated ids are kept in the rows, not summarized)
+                    out.setdefault(r["arm"], {}).setdefault(c, {}).setdefault(k, []).append(v)
     return {arm: {c: {k: {"median": round(statistics.median(v), 2), "min": round(min(v), 2), "max": round(max(v), 2),
                           "n": len(v)} for k, v in ms.items()} for c, ms in cs.items()} for arm, cs in out.items()}
 
@@ -447,7 +574,9 @@ def orchestrate(a: argparse.Namespace) -> None:
                 continue
             print(f"round {rnd} {arm['name']}", flush=True)
             r = {"round": rnd, "arm": arm["name"]} | run_arm(arm, a, outdir / f"r{rnd}_{arm['name']}.log")
-            print("  " + json.dumps({k: r[k] for k in ("results", "error", "peak_vram_mib") if k in r}), flush=True)
+            brief = {c: {k: v for k, v in m.items() if k != "ids"} for c, m in r.get("results", {}).items()}
+            print("  " + json.dumps({"results": brief} | {k: r[k] for k in ("error", "peak_vram_mib") if k in r}),
+                  flush=True)
             rows.append(r)
             with open(raw, "a") as f:
                 f.write(json.dumps(r) + "\n")
@@ -472,7 +601,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     w = sub.add_parser("worker")
     w.add_argument("--engine", choices=tuple(WORKERS), required=True)
-    w.add_argument("--server", help="llama-server, or Strata's engine")
+    w.add_argument("--server", help="llama-server, or Strata's or Maya's engine")
     w.add_argument("--requests", help="the orchestrator's requests.json (default: --contexts at the v1 offsets)")
     w.add_argument("--log")
     w.add_argument("--wrap", default="", help="a command prefix for the server (e.g. nsys profile ...)")
@@ -484,13 +613,14 @@ def main() -> None:
     o.add_argument("--server", default=str(ROOT / "bench" / ".envs" / "llama.cpp-offload" / "bin" / "llama-server"))
     o.add_argument("--python", default=str(ROOT / "bench" / ".envs" / "freetoken-offload" / "bin" / "python"))
     o.add_argument("--strata", default=str(ROOT / "bench" / ".envs" / "strata" / "strata"))
+    o.add_argument("--maya", default=str(ROOT / "local" / "build" / "maya-v1.1.27" / "maya"))
     o.add_argument("--holon-python", default=sys.executable)
     o.add_argument("--requests", help="a plan written by `plan` (fn's corpus needs tokenizers, which a bench venv "
                    "may lack)")
     pl = sub.add_parser("plan", help="write requests.json")
     pl.add_argument("--out", required=True)
     for p in (o, pl):
-        p.add_argument("--corpus", choices=("v1", "fn"), default="v1")
+        p.add_argument("--corpus", choices=("v1", "fn", "glm"), default="v1")
         p.add_argument("--spans", type=int, nargs="+", default=[0, 1, 2],
                        help="fn: the candidate starts timed (0-11; past 5 the midpoints between the six D11 starts)")
         p.add_argument("--contexts", type=int, nargs="+", default=[1024, 4096, 32768])

@@ -8,8 +8,8 @@ are history, not required reading: start from [the README](../../README.md), [th
 
 The records keep only what a document cites: measurement records in `docs/dev/evidence/`, and in
 [`docs/dev/spikes/`](spikes/README.md) the spikes cited as how a document's numbers were produced. Tools that outlived
-their spike are in `judge/` (`consistency.py`, `cover.py`, `exact.py`, `f5b_l2.py`, `tasks/`) and `bench/`
-(`ledger.py`, `timeline.py`, `placement_replay.py`, `fn_oracle.py`). Other `spikes/<name>/…` paths in these records
+their spike are in `judge/` (`consistency.py`, `cover.py`, `glm_cover.py`, `exact.py`, `f5b_l2.py`, `tasks/`) and `bench/`
+(`ledger.py`, `timeline.py`, `placement_replay.py`, `fn_oracle.py`, `loan_need.py`). Other `spikes/<name>/…` paths in these records
 name experiments not kept in the repository. New experiments live in the untracked `local/`.
 
 | Record | Milestone |
@@ -28,6 +28,8 @@ name experiments not kept in the repository. New experiments live in the untrack
 | [v1-kv-tiers.md](v1-kv-tiers.md) | v1 K: KV and checkpoint tiers under the prefix index |
 | [v1-moe-prefill.md](v1-moe-prefill.md) | v1: MoE prefill speed |
 | [v1-flash-next.md](v1-flash-next.md) | v1 FN: Qwen3.8-Flash-Next and its offload, compared with Strata |
+| [v1-auto-config.md](v1-auto-config.md) | v1: automatic deployment values (host RAM, GPU slack, a lock's files) |
+| [v1-glm.md](v1-glm.md) | v1 GLM: GLM-5.3-Flash on limited VRAM, compared with Project Maya |
 
 Paths under `local/` (e.g. `local/fn/`, `local/models/`, `local/tmp/`) name the authors' untracked working files:
 downloads of public models, clones of the reference engines at their public commits, files built from those with the

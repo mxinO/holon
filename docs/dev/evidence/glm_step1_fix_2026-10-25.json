@@ -1,0 +1,288 @@
+{
+ "date": "2026-10-25",
+ "doc": "docs/dev/v1-glm.md \u00a713 (step 1's code review), \u00a711 call 4",
+ "range": "145a80df..HEAD (the fix round: d5b2fa20..HEAD on top of the step-1 close 6dc24b90)",
+ "run_all": {
+  "how": "scripts/ci/run_all.sh 145a80df with the dev venv active",
+  "rc": 0,
+  "import_contracts": "8 kept, 0 broken",
+  "core_diff": "empty",
+  "warn": "9 committed locks outdated (kernels.expert_io, std.moe, std.tiered): propagated at the milestone close"
+ },
+ "l0": {
+  "sm_86 (RTX A5000)": "259 passed, 1 skipped (cpu_task, expert_io, placement.promote, moe_engine, tiered) at the head; 299 passed with aux_models, tier_pagecache, judge tiers before the last two fixes",
+  "sm_89 (RTX 4090)": "300 passed, 1 skipped (the same files and aux_models, tier_pagecache, judge tiers) at 5bb7a9b5; the head's later change is Python only",
+  "sm_120 (RTX 5090)": "257 passed, 1 skipped at the head; the SSD bitwise cases 5 times more, 25 of 25 passed"
+ },
+ "vehicle_rtx-5090_nvme": {
+  "model": "Qwen3-30B-A3B Q4_K_M",
+  "how": "one sequence, cache 0.25, uncapped vs RAM 0.25 (capped) vs capped with the tail lent and the loan required (capped_loan) vs RAM 0.8 with free units to park into (free_loan), each after the file's pages were evicted; prompts 5000/700/3000, 64 tokens; capped on main for speed",
+  "arms": {
+   "capped": {
+    "identical_to_uncapped": true,
+    "seconds": 28.96,
+    "parked": 479,
+    "loan_bytes": 0,
+    "io": {
+     "backend": "io_uring",
+     "bytes": 64918802944,
+     "busy_ns": 26489241908,
+     "requests_1": 10733,
+     "latency_ns_1": 1037647191,
+     "requests_2-3": 243,
+     "latency_ns_2-3": 708501540,
+     "requests_4+": 1072,
+     "latency_ns_4+": 37578810630
+    }
+   },
+   "capped_loan": {
+    "identical_to_uncapped": true,
+    "seconds": 30.56,
+    "parked": 479,
+    "loan_bytes": 426811392,
+    "io": {
+     "backend": "io_uring",
+     "bytes": 69053432320,
+     "busy_ns": 28153144914,
+     "requests_1": 10874,
+     "latency_ns_1": 1054076157,
+     "requests_2-3": 228,
+     "latency_ns_2-3": 679525052,
+     "requests_4+": 1138,
+     "latency_ns_4+": 39061376225
+    }
+   },
+   "free_loan": {
+    "identical_to_uncapped": true,
+    "seconds": 4.22,
+    "parked": 731,
+    "loan_bytes": 426811392,
+    "io": {
+     "backend": "io_uring",
+     "bytes": 5152124928,
+     "busy_ns": 2160745037,
+     "requests_1": 11836,
+     "latency_ns_1": 254270494,
+     "requests_2-3": 118,
+     "latency_ns_2-3": 350331631,
+     "requests_4+": 286,
+     "latency_ns_4+": 1607756888
+    }
+   },
+   "main_capped": {
+    "identical_to_uncapped": true,
+    "seconds": 50.03,
+    "parked": 0
+   }
+  }
+ },
+ "vehicle_rtx-a5000": {
+  "identical_to_uncapped": {
+   "capped": true,
+   "capped_loan": true,
+   "free_loan": true
+  },
+  "found": [
+   "parking lists built on the copy stream from main-stream temporaries (allocator reuse): garbage logits then an illegal address, fixed in 273da7b5",
+   "a role's classes viewing the shared landing pool at their own row widths (rows overlapping): fixed in 273da7b5"
+  ]
+ },
+ "attribution_rtx-5090": {
+  "how": "vehicle_attr: the capped arm with the tail lent and the loan required (base); read-ahead off (noahead); cpu_task.io_depth 1 (depth1); the loan off and coldest lending (nolend: under exclusive tiers a prompt step past its 8 staging slots always lends, so 'lending off' is not a configuration); 3 runs each, pages evicted before each; prefill seconds summed over the 3 prompts, decode tok/s their mean; the I/O worker's bytes over its busy time",
+  "arms": {
+   "base": {
+    "prefill_s_sum3prompts": [
+     24.33,
+     24.33,
+     24.33
+    ],
+    "decode_tok_s_mean": [
+     83.5,
+     83.6,
+     83.6
+    ],
+    "prefill_GBps_busy": [
+     2.47,
+     2.47,
+     2.47
+    ],
+    "decode_GBps_busy": [
+     2.23,
+     2.23,
+     2.24
+    ],
+    "latency_us_by_experts": {
+     "1": [
+      29364,
+      83.8
+     ],
+     "2-3": [
+      552,
+      2988.7
+     ],
+     "4+": [
+      2916,
+      37088.9
+     ]
+    },
+    "parked": [
+     271,
+     271,
+     271
+    ]
+   },
+   "noahead": {
+    "prefill_s_sum3prompts": [
+     24.69,
+     24.7,
+     24.71
+    ],
+    "decode_tok_s_mean": [
+     83.5,
+     83.3,
+     83.1
+    ],
+    "prefill_GBps_busy": [
+     2.46,
+     2.46,
+     2.46
+    ],
+    "decode_GBps_busy": [
+     2.23,
+     2.22,
+     2.22
+    ],
+    "latency_us_by_experts": {
+     "1": [
+      29286,
+      84.0
+     ],
+     "2-3": [
+      546,
+      2943.6
+     ],
+     "4+": [
+      2568,
+      27124.1
+     ]
+    },
+    "parked": [
+     271,
+     271,
+     271
+    ]
+   },
+   "depth1": {
+    "prefill_s_sum3prompts": [
+     51.18,
+     50.86,
+     51.06
+    ],
+    "decode_tok_s_mean": [
+     53.4,
+     53.7,
+     53.5
+    ],
+    "prefill_GBps_busy": [
+     1.15,
+     1.15,
+     1.15
+    ],
+    "decode_GBps_busy": [
+     1.11,
+     1.12,
+     1.12
+    ],
+    "latency_us_by_experts": {
+     "1": [
+      29364,
+      158.9
+     ],
+     "2-3": [
+      552,
+      6030.0
+     ],
+     "4+": [
+      2916,
+      83408.3
+     ]
+    },
+    "parked": [
+     271,
+     271,
+     271
+    ]
+   },
+   "nolend": {
+    "prefill_s_sum3prompts": [
+     41.05,
+     41.08,
+     40.98
+    ],
+    "decode_tok_s_mean": [
+     117.1,
+     117.1,
+     117.1
+    ],
+    "prefill_GBps_busy": [
+     2.46,
+     2.46,
+     2.47
+    ],
+    "decode_GBps_busy": [
+     2.22,
+     2.22,
+     2.22
+    ],
+    "latency_us_by_experts": {
+     "1": [
+      33015,
+      67.6
+     ],
+     "2-3": [
+      507,
+      3072.0
+     ],
+     "4+": [
+      4494,
+      34076.3
+     ]
+    },
+    "parked": [
+     265,
+     265,
+     265
+    ]
+   }
+  },
+  "n3_reference_GBps": {
+   "k1": "2.42-2.45",
+   "k4": "2.55-2.56",
+   "k8": "2.57"
+  },
+  "reading": "in-engine read rate while busy: prefill 2.46-2.47 GB/s (within 4% of N3 at 4+ experts, at N3's k=1), decode 2.22-2.24 GB/s (9% under N3's k=1: the vehicle's pieces are small, a request's fixed cost weighs more); read-ahead adds 1.5% to prefill on the vehicle; depth 1 halves the rate (prefill 2.1x slower, decode 1.56x); the tail and the loan make prefill 1.69x faster than coldest lending but decode after the prompt 29% slower (the tail's parked experts are read back: the 3000-token prompt's decode read 624 MB vs 114 MB)",
+  "capped_vs_main": "28.96 s vs 50.03 s (1.73x), the same arm on main"
+ },
+ "nsys_timeline": {
+  "where": "RTX A5000 (no nsys in the node's container), the base arm",
+  "signals_then_ram_gather": 816,
+  "io_request_seen_before_the_gather_ended": 815
+ },
+ "fn": {
+  "mtp_output_weight": "cause (confirmed from source): the reproduction's flags omitted the lock's [sources] mtp.path (Strata's MTP pack, mtp-q2_0-q8@a55280a0417d4b19); without it drafters.mtp maps the target checkpoint's tensors, which hold no MTP head, and fails on output.weight. With the pack both main and the branch build and generate the same 8 tokens.",
+  "ple_ram_vs_ssd_mtp_on": {
+   "how": "spikes/fn7/ple_ssd.py on an RTX A5000 at the rtx-5080 lock's flags with MTP on (the pack) and the warm-start profile off, the warm-up and two 1K prompts, 64 tokens, top-5 logprobs",
+   "identical": true,
+   "rows_off_by_one_plant_differs": true
+  }
+ },
+ "plants_and_fail_without": {
+  "S1-B1 parked bytes beside the loan": "the new test fails on the pre-fix code",
+  "S1-M1 spare conservation (second serve)": "fails on the pre-fix code (the step's lent slots fall short)",
+  "C S1-M1 round 0 before the RAM gather": "the order check fails on the old order",
+  "A S1-m1 abandon epoch": "the FIFO test fails 5 of 5 without the epoch check",
+  "landing view": "the mixed-class test fails on the per-class views",
+  "keep_copy_skipped": "fails: the copy task's L0 (3), the SSD bitwise runs (4), the parked test",
+  "parking_unwaited": "fails, structurally (the fence check); the tiny copies finish first"
+ }
+}

@@ -1,13 +1,16 @@
 """QSA's kernels in Triton (op contracts: std.mixers.qsa; docs/dev/v1-flash-next.md D6, D10): the index write and its
-block pooling, the block selection (float32 IEEE scores, an exact top-k with lower-block ties) and the sparse
-attention over gqa's KV layouts, q8_0 and fp8 read in the kernel."""
+block pooling, the block selection (float32 IEEE scores, an exact top-k with lower-block ties; GLM's signed head
+weights, docs/dev/v1-glm.md D5) and the sparse attention over gqa's KV layouts, q8_0 and fp8 read in the kernel; GLM's
+DSA index (gate-and-APE pooling) and absorbed latent attention (`mla.py`)."""
 from __future__ import annotations
 
 from holon.api import Constraint, KernelSpec
 
+from . import mla
 from .kernel import qsa_attend, qsa_index, qsa_select
 
 INDEX, SELECT, ATTEND = "qsa_index", "qsa_select", "qsa_attend"
+DSA_INDEX, MLA_ATTEND = "dsa_index", "mla_attend"
 SUB_BATCH = 512
 LAYOUTS = ("kv.hnd", "kv.hnd.fp8", "kv.hnd.q8_0")
 
@@ -22,11 +25,12 @@ class Index:
 
 
 class Select:
-    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int) -> None:
+    def __init__(self, ctx, *, heads: int, head_dim: int, ratio: int, budget: int, page: int,
+                 head_weights: bool = False) -> None:
         self.ratio, self.budget = ratio, budget
 
-    def __call__(self, q, pooled, table, seq, positions):
-        return qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget, SUB_BATCH)
+    def __call__(self, q, pooled, table, seq, positions, w=None):
+        return qsa_select(q, pooled, table, seq, positions, self.ratio, self.budget, SUB_BATCH, w)
 
 
 class Attend:
@@ -38,6 +42,23 @@ class Attend:
         return qsa_attend(q, kv, blocks, table, seq, positions, gate, self.ratio)
 
 
+class DsaIndex:
+    def __init__(self, ctx, *, head_dim: int, ratio: int, page: int, dtype: str) -> None:
+        self.ratio = ratio
+
+    def __call__(self, k, gate, raw, gates, pooled, ape, table, seq, positions):
+        mla.dsa_index(k, gate, raw, gates, pooled, ape, table, seq, positions, self.ratio)
+
+
+class MlaAttend:
+    def __init__(self, ctx, *, heads: int, latent: int, ratio: int, width: int, page: int, scale: float, q_dtype: str,
+                 kv_dtype: str) -> None:
+        self.ratio, self.scale = ratio, scale
+
+    def __call__(self, q, kv, blocks, table, seq, positions):
+        return mla.mla_attend(q, kv, blocks, table, seq, positions, self.ratio, self.scale)
+
+
 def _pow2(n: int) -> bool:
     return n > 0 and n & (n - 1) == 0
 
@@ -46,13 +67,18 @@ class Plugin:
     def register(self, regs) -> None:
         checks = {INDEX: lambda f: _pow2(f["head_dim"]) and f["page"] % f["ratio"] == 0
                   and f["rotary_dim"] % 2 == 0 and f["rotary_dim"] <= f["head_dim"],
-                  SELECT: lambda f: _pow2(f["head_dim"]) and f["head_dim"] >= 16 and f["heads"] <= 16,
+                  SELECT: lambda f: _pow2(f["head_dim"]) and f["head_dim"] >= 16 and f["heads"] <= 32,
                   ATTEND: lambda f: _pow2(f["head_dim"]) and f["head_dim"] % 32 == 0 and f["layout"] in LAYOUTS
-                  and f["q_dtype"] in ("bfloat16", "float16")}
+                  and f["q_dtype"] in ("bfloat16", "float16"),
+                  DSA_INDEX: lambda f: _pow2(f["head_dim"]) and f["page"] % f["ratio"] == 0,
+                  MLA_ATTEND: lambda f: 16 <= f["latent"] <= 1024 and _pow2(f["latent"]) and f["page"] % f["ratio"] == 0
+                  and f["kv_dtype"] == "bfloat16" and f["q_dtype"] in ("float32", "bfloat16")}
         fp8 = lambda f: f["layout"] == "kv.hnd.fp8"                              # noqa: E731
         anywhere, fp8_sms = Constraint(sm_min=80), Constraint(sm_min=89, sm_max=129)   # Triton's e4m3 from sm_89
         for op, impl, sms, check in ((INDEX, Index, anywhere, checks[INDEX]),
                                      (SELECT, Select, anywhere, checks[SELECT]),
+                                     (DSA_INDEX, DsaIndex, anywhere, checks[DSA_INDEX]),
+                                     (MLA_ATTEND, MlaAttend, anywhere, checks[MLA_ATTEND]),
                                      (ATTEND, Attend, anywhere, lambda f: checks[ATTEND](f) and not fp8(f)),
                                      (ATTEND, Attend, fp8_sms, lambda f: checks[ATTEND](f) and fp8(f))):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.qsa_triton", impl=impl, requires=sms,

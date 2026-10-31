@@ -4,7 +4,8 @@ version = "0.1.1"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Holon core: plugin ABI (holon.api) and runtime (holon.core)"
-dependencies = ["torch==2.11.0", "numpy>=2", "msgspec>=0.19", "pyzmq>=26"]   # torch from the cu130 index (root)
+dependencies = ["torch==2.11.0", "numpy>=2", "msgspec>=0.19", "pyzmq>=26",   # torch from the cu130 index (root)
+                "nvidia-ml-py"]   # platform.gpu_shared: whether a display or another process shares the card
 
 [project.scripts]
 holon = "holon.core.cli:main"

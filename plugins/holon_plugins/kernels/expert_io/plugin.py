@@ -23,6 +23,7 @@ from . import extension
 RESOLVE, FETCH, PREFETCH, PATCH, TIERS = "moe_resolve", "expert_fetch", "expert_prefetch", "moe_patch_rows", "moe_tiers"
 LOAN = "activation_loan"
 POLICIES = {RESOLVE: 0, "moe_resolve.lfu": 1, "moe_resolve.lru": 2}     # the native module's policy codes
+BESIDE_CTAS = 2                            # a store's moves beside the compute (docs/dev/v1-glm.md §13, step 7)
 ROLES, SHARED_BYTES = 8, 48 << 10          # a warp per role; the resolve's tables in shared memory, beside
 STATIC_BYTES = 9 * 4 + 32 * 8              # its static shared words (and the variants' alignment word), the scan's
 
@@ -101,33 +102,48 @@ class ExpertFetch:
         if str(opts.get("expert_io.fetch_roles", "on")) == "off":       # a store then fetches role by role
             self.gather_roles = None
 
-    def __call__(self, fetch, n, src, dst) -> None:
-        self.lib.fetch(fetch, n, src, dst, False)
+    beside = True                          # `(..., beside=True)`: on BESIDE_CTAS CTAs (a store's moves)
 
-    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int = 1) -> None:
+    def __call__(self, fetch, n, src, dst, runs=None, beside: bool = False) -> None:
+        if runs is None:
+            self.lib.fetch(fetch, n, src, dst, BESIDE_CTAS if beside else 0)
+        else:                                  # landing rows (docs/dev/v1-glm.md D8f): each piece's extents by its runs
+            self.lib.fetch_runs(fetch, n, src, dst, runs)
+
+    def gather_roles(self, fetch, n, srcs, dsts, part: int = 0, parts: int | None = None, size: int | None = None,
+                     runs=None) -> None:
         """Role r's units srcs[r][fetch[r, 0, i]] into dsts[r][fetch[r, 1, i]] for i < min(n[r], F), one launch; with
-        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉."""
-        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts)
+        `parts`, only its part `part`: entries [part·q, (part + 1)·q), q = ⌈min(n[r], F) / parts⌉ — or q = `size`
+        (exactly one of the two); `runs` (one per role): srcs are landing rows."""
+        if parts is not None and size is not None:
+            raise ValueError("expert_fetch@1's gather_roles: parts or size, not both")
+        self.lib.fetch_roles(fetch, n, list(srcs), list(dsts), self.ctas * len(dsts), part, parts or 1, size or 0,
+                             list(runs or []))
 
 
 class ExpertPrefetch:
     """D8's ring copies on a stream of its own, after the work enqueued so far, each key's end an event the compute
     stream waits on: from the device's tables, the fetch kernel on few SMs (zero-copy reads of the mapped host pool);
-    from the host's, copy-engine DMA from the pinned host pool (`cudaMemcpyBatchAsync`)."""
+    from the host's, copy-engine DMA from the pinned host pool (`cudaMemcpyBatchAsync`), or from landing rows by their
+    `runs` (docs/dev/v1-glm.md D8g: a copy per extent)."""
+
+    runs = True                            # `start(..., runs)` from landing rows, with copy "dma" (std.moe.kernels)
 
     def __init__(self, modules: Modules, ctx, *, unit_bytes: int, copy: str) -> None:
         self.lib, self.stream, self.landed = modules(ctx.fingerprint.sm), torch.cuda.Stream(ctx.device), {}
         self.copy = copy
 
-    def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor) -> None:
-        if fetch.is_cuda != (self.copy == "sm"):
-            raise ValueError(f"expert_prefetch@1 ({self.copy}): the copy list on the {fetch.device.type}")
+    def start(self, key: int, fetch: torch.Tensor, n: torch.Tensor, src: torch.Tensor, dst: torch.Tensor,
+              runs: torch.Tensor | None = None) -> None:
+        if fetch.is_cuda != (self.copy == "sm") or (runs is not None and self.copy == "sm"):
+            raise ValueError(f"expert_prefetch@1 ({self.copy}): the copy list on the {fetch.device.type}"
+                             + (", with runs (dma only)" if runs is not None else ""))
         self.stream.wait_stream(torch.cuda.current_stream(dst.device))     # after the work enqueued so far
         if self.copy == "sm":                                              # the device's list: SM copies
             with torch.cuda.stream(self.stream):
-                self.lib.fetch(fetch, n, src, dst, True)
+                self.lib.fetch(fetch, n, src, dst, 1)          # one CTA: beside a prefill pass's mmq
         else:                                                              # the host's: copy engines
-            self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream)
+            self.lib.copy_batch(fetch, int(n[0]), src, dst, self.stream.cuda_stream, runs)
         self.landed[key] = torch.cuda.Event()
         self.landed[key].record(self.stream)
 
@@ -151,9 +167,11 @@ class MoeTiers:
         self.lib = modules(ctx.fingerprint.sm)
 
     def __call__(self, ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                 owner, capacity, heat, io, moves, n_moves) -> None:
+                 owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp=None,
+                 clock=None) -> None:
         self.lib.tiers(ids, kinds, group, fetch, n_fetch, stage, delta, start, n_delta, residency, host, piece, classes,
-                       owner, capacity, heat, io, moves, n_moves)
+                       owner, capacity, heat, io, moves, n_moves, ssd, n_ssd, n_ram, rows, ahead, hit, n_hit, stamp,
+                       clock)
 
 
 class ActivationLoan:
@@ -172,8 +190,13 @@ class ActivationLoan:
         self.index = device.index if device.index is not None else torch.cuda.current_device()
 
     def use(self, range_: torch.Tensor):
+        return self.use_ranges([range_])
+
+    def use_ranges(self, ranges: list[torch.Tensor]):
+        """`use` over several device ranges (docs/dev/v1-glm.md D8w: one per class with a tail), in the order given —
+        the caller's smallest first, so small segments fill the small ranges —, none overlapping."""
         self.release()
-        self.lib.loan_set(range_.data_ptr(), range_.numel())
+        self.lib.loan_set_ranges([r.data_ptr() for r in ranges], [r.numel() for r in ranges])
         self.pool = torch.cuda.MemPool(self.allocator.allocator())
         return torch.cuda.use_mem_pool(self.pool, self.index)
 
@@ -184,6 +207,10 @@ class ActivationLoan:
     def held(self) -> int:
         """After `release`: the bytes of the pool's segments still out (0: nothing outlived the use)."""
         return self.lib.loan_live_bytes()
+
+    def overflow(self) -> int:
+        """The most bytes the current use's segments took outside its range at once (the device's own memory)."""
+        return self.lib.loan_overflow()
 
 
 class Plugin:

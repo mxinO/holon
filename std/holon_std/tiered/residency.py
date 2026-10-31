@@ -17,6 +17,7 @@ import torch
 LAG = 2                       # launches between the commit deciding an edit and the launch applying it
 OWNER = 1                     # the edit error word's bit: a precondition failed
 RETURN = -3                   # a delta record's `a` marking where a step's lent slots came back
+SPARE, OWN = -4, -5           # exclusive tiers' records for `moe_tiers@2` (std.moe.kernels): the map adopts the step's
 
 
 class ResidencyMap:
@@ -67,18 +68,23 @@ class ResidencyMap:
         self._flat.scatter_(0, index, torch.where(ok, value.int(), now))
         self._clear()
 
-    def commit(self, step: int, records: np.ndarray, returned: bool = False) -> None:
+    def commit(self, step: int, records: np.ndarray, returned: bool = False, device: np.ndarray | None = None,
+               empty: tuple[np.ndarray, np.ndarray] | None = None) -> None:
         """The host mirror after step `step`: the host edits launched by it, then the step's delta log `records`
         ((group, a, b): a took b's slots, b unmapped; (group, a, −2 − j): a took the group's empty slots j, popped;
         (group, −1, b): b unmapped, lent; (group, RETURN, 0): the lent slots returned there), then — a step that
         `returned` its lent slots without a marker — every lent item's slots on top of its group's empty stack, in the
-        order of their records."""
+        order of their records; given the step's `device` map (as it stood after the step), the mirror is that; given
+        its `empty` stacks ([groups, roles, items] slots, [groups] counts: exclusive tiers, whose whole-expert tail
+        swaps lent slots between layers, docs/dev/v1-glm.md D8w), the mirror's stacks are those."""
         flat = self.host.reshape(-1)
         for launch in sorted(x for x in self._launched if x <= step):
             index, _, value = self._launched.pop(launch)
             flat[index] = value
         back: list[list[np.ndarray]] = [[] for _ in self.empty]
         for g, a, b in records.tolist():
+            if a in (SPARE, OWN):                # (exclusive tiers: the step's map says where b went)
+                continue
             if a == RETURN:                      # the lent slots came back here (`Lent`'s marker), before what follows
                 self.empty[g] += back[g]
                 back[g] = []
@@ -94,6 +100,11 @@ class ResidencyMap:
             self.host[g, b] = -1
         for g, slots in enumerate(back):
             self.empty[g] += slots
+        if device is not None:                   # the step's map itself (exclusive tiers: the tier codes the device
+            self.host[...] = device              # placed unlogged — demotions, keeps, parked lends — exact too)
+        if empty is not None:
+            slots, counts = empty
+            self.empty = [[slots[g, :, j].copy() for j in range(int(counts[g]))] for g in range(len(self.empty))]
 
     def _clear(self) -> None:
         self._list[0].fill_(len(self._flat) - 1)
