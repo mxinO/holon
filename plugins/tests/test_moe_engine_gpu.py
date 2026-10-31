@@ -179,6 +179,37 @@ def test_an_ssd_read_past_its_time_bound_stops_the_engine(gpu_moe):
     engine.close()
 
 
+def test_a_start_refused_after_its_pools_releases_them(gpu_moe, monkeypatch):
+    """An engine refused at its start is never closed: it releases what it built as `close` would. An exclusive-tier
+    layout refused after its first materialize (`moe.lend_peak = require` with no tail to lend) once kept its store —
+    the move thread held it —, ≈ 170 MiB of VRAM and its pinned pools, for the process's life."""
+    import gc
+    import threading
+    import weakref
+
+    from holon.core import platform
+
+    regions, real = [], platform._Pinned
+
+    class Counted(real):
+        def __init__(self, *a, **k):
+            super().__init__()
+            regions.append(weakref.ref(self))
+    monkeypatch.setattr(platform, "_Pinned", Counted)
+    file, _, _ = gpu_moe
+    torch.cuda.synchronize()
+    held = torch.cuda.memory_allocated()
+    with pytest.raises(RuntimeError, match="moe.ring_lend is not tail"):
+        _gpu_engine(file, host_memory=1 << 27, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "coldest",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+    gc.collect()
+    assert len(regions) > 2 and not [r for r in regions if r() is not None]
+    assert torch.cuda.memory_allocated() <= held                 # (an earlier test's engine may go too)
+    assert not [t for t in threading.enumerate() if t.name.endswith(".move")]
+
+
 def test_rams_long_heat_is_its_oracles(gpu_moe):
     """`moe.ram_heat` (docs/dev/v1-glm.md §7.4's lever 1, step 6): an exclusive RAM tier's victims by a long-memory heat
     of its own — each step's decode tokens decay it by the factor a token, then add the step's routed counts — which the

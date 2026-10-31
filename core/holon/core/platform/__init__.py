@@ -5,6 +5,7 @@ import mmap
 import os
 import pathlib
 import re
+import types
 from collections.abc import Callable, Sequence
 
 import torch
@@ -231,9 +232,9 @@ def device_alias(t: torch.Tensor, device: torch.device) -> torch.Tensor:
     memory has its host address on the device); `t` itself off CUDA."""
     if device.type != "cuda":
         return t
-    view = type("Mapped", (), {"__cuda_array_interface__": {
-        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3}, "host": t})
-    alias = torch.as_tensor(view(), device=device)              # keeps `view`, which keeps the host memory
+    view = types.SimpleNamespace(host=t, __cuda_array_interface__={   # (one class: a class made per call outlived
+        "shape": (t.numel(),), "typestr": "|u1", "data": (t.data_ptr(), False), "version": 3})   # its last alias)
+    alias = torch.as_tensor(view, device=device)                # keeps `view`, which keeps the host memory
     if alias.data_ptr() != t.data_ptr():          # not the current device: torch copied instead
         raise RuntimeError(f"no alias of host memory on {device} (make it the current device)")
     return alias

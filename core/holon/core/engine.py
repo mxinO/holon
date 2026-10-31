@@ -131,7 +131,16 @@ class _Target:
 
 
 class Engine:
+    ctx = processor = tier = executor = None      # (a start refused part-built has built none of them yet)
+
     def __init__(self, cfg: EngineConfig, plugins: PluginSet | None = None) -> None:
+        try:
+            self._build(cfg, plugins)
+        except BaseException:                    # a refused start is never closed: what it built goes now (a helper
+            self._release()                      # thread kept the engine's pools, pinned host memory included)
+            raise
+
+    def _build(self, cfg: EngineConfig, plugins: PluginSet | None) -> None:
         cfg = dataclasses.replace(cfg)             # its own copy: the clamp may lower max_model_len
         self.cfg, self.device = cfg, torch.device(cfg.device)
         platform.configure_allocator(self.device)
@@ -424,21 +433,31 @@ class Engine:
                 self.drain()
         except Exception as e:                           # a failing commit still stops the helpers
             failed = e
-        try:
-            platform.synchronize(self.device)            # (every stream) helpers and host pools go once it is idle
-        except Exception as e:                           # a lost device (a sticky error): its work is gone anyway
-            failed = failed or e
-        for o in (self.processor, *self.shared):
-            getattr(o, "shutdown", lambda: None)()
-        if self.tier is not None:
-            self.tier.close()
-        self.executor = self._inflight = None
+        released = self._release()
+        if failed := failed or released:
+            raise failed
+
+    def _release(self) -> Exception | None:
+        """Stop the helpers once the device is idle — the processor's, the shared objects', the state tier's —, drop
+        what they hold and free the pools (`close`, and a start refused part-built): every step runs, the first error
+        is returned (the allocator's cache is released only without one)."""
+        if self.ctx is None:                             # (nothing that holds memory built yet)
+            return None
+        failed, helpers = None, (self.processor, *self.ctx.shared_objects.values())
+        for step in (functools.partial(platform.synchronize, self.device),          # (every stream)
+                     *(getattr(o, "shutdown", lambda: None) for o in helpers),
+                     getattr(self.tier, "close", lambda: None)):
+            try:
+                step()
+            except Exception as e:  # noqa: BLE001 — a lost device (a sticky error): its work is gone; the rest stop
+                failed = failed or e
+        self.executor = self._inflight = self.processor = self.tier = None
         self.shared, self.ctx.shared_objects = [], {}    # what they hold, host memory included, goes too
         self.ledger.free(host=True)
         gc.collect()
-        if failed is not None:
-            raise failed
-        platform.release_cache(self.device)
+        if failed is None:
+            platform.release_cache(self.device)
+        return failed
 
     def stats(self) -> dict[str, int]:
         out = {"waiting": len(self.sched.waiting), "running": len(self.sched.running),
