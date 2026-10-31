@@ -50,7 +50,7 @@ def spill(options: Mapping[str, object], checkpoint: str) -> tuple[dict[str, str
     return ({"rows.place": ",".join("ple:ssd" if p == "ple:host" else p for p in place)},
             f"the PLE table read from the checkpoint ({disk} disk) instead of ≈ 27 GiB of pinned RAM, byte-identical; "
             "prefill −16%/−26% at 1K/4K and MTP decode −6%/−7% on an RTX 5090 (measured with an earlier I/O worker), "
-            "unmeasured on an RTX 5080")
+            "prefill −60%/−71%/−71% and decode −2% at 1K/4K/32K on an RTX 5080")
 
 
 def source_hint(identity: str) -> str | None:
@@ -59,8 +59,8 @@ def source_hint(identity: str) -> str | None:
     if identity != MTP:
         return None
     out = f"~/.cache/holon/sources/{MTP}"
-    return ("serving without the MTP head costs ≈ 30% of decode (est.). Strata's public tools make it (README, "
-            "Qwen3.8-Flash-Next):\n"
+    return ("serving without the MTP head costs 24–37% of decode (measured on an RTX 5080 and 5090). Strata's public "
+            "tools make it (README, Qwen3.8-Flash-Next):\n"
             "    git clone https://github.com/Niko1221/Strata.git strata && git -C strata checkout 296b59d\n"
             "    uv run python strata/tools/mtp_fetch.py fetch --out mtp\n"
             f"    mkdir -p {out}\n"

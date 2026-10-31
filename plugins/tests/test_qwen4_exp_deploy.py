@@ -50,4 +50,4 @@ def test_the_spill_targets_any_disk_not_known_to_rotate_or_be_remote(tmp_path, m
 def test_the_pack_hint_names_strata_s_commands_and_the_cost():
     assert deploy.source_hint("other@0123456789abcdef") is None
     hint = deploy.source_hint(deploy.MTP)
-    assert "30% of decode" in hint and f"--out ~/.cache/holon/sources/{deploy.MTP}/mtp-q2_0.gguf" in hint
+    assert "24–37% of decode" in hint and f"--out ~/.cache/holon/sources/{deploy.MTP}/mtp-q2_0.gguf" in hint
