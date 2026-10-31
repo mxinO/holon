@@ -661,6 +661,7 @@ def test_the_cpus_share_computes_a_passs_lowest_ranked_misses(tiny_moe, tmp_path
     assert share.takes(2) and not share.takes(1) and rows and min(rows) >= 2
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")   # (its byte check synchronizes the device)
 def test_a_second_seed_reads_only_what_ram_did_not_hold(tiny_moe, tmp_path, monkeypatch):
     """Exclusive tiers seeded twice (the startup profile's minimum pools, then the final ones): the second seed reads
     from the checkpoint only the pieces RAM did not hold — a VRAM piece RAM held is copied out of its unit, a RAM piece
