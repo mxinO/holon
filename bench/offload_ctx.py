@@ -435,12 +435,17 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
     def read() -> int:                       # the SSD bytes the store's I/O worker read so far (0: no SSD tier)
         return io.io_stats()["bytes"] if io is not None else 0
 
+    def moves() -> int:                      # D8x: the experts a short prompt parked in read-ahead rows, so far
+        counts = getattr(store, "move_counts", None)
+        return int(counts[0]) if counts is not None else 0
+
     def request(ids: list[int], n: int) -> dict:
         stamps, done, out = [], False, []
         torch.cuda.synchronize()
         seen.update(hits=0, routed=0)
         rows0, tokens0, by0 = passes()
-        b0 = b1 = read()
+        b0 = b1 = b32 = read()
+        moved = moves()
         least, retries = torch.cuda.mem_get_info()[0], torch.cuda.memory_stats()["num_alloc_retries"]
         t0 = time.perf_counter()
         rid = engine.add(ids, SamplingParams(temperature=0.0, max_tokens=n, ignore_eos=True))
@@ -453,6 +458,8 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                         b1 = read()          # the prompt's reads (the decode's from here)
                     stamps += [time.perf_counter()] * len(d.token_ids)
                     out += list(d.token_ids)
+                    if len(stamps) >= 33 and b32 == b0:
+                        b32 = read()         # decode tokens 1-32's reads: what the prompt displaced, re-read
                     done = d.finish_reason is not None
         assert len(stamps) == n, (len(stamps), n)
         rows, tokens, by = passes()
@@ -468,7 +475,8 @@ def holon_worker(a: argparse.Namespace, corpus: list[int] | None) -> dict:
                 "alloc_retries": torch.cuda.memory_stats()["num_alloc_retries"] - retries}
         if io is not None:                   # SSD bytes: the prompt's, and a decode token's after it
             b2 = read()
-            res |= {"ssd_prompt_bytes": b1 - b0, "ssd_decode_bytes_per_token": (b2 - b1) / max(n - 1, 1)}
+            res |= {"ssd_prompt_bytes": b1 - b0, "ssd_decode_bytes_per_token": (b2 - b1) / max(n - 1, 1),
+                    "ssd_bytes_per_token_1_32": (b32 - b1) / 32, "parked_in_rows": moves() - moved}
         return res | {"ids": out}
 
     warm, reqs = requests(a, corpus)
