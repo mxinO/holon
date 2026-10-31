@@ -84,6 +84,6 @@ def test_the_ram_short_spill_is_mode_ii_as_measured():
     options, note = deploy.spill(lock, "/data/glm.gguf")
     declared = cli.declared_options(discover())
     assert options == deploy.MODE2 and set(options) <= set(declared) and not cli.outside_choices(options, declared)
-    assert "mode (ii)" in note and "1.7–1.9×" in note
+    assert "mode (ii)" in note and "1.7–1.9×" in note and "2.5–2.8×" in note and "smaller moe.ram" in note
     assert deploy.spill(lock | {"moe.lend_peak": "off"}, "/data/glm.gguf") is None             # the RTX 5080's
     assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf") is None
