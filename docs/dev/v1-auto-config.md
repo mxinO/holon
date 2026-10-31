@@ -385,8 +385,9 @@ A give-up after a host-memory refusal ends with the four ordered hints of D1 ste
 The tree each row was measured on is given beside it: `e0e1e518` is the release tree before the OOM fix, `067da0cf`
 the release head with every lock current; rows without a tree ran at `067da0cf`. The runs used one RTX 5080 or
 RTX 5090 desktop per job, and each RAM test ran in its own capped step (cgroup v2, `memory.high` = `memory.max`).
-**These nodes have no swap.** The no-swap criterion is recorded as "no swap on these nodes", not passed; it is pending
-the owner.
+**These nodes have no swap.** The no-swap criterion is recorded as "no swap on these nodes", not passed; the owner
+waived it for the merge (2026-10-31): Holon never relies on swap (its own overflow is the SSD tier, read from the
+checkpoint), and the capped runs show the budget holds with no OOM kill. A run on a host with swap stays a follow-up.
 
 | § | Test | RTX 5080 | RTX 5090 | Verdict |
 |---|---|---|---|---|
