@@ -89,7 +89,8 @@ class TierCtx(Protocol):
     def host_left(self) -> int | None:
         """Bytes of `EngineConfig.host_memory` the host pools do not hold yet, when the deployment fits itself to
         this machine (`EngineConfig.clamp_context`, `holon serve`): a host level may then take less than its option
-        asks. None otherwise: take what the option asks or fail."""
+        asks. None otherwise: take what the option asks or fail. `BuildCtx.host_left` differs: ungated (a placement,
+        not what is served) and the lesser of this and the live RAM less the headroom."""
 
 
 class StateTier(Protocol):

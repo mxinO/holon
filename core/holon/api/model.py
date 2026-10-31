@@ -146,7 +146,9 @@ class BuildCtx(Protocol):
         """The host memory pools may still take (ABI 1.7): the least of the host budget (`EngineConfig.host_memory`)
         less every host pool requested so far and, read now, the RAM available less `holon serve`'s headroom
         (docs/dev/v1-auto-config.md D1); None without a host budget. A unit sizing a host pool to what is left asks it
-        before the request."""
+        before the request. Unlike `TierCtx.host_left` (a state tier's, after the final materialize), it is not gated
+        on `clamp_context` and reads the live RAM too: sizing a pool to the host is placement, which a lock-writing
+        run may do, where a tier taking less than its option asks would change what the lock serves."""
 
     def shared(self, key: str, factory: Callable[[BuildCtx], Any]) -> Any:
         """One object per engine for `key` (by convention the provider's resource name, e.g. "cpu_task.worker"): the

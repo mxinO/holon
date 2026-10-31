@@ -38,7 +38,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
     holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; "ssd" its
     share by `fit` at the working floor's f, a quarter here, "ssdfit" at half, docs/dev/v1-glm-ram.md D2 — "fit" on a
-    budget holding every expert is the inclusive store, its I/O worker started idle (B-R10) —; at one
+    budget holding every expert is the inclusive store, its I/O worker started idle and D8g's gathers off (B-R10, the
+    review's A-M1) —; at one
     sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
     coldest or sent to the SSD, while its own staging slots stay a graphed step's, and its SSD reads land in landing
     rows of two, a call's in rounds, its prompt steps of 8 tokens or more reading the next layers' sets ahead:
@@ -82,6 +83,7 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
             "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
             "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"}
             | ({"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {})
+            | ({"moe.ring_tokens": 32, "moe.stream_tokens": 1 << 20, "moe.split": "on"} if share == 1.0 else {})
             | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
                 "moe.ram": "*=0.25" if share is False else "fit"} if ssd or share else {}))
     store = engine.ctx.shared_objects[KEY]
@@ -111,9 +113,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         piped.append(a[-1])
         return pipelined(self, *a)
     spy = mock.patch.object(DeviceResolver, "_pipelined", piping)
+    gathers = mock.patch.object(tiered_store, "ROUNDS_BELOW", 8 if share == 1.0 else tiered_store.ROUNDS_BELOW)
     with (spy, route_dump(engine) as trace, warnings.catch_warnings(record=True) as syncs,
           _no_host_sync(Lent, "begin", "sources", "done", mode=mode), _tail_checked(store) as tails, spy_rows,
-          spy_hits):
+          spy_hits, gathers):                        # ("fit": D8g's gathers' steps from 8 tokens, which it never runs)
         warnings.simplefilter("always")
         assert _served(engine, prompts, mirrored=store if one else None) == want
     assert bool(tails) == (ring in ("tail", "pipe"))
@@ -130,9 +133,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
                   ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@2", "kernels.expert_io"),
                                                                  ("cpu_task@1", "kernels.cpu_task")} if ssd or share
                                                                else set())
-    if share == 1.0:                                 # bound in the build, started, never signalled
-        io = engine.ctx.shared_objects["cpu_task.io"].native
-        assert io.served() == 0 and io.flag() == 0
+    if share == 1.0:                                 # bound in the build, started, never signalled; no step runs
+        io = engine.ctx.shared_objects["cpu_task.io"].native         # D8g's gathers in parts (the lock never does:
+        assert io.served() == 0 and io.flag() == 0 and not piped     # A-M1) though its copy engines are bound
+        assert store.copies and store.borrowed["stage"]
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0

@@ -71,11 +71,15 @@ measured; "other use" counts Holon's own processes, ≈ 3 GiB, est.):
 | lock | pinned host RAM | RAM for full speed | with less RAM |
 |---|---|---|---|
 | Qwen3.8-27B, RTX 5080 and RTX 5090 | a 16 GiB KV tier ([KV tiers](#kv-tiers)) | 32 GB, ≤ 6 GiB other use | the tier takes what is left, down to its floor; below it, the defaults serve without a tier |
-| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | refused once, with what to do: free the RAM it names, serve this card's UD-IQ3_XXS lock (no pinned RAM), or `--host-memory` |
-| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill), then refused |
+| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | std's generic spill: the experts the RAM holds (`moe.ram=fit`), the rest read from the model file on the SSD; below the working floor refused, naming each term |
+| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill) and the experts by `moe.ram=fit` (all in RAM where they fit); where they do not, without the MTP head (decode 24–37% slower) |
 | Qwen3.8-Flash-Next IQ3_S, RTX 5090 | the same, ≈ 74.5 GiB | 96 GB, ≤ ≈ 10 GiB other use | the same |
-| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 128 GB (96 GB with ≤ ≈ 2 GiB other use) | mode (ii): about 62% of the experts in RAM (≈ 50 GiB), the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)), then refused |
-| GLM-5.3-Flash, RTX 5080 | the same | the same | refused once, with what to do |
+| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 128 GB (96 GB with ≤ ≈ 2 GiB other use) | mode (ii): the share of the experts the host fits in RAM, the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)); below the working floor refused |
+| GLM-5.3-Flash, RTX 5080 | the same | the same | std's generic spill, as the Qwen3-30B-A3B row |
+
+On every offload lock the RAM-short retry is std's generic spill (`moe.ram=fit`: the RAM tier sized from the host
+budget, `docs/dev/v1-glm-ram.md`); a model plugin refines it where it measured its own (GLM on the RTX 5090). Its speed
+on Qwen3-30B-A3B and Qwen3.8-Flash-Next is not measured yet.
 
 `--host-memory BYTES` sets the budget instead (warned about where it cuts into what is kept free). The GPU's share
 works the same way: `holon serve` sizes an offload lock's expert cache from the startup profile's measured peak and a

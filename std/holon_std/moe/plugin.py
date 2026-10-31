@@ -13,8 +13,7 @@ class Plugin:
             return None
         return ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "fit"},
                 "the experts this host's RAM holds pinned, the rest read from the checkpoint's file (keep it on a "
-                "local NVMe drive), byte-identical; the cost the model's (1.9–8.3× slower with half of them in RAM on "
-                "Qwen3-30B-A3B and Qwen3.8-Flash-Next, docs/dev/v1-offload.md)")
+                "local NVMe drive), byte-identical; its cost the model's (docs/dev/v1-offload.md measures it)")
 
     def register(self, regs) -> None:
         regs.units.add("std.moe", units.MoE)

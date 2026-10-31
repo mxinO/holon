@@ -31,4 +31,4 @@ def spill(options: Mapping[str, object], checkpoint: str, *, card: str) -> tuple
                               "checkpoint's file (keep it on a local NVMe drive); with 64 GB of RAM 1K-4K prefill ≈ "
                               "2.5–2.8×, decode ≈ 1.7–1.9× and 32K prefill ≈ 1.1× slower than the lock, faster with "
                               f"more (docs/dev/v1-glm.md); below ≈ {ram} GB of RAM 32K decode falls under ≈ {rate} "
-                              "tok/s (docs/dev/v1-glm-ram.md)")
+                              "tok/s (est., docs/dev/v1-glm-ram.md)")

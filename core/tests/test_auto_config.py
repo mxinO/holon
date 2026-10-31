@@ -6,6 +6,7 @@ import contextlib
 import os
 import sys
 import types
+from unittest import mock
 
 import pytest
 import torch
@@ -131,13 +132,15 @@ def test_the_lock_is_fitted_with_its_files_a_spill_and_manual_notes(tmp_path, mo
     """D1, D5: a lock's file found by identity in the cache; one missing serves without speculation (both lock
     entries) with the plugin's hint, never a refusal, and an unreadable cache too; a spill becomes a memory-only entry
     before the lock, dropped when a flag sets one of its keys; the first owner setting an option wins (the model
-    plugin, asked first: docs/dev/v1-glm-ram.md D5), the lock's class given to a hook naming `card`; an empty spill is
+    plugin, asked first: docs/dev/v1-glm-ram.md D5), one adding no option dropped with its note, the lock's class given
+    to a hook naming `card`; an empty spill is
     a note for the refusal only; no defaults entry when asked; a drafting lock's spill is tried without speculation
     after it (m8)."""
     monkeypatch.setattr(cli, "CACHE", tmp_path)
     found = _found({"mtp.path": "head@0123456789abcdef"}, {"rows.place": "t:host"})
     owners = [_CardOwner(({"rows.place": "t:ssd", "moe.ram": "fit"}, "slower"), "make it so"),
-              _Owner(({"moe.ram": "*=0.5", "moe.tiers": "a,b"}, "generic")), _Owner(({}, "manual"))]
+              _Owner(({"moe.ram": "*=0.5", "moe.tiers": "a,b"}, "generic")), _Owner(({"moe.ram": "x"}, "adds none")),
+              _Owner(({}, "manual"))]
     (pack := tmp_path / "sources" / "head@0123456789abcdef" / "head.gguf").parent.mkdir(parents=True)
     pack.write_bytes(b"head")
     extra, spill, notes, manual = cli.fit_lock(found, {}, owners, "m")
@@ -168,13 +171,18 @@ def test_the_lock_is_fitted_with_its_files_a_spill_and_manual_notes(tmp_path, mo
 def test_a_refusal_says_what_to_do_and_a_restart_is_admitted_against_its_own_entry(tmp_path, monkeypatch):
     """The ledger's refusal names the shortfall and the override; a restart, under the pin lock, is refused (memory)
     when the RAM no longer holds what its entry pinned, and an entry never started gets its derived cap lowered to what
-    is free above half the headroom, not checked against another entry's bytes (A C-M3). What a unit may still pin
+    is free above half the headroom, not checked against another entry's bytes (A C-M3); a pin the OS refuses is a
+    memory failure too. What a unit may still pin
     (`BuildCtx.host_left`, docs/dev/v1-glm-ram.md D1) is the lesser of the budget less the host pools and the RAM
     available now less the headroom; None without a budget."""
     ledger = Ledger(torch.device("cpu"), host_memory=GiB)
     with pytest.raises(OutOfUnits, match=rf"Short by 1.0 GiB at least: .* --host-memory {2 * GiB} or more"):
         ledger.plugin_pool("big", unit_bytes=GiB, min_units=2, pref_units=2, device="host")
     ledger.plugin_pool("small", unit_bytes=1 << 20, min_units=1, pref_units=1, device="host")
+    with mock.patch.object(platform, "host_memory", side_effect=OSError(12, "Cannot allocate memory")), \
+            pytest.raises(OutOfUnits, match=r"pinning plugin\.refused \(1 MiB\) failed: .*Cannot allocate"):
+        ledger.plugin_pool("refused", unit_bytes=1 << 20, min_units=1, pref_units=1, device="host")   # (a memory
+    assert "plugin.refused" not in ledger.pools                                       # failure: A m4)
     for i in (1, 2):
         (tmp_path / f"head-0000{i}-of-00002.gguf").write_bytes(b"x" * i)
     assert cli.checkpoint_bytes(str(tmp_path / "head-00001-of-00002.gguf")) == 3

@@ -112,6 +112,9 @@ class Offload(nn.Module):
         self._facts = {"experts": experts, "top_k": top_k}
         # F5b: the CPU's share, unless the split was measured on another CPU tier (S5: F5a there)
         plan, isa = plan_table(str(opts.get("moe.cpu_plan", "")), experts), str(opts.get("moe.cpu_isa", ""))
+        if plan and str(opts.get("moe.ram", "")).strip() == "fit":    # (its pools would come out of fit's reserve)
+            raise ValueError("std.moe.offload@1: moe.cpu_plan beside moe.ram=fit: the CPU's share pins host pools "
+                             "after the RAM tier is sized to what is left; give moe.ram a share, or drop the plan")
         self._cpu = ctx.shared(CPU, lambda root: CpuShare(root, self.store, plan=plan, tokens=_rows(root),
                                                           min_tokens=int(opts.get("moe.cpu_min_tokens", 1)))) \
             if plan and isa in ("", ctx.fingerprint.cpu_isa) else None

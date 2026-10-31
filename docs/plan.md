@@ -859,8 +859,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **D8x's move thread: views once a move** (GLM, `docs/dev/v1-glm.md` D8x): the thread builds its landing-row and
   RAM-unit views per piece under the GIL (≈ 450 a 1K prompt), likely the rest of the launches' p99 (+1.01 ms at
   GLM's close, at the bound); build them once a move, so it holds the GIL only to index and copy.
-- **GLM's spill sized from the host budget** (GLM's close, the coordinator): `glm5_next`'s spill returns mode (ii) as
-  measured, `moe.ram` `*=0.6238` (RAM's share of the experts for a 64 GB host) whatever the host has. It should take
+- **GLM's spill sized from the host budget** (GLM's close, the coordinator) — **delivered** by `docs/dev/v1-glm-ram.md`
+  §9 (`moe.ram=fit`, the spill's card, `MODE2` by card); open there: GLM's knee measured, the RTX 5080's entry (D7).
+  As it was: `glm5_next`'s spill returned mode (ii) as measured, `moe.ram` `*=0.6238` (RAM's share of the experts for
+  a 64 GB host) whatever the host has. It should take
   the host budget auto-config derives (a seam the spill hook does not get today) and size `moe.ram` from it, so a
   48 GB or 80 GB host gets the share that fits it rather than the 64 GB host's. With it: pass the lock's class too
   and key `MODE2` by class (today `moe.lend_peak = require` stands for the RTX 5090's lock, the only GLM lock that

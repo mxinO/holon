@@ -247,7 +247,8 @@ class Spills(Protocol):
         tries them after the lock's start fails for memory. Empty options: an alternative only named when the start
         is refused. None: nothing to offer for `checkpoint` (its local path). `card` (ABI 1.7; passed only to an
         implementation naming it, so one without it serves as before): the lock's fingerprint class
-        (`<gpu>[+<cpu tier>]/<toolchain>`), for a set measured on one card. The owners are asked model plugin first,
+        (`<gpu>[+<cpu tier>]/<toolchain>`), for a set measured on one card — the lock's also when it is borrowed from
+        another card (served unverified: its spill as measured with it). The owners are asked model plugin first,
         and the first to set an option wins: a model's measured values refine a generic spill."""
 
 

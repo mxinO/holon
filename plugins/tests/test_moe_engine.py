@@ -779,7 +779,7 @@ def test_fit_where_every_expert_fits_is_the_locks_store(tiny_moe, tmp_path):
     beside the reserve runs as the lock: inclusive, the same arenas, seed and map, the same outputs bit for bit, and
     no landing, I/O or run pools — its exclusive kernels and I/O worker bound in the build, whatever f, and idle. At a
     share below 1 an auxiliary model's experts (a drafter's head) are refused for memory (m8: `holon serve` serves
-    without speculation next), a share other than the whole value refused at once."""
+    without speculation next), a share other than the whole value refused at once, and so is a CPU share beside it."""
     from holon_std.tiered.store import TieredStore
 
     checkpoint, prompts = tiny_moe
@@ -806,3 +806,5 @@ def test_fit_where_every_expert_fits_is_the_locks_store(tiny_moe, tmp_path):
         _engine(file, host_memory=1 << 30, plugin_options=fitted)
     with pytest.raises(ValueError, match="fit is the whole value"):
         _engine(file, host_memory=1 << 30, plugin_options=fitted | {"moe.ram": "*=fit"})
+    with pytest.raises(ValueError, match="moe.cpu_plan beside moe.ram=fit"):        # (its pools after fit's: A m3)
+        _engine(file, host_memory=1 << 30, plugin_options=fitted | {"moe.cpu_plan": "1,1,2,2"})

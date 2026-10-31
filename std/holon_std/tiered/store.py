@@ -458,14 +458,13 @@ class TieredStore:
                 self.halves = 2
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
-        """The exclusive tiers' device tables (`moe_tiers@2`'s; RAM's units sized by pieces: under `fit` they are made
-        before f), after their kernels."""
+        """The exclusive tiers' device tables (`moe_tiers@2`'s; RAM's units' at `before_materialize`, once `fit` has
+        solved its share), after their kernels."""
         self._exclusive_kernels()
         classes = list(self.classes.values())
         static = functools.partial(self.ctx.static, dtype=torch.int32)
         self.piece = static(f"{self.name}.piece", shape)
         self.classes32 = static(f"{self.name}.classes32", (shape[0], self.roles))
-        self.owner = static(f"{self.name}.owner", (len(classes), max(len(c.pieces) for c in classes)))
         self.capacity = static(f"{self.name}.capacity", (len(classes),))
         self.call_start = static(f"{self.name}.call_start", (1,))
         # A call's moves (its demotions, then its admitted staged pieces): two tables, a call's by its group's parity.
@@ -483,10 +482,6 @@ class TieredStore:
                                      [torch.Event(device=self.ctx.device), torch.Event(device=self.ctx.device)])
         self.recorded: set = set()              # the fences recorded in this step (the last step's moves joined it:
         #                                         a wait on an earlier one is moot, and a graph cannot capture it)
-        # The demotions run beside the next call too: it never gives a unit the previous call demoted into to a
-        # displacement (a keep the I/O worker writes from the host would race that copy): `moe_tiers@2`'s stamps
-        self.tier_stamps = {"stamp": static(f"{self.name}.stamp", tuple(self.owner.shape)),
-                            "clock": static(f"{self.name}.clock", (1,))} if self.moves_async else {}
         # SSD reads' landing (docs/dev/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's
         # j-th SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
         # into the I/O worker's view before its signal
@@ -599,6 +594,13 @@ class TieredStore:
             self._pieces = dict.fromkeys(self.classes, piece)
             self.piece.copy_(torch.from_numpy(piece))
             self.classes32.copy_(torch.from_numpy(self.class_table.astype(np.int32)))
+            # each class's RAM units (`owner`: their pieces), as many as it holds (`fit`'s share solved by now); the
+            # demotions run beside the next call too: it never gives a unit the previous call demoted into to a
+            # displacement (a keep the I/O worker writes from the host would race that copy): `moe_tiers@2`'s stamps
+            static = functools.partial(self.ctx.static, dtype=torch.int32)
+            self.owner = static(f"{self.name}.owner", (len(classes), max(c.held for c in classes)))
+            self.tier_stamps = {"stamp": static(f"{self.name}.stamp", tuple(self.owner.shape)),
+                                "clock": static(f"{self.name}.clock", (1,))} if self.moves_async else {}
             self.capacity.copy_(torch.tensor([c.held for c in classes], dtype=torch.int32))
             # a lent expert's parking (`_park`): the groups of each class signature, each class's fetch (slot → unit)
             self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
@@ -1028,9 +1030,11 @@ class TieredStore:
             self.large_passes(at) and not self.exclusive else 1
         self._rounds = self._mode == "stage" and self._parts == 1 and at < ROUNDS_BELOW and self.rounds_able
         # D8g: a staging step's gathers beside the compute (its passes all pipeline: every one of them computes part
-        # by part) — in rounds below ROUNDS_BELOW, else each miss in its own staging slot
-        self._beside = bool(self.copies) and self._mode == "stage" and self._parts == 1 and self._pipelining and \
-            ("rounds" if self._rounds else "stage") in self._beside_modes and (self._rounds or at >= ROUNDS_BELOW)
+        # by part) — in rounds below ROUNDS_BELOW, else each miss in its own staging slot; exclusive tiers only (`fit`
+        # at f ≥ 1 has its copy engines bound, and runs as the lock: A-M1)
+        self._beside = self.exclusive and bool(self.copies) and self._mode == "stage" and self._parts == 1 and \
+            self._pipelining and ("rounds" if self._rounds else "stage") in self._beside_modes and \
+            (self._rounds or at >= ROUNDS_BELOW)
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned:
             self._loan_overflowed()

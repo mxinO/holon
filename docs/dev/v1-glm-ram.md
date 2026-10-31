@@ -56,8 +56,8 @@ card. Core gains two additive members.
   (B-R6; A-RAM-M1.3).
 - **One owner (A-RAM-M1, m6, R2-m3).** One rule: `fit` refuses when a state tier is configured. Nothing then races
   the store for the host remainder.
-- **Limits.** A pool requested after the store's (a CPU share's, `moe.cpu_plan`: its job table and rows) must fit the
-  reserve. No lock combines a CPU share with `fit`.
+- **Limits.** A pool requested after the store's comes out of the reserve. A CPU share (`moe.cpu_plan`: its job
+  table and rows, up to GBs) would, so `fit` refuses it (the code review's A m3). No lock combines them.
 - **Quantized.** f is rounded down to 1/256, so placement does not drift with a few MB of free RAM from start to start
   (A-RAM-m1).
 
@@ -252,8 +252,8 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
 ### 9.1 The D1 form: `host_left()` at build, with B-R10
 
 **Chosen: `BuildCtx.host_left()`** (D1's default). The zero-core form was priced against B-R10 and is not small:
-- B-R10 already brings half of it: under `fit` the store binds its exclusive kernels and I/O worker in the build and
-  sizes `owner` (and the stamps) by pieces.
+- B-R10 already brings half of it: under `fit` the store binds its exclusive kernels and I/O worker in the build, and
+  makes its tables at `before_materialize`.
 - The other half stays a restructure:
   - **No reserve without a reading.** The ledger grants a host request between min and pref against `host_memory`
     alone. A grant-derived f cannot leave the reserve (the store would need what is left to set pref), nor see the
@@ -271,21 +271,26 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
 - **At the first `before_materialize`:**
   1. **The first reading decides exclusivity.** f ≥ 1 when every piece fits beside the reserve
      (`left − reserve ≥ Σ pieces × unit`). The inclusive store needs no I/O pools, so none are counted.
-  2. **The tables come next** (the statics are allowed there, as the inclusive store's always were). `owner` is sized by
-     pieces for every exclusive store: a few int32s an expert.
+  2. **The tables come next** (the statics are allowed there, as the inclusive store's always were). RAM's units
+     (`owner`, the stamps) come after f, sized by the share as under a manual `moe.ram` (the code review's A m2).
   3. **The store's own host pools are requested before the RAM tier's:** landing rows, request tables, runs. So the
      second reading has them off already: the ledger subtracts them, with no duplicate arithmetic of their sizes.
   4. **f is solved from the second reading.** The RAM tier is made again with its units.
   5. **The third reading** is taken just before the tier's pool (`fit.recheck`).
-- **At f ≥ 1** the store is the lock's:
+- **At f ≥ 1** the store has the lock's bytes and layout, its I/O worker started idle:
   - inclusive, with no landing, I/O or run pools;
   - `moe.ram_heat` unused;
-  - each I/O slot bound in the build gets an idle copy task (zero roles), never signalled. The worker starts and
-    dozes (50 µs naps after 100 ms idle).
+  - D8g's gathers off: the copy engines bound in the build are never used. D8g is gated on exclusive tiers (the code
+    review's A-M1: before, a staging step of 8K+ prompt tokens ran its passes in 2 sparse parts, a path the lock never
+    takes);
+  - each I/O slot bound in the build gets an idle copy task (zero roles), never signalled. The worker starts, pinned
+    to a core, and dozes (50 µs naps after 100 ms idle). Its error word is zeroed at the first launch (a device
+    synchronize) and read at each commit.
+  - So `fit` needs the `cpu_task` prebuild and io_uring or Linux AIO even where it reads nothing.
   - "Identical to the lock" is tested as the same arenas (class, units, offset, size), seed and map, and the same
-    outputs bit for bit. The only difference is the build-time kernels: two more lock sites and the worker's error
-    word. On a VRAM-bound fill arena those few KB could cost one unit at a boundary; the tests' arenas hold every
-    piece, so they do not show it.
+    outputs bit for bit. The other differences are the build-time kernels (two more lock sites) and the worker's
+    error word. On a VRAM-bound fill arena those few bytes could cost one unit at a boundary; the tests' arenas hold
+    every piece, so they do not show it.
 
 **Two departures from the rev 2.1 text:**
 - **The tier gets per-class counts, not `*=f`:** `<class>=⌊f × pieces⌋`, at least 1. `Pinned` rounds a fraction
@@ -327,8 +332,9 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
 
 - **`card`:** `fit_lock` passes the lock's fingerprint class (`found[0].plan.fingerprint_class`,
   `<gpu>[+<cpu tier>]/<toolchain>`) to a hook naming it (`inspect.signature`). `glm5_next` keys `MODE2` and `KNEE` by
-  its GPU part.
-- **The merge is first-setter-wins** (`spill = got[0] | spill`), with the model plugin asked first.
+  its GPU part. A borrowed lock passes its own card: the spill measured with the lock it refines.
+- **The merge is first-setter-wins** (`spill = got[0] | spill`), with the model plugin asked first. A spill adding
+  no option is dropped with its note (A m5, B m1): GLM's set on the RTX 5090 prints GLM's note alone.
 - **Std's generic spill** sets `moe.tiers` (std's two tiers) and `moe.ram=fit` on every offload lock, unless the lock
   sets `moe.ram`.
 - **`glm5_next`'s spill** is `MODE2["rtx-5090"]`: the measured set with `moe.ram=fit`. It returns None on any other
@@ -353,7 +359,7 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
 
 ### 9.4 Core, ABI 1.7
 
-**Core: +10 code lines.** `check_core_loc.py` reads 5,276 / 6,000 on top of `mxinO/fail-stop` (5,266 at 382fbf8e).
+**Core: +12 code lines.** `check_core_loc.py` reads 5,278 / 6,000 on top of `mxinO/fail-stop` (5,266 at 382fbf8e).
 
 | Where | Lines | What |
 |---|---|---|
@@ -362,9 +368,10 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
 | `api/hooks.py` | +1 | `Spills.spill`'s `*, card: str = ""`, wrapped |
 | `cli.py` | +2 | `card` (`import inspect`, the call) |
 | `cli.py` | +2 | m8's entry |
-| `cli.py` (merge), `engine.py` (`"slots": cfg.slots`) | 0 | |
+| `memory.py` | +2 | a pin the OS refuses is `OutOfUnits`, a memory failure (the code review's A m4) |
+| `cli.py` (merge, notes, the spill entries by identity), `engine.py` (`"slots": cfg.slots`) | 0 | |
 
-The design's +5 to +6 had no m8 entry and no wrapped signature.
+The design's +5 to +6 had no m8 entry, no wrapped signature and no pin refusal.
 
 **`check_abi.py` renders signatures; it does not compare names only (B-R5's premise).**
 - A plugin-implemented hook's changed line counted as a major change.
@@ -387,26 +394,31 @@ The design's +5 to +6 had no m8 entry and no wrapped signature.
 - **The bitwise GPU test** (`test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store`) under `fit`:
   - `ssd` at the floor's f;
   - `ssdfit` at half;
-  - `fit` (f = 1, the inclusive store, its I/O worker started and never signalled). It fails without the idle tasks.
+  - `fit` (f = 1, the inclusive store, its I/O worker started and never signalled), under GLM's staging terms
+    (`ring_tokens` 32, a large `stream_tokens`, `moe.split` on) with D8g's threshold at 8 tokens: no pass runs in
+    parts. It fails without the idle tasks, and without A-M1's gate.
 - **f ≥ 1 identical to the lock on the CPU** (`test_fit_where_every_expert_fits_is_the_locks_store`):
   - the layout, the outputs, and no I/O pools;
   - m8's refusal (the last layer taken as a head's);
-  - `*=fit` refused.
+  - `*=fit` refused, and `moe.cpu_plan` beside `fit`.
 - **Under the deployment's terms:** `_mode2` now sets `moe.ram=fit`, with `_fit_at(share)` telling the store the host
   memory left. The `mode2` cases run under it: the loan's parking, its plants, and D8x at a quarter.
 - **Spills:**
   - first-setter-wins, `card` to 2- and 3-argument hooks, and the no-speculation entry
     (`core/tests/test_auto_config.py`);
   - GLM's spill per card through the real merge with std's (`test_glm_oracles.py`);
-  - `host_left()`'s two terms and None.
+  - `host_left()`'s two terms and None; a pin the OS refuses is `OutOfUnits`.
 - **`check_locks`** refusing `fit` (`core/tests/test_api.py`).
 
 ### 9.6 Limits and open items
 
-- **A CPU share (F5b, `moe.cpu_plan`) beside `fit`.** Its host pools are requested after the store's, so they must
-  fit the reserve's 64 MiB of pinned buffers. No lock combines them (D1, "Limits").
+- **A CPU share (F5b, `moe.cpu_plan`) beside `fit` is refused** (D1, "Limits").
 - **Approved as built** by the coordinator: `check_abi`'s rule for optional hooks with `card`'s default, `slots` in
-  `BuildCtx.options`, core's +10, and m8's entry without speculation.
+  `BuildCtx.options`, core's +10 (+12 with A m4), and m8's entry without speculation.
+- **The code review** (A, B on `382fbf8e..f28f53c2`): A-M1, B-M1 (the README's Host RAM table) and the minors are
+  taken in this round. Two docstrings now say how `BuildCtx.host_left` and `TierCtx.host_left` differ (B m3). The
+  knee's note says "est." (B m2). Plan §10's follow-up is marked delivered (B m7). B m5 (a CPU-tier suffix on
+  `card`) is latent and left.
 - **Open:**
   - GLM's knee (`KNEE`) is a placeholder until step 2;
   - the RTX 5080 has no `MODE2` entry (D7).

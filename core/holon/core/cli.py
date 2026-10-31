@@ -206,7 +206,7 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
     plugins declaring the lock's options and sources): settings giving the lock's `[sources]` no flag gives
     (`HintsSources`, in CACHE; when one is missing or the cache cannot be read, speculation off instead: they
     are drafters' heads), the spill (`Spills`, given the lock's class: the first owner to set an option wins; one
-    setting an option a flag gives is dropped) with its notes, and the notes of manual alternatives."""
+    setting an option a flag gives, or adding none, is dropped) with its notes, and the notes of manual alternatives."""
     if found is None:
         return {}, {}, [], []
     given, extra, spill, notes = flags.get("plugin_options", {}), {"plugin_options": {}}, {}, []
@@ -222,7 +222,7 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
     manual, card = [], found[0].plan.fingerprint_class
     for spills in (o.spill for o in owners if hasattr(o, "spill")):        # (`card` to a hook naming it: ABI 1.7)
         got = spills(options, checkpoint, **{"card": card} if "card" in inspect.signature(spills).parameters else {})
-        if got and not set(got[0]) & set(given):
+        if got and not set(got[0]) & set(given) and (set(got[0]) - set(spill) or not got[0]):   # (it adds an option)
             spill = got[0] | spill                  # the first owner setting an option wins: the model plugin's
             (notes if got[0] else manual).append("".join(f"{k}={v} " for k, v in got[0].items()) + got[1])
     return extra, spill, notes, manual
@@ -480,13 +480,13 @@ def _main(argv: list[str] | None) -> None:
     history = serve_history(model, flags | ({"host_memory": budget} if budget is not None else {}), found,
                             auto_context(model_plugin, source), serve_defaults(args.plans), lock_extra=extra,
                             spill=spill, keep_defaults=keep)
-    spilled = [c for c, _ in history[keep:-1]]
+    spilled = {id(c) for c, _ in history[int(keep):-1]}      # (the spill entries, by identity)
     history = checked_options(history, declared)
     if not history:
         raise SystemExit("holon: no configuration left to serve (the lock's was refused above, and the defaults "
                          "cannot hold this model): --no-lock serves defaults and your flags")
     config, lock = history[-1]
-    memory_only = {i: "(spilled: " + "; ".join(notes) + ")" for i, (c, _) in enumerate(history) if c in spilled}
+    memory_only = {i: "(spilled: " + "; ".join(notes) + ")" for i, (c, _) in enumerate(history) if id(c) in spilled}
     admit = functools.partial(admit_restart, derived=budget is not None)
 
     def refused(e: object) -> SystemExit:
