@@ -1,7 +1,8 @@
 # v1 — GLM on any host from its floor up: the RAM tier sized from the host budget
 
-Status: **design note, rev 2 (2026-10-31), answering the panel's review of rev 1** (A correctness, B architecture, C
-performance; all three: buildable after rev 2). The answers are in §7. Nothing is built.
+Status: **design note, rev 2.1 (2026-10-31): rev 2 cleared by the panel (A, B, C), with their rev-2 items taken (§8).**
+C's replay of the step-7 recording (the panel's notes) places the grid: speed is monotonic in RAM, steep from 56 to
+≈ 74 GB, flat from ≈ 84 GB; one f is within 0.09 points of heat-greedy. Nothing is built.
 
 **The owner's request (2026-10-31):** "we should not assume the 64g is the only one we need support, we should be able
 to adapte to different mem size (with 64g as a lower limit maybe)".
@@ -32,10 +33,13 @@ card. Core gains two additive members.
 
 **The value.** `moe.ram=fit`, the whole value only (no per-class `fit`), makes the store solve one expert fraction f
 (D2) from the host budget. The rules:
-- **When.** The store resolves `fit` once, at its first `holds()` question (the first `resolver()`, at build), before
-  the startup profile. It caches f, and passes `*=f` to the tier. Every later `holds()`, the profile's minimum layout
-  included, uses the cached f. A host pool is never re-pinned or re-seeded (B-R1, A-RAM-M1.2).
-- **Against what:** `BuildCtx.host_left()`, a new optional API member: `cfg.host_memory − ledger.host_bytes()`.
+- **When.** The store resolves `fit` once, at its first `before_materialize`, after every fixed host pool is requested
+  (its own, `std.tiered.rows`', `std.moe.cpu`'s and the like; A's R2-m2), and before the startup profile. It caches
+  f, and passes `*=f` to the tier. Every later `holds()`, the profile's minimum layout included, uses the cached f. A
+  host pool is never re-pinned or re-seeded (B-R1, A-RAM-M1.2). Pools requested after it are named in the reserve.
+- **Against what:** `BuildCtx.host_left()`, a new optional API member:
+  `min(cfg.host_memory − ledger.host_bytes(), live available − headroom)`. Core reads the live RAM, since std cannot
+  import `holon.core` (B-R6).
   - It is **not gated on `clamp_context`**, so `exact.py`, the bench and the tests have a budget whenever
     `host_memory` is set (B-R1). A placement-only choice is not a lock degradation.
   - **Without a host budget, `fit` refuses** ("moe.ram=fit needs a host budget: `holon serve` derives one;
@@ -43,16 +47,14 @@ card. Core gains two additive members.
 - **Taken off before solving:**
   - the store's own host pools: the read-ahead landing rows and their on-demand halves, the I/O and run tables;
   - every host pool already requested: the embeddings and the PLE rows of `std.tiered.rows`;
-  - **the state tier's level as a fixed request,** its configured bytes, if a state tier is set and has not built
-    yet;
-  - **a constant reserve:** the I/O worker's bounce windows (≤ 512 MiB), the pinned buffers outside the ledger
-    (`_readback`, `_move_host`, D8g's lists; A-RAM-M1.4), and R (D4).
-- **Re-checked before pinning.** Just before the tier's pool is requested, the store re-reads `platform.host_ram()`.
-  It takes `f = min(f, f(live available − headroom − R))`, so the serve-start snapshot cannot over-commit by what
-  other processes took meanwhile (A-RAM-M1.3).
-- **One owner (A-RAM-M1).** Under `fit` the store is the only reader of the host remainder. A state tier set beside it
-  takes its configured level as a fixed request, and does not clamp to `host_left()`. Its build checks `fit` among the
-  options and fails rather than race.
+  - **a generic reserve:** the I/O worker's bounce windows (≤ 512 MiB), the pinned buffers outside the ledger
+    (`_readback`, `_move_host`, D8g's lists; A-RAM-M1.4) and the process's non-pinned growth R (D4), as std's
+    constant, no model's (m4).
+- **Re-checked before pinning.** Just before the tier's pool is requested, the store asks `host_left()` again. If the
+  live reading is lower than the one f was solved from, the start refuses with both readings rather than re-solving
+  (B-R6; A-RAM-M1.3).
+- **One owner (A-RAM-M1, m6, R2-m3).** One rule: `fit` refuses when a state tier is configured. Nothing then races
+  the store for the host remainder.
 - **Quantized.** f is rounded down to 1/256, so placement does not drift with a few MB of free RAM from start to start
   (A-RAM-m1).
 
@@ -63,27 +65,26 @@ needs:
 - the statics (`owner`, `n_ram`, `_ram`) sized by pieces;
 - `Pinned` as one pool with per-class offsets.
 
-Otherwise it is `host_left()` at build: about +3 core lines, ABI 1.6 → 1.7 minor (B-R4). Both forms keep the single
-owner.
+Otherwise it is `host_left()` at build. **Core: +5 to +6 lines in all** (`host_left()` with its live reading, the
+spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single owner.
 
 ### D2. One fraction of whole experts; capped at saturation
 
 - **The rule.** An expert serves from RAM only if all its pieces are there: gate/up and down are in different
   classes, and GLM's down classes cover disjoint layer groups. So `fit` solves one fraction:
 
-  `f = min(f_sat, (host_left − pools − reserve) / Σ_classes(pieces × unit_bytes))`
+  `f = (host_left − pools − reserve) / Σ_classes(pieces × unit_bytes)`, rounded down to 1/256
 
   with `held = max(1, floor(f × pieces))` in each class. The store's RAM heat (`moe.ram_heat`) picks which experts.
-- **The cap at saturation (C §1).** `f_sat = (pieces not in the VRAM cache + the largest step's lend count) / pieces`.
-  - Past it there are no SSD-only experts left and nothing to park, so more units are wasted pinned RAM.
-  - It is about 0.82–0.84 at the RTX 5090's GLM deployment.
-  - The store knows both terms at its layout: the cache's slots by class, and the tail's lend count.
-- **One f against heat-per-byte (A-RAM-m2, C §3).** Step 0 checks offline, from the routing profile's per-expert heat,
-  the route mass captured by one f against heat-greedy whole experts at f = 0.4, 0.62 and 0.74.
-  - If the gap is under 1%, keep one f.
-  - If more, `fit` computes the per-class counts from the profile instead. That is the same output shape.
-- **The MTP head's experts** (an auxiliary group, Flash-Next's `aux.*` classes) count among the pieces and take the
-  same f. GLM's head is unused.
+- **No cap at saturation (B-R7, A's R2-m1).** Rev 2's `f_sat` is dropped: the VRAM cache's size and the tail's lend
+  count are not known when f is fixed. Past saturation (f ≈ 0.82–0.84, a ≈ 84 GB host) more units buy nothing, but the
+  lock is tried first, so the waste is only the **band from ≈ 84 GB to the lock's need (≈ 96 GB with little other
+  use)**, where the spill pins RAM a smaller f would serve as fast.
+- **One f against heat-per-byte (A-RAM-m2, C §3): kept.** C's replay: one f is within 0.09 points of heat-greedy whole
+  experts.
+- **The MTP head under `f < 1` (B-R9):** stays refused as today. The store refuses an auxiliary group's experts under
+  exclusive tiers, so a Flash-Next spill with `f < 1` serves without MTP, with the existing warning. GLM's head is
+  unused.
 - **`f ≥ 1`:** every piece is held, the tier is not exclusive, and the store runs as the lock does. It is tested
   identical to the lock.
 
@@ -93,7 +94,7 @@ owner.
   So a host that holds every expert gets mode (i).
 - C's model predicts the curve:
   - a rise from the floor to a knee at about 72–76 GB;
-  - a plateau from about 84 GB, where f is at f_sat;
+  - a plateau from about 84 GB, past saturation (f ≈ 0.82–0.84);
   - then a step up to the lock, about +20% decode, at the size where it starts (about 96 GB with little other use).
 - The plateau's speed is reported against the lock, not gated to it.
 
@@ -114,12 +115,10 @@ owner.
     gives N and X, measured, and so does the README.
   - The owner's "64 GB as a lower limit maybe" goes to the owner with this choice: refuse at the floor and warn at the
     knee (Q1).
-- **Memory-failure retries (A-RAM-M2).** Under `fit`, a start killed for memory re-derives f from a fresh snapshot, so
-  a systematic undercount would loop.
-  - Each memory-failure retry of a `fit` entry doubles the reserve, at most 3 times, said in the log. The supervisor
-    passes the retry count; step 0 checks whether the existing restart admission's lowered cap already gives it with no
-    new line.
-  - Then the start refuses with the measured shortfall.
+- **Memory-failure retries (A-RAM-M2, m5).** Under `fit`, a start killed for memory would re-derive the same f from a
+  fresh snapshot. Restart admission already lowers an entry's host cap after a memory failure: `fit` solves from that
+  lowered `host_memory`, so each retry gets a smaller f with no new channel, within admission's bounded count, then
+  the start refuses with the measured shortfall.
 
 ### D5. Spills: the card, first-setter-wins, and the generic spill
 
@@ -128,14 +127,14 @@ owner.
   into `core/abi.txt` by hand with the 1.7 bump, since `check_abi.py` compares names only (B-R5).
 - **First-setter-wins (B-R2).** `fit_lock` merges `spill = got[0] | spill`, with the model plugin asked first, so the
   model's measured set refines std's generic one. The line count is unchanged.
-- **Std's generic spill becomes a real one** for any offload lock: only `moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1`
-  and `moe.ram=fit`. No F10: `placement.promote@1` is a first-party plugin measured on GLM only (B-R3). It applies on
-  the cards where the exclusive-tier tests ran: the bitwise `ssd` cases and `exact.py` (A-RAM-m4).
+- **Std's generic spill becomes a real one** for every offload lock: only `moe.tiers=std.tiered.pinned@1,std.tiered.gguf_direct@1`
+  and `moe.ram=fit`. No F10: `placement.promote@1` is a first-party plugin measured on GLM only (B-R3). It is not
+  gated by card: an exactness failure under it is a std bug to fix (B-R8).
 - **`glm5_next`'s spill becomes `MODE2[card]` with `moe.ram=fit`.**
   - **RTX 5090:** the measured set (8,192-row passes, the loan options, `read_ahead`, `stream_tokens` 65,536, F10).
   - **RTX 5080:** per D7.
   - **Other cards:** GLM's spill returns nothing and the generic spill applies (lfu, std's tiers). Its tuned set is
-    never applied to a card it was not measured on.
+    never applied to a card it was not measured on; where it applies, it refines the generic one (first-setter-wins).
 - **`check_locks` refuses `fit` in a lock** (a CI check). A lock's placement is fixed; `fit` lives only in spills.
 
 ### D6. Which 64 GB values move with RAM (C §2)
@@ -144,24 +143,26 @@ owner.
 |---|---|---|
 | `pass_rows` 8,192, the loan options, `stream_tokens` 65,536, `ram_heat` 0.999 | hold (VRAM-side, or matter less as SSD-only shrinks) | no |
 | `read_ahead` 135 **with D8x's rows** | coupled. D8x parks a short prompt's ≈ 225 lent experts in 2 × `read_ahead` rows a role, 128 at 64 GB, so ≈ 100 park over RAM again | 1K prefill and D8x's `parked_in_rows`, at 64 GB and 80 GB: `read_ahead` 135 against D8x's rows decoupled from it |
-| F10's budget (1 a layer) | likely at the plateau, where promotions only shuffle VRAM and RAM | one arm at 80 GB: budget 1 against 0 against `placement.lfu`, 32K decode |
-| Parking (D8l, D8x) | self-adjusting: idle past f_sat | counters only |
+| F10's budget (1 a layer) | likely at the plateau, where promotions only shuffle VRAM and RAM | one arm at 88 GB (on the plateau, C): budget 1 against 0 against `placement.lfu`, 32K decode |
+| Parking (D8l, D8x) | self-adjusting: idle past saturation | counters only |
 
 ### D7. The RTX 5080
 
 - Its lock serves 8K steps without a loan (`moe.lend_peak` off). Mode (ii) has never run there.
-- **Step 3:** a smoke and `exact.py` at its lock's flags with the generic spill, under a 64 GiB cap.
-- **If exact:** one capped bench at 64 GB against the lock, with `read_ahead` and F10 as in D6. `MODE2["rtx-5080"]`
-  ships with its own reported numbers (Maya on 16 GB is not a program bar).
-- **If not,** the 5080's GLM spill stays None (the generic spill too), with the reason recorded.
+- **Step 3:** a smoke and `exact.py` at its lock's flags with the generic spill, under a 64 GiB cap. An exactness
+  failure is fixed at its cause, not gated (B-R8).
+- Then one capped bench at 64 GB against the lock, with `read_ahead` and F10 as in D6. If GLM's tuned set gains there,
+  `MODE2["rtx-5080"]` ships with its own reported numbers (Maya on 16 GB is not a program bar); otherwise the 5080
+  serves the generic spill.
 
 ## 3. Acceptance
 
 1. **The capped RTX 5090** (a cgroup-enforced job step, the node's NVMe, D11's method):
-   - 64, 72 and 80 GB at 3 rounds;
-   - 96 GB at 1 round, recording which of the lock and the spill started;
-   - 48 and 40 GB at 1 round each, for the knee;
+   - 56, 64 and 72 GB at 3 rounds;
+   - 48, 80 and 88 (or 96) GB at 1 round each, recording at the largest which of the lock and the spill started;
    - the uncapped lock.
+
+   C's replay rows read as ±30% at 40–56 GB, and its ≥ 72 GB prefill rows as upper bounds.
 
    At each size: 1K and 32K (4K only at 64 GB and the lock), SSD MB a decode token over tokens 1–32, and D8x's
    `parked_in_rows`. Speed rises with RAM. At 64 GB it is at or above the close's mode (ii) within its round spread.
@@ -170,9 +171,11 @@ owner.
 2. **Zero OOM kills** at every size (`memory.events`). Below the floor the refusal comes at build, with its terms.
 3. **`exact.py`:**
    - the RTX 5090 at 80 GB, the spill as `holon serve` gives it, byte-identical to the lock's first run;
-   - the generic spill on Qwen3-30B-A3B (the RTX 5080 offload lock) and on Flash-Next (one card), each capped.
+   - the generic spill on Qwen3-30B-A3B (the RTX 5080 offload lock) and on Flash-Next (one card, MTP off: B-R9), each
+     capped.
 4. **Tests,** under the deployment's terms (the `mode2` fixture with `moe.ram=fit`):
-   - `fit`'s arithmetic, engine-free: quantization, f_sat, the floor's refusal message, `f ≥ 1`;
+   - `fit`'s arithmetic, engine-free: quantization, the floor's refusal message, the lower second reading's refusal,
+     the refusal with a state tier, `f ≥ 1`;
    - the bitwise `ssd` cases at a `fit` share, and at the floor's f;
    - `f ≥ 1` identical to the lock;
    - first-setter-wins;
@@ -212,15 +215,31 @@ owner.
 | B-R3 no F10 in the generic spill | **Taken** (D5): tiers and `fit` only; GLM's tuned set only on measured cards |
 | B-R4 the fill pool is a restructure | **Taken:** `host_left()` at build (+3 core, ABI 1.7); the zero-core form priced in step 0 |
 | B-R5 keyword-only `card`, `abi.txt` by hand | **Taken** (D5) |
-| A-RAM-M1 one owner, sized once, re-checked before pinning, pinned buffers counted | **Taken** (D1): the store is the only reader; the state tier a fixed request; before the profile; live re-read; reserve |
+| A-RAM-M1 one owner, sized once, re-checked before pinning, pinned buffers counted | **Taken** (D1): the store is the only reader (rev 2.1: `fit` refuses with a state tier); before the profile; live re-read; reserve |
 | A-RAM-M2 a memory-failure restart loops | **Taken** (D4): the reserve doubles per retry, at most 3, then refuse |
 | A-RAM-M3 the floor from real requests; the 6.4 GiB tail is a knee term | **Taken** (D4): the ledger's requests + R at a 32K peak + ≥ 1 unit a class + the working tier; the tail a knee term |
 | A-RAM-m1 quantize f | **Taken** (D1): 1/256, down |
 | A-RAM-m2 / C §3 one f against heat-greedy | **Taken** (D2): checked offline in step 0; keep one f under 1% |
 | A-RAM-m3 refuse at build | **Taken** (D4) |
 | A-RAM-m4 the spill only where tested | **Taken** (D5) |
-| C §1 cap at saturation; the knee ≈ 72–76 GB; plateau; +20% step | **Taken** (D2's f_sat, D3, D4) |
+| C §1 cap at saturation; the knee ≈ 72–76 GB; plateau; +20% step | **Taken** (D3, D4); the cap dropped in rev 2.1 (§8) |
 | C §1 replay first | **Taken** (step 0; C writes it) |
 | C §2 `read_ahead` coupled with D8x's rows; F10 at the plateau | **Taken** (D6) |
 | C §4 the grid | **Taken** (acceptance 1) |
 | Other: `check_locks` refuses `fit`; the MTP head under `fit`; generic-spill exactness on the 30B and Flash-Next; `f ≥ 1` identical | **Taken** (D5, D2, acceptance 3, 4) |
+
+## 8. The panel's review of rev 2, and rev 2.1
+
+| Finding | Answer |
+|---|---|
+| B-R6 std cannot import core for the live read | **Taken** (D1): `host_left()` returns min(remaining budget, live available − headroom); a lower second reading refuses |
+| B-R7, A R2-m1 `f_sat`'s inputs are unknown when f is fixed | **Taken** (D2): dropped; the wasted band ≈ 84 GB to the lock's need noted |
+| B-R8 the generic spill on every offload lock; failures are bugs | **Taken** (D5, D7) |
+| B-R9 the MTP head under `f < 1` | **Taken** (D2): refused as today, served without MTP with the warning; Flash-Next's check MTP off |
+| B m4 R in the generic reserve | **Taken** (D1) |
+| B m5 retries through admission's lowered cap | **Taken** (D4) |
+| B m6, A R2-m3 one state-tier rule | **Taken** (D1): `fit` refuses with a state tier configured |
+| B m7 core lines once | **Taken** (D1): +5 to +6 |
+| A R2-m2 resolve after every fixed pool | **Taken** (D1): at the first `before_materialize` |
+| C the grid; F10 at 88 GB; replay error bars | **Taken** (acceptance 1, D6) |
+| Q1 | With the owner; built as designed (refuse at the floor, warn at the knee); "refuse under 64" would be one constant |
