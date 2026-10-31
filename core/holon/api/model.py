@@ -142,6 +142,12 @@ class BuildCtx(Protocol):
         `mapped`: device kernels may also read and write it in place (`Pool.device_view`). MemOps copy units between
         host and device pools (`MemOp.after`, `lands_by`)."""
 
+    def host_left(self) -> int | None:
+        """The host memory pools may still take (ABI 1.7): the least of the host budget (`EngineConfig.host_memory`)
+        less every host pool requested so far and, read now, the RAM available less `holon serve`'s headroom
+        (docs/dev/v1-auto-config.md D1); None without a host budget. A unit sizing a host pool to what is left asks it
+        before the request."""
+
     def shared(self, key: str, factory: Callable[[BuildCtx], Any]) -> Any:
         """One object per engine for `key` (by convention the provider's resource name, e.g. "cpu_task.worker"): the
         first call builds it with `factory(ctx)`, where `ctx` is the engine's own context even when an auxiliary

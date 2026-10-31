@@ -1,9 +1,11 @@
 """The MoE engine tests' shared models, engines and checks (`test_moe_engine*.py`, and the offload plugins' engine
 tests): the tiny CPU Qwen3-MoE and its engine, the GPU models (`gpu_moe`, `gpu_moe_wide`) with the resident store's
-outputs, GLM mode (ii)'s terms (`_mode2`), and the exclusive-tier store's invariants (`_bytes_exact`, `_held_once`,
+outputs, GLM mode (ii)'s terms (`_mode2`, RAM's share by `fit` at a set f: `_fit_at`), and the exclusive-tier store's
+invariants (`_bytes_exact`, `_held_once`,
 ...). The fixtures, registered in `conftest.py`, are module-scoped: each test module that uses one builds its own
 (xdist spreads the modules over the workers)."""
 import contextlib
+import math
 from unittest import mock
 
 import gguf
@@ -209,11 +211,12 @@ def _wide(tmp_path_factory, qtype, types) -> tuple:
 
 def _mode2(**over) -> dict:
     """GLM mode (ii)'s deployment terms on the tiny models (docs/dev/v1-glm.md, the process section: an exclusive-tier
-    change's engine tests run under them too): exclusive tiers, F10 (`placement.promote@1`, the spares a tail step
+    change's engine tests run under them too): exclusive tiers with RAM's share sized from the host budget (`fit`,
+    docs/dev/v1-glm-ram.md: `_fit_at` sets the f it solves), F10 (`placement.promote@1`, the spares a tail step
     releases), the tail lent with the step-peak loan required, RAM's own heat, the loan's margin and largest range,
-    split calls and gathers beside the compute — the cache and RAM fractions the tiny models'."""
+    split calls and gathers beside the compute — the cache fraction the tiny models'."""
     return {"moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "tail",
-            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.5",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "fit",
             "moe.placement": "placement.promote@1", "moe.ram_heat": "0.999", "moe.loan_margin": "1.12",
             "moe.loan_largest": "0.55", "moe.split": "on",
             "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"} | over
@@ -221,8 +224,31 @@ def _mode2(**over) -> dict:
 
 @pytest.fixture
 def mode2():
-    """`_mode2`, the deployment's terms (overrides by keyword)."""
-    return _mode2
+    """`_mode2`, the deployment's terms (overrides by keyword), `fit` solving f = `share` (default half the experts)
+    for the engines the test builds after."""
+    with contextlib.ExitStack() as stack:
+        def terms(share: float = 0.5, **over) -> dict:
+            stack.enter_context(_fit_at(share))
+            return _mode2(**over)
+        yield terms
+
+
+@contextlib.contextmanager
+def _fit_at(share: float | None):
+    """`moe.ram=fit` solving f = `share` (None: the working floor's, `fit.floor`): the host memory the store is told is
+    left (`BuildCtx.host_left`) is fit's reserve and that share of every piece's bytes (`fit`'s arithmetic on real
+    readings: its own tests)."""
+    from holon.core.build import BuildContext
+    from holon_std.moe.offload import KEY
+    from holon_std.tiered import fit
+
+    def left(ctx) -> int:
+        store = ctx.shared_objects[KEY]
+        classes = {c.name: (len(c.pieces), c.unit_bytes) for c in store.classes.values()}
+        f = fit.floor(classes, store._keeps) if share is None else share
+        return fit.RESERVE + math.ceil(f * sum(n * unit for n, unit in classes.values()))
+    with mock.patch.object(BuildContext, "host_left", left):
+        yield
 
 
 @contextlib.contextmanager

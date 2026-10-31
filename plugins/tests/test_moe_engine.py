@@ -11,7 +11,7 @@ from unittest import mock
 import numpy as np
 import pytest
 import torch
-from holon.api import RowKind, SamplingParams
+from holon.api import OutOfUnits, RowKind, SamplingParams
 from holon.core.batching import host_plan
 from holon.core.engine import Engine, EngineConfig
 from holon_std.moe.kernels import DECODE, PADDING
@@ -22,7 +22,17 @@ from holon_testing.ref_kernels.kernels import LinearExperts
 from safetensors.torch import save_file
 from transformers import AutoModelForCausalLM, Qwen3MoeConfig, Qwen3MoeForCausalLM
 
-from .moe_engine_common import GREEDY, Q, _bytes_exact, _engine, _gguf_and_dense, _held_once, _served, _tail_checked
+from .moe_engine_common import (
+    GREEDY,
+    Q,
+    _bytes_exact,
+    _engine,
+    _fit_at,
+    _gguf_and_dense,
+    _held_once,
+    _served,
+    _tail_checked,
+)
 from .test_engine import _hf_greedy
 
 PREBUILT = ("ggml_cuda", "expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
@@ -729,3 +739,70 @@ def test_exclusive_tiers_serve_what_the_resident_store_does(tiny_moe, tmp_path):
     with mock.patch.object(GgufDirect, "read", lambda self, c, n: ("memcpy", read(self, c, n)[1])), \
             pytest.raises(ValueError, match="'pread' extents"):
         _engine(file, host_memory=1 << 24, plugin_options=short)
+
+
+def test_fit_solves_one_share_once_and_refuses_below_its_floor():
+    """docs/dev/v1-glm-ram.md D1, D2, D4, engine-free: `moe.ram=fit`'s f = (left − reserve) / every piece's bytes,
+    rounded down to 1/256 (less than 1/256 more RAM moves nothing), each class ⌊f × pieces⌋ units, below 1 — every
+    piece fitting beside the reserve is the lock's store (`whole`) —; below the working floor (every class a call's
+    keeps) the start is refused for memory with each term in bytes; a lower reading just before the RAM tier's pool
+    refuses with both readings, never solving again; no host budget, or a state tier, refuses."""
+    from holon_std.tiered import fit
+
+    gib = 1 << 30
+    classes = {"gate_up": (512, 3 << 20), "down.a": (256, 1 << 20), "down.b": (256, 1 << 20)}     # 2 GiB of experts
+    half = fit.RESERVE + gib
+    assert fit.share("moe", half, classes, 32, {}) == (0.5, {"gate_up": 256, "down.a": 128, "down.b": 128})
+    assert fit.share("moe", half + (8 << 20) - 1, classes, 32, {})[0] == 0.5               # (1/256: 8 MiB)
+    assert fit.share("moe", half + (8 << 20), classes, 32, {})[0] == 0.5 + 1 / 256
+    assert fit.share("moe", fit.RESERVE + 2 * gib, classes, 32, {})[0] == 255 / 256       # (exclusive: below 1)
+    assert not fit.whole(fit.RESERVE + 2 * gib - 1, 2 * gib) and fit.whole(fit.RESERVE + 2 * gib, 2 * gib)
+    assert fit.floor(classes, 32) == 0.125 and fit.floor(classes, 1000) == 1.0       # (a call's keeps: its pieces)
+    with pytest.raises(OutOfUnits, match=r"below the working floor: the store needs 3\.82 GiB .* own I/O pools 0\.01 "
+                       r"GiB \(moe\.landing\.0 0\.008\), the reserve 3\.56 GiB .* a minimal RAM tier 0\.25 GiB "
+                       r"\(f 0\.1250 of the experts' 2\.00 GiB: every class a call's keeps, 32 units\) — and 3\.77 "
+                       r"GiB was left .* Short by 0\.05 GiB"):
+        fit.share("moe", fit.RESERVE + gib // 5, classes, 32, {"moe.landing.0": 8 << 20})
+    ctx = types.SimpleNamespace(options={}, host_left=lambda: 5 * gib)
+    fit.recheck(ctx, "moe", 6 * gib, 5 * gib)
+    with pytest.raises(OutOfUnits, match=r"fell from 6\.00 GiB, which .* to 5\.00 GiB before the RAM tier's pool"):
+        fit.recheck(ctx, "moe", 6 * gib, 5 * gib + 1)
+    assert fit.budget(ctx, "moe") == 5 * gib
+    with pytest.raises(ValueError, match="needs a host budget"):
+        fit.budget(types.SimpleNamespace(options={}, host_left=lambda: None), "moe")
+    with pytest.raises(ValueError, match=r"the state tier \(std\.state_tier\) would take too"):
+        fit.budget(types.SimpleNamespace(options={"slots": {"tier": "std.state_tier"}}, host_left=lambda: gib), "moe")
+
+
+def test_fit_where_every_expert_fits_is_the_locks_store(tiny_moe, tmp_path):
+    """docs/dev/v1-glm-ram.md D2, B-R10: `moe.ram=fit` (the spill's tiers too) on a host budget holding every expert
+    beside the reserve runs as the lock: inclusive, the same arenas, seed and map, the same outputs bit for bit, and
+    no landing, I/O or run pools — its exclusive kernels and I/O worker bound in the build, whatever f, and idle. At a
+    share below 1 an auxiliary model's experts (a drafter's head) are refused for memory (m8: `holon serve` serves
+    without speculation next), a share other than the whole value refused at once."""
+    from holon_std.tiered.store import TieredStore
+
+    checkpoint, prompts = tiny_moe
+    file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
+    lock = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25"}
+    fitted = lock | {"moe.ram": "fit", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
+    engines = [_engine(file, host_memory=1 << 24, plugin_options=lock), _engine(file, host_memory=4 << 30,
+                                                                               plugin_options=fitted)]
+    stores = [e.ctx.shared_objects[KEY] for e in engines]
+    layout = [([(c.name, c.held, c.at, c.size, c.staging) for c in s.classes.values()], s.residency.host.tolist())
+              for s in stores]
+    assert layout[0] == layout[1] and not stores[1].exclusive and stores[1].share == 1.0
+    assert not [n for n in engines[1].ledger.pools if any(k in n for k in (".landing.", ".io", ".runs."))]
+    assert "std.tiered[moe]/moe_tiers@2" in engines[1].ctx.kernels and stores[1].reads and all(
+        r.task is not None for r in stores[1].reads)                   # (bound, each an idle task: never signalled)
+    assert _served(engines[0], prompts) == _served(engines[1], prompts)
+    before = TieredStore.before_materialize
+
+    def headed(self, ctx):                       # the last layer taken as a drafter's head's (FN D12a)
+        self.mark_auxiliary(max(self.groups))
+        return before(self, ctx)
+    with _fit_at(0.5), mock.patch.object(TieredStore, "before_materialize", headed), \
+            pytest.raises(OutOfUnits, match="a drafter's head.*without speculation next"):
+        _engine(file, host_memory=1 << 30, plugin_options=fitted)
+    with pytest.raises(ValueError, match="fit is the whole value"):
+        _engine(file, host_memory=1 << 30, plugin_options=fitted | {"moe.ram": "*=fit"})

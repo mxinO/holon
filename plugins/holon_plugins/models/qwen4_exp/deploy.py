@@ -50,7 +50,8 @@ def spill(options: Mapping[str, object], checkpoint: str) -> tuple[dict[str, str
     return ({"rows.place": ",".join("ple:ssd" if p == "ple:host" else p for p in place)},
             f"the PLE table read from the checkpoint ({disk} disk) instead of ≈ 27 GiB of pinned RAM, byte-identical; "
             "prefill −66%/−80%/−81% and decode −2% to −3% at 1K/4K/32K on an RTX 5090, prefill −60%/−71%/−71% and "
-            "decode −2% on an RTX 5080")
+            "decode −2% on an RTX 5080; where RAM then holds only a share of the experts, served without the MTP head "
+            "(decode 24–37% slower, docs/dev/v1-glm-ram.md m8)")
 
 
 def source_hint(identity: str) -> str | None:

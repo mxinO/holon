@@ -122,6 +122,11 @@ class BuildContext:
             raise PluginError(f"pool {name!r}: a model-only build has no memory ledger")
         return self.ledger.plugin_pool(name, **sizes)
 
+    def host_left(self) -> int | None:
+        if self.ledger is not None and self.ledger.host_memory:          # (None: no host budget)
+            available, total, _ = platform.host_ram()
+            return min(self.ledger.host_memory - self.ledger.host_bytes(), available - platform.host_headroom(total))
+
     def shared(self, key: str, factory: Any) -> Any:
         if key not in self.shared_objects:
             if self.sealed:
@@ -168,7 +173,7 @@ class ChildContext:
     def __init__(self, parent: BuildContext, namespace: str, options: dict[str, Any] | None = None) -> None:
         self.parent, self.namespace = parent, namespace
         self.plugins, self.device, self.dtype = parent.plugins, parent.device, parent.dtype
-        self.fingerprint = parent.fingerprint
+        self.fingerprint, self.host_left = parent.fingerprint, parent.host_left
         self.options = parent.options | (options or {})
 
     def unit_class(self, ref: Ref) -> Any:

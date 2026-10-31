@@ -25,7 +25,8 @@ class DeviceResolver:
         self.group = None                     # its row in the store's tables, once attached (`attach`)
         self._prepared = False                # the pass is prepared, not yet resolved
         self.io_slot = None                   # exclusive tiers: its SSD reads' slot on the I/O worker (D8g: one a
-        self.io_slots: tuple = ()             # landing half, `io_slots`)
+        self.io_slots: tuple = ()             # landing half, `io_slots`), and its read-ahead set's
+        self.ahead_slot = None
         facts = {"experts": store.items, "top_k": store.top_k, "roles": store.roles, "staging": store.staging}
         site = f"std.tiered[{store.name}]"
         op = store.policy.resolve_variant or RESOLVE

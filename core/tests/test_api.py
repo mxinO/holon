@@ -108,7 +108,7 @@ def test_manifest_loads_design_example(tmp_path: pathlib.Path):
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = 'a8' }\n", "strings"),
     (">=1.0,<2.0", "[options]\n'a.b' = { help = 'x', choices = [4, 8] }\n", "strings"),
     (None, "", "core_abi missing"),                                  # required (release design §7)
-    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.6"),   # checked before the keys
+    (">=0.2,<0.3", "[surprise]\n", "does not admit this core's plugin ABI 1.7"),   # checked before the keys
     ("~=0.1", "", "expected clauses"),
 ])
 def test_manifest_rejects_mistakes_with_path(tmp_path: pathlib.Path, abi, extra, match):
@@ -230,19 +230,27 @@ def test_the_core_diff_report_names_core_changes_from_scripts_ci(tmp_path):
     assert "core/a.py" in report("base")
 
 
-def test_check_locks_refuses_a_lock_carrying_a_cpu_tier(tmp_path):
+def test_check_locks_refuses_a_lock_carrying_a_cpu_tier_or_fit(tmp_path):
     """`scripts/ci/check_locks.py` refuses a lock class with a CPU tier (`<gpu>+<tier>/…`) until the policy for tier
-    and benchmark-only locks is decided (docs/plan.md §10, F5b locks): the lookup would make it a host's default."""
+    and benchmark-only locks is decided (docs/plan.md §10, F5b locks): the lookup would make it a host's default; and
+    a lock setting `moe.ram=fit`, which varies with the host (docs/dev/v1-glm-ram.md D5: spills only)."""
+    from holon_tools import locks
+
     root = pathlib.Path(__file__).resolve().parents[2]
     lock = root / "plans" / "nvidia" / "Qwen3-8B-NVFP4@70613544a162fdd3" / "rtx-5080" / "cu130-torch2.11" / "1.lock"
 
-    def check(cls: str) -> subprocess.CompletedProcess:
+    def check(cls: str, text: str = lock.read_text()) -> subprocess.CompletedProcess:
         plans = tmp_path / cls.replace("/", "_") / "plans"
         target = plans / "nvidia" / "Qwen3-8B-NVFP4@70613544a162fdd3" / cls / "1.lock"
         target.parent.mkdir(parents=True)
-        target.write_text(lock.read_text())
+        target.write_text(text)
         return subprocess.run([sys.executable, str(root / "scripts" / "ci" / "check_locks.py"), "--plans", str(plans)],
                               capture_output=True, text=True)
     assert check("rtx-5080/cu130-torch2.11").returncode == 0
     tiered = check("rtx-5080+x86-avx512/cu130-torch2.11")
     assert tiered.returncode == 1 and "carries a CPU tier" in tiered.stdout
+    read = locks.read(lock)
+    engine = read.plan.engine | {"plugin_options": read.plan.engine.get("plugin_options", {}) | {"moe.ram": "fit"}}
+    fitted = check("rtx-5090/cu130-torch2.11", locks.dumps(dataclasses.replace(
+        read, plan=dataclasses.replace(read.plan, engine=engine))))
+    assert fitted.returncode == 1 and "sets moe.ram=fit" in fitted.stdout

@@ -240,11 +240,15 @@ class TrainedContext(Protocol):
 
 # -- any plugin, asked by `holon serve` (docs/dev/v1-auto-config.md D1, D5) -------------------------------------------
 class Spills(Protocol):
-    def spill(self, options: Mapping[str, object], checkpoint: str) -> tuple[Mapping[str, str], str] | None:
+    def spill(self, options: Mapping[str, object], checkpoint: str, *, card: str = ""
+              ) -> tuple[Mapping[str, str], str] | None:
         """On the model plugin or a plugin declaring one of `options` (a lock's plugin options): the options under
         which the deployment serves with less pinned host memory, byte-identical, and a note of the cost; `holon serve`
         tries them after the lock's start fails for memory. Empty options: an alternative only named when the start
-        is refused. None: nothing to offer for `checkpoint` (its local path)."""
+        is refused. None: nothing to offer for `checkpoint` (its local path). `card` (ABI 1.7; passed only to an
+        implementation naming it, so one without it serves as before): the lock's fingerprint class
+        (`<gpu>[+<cpu tier>]/<toolchain>`), for a set measured on one card. The owners are asked model plugin first,
+        and the first to set an option wins: a model's measured values refine a generic spill."""
 
 
 class HintsSources(Protocol):

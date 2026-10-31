@@ -6,6 +6,7 @@ import json
 import os
 import pathlib
 import subprocess
+import types
 import warnings
 
 import pytest
@@ -72,18 +73,31 @@ def test_the_files_tokenizer_is_llama_cpps_and_the_models(tmp_path):
         assert tok.decode(ids) == text, text
 
 
-def test_the_ram_short_spill_is_mode_ii_as_measured():
-    """`holon serve`'s spill for the RTX 5090 lock (docs/dev/v1-auto-config.md D1): mode (ii)'s measured settings, each
-    an option an installed plugin declares, with a value in its choices; none for the RTX 5080's lock (mode (ii) was
-    measured on the 5090 only) or for options already setting RAM's share."""
+def test_the_ram_short_spill_is_mode_ii_as_measured_on_its_card(monkeypatch):
+    """`holon serve`'s spill for GLM's offload locks (docs/dev/v1-auto-config.md D1; docs/dev/v1-glm-ram.md D5): on the
+    card mode (ii) was measured on (the RTX 5090's lock) its measured settings, RAM's share sized to the host (`fit`),
+    each an option an installed plugin declares with a value in its choices, the note giving the cost and the knee;
+    none on another card (the RTX 5080's lock) or for options already setting RAM's share. Through `holon serve`'s
+    merge, model plugin first and first setter winning, the measured set is what serves on its card, std's generic
+    spill (the tiers and `fit` alone) on the other."""
     from holon.core import cli
     from holon.core.plugins import discover
     from holon_plugins.models.glm5_next import deploy
+    from holon_plugins.models.glm5_next.plugin import Plugin
+    from holon_std.moe.plugin import Plugin as Moe
 
-    lock = {"moe.store": "std.moe.offload@1", "moe.lend_peak": "require", "moe.ring_lend": "tail"}
-    options, note = deploy.spill(lock, "/data/glm.gguf")
+    lock, cards = {"moe.store": "std.moe.offload@1", "moe.lend_peak": "require", "moe.ring_lend": "tail"}, (
+        "rtx-5090/cu130-torch2.11", "rtx-5080/cu130-torch2.11")
+    options, note = deploy.spill(lock, "/data/glm.gguf", card=cards[0])
     declared = cli.declared_options(discover())
-    assert options == deploy.MODE2 and set(options) <= set(declared) and not cli.outside_choices(options, declared)
-    assert "mode (ii)" in note and "1.7–1.9×" in note and "2.5–2.8×" in note and "smaller moe.ram" in note
-    assert deploy.spill(lock | {"moe.lend_peak": "off"}, "/data/glm.gguf") is None             # the RTX 5080's
-    assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf") is None
+    assert options == deploy.MODE2["rtx-5090"] and options["moe.ram"] == "fit" and set(options) <= set(declared)
+    assert not cli.outside_choices(options, declared) and "mode (ii)" in note and "1.7–1.9×" in note
+    assert "below ≈ {} GB of RAM 32K decode falls under ≈ {} tok/s".format(*deploy.KNEE["rtx-5090"]) in note
+    assert deploy.spill(lock, "/data/glm.gguf", card=cards[1]) is None
+    assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf", card=cards[0]) is None
+    monkeypatch.setattr(cli.plans, "lock_overrides", lambda found: dict(found.plan.engine))
+    generic = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "fit"}
+    for card, want in zip(cards, (deploy.MODE2["rtx-5090"], generic), strict=True):
+        plan = types.SimpleNamespace(sources={}, engine={"plugin_options": lock}, fingerprint_class=card)
+        assert cli.fit_lock((types.SimpleNamespace(plan=plan), False, "1.lock"), {}, [Plugin(), Moe()],
+                            "/data/glm.gguf")[1] == want

@@ -1,10 +1,12 @@
 """The plugin ABI's listing (release design §7): what plugins may rely on, rendered from the code and compared with
 `core/abi.txt`. A difference fails unless the listing is regenerated (`--write`) with `holon.api.ABI` bumped: an
 addition needs a minor bump — so do keyword-only parameters with defaults added to a member plugins only call (of a
-Protocol the core implements, or of a dataclass), and a field's default listing the fields its class gained —; a
-removal or change, a member added to a required Protocol plugins implement, or a dataclass field added without a
-default needs a major one (below 1.0: the minor number, as manifests' ranges read it). Also fails when the core looks
-up a hook by name (`hasattr` / `getattr` with a literal) that no Protocol of `holon.api` declares.
+Protocol the core implements, or of a dataclass) or to an optional hook's (which the core passes only to an
+implementation naming them: backward-compatible for callers and implementers), and a field's default listing the
+fields its class gained —; a removal or change, a member added to a required Protocol plugins implement, or a
+dataclass field added without a default needs a major one (below 1.0: the minor number, as manifests' ranges read
+it). The listing states the rule in its header (`RULE`, not compared). Also fails when the core looks up a hook by name
+(`hasattr` / `getattr` with a literal) that no Protocol of `holon.api` declares.
 
 Listed: every public name of `holon.api` (dataclass fields by index with types and defaults; Protocol members with
 their signatures, required or optional, and who implements the Protocol), the optional hooks (`holon.api.hooks`),
@@ -137,8 +139,15 @@ def contracts(dist: str) -> str:
     return "".join(f"{line}\n" for line in sorted(out))
 
 
+RULE = ["## The version rule (scripts/ci/check_abi.py): a removal or change, a member added to a required Protocol",
+        "## plugins implement, or a dataclass field without a default is major; any other addition minor — a",
+        "## keyword-only parameter with a default added to a member of a Protocol the core implements, of a dataclass,",
+        "## or of an optional hook plugins implement included (backward-compatible for callers and implementers: the",
+        "## core passes it only to an implementation naming it, as `Spills.spill`'s `card`)."]   # (`##`: not compared)
+
+
 def listing() -> str:
-    lines = [f"abi {api.ABI}", "", "# holon.api"]
+    lines = [f"abi {api.ABI}", "", *RULE, "", "# holon.api"]
     for name in sorted(api.__all__):
         if name != "ABI" and getattr(obj := getattr(api, name), "__module__", "") != hooks.__name__:  # hooks: below
             lines += render(name, obj)
@@ -181,7 +190,7 @@ def _version(listing: str) -> tuple[int, ...]:
 def _entries(listing: str) -> set[tuple[str, str]]:
     """Each line of a listing with the item it belongs to (its last unindented line)."""
     out, head = set(), ""
-    for line in listing.splitlines()[1:]:
+    for line in (ln for ln in listing.splitlines()[1:] if not ln.startswith("##")):
         head = line if not line.startswith("  ") else head
         out.add((head, line))
     return out
@@ -241,8 +250,12 @@ def bump_error(old: str, new: str) -> str | None:
     required Protocol plugins implement (plugins of the old ABI lack it), or a dataclass field added without a default
     (callers of the old ABI do not pass it) needs a major bump (below 1.0: the minor number, as manifests' ranges read
     it); any other addition a minor one, keyword-only parameters with defaults added to a member of a Protocol the core
-    implements or of a dataclass included (`extends`)."""
+    implements or of a dataclass included (`extends`), and to a member of an optional Protocol plugins implement (a
+    hook: the core passes such a keyword only to an implementation naming it, so one of the old ABI serves as
+    before)."""
     was, now, before, after = _version(old), _version(new), _entries(old), _entries(new)
+    if before == after and now == was:           # (the header's rule text only: not the ABI)
+        return None
     def breaks(head: str, line: str) -> bool:
         if line == head or (head, head) not in before:            # a new item
             return False
@@ -251,8 +264,11 @@ def bump_error(old: str, new: str) -> str | None:
     defaults = {(head.split()[1], line.split()[1].rstrip(":")): line.partition(" = ")[2] for head, line in after
                 if head.startswith("dataclass ") and line.strip().startswith("#") and " = " in line}
 
-    def extended(head: str, line: str) -> bool:      # by a line of the same item, which plugins only call or read
-        return ("implemented by core" in head or head.startswith("dataclass ")) and any(
+    # by a line of the same item, which plugins only call or read, or an optional hook's (`Spills`' card: the core
+    # passes a keyword added to it only to an implementation naming it)
+    def extended(head: str, line: str) -> bool:
+        return ("implemented by core" in head or head.startswith("dataclass ") or
+                "optional, implemented by plugins" in head) and any(
             h == head and extends(line, new, defaults) for h, new in after - before)
 
     breaking = sorted(line for head, line in before - after if not extended(head, line)) + sorted(

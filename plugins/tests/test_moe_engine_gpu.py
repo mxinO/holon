@@ -3,6 +3,7 @@ kernels.expert_io's resolve and gathers, decode steps from CUDA graphs — bitwi
 every placement policy, with exclusive tiers (RAM and the SSD, the I/O worker's reads), the CPU's share of the misses
 (bounded), the SSD reads' landing rows and read-ahead sets (docs/dev/v1-glm.md D8f, D8u), and the fences the store's
 streams use."""
+import contextlib
 import os
 import warnings
 from unittest import mock
@@ -15,7 +16,7 @@ from holon_std.moe.offload import KEY
 from holon_std.tiered.ring import Lent
 from holon_testing.gguf_files import write
 
-from .moe_engine_common import GREEDY, Q, _bytes_exact, _gpu_engine, _no_host_sync, _served, _tail_checked
+from .moe_engine_common import GREEDY, Q, _bytes_exact, _fit_at, _gpu_engine, _no_host_sync, _served, _tail_checked
 
 PREBUILT = ("ggml_cuda", "expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
@@ -25,7 +26,8 @@ pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a G
                                            ("placement.profile_decay@1", "*=0.25"), ("std.tiered.static@1", "*=0.25"),
                                            ("", "*=0.5 ring"), ("", "*=0.5 dma"), ("", "*=0.75 tail"),
                                            ("", "*=0.25 split"), ("", "*=0.75 pipe"),
-                                           ("", "*=0.25 ssd"), ("", "*=0.25 ssd1"), ("", "*=0.25 ssdsplit"),
+                                           ("", "*=0.25 ssd"), ("", "*=0.25 ssdfit"), ("", "*=0.25 fit"),
+                                           ("", "*=0.25 ssd1"), ("", "*=0.25 ssdsplit"),
                                            ("std.tiered.static@1", "*=0.25 ssd"),
                                            ("placement.promote@1", "*=0.25 ssd")])
 def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, policy, cache):
@@ -34,7 +36,9 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     resolve, its F11 and F4 variants and zero-copy gather from mapped host pools), decode steps replayed from CUDA
     graphs and prefill chunked past the mmvq limit: the offload store's streams and prompt logprobs are the resident
     store's, bit for bit, under every placement policy (arenas of 42, 18, 10 slots: stream-k unpatched), and with RAM
-    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; at one
+    holding a quarter of the experts (exclusive tiers, D10: SSD reads on the I/O worker inside decode graphs; "ssd" its
+    share by `fit` at the working floor's f, a quarter here, "ssdfit" at half, docs/dev/v1-glm-ram.md D2 — "fit" on a
+    budget holding every expert is the inclusive store, its I/O worker started idle (B-R10) —; at one
     sequence, "ssd1", its prompt steps borrow their staging from the cache, the lent experts parked in RAM over its
     coldest or sent to the SSD, while its own staging slots stay a graphed step's, and its SSD reads land in landing
     rows of two, a call's in rounds, its prompt steps of 8 tokens or more reading the next layers' sets ahead:
@@ -54,9 +58,10 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
         resident = _gpu_engine(file, max_seqs=1)
         want = _served(resident, prompts)
         resident.close()
-    ssd, split = ring in ("ssd", "ssd1", "ssdsplit"), ring in ("split", "ssdsplit")   # their copies on SMs / copy
-    #                                                engines, "tail" a tail (D11), "ssdsplit" both (D8c)
-    ring = "" if ssd or split else ring              # first; "ssd": RAM holds a quarter; "split": the decode passes'
+    ssd, split = ring in ("ssd", "ssdfit", "ssd1", "ssdsplit"), ring in ("split", "ssdsplit")   # their copies on SMs /
+    #                                                copy engines, "tail" a tail (D11), "ssdsplit" both (D8c)
+    share = {"ssd": None, "ssdfit": 0.5, "fit": 1.0}.get(ring, False)    # `fit` solving f: the floor's, half, all
+    ring = "" if ssd or split or ring == "fit" else ring      # first; "ssd": RAM a quarter; "split": the decode passes'
     pipe = ring == "pipe"                            # resident entries first, the misses' fetch on a side stream;
                                                      # "pipe": prompt steps stage, their misses in 4 fetched parts
     from holon_std.tiered import store as tiered_store
@@ -69,16 +74,21 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
                                  lambda self, r, **kw: order.append(f"rows {r}") or rows(self, r, **kw))
     spy_gather = mock.patch.object(DeviceResolver, "_gather", lambda self, f, n, landed=False, part=0: order.append(
         "ssd" if landed else "ram") or gather(self, f, n, landed=landed, part=part))
-    with (spy_tiers, spy_rows, spy_gather,
+    with (spy_tiers, spy_rows, spy_gather, _fit_at(share) if share is not False else contextlib.nullcontext(),
           mock.patch.object(tiered_store, "ON_DEMAND", 2 if one else tiered_store.ON_DEMAND)):   # ssd1: rounds of 2
         engine = _gpu_engine(
-            file, host_memory=1 << 27, **({"max_seqs": 1} if one else {}), plugin_options={
+            file, host_memory=1 << 28, **({"max_seqs": 1} if one else {}), plugin_options={
             "moe.store": "std.moe.offload@1", "moe.cache": cache, "moe.placement": policy,
             "moe.ring_tokens": 32 if ring else 512, "moe.ring_copy": "dma" if ring == "dma" else "sm",
             "moe.ring_lend": "tail" if ring in ("tail", "pipe") else "coldest", "moe.split": "on" if split else "off"}
             | ({"moe.stream_tokens": 1 << 20, "moe.pipeline": 4} if pipe else {})
-            | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "*=0.25"} if ssd else {}))
+            | ({"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1",
+                "moe.ram": "*=0.25" if share is False else "fit"} if ssd or share else {}))
     store = engine.ctx.shared_objects[KEY]
+    if share is not False:                           # fit: f the floor's (each class a graphed step's 8 misses of its
+        held = {c.held for c in store.classes.values()}          # 32 pieces: a quarter) or half, held ⌊f × pieces⌋
+        assert (store.share, held) == {None: (0.25, {8}), 0.5: (0.5, {16}), 1.0: (1.0, {32})}[share], held
+        assert store.exclusive == (share != 1.0)
     if ssd:                                          # (prompt steps of 8 tokens or more read ahead; never one with
         store.read_ahead_tokens = 8                  # a decode row: at 4 sequences, mixed steps keep: D8f)
     calls = []                                       # eager calls' SSD misses (round 0's count) and read-ahead hits
@@ -118,7 +128,11 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     assert {(k.rpartition("/")[2], v["provider"]) for k, v in engine.ctx.kernels.items() if k.startswith("std.tiered")
             } == {variant, ("expert_fetch@1", "kernels.expert_io"),
                   ("expert_prefetch@1", "kernels.expert_io")} | ({("moe_tiers@2", "kernels.expert_io"),
-                                                                 ("cpu_task@1", "kernels.cpu_task")} if ssd else set())
+                                                                 ("cpu_task@1", "kernels.cpu_task")} if ssd or share
+                                                               else set())
+    if share == 1.0:                                 # bound in the build, started, never signalled
+        io = engine.ctx.shared_objects["cpu_task.io"].native
+        assert io.served() == 0 and io.flag() == 0
     if ssd:                                          # the SSD reads ran on the I/O worker, fail-open untouched
         io = engine.ctx.shared_objects["cpu_task.io"].native
         assert store.exclusive and io.served() > 0 and io.flag() == 0
@@ -260,9 +274,10 @@ def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
     a, table = store.landing_rows, store.io_pool.view(torch.int32, (store.halves, store.roles, 1 + store.landing_rows,
                                                                     3))[0]
     for reads in (x for x in store.reads if not x.ahead and not x.half):
-        classes = store.layer_classes[reads.g]
+        g = reads.resolver.group
+        classes = store.layer_classes[g]
         for at in range(0, store.items, a):
-            pieces = [[store._piece_index(c, reads.g, i, r) for i in range(at, min(at + a, store.items))]
+            pieces = [[store._piece_index(c, g, i, r) for i in range(at, min(at + a, store.items))]
                       for r, c in enumerate(classes)]
             for r, p in enumerate(pieces):
                 table[r, 0, 0] = len(p)
@@ -270,7 +285,7 @@ def test_a_roles_classes_share_its_landing_rows(gpu_moe, tmp_path):
             reads()
             for r, (c, p) in enumerate(zip(classes, pieces, strict=True)):
                 runs = store.landing_view(c.name, device=False)[1][:len(p)].numpy()
-                assert np.array_equal(runs, store.piece_runs[c.name][p]), (reads.g, r, at)
+                assert np.array_equal(runs, store.piece_runs[c.name][p]), (g, r, at)
     engine.close()
 
 
