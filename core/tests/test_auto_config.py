@@ -48,16 +48,16 @@ def test_host_ram_is_meminfo_and_the_cgroup_limits_less_what_they_hold(tmp_path,
     assert platform.host_headroom(total) == 6 * GiB and platform.host_headroom(256 * GiB) == int(12.8 * GiB)
 
 
-@pytest.mark.parametrize("case", ["v2", "v1", "none"])
+@pytest.mark.parametrize("case", ["v2", "v1", "v1 container root", "none"])
 def test_the_oom_kills_are_the_cgroups_count(tmp_path, case):
-    """The OOM killer's kills in this process's cgroup: v2's `memory.events`, v1's `memory.oom_control`; None
-    without either."""
+    """The OOM killer's kills in this process's cgroup: v2's `memory.events`, v1's `memory.oom_control` (a path
+    missing here, cgroupns=host: the mount's root); None without either."""
     proc, cg = tmp_path / "proc", tmp_path / "cg"
-    _tree(proc, {"self/cgroup": "4:memory:/user\n0::/app\n" if case == "v1" else "0::/app\n"})
+    _tree(proc, {"self/cgroup": "4:memory:/user\n0::/app\n" if case.startswith("v1") else "0::/app\n"})
+    v1 = "memory/memory.oom_control" if case == "v1 container root" else "memory/user/memory.oom_control"
     _tree(cg, {"app/memory.events": "low 0\noom 3\noom_kill 2\n",
-               "memory/user/memory.oom_control": "oom_kill_disable 0\nunder_oom 0\noom_kill 5\n"} if case != "none"
-          else {"app/memory.max": "max"})
-    assert platform.oom_kills(str(proc), str(cg)) == {"v2": 2, "v1": 5, "none": None}[case]
+               v1: "oom_kill_disable 0\nunder_oom 0\noom_kill 5\n"} if case != "none" else {"app/memory.max": "max"})
+    assert platform.oom_kills(str(proc), str(cg)) == {"v2": 2, "none": None}.get(case, 5)
 
 
 def test_the_pin_lock_never_fails_a_start(tmp_path, monkeypatch, capsys):

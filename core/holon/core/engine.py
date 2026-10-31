@@ -446,14 +446,13 @@ class Engine:
         failed, helpers = None, (self.processor, *self.ctx.shared_objects.values())
         for step in (functools.partial(platform.synchronize, self.device),          # (every stream)
                      *(getattr(o, "shutdown", lambda: None) for o in helpers),
-                     getattr(self.tier, "close", lambda: None)):
+                     getattr(self.tier, "close", lambda: None), functools.partial(self.ledger.free, host=True)):
             try:
                 step()
             except Exception as e:  # noqa: BLE001 — a lost device (a sticky error): its work is gone; the rest stop
                 failed = failed or e
         self.executor = self._inflight = self.processor = self.tier = None
         self.shared, self.ctx.shared_objects = [], {}    # what they hold, host memory included, goes too
-        self.ledger.free(host=True)
         gc.collect()
         if failed is None:
             platform.release_cache(self.device)

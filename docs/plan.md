@@ -852,6 +852,10 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   exclusive tiers' I/O worker never did, so its timeouts left wrong bytes silently until GLM's ea7ddd01. The provider
   should carry its own error word as telemetry with a commit-time raise, so no consumer can forget it (a contract
   change: its consumers' watches then go).
+- **The PLE rows' descriptor outlives a left-behind read** (fail-stop's review, A; pre-existing):
+  `std.tiered.rows`' `_File.shutdown` closes the SSD table's descriptor even when the I/O worker left its
+  coordinator in a read past its time bound, where the store keeps its descriptors open (`service.left`), so the
+  number could be reused under a read still in flight. Check `service.left` the same way.
 - **D8x's move thread: views once a move** (GLM, `docs/dev/v1-glm.md` D8x): the thread builds its landing-row and
   RAM-unit views per piece under the GIL (≈ 450 a 1K prompt), likely the rest of the launches' p99 (+1.01 ms at
   GLM's close, at the bound); build them once a move, so it holds the GIL only to index and copy.

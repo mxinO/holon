@@ -94,6 +94,7 @@ class Service:
         if self.armed:
             return [], []
         self.armed = True
+        torch.cuda.synchronize(self.errors.device)  # the start's last work done: none of its bits lands after the zero
         return [(self.errors, np.zeros(1, dtype=np.int32))], []
 
     def after_commit(self, step, telemetry) -> None:

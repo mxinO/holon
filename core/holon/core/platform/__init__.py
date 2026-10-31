@@ -157,9 +157,10 @@ def oom_kills(proc: str = "/proc", cgroup: str = "/sys/fs/cgroup") -> int | None
     `memory.oom_control`); None where neither can be read."""
     groups, own = _cgroup(proc, cgroup)
     v1 = next((ln.split(":", 2)[2] for ln in groups.splitlines() if ":memory:" in ln), None)
+    mount = pathlib.Path(cgroup, "memory")                     # (v1, cgroupns=host: a container's is the mount's root)
+    v1 = v1 if v1 is None else p if (p := mount / v1.lstrip("/")).is_dir() else mount
     with contextlib.suppress(OSError, ValueError):
-        text = _read(pathlib.Path(cgroup, "memory", v1.lstrip("/"), "memory.oom_control") if v1 else
-                     own / "memory.events")
+        text = _read(v1 / "memory.oom_control" if v1 is not None else own / "memory.events")
         return next((int(ln.split()[1]) for ln in text.splitlines() if ln.startswith("oom_kill ")), None)
     return None
 
