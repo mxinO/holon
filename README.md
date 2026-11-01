@@ -503,7 +503,7 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   (17.0% unconstrained, its free outputs running past the JSON). Guards against such runaways are deferred; set
   `max_tokens`.
 - **GLM-5.3-Flash's mode (ii) is not a lock:** its share of RAM is sized at start, measured on one RTX 5090 from 48 to
-  88 GB (`docs/dev/v1-glm-ram.md` §10). At 64 GB its decode is below Project Maya's at 4K and 32K (Performance).
+  88 GiB (`docs/dev/v1-glm-ram.md` §10). At 64 GiB its decode is below Project Maya's at 4K and 32K (Performance).
 - DFlash2 speculation is an opt-in, in no lock ([docs/dev/m04-spec.md](docs/dev/m04-spec.md)).
 - Stop the server before a `git pull`: the install is editable, so a supervisor restart would import the new code.
 
