@@ -478,3 +478,53 @@ put the files on a local drive.
 suite (`-m ""`, 8 GPUs) 2,071 passed, 139 skipped.
 
 **Open:** the RTX 5080's tuned set (D7): it serves std's generic spill, exact.
+## 11. The 64 GiB 32K decode gap against Maya: investigated, not worth the complexity (2026-11-01)
+
+After RAM-adapt the only cell under Maya is 32K decode at 64 GiB. Holon's `fit` (§10) is set against Maya's default arm
+from the close (`docs/dev/evidence/glm_close_2026-10-31.json`). The two are not the same session, so the ratios are
+indicative:
+
+| Decode, tok/s | 1K | 4K | 32K |
+|---|---|---|---|
+| Holon, 64 GiB `fit` | 24.9 | 22.0 | 19.5 |
+| Maya default, 64 GiB | 23.5 | 21.9 | 21.0 |
+| ratio | 1.06 | 1.00 | **0.93** |
+
+It is a RAM-size effect: at 72 GiB Holon decodes 32K at 24.2 tok/s.
+
+**Where the token goes.** One nsys pass on main (7557a1ae) on an RTX 5090 under a 64 GiB cap. The spill is as `holon
+serve` gives it (`fit`: 0.6250); decode tokens 33–96 after a 32K prompt; zero OOM kills. Per decode token:
+
+| Kernel | Calls | µs a call | ms a token | Grid |
+|---|---|---|---|---|
+| `k_wait` (the SSD reads' wait) | 42 | 3.1 median (long tail) | 24.7 | 1 CTA × 1 thread |
+| `k_fetch_roles` (RAM gathers) | 84 | 1.8 median | 14.2 | 16 CTAs |
+| `k_fetch` | 168 | 1.7 | 6.7 | 2 CTAs |
+| `k_tiers` | 42 | 31.8 | 1.33 | **1 CTA × 1,024** |
+| `k_settle` | 42 | 15.6 | 0.56 | **1 CTA × 256** |
+| `k_promote` | 42 | 10.7 | 0.45 | **1 CTA × 256** |
+
+- **The tier ops are 2.34 ms a token, plus a ≈ 6 µs gap from promote to settle each layer (0.25 ms).** That is 2.6 ms
+  of a ≈ 54 ms token (4.8%). All three kernels are single-CTA serial phases, one sequence a layer.
+- **What a fusion could take:**
+  - One kernel for promote → settle → tiers removes two launches and the gap: ≈ 0.3–0.4 ms a token.
+  - Spreading the serial phases over CTAs is the D8t lever 2 already tried: predicted 15 µs a `k_tiers` call, it
+    measured 51 µs, then 31.8 µs here. Their work is ordered by the layer's routes (each call's admissions, demotions
+    and stamps depend on the previous ones). A further split promises ≲ 1 ms at best.
+  - **Fusable: ≈ 0.3–1 ms a token, under the 2 ms gate: ≤ 2% at 32K.**
+- **The rest is the drive and the link, at par with Maya's.** The SSD reads' wait is 24.7 ms a token over tokens 33–96
+  (16.3 at the steady state of step 7, Maya's 16.4). The RAM gathers move ≈ 530 MB a token at the link's rate.
+
+**The other levers** (predicted from step 7's measured variants, no new runs):
+- **Keeping more of RAM through a 32K prompt** (the 76 MB a token of RAM experts the prompt pushed to the SSD, tokens
+  1–32): ceiling +8% at 32K. Every measured variant trades it against rereads of the lent experts: D8l kept (+6.4%),
+  D8v −0.5%, D8r −13.5%. **≤ 1%.**
+- **Maya's one-pass, partly empty borrow:** per GiB of tail the two engines displace the same. D8u's staging inside the
+  tail was replayed at ≈ 0 decode gain. **0–2%.**
+
+**Conclusion:** no lever predicts ≥ 3%. The 32K decode gap at 64 GiB is structural:
+- the exclusive tiers' in-graph bookkeeping;
+- a 32K prompt displacing RAM experts that decode then rereads.
+
+More RAM closes it (Holon is ahead at every context from 72 GiB). The to-do item closes as "investigated, not worth the
+complexity".
