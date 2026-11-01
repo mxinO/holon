@@ -467,6 +467,14 @@ equal, zero OOM kills):
 
 ¹ GiB throughout: the caps, the knee (72 GiB, `KNEE`'s "GB") and the README's sizes are cgroup limits in GiB.
 
-**Open:** m8 end to end (`holon serve` Flash-Next with MTP at 36 GB: the lock refused, the spill refusing the head,
-the no-drafting entry serving) needs a current lock, so it runs after the close's lock round; the RTX 5080 has the
-generic spill, its own bench (D7) not run.
+**m8 end to end** (`holon serve` Flash-Next IQ2_XS on an RTX 5080 under a 36 GiB cap, MTP on with its pack, the files
+on the node's NVMe, the close's locks; zero OOM kills): the lock refused for host memory (its tier 17.0 GiB, 2.35 GiB
+left); the spill (the PLE table from the SSD + `fit`) with MTP refused by the store's m8 check; the same without
+speculation served (`fit`: 0.7344 of the experts in RAM) and answered a request. From scratch storage the PLE spill
+declines (a network disk), the generic spill alone falls below the working floor, and the start is refused naming it:
+put the files on a local drive.
+
+**The suites on the close's tree** (e6072a6b): the default run with no GPU visible 981 passed, 996 skipped; the full
+suite (`-m ""`, 8 GPUs) 2,071 passed, 139 skipped.
+
+**Open:** the RTX 5080's tuned set (D7): it serves std's generic spill, exact.
