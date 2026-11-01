@@ -423,3 +423,46 @@ The design's +5 to +6 had no m8 entry, no wrapped signature and no pin refusal.
   - GLM's knee (`KNEE`) is a placeholder until step 2;
   - the RTX 5080 has no `MODE2` entry (D7).
 
+
+## 10. Step 2-3: the grid and the exactness runs (2026-11-01, 59482cdb)
+
+**The RTX 5090 grid** (one desktop; each cell its own job step, its cgroup cap enforced and logged; zero OOM kills in
+every cell). The arm is the lock's flags + `MODE2["rtx-5090"]` (`moe.ram=fit`) + `--auto`: what `holon serve`
+gives at that RAM. A cell is the median over rounds of each round's median over the context's 8 requests; tok/s; SSD
+MB a decode token over tokens 1-32 and D8x's parked rows at 1K beside it.
+
+| Cap | Rounds | f (logged) | 1K prefill / decode | 4K | 32K prefill / decode | SSD 1-32, 1K / 32K | parked (1K) |
+|---|---|---|---|---|---|---|---|
+| 48 GB | 1 | 0.4297 | 109 / 11.7 | | 2,195 / 9.3 | 224 / 325 | 250 |
+| 56 GB | 3 | 0.5312 | 161 / 17.0 | | 2,660 / 13.4 | 133 / 236 | 235 |
+| 64 GB | 3 | 0.6289 | 292 / 24.9 | 771 / 22.0 | 3,079 / 19.5 | 60 / 141 | 227 |
+| 72 GB | 3 | 0.7305 | 606 / 33.1 | | 3,196 / 24.2 | 11 / 76 | 151 |
+| 80 GB | 1 | 0.8281 | 647 / 35.2 | | 3,268 / 30.2 | — / 19 | — |
+| 88 GB, `fit` | 1 | 0.9258 | 647 / 35.0 | | 3,257 / 32.4 | — / 1 | — |
+| 88 GB, the lock (it starts: budget 81.7 GiB) | 1 | — | 710 / 41.7 | | 3,454 / 36.8 | | |
+| uncapped, the lock | 1 | — | 710 / 41.4 | 2,121 / 37.2 | 3,450 / 36.5 | | |
+
+- **Monotonic in RAM** at every context, flat from 80 to 88 GB (within one round's noise), with the step up to the
+  lock where it starts (88 GB here: `holon serve` takes the lock there). C's replay placed the bend right: steep from
+  56 to ≈ 72 GB, flat past ≈ 80 GB.
+- **At 64 GB, at or above the close's mode (ii)** (288 / 774 / 3,030 prefill, 24.4 / 21.5 / 19.3 decode).
+- **The knee: 72 GB** (`KNEE`): below it decode falls fastest (32K decode 24.2 tok/s at 72, 19.5 at 64; 1K prefill
+  606 against 292). The spill's note warns under it.
+- **D6:** `read_ahead` 256 against 135 loses at 64 GB (1K prefill −15%, decode −7% to −9%) and at 80 GB (32K decode
+  −5%), with D8x's parked rows unchanged (227 → 230): 135 stays. **F10 at 88 GB** against `placement.lfu`: lfu decodes
+  at 24.7 / 22.1 against 35.0 / 32.4 tok/s: F10 stays (no budget-0 arm: `BUDGET` is a constant).
+
+**Exactness** (each spill under its cap against its lock's uncapped snapshot, `exact.py --pools own`, state pools
+equal, zero OOM kills):
+
+| Lock | Cap | f (logged) | Steps | Result |
+|---|---|---|---|---|
+| GLM, RTX 5090, `MODE2` | 80 GB | 0.8320 | 2,157 | byte-identical |
+| GLM, RTX 5080, std's generic spill | 64 GB | 0.6562 | 2,157 | byte-identical |
+| Qwen3-30B-A3B Q4_K_M, RTX 5080 offload lock, generic spill | 16 GB | 0.3281 | 2,158 | byte-identical |
+| Flash-Next IQ2_XS, RTX 5080, MTP off, PLE + generic spill | 36 GB | 0.7539 | 2,158 | byte-identical |
+| the same | 48 GB | ≥ 1 ("every expert in RAM": the inclusive `fit`, A-M1's path) | 2,158 | byte-identical |
+
+**Open:** m8 end to end (`holon serve` Flash-Next with MTP at 36 GB: the lock refused, the spill refusing the head,
+the no-drafting entry serving) needs a current lock, so it runs after the close's lock round; the RTX 5080 has the
+generic spill, its own bench (D7) not run.

@@ -92,7 +92,7 @@ def test_the_ram_short_spill_is_mode_ii_as_measured_on_its_card(monkeypatch):
     declared = cli.declared_options(discover())
     assert options == deploy.MODE2["rtx-5090"] and options["moe.ram"] == "fit" and set(options) <= set(declared)
     assert not cli.outside_choices(options, declared) and "mode (ii)" in note and "1.7–1.9×" in note
-    assert "below ≈ {} GB of RAM 32K decode falls under ≈ {} tok/s (est.".format(*deploy.KNEE["rtx-5090"]) in note
+    assert "below ≈ {} GB of RAM 32K decode falls under ≈ {} tok/s (docs".format(*deploy.KNEE["rtx-5090"]) in note
     assert deploy.spill(lock, "/data/glm.gguf", card=cards[1]) is None
     assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf", card=cards[0]) is None
     monkeypatch.setattr(cli.plans, "lock_overrides", lambda found: dict(found.plan.engine))

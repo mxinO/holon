@@ -16,7 +16,7 @@ MODE2 = {"rtx-5090": {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1
                       "moe.loan_margin": "1.12", "moe.loan_taper": "8192,32768", "moe.loan_largest": "0.55"}}
 # The knee by card (docs/dev/v1-glm-ram.md D4): below this host RAM (GB), 32K decode falls under this rate (tok/s).
 # PLACEHOLDER: C's replay of the step-7 recording (≈ 72 GB, 27.9 tok/s), until the capped grid (step 2) measures it
-KNEE = {"rtx-5090": (72, 28)}
+KNEE = {"rtx-5090": (72, 24)}     # measured: 32K decode 24.2 tok/s at 72 GB, 19.5 at 64 (docs/dev/v1-glm-ram.md §10)
 
 
 def spill(options: Mapping[str, object], checkpoint: str, *, card: str) -> tuple[dict[str, str], str] | None:
@@ -31,4 +31,4 @@ def spill(options: Mapping[str, object], checkpoint: str, *, card: str) -> tuple
                               "checkpoint's file (keep it on a local NVMe drive); with 64 GB of RAM 1K-4K prefill ≈ "
                               "2.5–2.8×, decode ≈ 1.7–1.9× and 32K prefill ≈ 1.1× slower than the lock, faster with "
                               f"more (docs/dev/v1-glm.md); below ≈ {ram} GB of RAM 32K decode falls under ≈ {rate} "
-                              "tok/s (est., docs/dev/v1-glm-ram.md)")
+                              "tok/s (docs/dev/v1-glm-ram.md)")

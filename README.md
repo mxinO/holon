@@ -403,9 +403,20 @@ uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
   rest read from the model file on the SSD as they are needed (exclusive tiers, `docs/dev/v1-glm.md` D10;
   `plugins/holon_plugins/models/glm5_next/deploy.py`), logged with its share and cost. The output is the same as the
   lock's (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode
-  tokens, so keep the files on a local NVMe drive. Measured on one RTX 5090 with the job's RAM capped at 64 GiB: 1K–4K
-  prefill about 2.5–2.8×, decode about 1.7–1.9× and 32K prefill about 1.1× slower than the lock (Performance). Below
-  the store's working floor the start is refused, naming each term.
+  tokens, so keep the files on a local NVMe drive. Below the store's working floor the start is refused, naming each
+  term. Speed by the host's RAM, one RTX 5090 with the job's RAM capped (the lock from 88 GB; tok/s, 1K / 32K;
+  `docs/dev/v1-glm-ram.md` §10):
+
+  | RAM | experts in RAM | prefill | decode |
+  |---|---|---|---|
+  | 48 GB | 43% | 109 / 2,195 | 11.7 / 9.3 |
+  | 56 GB | 53% | 161 / 2,660 | 17.0 / 13.4 |
+  | 64 GB | 63% | 292 / 3,079 | 24.9 / 19.5 |
+  | 72 GB | 73% | 606 / 3,196 | 33.1 / 24.2 |
+  | 80 GB | 83% | 647 / 3,268 | 35.2 / 30.2 |
+  | 88 GB and more (the lock) | all | 710 / 3,454 | 41.7 / 36.8 |
+
+  Below about 72 GB, decode falls fastest: that is the knee the start warns under.
 - **First start:** about a minute to ready on an RTX 5090 at mode (ii), reading about 79 GiB from the drive (the
   checkpoint about once; `docs/dev/v1-glm.md` §13 step 7). A restart rereads the experts but not the file's hash.
 - **Accuracy** (`docs/dev/v1-glm.md` §13): the locks pass L2 in its reference form on both prompt sets (the RTX 5090:
@@ -488,8 +499,8 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   accepted as a recorded shortfall; GLM-5.3-Flash truncated 7.8% of constrained outputs at `max_tokens` 2048
   (17.0% unconstrained, its free outputs running past the JSON). Guards against such runaways are deferred; set
   `max_tokens`.
-- **GLM-5.3-Flash's mode (ii) is not a lock:** it was measured on one RTX 5090 at a 64 GB host; other RAM sizes are
-  not measured yet (`docs/dev/v1-glm-ram.md`). Its decode is below Project Maya's at 4K and 32K (Performance).
+- **GLM-5.3-Flash's mode (ii) is not a lock:** its share of RAM is sized at start, measured on one RTX 5090 from 48 to
+  88 GB (`docs/dev/v1-glm-ram.md` §10). At 64 GB its decode is below Project Maya's at 4K and 32K (Performance).
 - DFlash2 speculation is an opt-in, in no lock ([docs/dev/m04-spec.md](docs/dev/m04-spec.md)).
 - Stop the server before a `git pull`: the install is editable, so a supervisor restart would import the new code.
 
