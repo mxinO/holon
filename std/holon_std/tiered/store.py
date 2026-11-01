@@ -45,9 +45,9 @@ from collections.abc import Callable
 
 import numpy as np
 import torch
-from holon.api import Extent, MemOp, Ref, RowKind
+from holon.api import Extent, MemOp, OutOfUnits, Ref, RowKind
 
-from . import files
+from . import files, fit
 from . import move as moves
 from .residency import LAG, ResidencyMap
 from .resolver import ACTIVATION_LOAN, CPU_TASK, EXPERT_PREFETCH, TIERS, DeviceResolver
@@ -175,6 +175,7 @@ class TieredStore:
             raise ValueError(f"{name}: beside {beside!r}: on, stage, rounds or off")
         self._beside_modes = {"on": ("stage", "rounds"), "off": ()}.get(beside, (beside,))
         self.copies: dict[str, tuple] = {}
+        self.reads: list[_Reads] = []            # exclusive tiers' SSD reads (`_bind_io`)
         self.halves = 1                          # the on-demand landing halves (two under D8g: ping-pong)
         self._beside = False                     # this step's gathers go beside the compute (D8g)
         self._readback: dict[str, torch.Tensor] | None = None
@@ -245,12 +246,20 @@ class TieredStore:
         self._own_tail: tuple[int, int] | None = None        # a staging layout's own tail: (byte offset, bytes)
         self._fetch_streams: dict[bool, torch.Stream] = {}
         self._auxiliary: set[int] = set()                   # an auxiliary model's groups (`mark_auxiliary`)
-        self.tiers = [ctx.unit(Ref(t), ram=ram) for t in tiers]    # `ram`: the RAM tier's units per class
+        # `ram`: the RAM tier's units per class, or `fit` (docs/dev/v1-glm-ram.md D1, `fit.py`): one share of every
+        # class sized from the host budget at the first `before_materialize`, the tier made again with its units
+        self._fit, self._tier_refs, self._keeps = ram.strip() == "fit", tiers, staging
+        if "fit" in ram and not self._fit:
+            raise ValueError(f"{name}: moe.ram {ram!r}: fit is the whole value (one share of every class)")
+        self.tiers = [ctx.unit(Ref(t), ram="" if self._fit else ram) for t in tiers]
         if not 1 <= len(self.tiers) <= 2 or not self.tiers[0].device_readable or \
-                any(t.device_readable for t in self.tiers[1:]):
-            raise NotImplementedError(f"{name}: a device-readable host tier, then at most one file tier, not "
-                                      f"{list(tiers)}")
+                any(t.device_readable for t in self.tiers[1:]) or (self._fit and len(self.tiers) < 2):
+            raise NotImplementedError(f"{name}: a device-readable host tier, then at most one file tier (with moe.ram "
+                                      f"fit, one), not {list(tiers)}")
         self.exclusive = False                  # RAM holds fewer pieces than the store (D10): decided at the bind
+        #                                         (`fit`: at the first `before_materialize`)
+        self.share: float | None = None         # `fit`'s share f (1.0: every piece, inclusive), once solved
+        self.io = None                          # exclusive tiers' I/O worker (`cpu_task@1`), bound in the build
         ref = policy if isinstance(policy, Ref) else Ref(policy or POLICY)    # POLICY: the one tier holds every expert
         self.policy, self.policy_ref = ctx.unit(ref, items=items, roles=roles), ref.target       # (pinned, inclusive)
         self._cache, self._profile = _parse_cache(cache), profile
@@ -307,8 +316,11 @@ class TieredStore:
         if self.ring_lend == "tail" and not hasattr(self.resolvers[0].resolve, "lend_tail"):
             raise ValueError(f"{self.name}: ring_lend tail (moe.ring_lend): {self.policy_ref}'s resolve "
                              f"({self.policy.resolve_variant or 'moe_resolve@1'}) does not lend a tail (`lend_tail`)")
-        if self.residency is not None or any(self.tiers[0].holds(c.name, len(c.pieces)) < len(c.pieces)
-                                             for c in self.classes.values()):
+        if self._fit:                            # B-R10: exclusive tiers' kernels and I/O worker bound in the build
+            self._exclusive_kernels()            # whatever f turns out to be (idle at f ≥ 1); the tables after it
+            self._bind_io(self.resolvers[-1])
+        elif self.residency is not None or any(self.tiers[0].holds(c.name, len(c.pieces)) < len(c.pieces)
+                                               for c in self.classes.values()):
             self._tables()                       # exclusive tiers bind their I/O worker in the build: no later group
         return self.resolvers[-1]
 
@@ -318,9 +330,9 @@ class TieredStore:
             aux = {c.name for g in self._auxiliary for c in self.groups[g].values()} - \
                 {c.name for g in self.groups if g not in self._auxiliary for c in self.groups[g].values()}
             pinned = [c.cap for c in self.classes.values() if c.cache is not None and c.name not in aux]
-            for c in self.classes.values():
+            for c in self.classes.values():     # (under `fit` every piece until f is solved: `_fit_tier`)
                 c.held = self.tiers[0].holds(c.name, len(c.pieces))
-            self.exclusive = any(c.held < len(c.pieces) for c in self.classes.values())
+            self.exclusive = self.exclusive or any(c.held < len(c.pieces) for c in self.classes.values())
             if self._ram_decay is None:
                 self._ram_decay = RAM_HEAT if self.exclusive else 0.0
             ranked = self.policy.device_owned and getattr(self.policy, "heat", None) is not None
@@ -395,7 +407,7 @@ class TieredStore:
             self.layer_classes = [[self.groups[g][r] for r in range(self.roles)] for g in self.layers]
             if self.exclusive:
                 self._exclusive_tables(shape)
-            elif self._ram_decay:
+            elif self._ram_decay and not self._fit:          # (`fit` at f ≥ 1: RAM's heat unused, as the tiers)
                 raise ValueError(f"{self.name}: moe.ram_heat ranks an exclusive RAM tier: set moe.tiers to one")
             self.prefetch = {}
             for c in self.classes.values():
@@ -410,23 +422,49 @@ class TieredStore:
                 continue
             g = self._order[r.group_id]
             r.attach(g, {n: t[g] for n, t in self.state.items()})
-            if self.exclusive:                   # its SSD reads, copy tasks on the I/O worker (bound at materialize):
-                self.reads.append(_Reads(self, g))                  # on demand (urgent), and its read-ahead set's
-                r.io_slot = self.io.bind(self.reads[-1], urgent=True)
-                r.io_slots = (r.io_slot,)
-                if self.halves == 2:             # D8g: the second landing half's, its own request table (A G2-M1)
-                    self.reads.append(_Reads(self, g, half=1))
-                    r.io_slots += (self.io.bind(self.reads[-1], urgent=True),)
-                self.reads.append(_Reads(self, g, ahead=True))
-                self.ahead_slots[g] = self.io.bind(self.reads[-1])
+            if self.exclusive:
+                self._bind_io(r)
+                self.ahead_slots[g] = r.ahead_slot
+
+    def _bind_io(self, r: DeviceResolver) -> None:
+        """Group r's SSD reads, copy tasks on the I/O worker, bound in the build (the worker starts after it; the tasks
+        are made at the seed): on demand (urgent), D8g's second landing half's (its own request table, A G2-M1), and
+        its read-ahead set's."""
+        if not r.io_slots:
+            reads = [_Reads(self, r, half=h) for h in range(self.halves)] + [_Reads(self, r, ahead=True)]
+            self.reads += reads
+            r.io_slots = tuple(self.io.bind(x, urgent=True) for x in reads[:-1])
+            r.io_slot, r.ahead_slot = r.io_slots[0], self.io.bind(reads[-1])
+
+    def _exclusive_kernels(self) -> None:
+        """The exclusive tiers' kernels: `moe_tiers@2`, the I/O worker (cpu_task@1, `io`: an engine's shared object,
+        made in the build) and D8g's copy engines (`copies`), once."""
+        if self.io is not None:
+            return
+        classes = list(self.classes.values())
+        facts = {"experts": self.items, "top_k": self.top_k, "roles": self.roles}
+        self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
+        self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
+                                                                                                       pool="io")
+        # D8g: per class two copy-engine instances (the hits' and RAM's parts, the SSD rounds': each its own stream),
+        # where the device's `expert_prefetch@1` copies from the host's lists with landing rows' runs
+        dma = [{"unit_bytes": c.unit_bytes, "copy": "dma"} for c in classes]
+        if self._beside_modes and all(self.ctx.candidates(EXPERT_PREFETCH, f) for f in dma):
+            site = f"std.tiered[{self.name}]"
+            pick = [[self.ctx.select_kernel(EXPERT_PREFETCH, site=f"{site}.{c.name}.{use}", **f).impl(self.ctx, **f)
+                     for use in ("parts", "rounds")] for c, f in zip(classes, dma, strict=True)]
+            if all(getattr(i, "runs", False) for p in pick for i in p):
+                self.copies = {c.name: tuple(p) for c, p in zip(classes, pick, strict=True)}
+                self.halves = 2
 
     def _exclusive_tables(self, shape: tuple[int, int, int]) -> None:
-        """The exclusive tiers' device tables (`moe_tiers@2`'s), its kernel and the I/O worker (cpu_task@1, `io`)."""
+        """The exclusive tiers' device tables (`moe_tiers@2`'s; RAM's units' at `before_materialize`, once `fit` has
+        solved its share), after their kernels."""
+        self._exclusive_kernels()
         classes = list(self.classes.values())
         static = functools.partial(self.ctx.static, dtype=torch.int32)
         self.piece = static(f"{self.name}.piece", shape)
         self.classes32 = static(f"{self.name}.classes32", (shape[0], self.roles))
-        self.owner = static(f"{self.name}.owner", (len(classes), max(c.held for c in classes)))
         self.capacity = static(f"{self.name}.capacity", (len(classes),))
         self.call_start = static(f"{self.name}.call_start", (1,))
         # A call's moves (its demotions, then its admitted staged pieces): two tables, a call's by its group's parity.
@@ -444,14 +482,6 @@ class TieredStore:
                                      [torch.Event(device=self.ctx.device), torch.Event(device=self.ctx.device)])
         self.recorded: set = set()              # the fences recorded in this step (the last step's moves joined it:
         #                                         a wait on an earlier one is moot, and a graph cannot capture it)
-        # The demotions run beside the next call too: it never gives a unit the previous call demoted into to a
-        # displacement (a keep the I/O worker writes from the host would race that copy): `moe_tiers@2`'s stamps
-        self.tier_stamps = {"stamp": static(f"{self.name}.stamp", tuple(self.owner.shape)),
-                            "clock": static(f"{self.name}.clock", (1,))} if self.moves_async else {}
-        facts = {"experts": self.items, "top_k": self.top_k, "roles": self.roles}
-        self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
-        self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
-                                                                                                       pool="io")
         # SSD reads' landing (docs/dev/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's
         # j-th SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
         # into the I/O worker's view before its signal
@@ -472,7 +502,7 @@ class TieredStore:
         self._move_at = self.ctx.static(f"{self.name}.move_at", (2, room + 1, self.roles), torch.int64)
         self._move_add = static(f"{self.name}.move_add", (2, room + 1, self.roles))
         self._move_host = None                   # its pinned host copy and count (at the first move)
-        self.ahead_slots: dict[int, int] = {}
+        self.ahead_slots: dict[int, int] = {}    # each layer's read-ahead slot on the I/O worker
         self.landing: dict[str, tuple] = {}
         self.runs: dict[str, object] = {}
         self.ssd = static(f"{self.name}.ssd", (self.roles, 2, self.prefill))
@@ -481,23 +511,12 @@ class TieredStore:
         self.io_rows = static(f"{self.name}.io_rows", (self.roles, 1 + self.prefill, 3))
         self.hit = static(f"{self.name}.hit", (self.roles, 2, self.prefill))       # misses read ahead (row, slot)
         self.n_hit = static(f"{self.name}.n_hit", (self.roles,))
-        self.reads: list[_Reads] = []
         self.heat = self.state.get(getattr(self.policy, "heat", None) or "")
         if self._ram_decay:                      # RAM's own long-memory heat (`moe.ram_heat`), what RAM ranks by
             self.ram_heat = self.ctx.static(f"{self.name}.ram_heat", shape[:2], torch.float32)
             self._ram_decay_t = self.ctx.static(f"{self.name}.ram_decay", (1,), torch.float32)
             self.heat = self.ram_heat
         self.parked = 0                          # lent experts parked in RAM, so far (from each commit's map)
-        # D8g: per class two copy-engine instances (the hits' and RAM's parts, the SSD rounds': each its own stream),
-        # where the device's `expert_prefetch@1` copies from the host's lists with landing rows' runs
-        dma = [{"unit_bytes": c.unit_bytes, "copy": "dma"} for c in classes]
-        if self._beside_modes and all(self.ctx.candidates(EXPERT_PREFETCH, f) for f in dma):
-            site = f"std.tiered[{self.name}]"
-            pick = [[self.ctx.select_kernel(EXPERT_PREFETCH, site=f"{site}.{c.name}.{use}", **f).impl(self.ctx, **f)
-                     for use in ("parts", "rounds")] for c, f in zip(classes, dma, strict=True)]
-            if all(getattr(i, "runs", False) for p in pick for i in p):
-                self.copies = {c.name: tuple(p) for c, p in zip(classes, pick, strict=True)}
-                self.halves = 2
 
     @property
     def layers(self) -> list[int]:
@@ -515,8 +534,18 @@ class TieredStore:
 
     # -- engine hooks -------------------------------------------------------------------------------------------------
     def before_materialize(self, ctx) -> None:
-        """The tiers take their storage (the RAM tier its pool, filled when it holds every piece), the arena pool is
-        requested, and under exclusive tiers the I/O tables."""
+        """The tiers take their storage (the RAM tier its pool, filled when it holds every piece; under exclusive tiers
+        after the store's own I/O pools), the arena pool is requested, and under exclusive tiers the I/O tables. `fit`
+        decides here whether the tiers are exclusive (docs/dev/v1-glm-ram.md D1, B-R10)."""
+        if self._fit:                            # f ≥ 1 (every piece fits beside the reserve): the lock's store
+            total = sum(len(c.pieces) * c.unit_bytes for c in self.classes.values())
+            self.exclusive = not fit.whole(fit.budget(self.ctx, self.name), total)
+            if self.exclusive and self._auxiliary:
+                raise OutOfUnits(f"{self.name}: moe.ram=fit: the host holds a share of the experts only (exclusive "
+                                 "tiers), which take no auxiliary model's experts (a drafter's head: "
+                                 "docs/dev/v1-glm-ram.md m8): `holon serve` serves without speculation next "
+                                 "(--max-draft-tokens 0), its decode slower by the drafter's gain (the model's spill "
+                                 "note gives it)")
         self._tables()
         classes = list(self.classes.values())
         self.granule = functools.reduce(math.gcd, (c.unit_bytes for c in classes))     # both pools' unit
@@ -524,11 +553,15 @@ class TieredStore:
         for c in classes:
             if not 0 <= c.cap <= len(c.pieces):
                 raise ValueError(f"{self.name}: class {c.name}: {c.cap} cache slots of {len(c.pieces)} pieces")
-            extents = [x for *_, x in c.pieces]
-            # (exclusive: SSD reads land in landing rows of their own, `landing`, below)
-            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, extents, staging=0, granule=self.granule)
             for t in self.tiers[1:]:
-                t.prepare(ctx, c.name, c.unit_bytes, extents)
+                t.prepare(ctx, c.name, c.unit_bytes, [x for *_, x in c.pieces])
+        if self.exclusive:                       # (SSD reads land in landing rows of their own)
+            self._io_pools(ctx, classes)
+        if self._fit:
+            self._fit_tier(classes)
+        for c in classes:
+            self.tiers[0].prepare(ctx, c.name, c.unit_bytes, [x for *_, x in c.pieces], staging=0,
+                                  granule=self.granule)
             c.host = self.tiers[0].units(c.name)
         host = np.full(self.residency.host.shape, -1, dtype=np.int32)
         if not self.exclusive:                   # inclusive: piece i in unit i, for good
@@ -561,50 +594,84 @@ class TieredStore:
             self._pieces = dict.fromkeys(self.classes, piece)
             self.piece.copy_(torch.from_numpy(piece))
             self.classes32.copy_(torch.from_numpy(self.class_table.astype(np.int32)))
+            # each class's RAM units (`owner`: their pieces), as many as it holds (`fit`'s share solved by now); the
+            # demotions run beside the next call too: it never gives a unit the previous call demoted into to a
+            # displacement (a keep the I/O worker writes from the host would race that copy): `moe_tiers@2`'s stamps
+            static = functools.partial(self.ctx.static, dtype=torch.int32)
+            self.owner = static(f"{self.name}.owner", (len(classes), max(c.held for c in classes)))
+            self.tier_stamps = {"stamp": static(f"{self.name}.stamp", tuple(self.owner.shape)),
+                                "clock": static(f"{self.name}.clock", (1,))} if self.moves_async else {}
             self.capacity.copy_(torch.tensor([c.held for c in classes], dtype=torch.int32))
             # a lent expert's parking (`_park`): the groups of each class signature, each class's fetch (slot → unit)
             self._signatures = [torch.from_numpy((self.class_table == row).all(1)).to(ctx.device)
                                 for row in np.unique(self.class_table, axis=0)]
             self._class_fetch = {name: f for r in self.resolvers for name, f in r.fetches().items()}
-            rows = 3 * (1 + self.landing_rows)                     # a round's request rows, the worker's view
-            self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.halves * self.roles,
-                                    pref_units=self.halves * self.roles, device="host", mapped=True)   # (a half's)
-            rows = 3 * (1 + self.ahead_rows)                       # each read-ahead set's request rows
-            self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
-                                       pref_units=DEPTH * self.roles, device="host", mapped=True)
-            self.descriptors, shape, n_rows = {}, {}, self.landing_rows * self.halves + DEPTH * self.ahead_rows
-            self.piece_runs = {}                 # D8g: each piece's runs in a landing row (the I/O worker's rule)
-            self.canon_runs, self._canon_dev = {}, {}    # D8x: a parked row's (its piece as a slot holds it)
-            for c in classes:
-                rows = []
-                for n in range(len(c.pieces)):
-                    kind, extents = self.tiers[1].read(c.name, n)
-                    if kind != "pread":                  # the copy task's one kind (a page-cache tier: O_DIRECT off)
-                        raise ValueError(f"{self.name}: {type(self.tiers[1]).__name__} read "
-                                         f"{c.name}'s piece {n} as {kind!r}: a file tier's descriptors are 'pread' "
-                                         "extents (fd, O_DIRECT, offset, nbytes)")
-                    rows.append([tuple(x) for x in extents])
-                width = max(map(len, rows))
-                self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
-                                                        dtype=torch.int64)
-                self.piece_runs[c.name] = _runs(self.descriptors[c.name].numpy())
-                self.canon_runs[c.name] = _canonical(self.descriptors[c.name].numpy())
-                self._canon_dev[c.name] = torch.from_numpy(self.canon_runs[c.name]).to(ctx.device)
-                shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
-                self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
-                                             min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
-            # landing rows (docs/dev/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
-            # (the class's runs, above); one pool a role — a layer's role is of one class, so its classes share it
-            # (step 1's review C S1-m2) —, its rows as wide as its classes' widest piece's supersets: every class
-            # reads row j at the same bytes (a narrower class's pieces in its first bytes)
-            for role in sorted({r for r, _ in shape.values()}):
-                row = max(w for r, w in shape.values() if r == role)
-                pool = ctx.pool(f"{self.name}.landing.{role}", unit_bytes=row, min_units=n_rows, pref_units=n_rows,
-                                device="host", mapped=True)
-                for name, (r, _) in shape.items():
-                    if r == role:
-                        self.landing[name] = (pool, row)
             self._ram = {c.name: np.full(c.held, -1) for c in classes}      # what each RAM unit holds (host's view)
+
+    def _io_pools(self, ctx, classes: list[SlotClass]) -> None:
+        """Exclusive tiers' own host pools (before the RAM tier's: `fit` sizes it from what they leave): a round's
+        request rows and the read-ahead sets', each class's descriptors and their runs, the landing rows a role."""
+        rows = 3 * (1 + self.landing_rows)                         # a round's request rows, the worker's view
+        self.io_pool = ctx.pool(f"{self.name}.io", unit_bytes=4 * rows, min_units=self.halves * self.roles,
+                                pref_units=self.halves * self.roles, device="host", mapped=True)   # (a half's)
+        rows = 3 * (1 + self.ahead_rows)                           # each read-ahead set's request rows
+        self.ahead_pool = ctx.pool(f"{self.name}.io_ahead", unit_bytes=4 * rows, min_units=DEPTH * self.roles,
+                                   pref_units=DEPTH * self.roles, device="host", mapped=True)
+        self.descriptors, shape, n_rows = {}, {}, self.landing_rows * self.halves + DEPTH * self.ahead_rows
+        self.piece_runs = {}                     # D8g: each piece's runs in a landing row (the I/O worker's rule)
+        self.canon_runs, self._canon_dev = {}, {}        # D8x: a parked row's (its piece as a slot holds it)
+        for c in classes:
+            rows = []
+            for n in range(len(c.pieces)):
+                kind, extents = self.tiers[1].read(c.name, n)
+                if kind != "pread":                      # the copy task's one kind (a page-cache tier: O_DIRECT off)
+                    raise ValueError(f"{self.name}: {type(self.tiers[1]).__name__} read "
+                                     f"{c.name}'s piece {n} as {kind!r}: a file tier's descriptors are 'pread' "
+                                     "extents (fd, O_DIRECT, offset, nbytes)")
+                rows.append([tuple(x) for x in extents])
+            width = max(map(len, rows))
+            self.descriptors[c.name] = torch.tensor([x + [(0, 0, 0, 0)] * (width - len(x)) for x in rows],
+                                                    dtype=torch.int64)
+            self.piece_runs[c.name] = _runs(self.descriptors[c.name].numpy())
+            self.canon_runs[c.name] = _canonical(self.descriptors[c.name].numpy())
+            self._canon_dev[c.name] = torch.from_numpy(self.canon_runs[c.name]).to(ctx.device)
+            shape[c.name] = (c.pieces[0][2], max(sum(_superset(x) for x in piece) for piece in rows))
+            self.runs[c.name] = ctx.pool(f"{self.name}.runs.{c.name}", unit_bytes=16 * width,
+                                         min_units=n_rows, pref_units=n_rows, device="host", mapped=True)
+        # landing rows (docs/dev/v1-glm.md D8f): every SSD read lands there, each extent's aligned superset in place
+        # (the class's runs, above); one pool a role — a layer's role is of one class, so its classes share it
+        # (step 1's review C S1-m2) —, its rows as wide as its classes' widest piece's supersets: every class
+        # reads row j at the same bytes (a narrower class's pieces in its first bytes)
+        for role in sorted({r for r, _ in shape.values()}):
+            row = max(w for r, w in shape.values() if r == role)
+            pool = ctx.pool(f"{self.name}.landing.{role}", unit_bytes=row, min_units=n_rows, pref_units=n_rows,
+                            device="host", mapped=True)
+            for name, (r, _) in shape.items():
+                if r == role:
+                    self.landing[name] = (pool, row)
+        self._io_bytes = {p.name: p.capacity * p.unit_bytes for p in {id(p): p for p in (
+            self.io_pool, self.ahead_pool, *self.runs.values(), *(q for q, _ in self.landing.values()))}.values()}
+
+    def _fit_tier(self, classes: list[SlotClass]) -> None:
+        """`fit`'s share, solved once (docs/dev/v1-glm-ram.md D1, D2): under exclusive tiers from the host memory the
+        store's own pools leave, the RAM tier made again with its units and checked just before its pool; f = 1 where
+        every piece fits (inclusive: the I/O worker bound in the build stays idle)."""
+        if not self.exclusive:
+            self.share = 1.0
+            for reads in self.reads:
+                reads.idle()
+            print(f"holon: {self.name}: moe.ram=fit: every expert in RAM")
+            return
+        left = fit.budget(self.ctx, self.name)
+        self.share, held = fit.share(self.name, left, {c.name: (len(c.pieces), c.unit_bytes) for c in classes},
+                                   self._keeps, self._io_bytes)
+        self.tiers[0] = self.ctx.unit(Ref(self._tier_refs[0]), ram=",".join(f"{k}={n}" for k, n in held.items()))
+        pinned = sum(held[c.name] * c.unit_bytes for c in classes)
+        fit.recheck(self.ctx, self.name, left, pinned + fit.RESERVE)
+        for c in classes:
+            c.held = self.tiers[0].holds(c.name, len(c.pieces))
+        print(f"holon: {self.name}: moe.ram=fit: {self.share:.4f} of the experts in RAM ({pinned / 2**30:.2f} GiB of "
+              f"{left / 2**30:.2f} GiB left), the rest read from the checkpoint's file")
 
     def decode_kinds(self, tokens: int) -> torch.Tensor:
         """Row kinds of `tokens` decode rows (an auxiliary model's sub-step, FN D12a)."""
@@ -963,9 +1030,11 @@ class TieredStore:
             self.large_passes(at) and not self.exclusive else 1
         self._rounds = self._mode == "stage" and self._parts == 1 and at < ROUNDS_BELOW and self.rounds_able
         # D8g: a staging step's gathers beside the compute (its passes all pipeline: every one of them computes part
-        # by part) — in rounds below ROUNDS_BELOW, else each miss in its own staging slot
-        self._beside = bool(self.copies) and self._mode == "stage" and self._parts == 1 and self._pipelining and \
-            ("rounds" if self._rounds else "stage") in self._beside_modes and (self._rounds or at >= ROUNDS_BELOW)
+        # by part) — in rounds below ROUNDS_BELOW, else each miss in its own staging slot; exclusive tiers only (`fit`
+        # at f ≥ 1 has its copy engines bound, and runs as the lock: A-M1)
+        self._beside = self.exclusive and bool(self.copies) and self._mode == "stage" and self._parts == 1 and \
+            self._pipelining and ("rounds" if self._rounds else "stage") in self._beside_modes and \
+            (self._rounds or at >= ROUNDS_BELOW)
         self._step_tail, self._step_down, self._step_gu_loan = None, {}, 0
         if self._loaned:
             self._loan_overflowed()
@@ -2040,19 +2109,24 @@ def _offsets(extents: list[Extent]) -> list[tuple[Extent, int]]:
 
 class _Reads:
     """A layer's SSD reads (exclusive tiers): `cpu_task@1`'s copy task over its roles' descriptors, RAM tier pools and
-    request rows, bound once the pools exist (the I/O worker reads `native` when it starts, after this)."""
+    request rows, bound once the pools exist (the I/O worker reads `native` when it starts, after this); its layer the
+    group of `resolver` (its row of the tables, once attached)."""
 
-    def __init__(self, store: TieredStore, g: int, ahead: bool = False, half: int = 0) -> None:
-        self.store, self.g, self.ahead, self.half, self.task = store, g, ahead, half, None
+    def __init__(self, store: TieredStore, resolver: DeviceResolver, ahead: bool = False, half: int = 0) -> None:
+        self.store, self.resolver, self.ahead, self.half, self.task = store, resolver, ahead, half, None
 
     def bind(self) -> None:
         if self.task is None:                   # landing rows, their runs, kept pieces into the RAM units
-            s = self.store
-            io = s.ahead_view(device=False)[self.g % DEPTH] if self.ahead else \
+            s, g = self.store, self.resolver.group
+            io = s.ahead_view(device=False)[g % DEPTH] if self.ahead else \
                 s.io_pool.view(torch.int32, (s.halves, s.roles, 1 + s.landing_rows, 3))[self.half]
             self.task = s.io.copy([(s.descriptors[c.name], *s.landing_view(c.name, device=False)[:1], io[r],
                                     s.landing_view(c.name, device=False)[1], c.host_view())
-                                   for r, c in enumerate(s.layer_classes[self.g])])
+                                   for r, c in enumerate(s.layer_classes[g])])
+
+    def idle(self) -> None:
+        """A task never signalled (`fit` at f ≥ 1: the worker bound in the build, its store inclusive)."""
+        self.task = self.store.io.copy([])
 
     @property
     def native(self):

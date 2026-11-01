@@ -71,11 +71,15 @@ measured; "other use" counts Holon's own processes, ≈ 3 GiB, est.):
 | lock | pinned host RAM | RAM for full speed | with less RAM |
 |---|---|---|---|
 | Qwen3.8-27B, RTX 5080 and RTX 5090 | a 16 GiB KV tier ([KV tiers](#kv-tiers)) | 32 GB, ≤ 6 GiB other use | the tier takes what is left, down to its floor; below it, the defaults serve without a tier |
-| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | refused once, with what to do: free the RAM it names, serve this card's UD-IQ3_XXS lock (no pinned RAM), or `--host-memory` |
-| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill), then refused |
+| Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | std's generic spill: the experts the RAM holds (`moe.ram=fit`), the rest read from the model file on the SSD; below the working floor refused, naming each term |
+| Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill) and the experts by `moe.ram=fit` (all in RAM where they fit); where they do not, without the MTP head (decode 24–37% slower) |
 | Qwen3.8-Flash-Next IQ3_S, RTX 5090 | the same, ≈ 74.5 GiB | 96 GB, ≤ ≈ 10 GiB other use | the same |
-| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 128 GB (96 GB with ≤ ≈ 2 GiB other use) | mode (ii): about 62% of the experts in RAM (≈ 50 GiB), the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)), then refused |
-| GLM-5.3-Flash, RTX 5080 | the same | the same | refused once, with what to do |
+| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 88 GiB (measured: the lock starts under an 88 GiB cap) | mode (ii): the share of the experts the host fits in RAM, the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)); below the working floor refused |
+| GLM-5.3-Flash, RTX 5080 | the same | ≈ 88 GiB (est., as the RTX 5090) | std's generic spill, as the Qwen3-30B-A3B row |
+
+On every offload lock the RAM-short retry is std's generic spill (`moe.ram=fit`: the RAM tier sized from the host
+budget, `docs/dev/v1-glm-ram.md`); a model plugin refines it where it measured its own (GLM on the RTX 5090). Its speed
+on Qwen3-30B-A3B and Qwen3.8-Flash-Next is not measured yet.
 
 `--host-memory BYTES` sets the budget instead (warned about where it cuts into what is kept free). The GPU's share
 works the same way: `holon serve` sizes an offload lock's expert cache from the startup profile's measured peak and a
@@ -394,14 +398,28 @@ RAM, the most used cached in VRAM.
 uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
 ```
 
-- **A 64 GB host (mode (ii)).** On the RTX 5090, a start refused for host memory retries the lock with RAM holding
-  about 62% of the experts and the rest read from the model file on the SSD as they are needed (exclusive tiers,
-  `docs/dev/v1-glm.md` D10; `plugins/holon_plugins/models/glm5_next/deploy.py`), logged with its cost. The output is the same as the lock's
-  (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode tokens,
-  so keep the files on a local NVMe drive. Measured on one RTX 5090 with the job's RAM capped at 64 GiB: 1K–4K prefill
-  about 2.5–2.8×, decode about 1.7–1.9× and 32K prefill about 1.1× slower than the lock (Performance). If it does not
-  fit either, the start is refused; pass the options of `plugins/holon_plugins/models/glm5_next/deploy.py`'s `MODE2` with
-  a smaller `moe.ram` share.
+- **A host short of the lock's RAM (mode (ii)).** On the RTX 5090, a start refused for host memory retries the lock
+  with RAM holding the share of the experts the host budget fits (`moe.ram=fit`, `docs/dev/v1-glm-ram.md`) and the
+  rest read from the model file on the SSD as they are needed (exclusive tiers, `docs/dev/v1-glm.md` D10;
+  `plugins/holon_plugins/models/glm5_next/deploy.py`), logged with its share and cost. The output is the same as the
+  lock's (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode
+  tokens, so keep the files on a local NVMe drive. Below the store's working floor the start is refused, naming each
+  term. Speed by the host's RAM, measured on one RTX 5090 with the job's RAM capped (medians: 3 rounds at 56–72 GB, 1
+  round at 48, 80 and 88; the lock from about 88 GiB, where the host budget holds every expert; tok/s, 1K / 32K;
+  `docs/dev/v1-glm-ram.md` §10):
+
+  | RAM | RAM tier (share of all experts) | prefill | decode |
+  |---|---|---|---|
+  | 48 GiB | 43% | 109 / 2,195 | 11.7 / 9.3 |
+  | 56 GiB | 53% | 161 / 2,660 | 17.0 / 13.4 |
+  | 64 GiB | 63% | 292 / 3,079 | 24.9 / 19.5 |
+  | 72 GiB | 73% | 606 / 3,196 | 33.1 / 24.2 |
+  | 80 GiB | 83% | 647 / 3,268 | 35.2 / 30.2 |
+  | 88 GiB and more (the lock) | all | 710 / 3,454 | 41.7 / 36.8 |
+
+  1K prefill doubles from 64 to 72 GiB and 1K decode rises fastest below 72 GiB; 32K decode keeps rising to about 80
+  GiB. From about 80 GiB to the lock speed is flat, and the lock is about 15–20% faster at decode. The start warns
+  below 72 GiB (the RAM sizes here, and the start's note's "GB", are the job's cgroup limits in GiB).
 - **First start:** about a minute to ready on an RTX 5090 at mode (ii), reading about 79 GiB from the drive (the
   checkpoint about once; `docs/dev/v1-glm.md` §13 step 7). A restart rereads the experts but not the file's hash.
 - **Accuracy** (`docs/dev/v1-glm.md` §13): the locks pass L2 in its reference form on both prompt sets (the RTX 5090:
@@ -484,9 +502,8 @@ start. A file outside the HF cache is hashed once to find its lock; the hash is 
   accepted as a recorded shortfall; GLM-5.3-Flash truncated 7.8% of constrained outputs at `max_tokens` 2048
   (17.0% unconstrained, its free outputs running past the JSON). Guards against such runaways are deferred; set
   `max_tokens`.
-- **GLM-5.3-Flash's mode (ii) is not a lock:** it was measured on one RTX 5090 at a 64 GB host, and the share of
-  experts in RAM is fixed for that host size whatever the host has (`docs/plan.md` §10, GLM's spill sized from the host
-  budget). Its decode is below Project Maya's at 4K and 32K (Performance).
+- **GLM-5.3-Flash's mode (ii) is not a lock:** its share of RAM is sized at start, measured on one RTX 5090 from 48 to
+  88 GiB (`docs/dev/v1-glm-ram.md` §10). At 64 GiB its decode is below Project Maya's at 4K and 32K (Performance).
 - DFlash2 speculation is an opt-in, in no lock ([docs/dev/m04-spec.md](docs/dev/m04-spec.md)).
 - Stop the server before a `git pull`: the install is editable, so a supervisor restart would import the new code.
 

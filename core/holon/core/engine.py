@@ -162,7 +162,7 @@ class Engine:
                              f"chunk ({cfg.max_seqs} + {mixing}), not {cfg.max_step_tokens}")
         options = {"page_size": cfg.page_size, "max_seqs": cfg.max_seqs, "max_model_len": cfg.max_model_len,
                    "max_step_tokens": cfg.max_step_tokens, "max_draft_tokens": cfg.max_draft_tokens if drafting else 0,
-                   "chunk_with_decode": mixing,
+                   "chunk_with_decode": mixing, "slots": cfg.slots,
                    "kernels": cfg.kernels, "kernel_preferences": cfg.kernel_preferences, "plugins": cfg.plugin_options}
         self.ctx = BuildContext(p, self.device, cfg.dtype, options, ledger=self.ledger)
         bound, planners = bind_state(self.spec, self.ctx, p, self.ledger, cfg)

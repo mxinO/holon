@@ -721,13 +721,28 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 
   Follow-ups:
   - the deploy slot or auto-tune library (D6's seam);
-  - a spill that sizes `moe.ram` from the host budget;
-  - the four ac-oom minors:
+  - a spill that sizes `moe.ram` from the host budget — **delivered** (`docs/dev/v1-glm-ram.md`);
+  - the four ac-oom minors — **delivered** (`docs/dev/v1-fail-stop.md`):
     1. a refused start prints the engine's traceback before its one-line reason;
     2. Ctrl-C ends `holon serve` with a KeyboardInterrupt traceback;
     3. `files.read`'s bounce windows are shared anonymous maps (shmem), where private ones would read as anon;
     4. SIGKILL at startup is taken as the OOM killer without checking the cgroup's `oom_kill` count (a user's
        `kill -9` would also count as a memory failure).
+
+  **Fail-stop status (2026-11-01): delivered.** Three plan §10 follow-ups as one small milestone
+  (`docs/dev/v1-fail-stop.md`): `cpu_task@1` fail-stop by construction (its own error word, raised at the commit), a
+  start-refused engine releases what it built (the exclusive store's move thread no longer leaks it), the four ac-oom
+  minors and the executor's always-zero memory-note term. Core +36 (5,230 → 5,266). Cleared by A; released with
+  RAM-adapt, one lock round for both.
+
+  **RAM-adapt status (2026-11-01): delivered.** GLM serves on any host from its working floor up
+  (`docs/dev/v1-glm-ram.md`): `moe.ram=fit` sizes the RAM tier from auto-config's host budget in std (one expert
+  fraction for every class, solved once at build, refused below the floor, warned below the knee), the spill hook gets
+  the card, spills merge first-setter-wins, std's generic spill is a real one for every offload lock, a RAM-short
+  drafting lock serves without speculation. On one RTX 5090 (capped, zero OOM kills): speed rises with RAM from 48 to
+  80 GiB, flat to the lock from ≈ 88 GiB; at 64 GiB at or above the close's mode (ii); the knee 72 GiB. Byte-identical
+  under `exact.py` on GLM (RTX 5090 and 5080), Qwen3-30B-A3B and Flash-Next. Core +12 (5,266 → 5,278), ABI 1.7.
+  Cleared by A, B and C. Open: the RTX 5080's tuned set (D7).
 - **Required staging units and a short card** (panel, K's close): when the staging units are in a pool's minimum
   (a state tier's, `max_seqs` + 1), a shortfall should come out of the context instead of refusing the start. Checked
   at the close review: a served start already does (`clamp_context`: `rtx-5080/12.lock` at a 2.79 GiB state budget
@@ -847,7 +862,7 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
   release; ABBA 3 rounds (6 only within 3% of a bar), release bars 3 rounds; the perf smoke (`bench/perf_smoke.py`)
   per change and the real-client smoke (`bench/client_smoke.py`) at each merge; `pytest` leaves out
   `slow` and `model` tests, the pre-merge full run (`-m ""`) shards over idle GPUs.
-- **`cpu_task@1` fail-stop by construction** (GLM, A's m1 on ea7ddd01): the provider fails open (a wait past its time
+- **`cpu_task@1` fail-stop by construction — delivered** (`docs/dev/v1-fail-stop.md`; GLM, A's m1 on ea7ddd01): the provider fails open (a wait past its time
   bound, or a failed task, answers at once, every later wait too), and each consumer had to watch its error word; the
   exclusive tiers' I/O worker never did, so its timeouts left wrong bytes silently until GLM's ea7ddd01. The provider
   should carry its own error word as telemetry with a commit-time raise, so no consumer can forget it (a contract
@@ -859,14 +874,16 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **D8x's move thread: views once a move** (GLM, `docs/dev/v1-glm.md` D8x): the thread builds its landing-row and
   RAM-unit views per piece under the GIL (≈ 450 a 1K prompt), likely the rest of the launches' p99 (+1.01 ms at
   GLM's close, at the bound); build them once a move, so it holds the GIL only to index and copy.
-- **GLM's spill sized from the host budget** (GLM's close, the coordinator): `glm5_next`'s spill returns mode (ii) as
-  measured, `moe.ram` `*=0.6238` (RAM's share of the experts for a 64 GB host) whatever the host has. It should take
+- **GLM's spill sized from the host budget** (GLM's close, the coordinator) — **delivered** by `docs/dev/v1-glm-ram.md`
+  §9 (`moe.ram=fit`, the spill's card, `MODE2` by card); GLM's knee measured (72 GiB, §10); open there: the RTX 5080's entry (D7).
+  As it was: `glm5_next`'s spill returned mode (ii) as measured, `moe.ram` `*=0.6238` (RAM's share of the experts for
+  a 64 GB host) whatever the host has. It should take
   the host budget auto-config derives (a seam the spill hook does not get today) and size `moe.ram` from it, so a
   48 GB or 80 GB host gets the share that fits it rather than the 64 GB host's. With it: pass the lock's class too
   and key `MODE2` by class (today `moe.lend_peak = require` stands for the RTX 5090's lock, the only GLM lock that
   lends: a future lock tuned with `require` on another card would get a set measured at 32 GB), and a refusal after
   the spill keeps the measured options with a smaller share (today it falls back to std's generic hint).
-- **A start-refused exclusive-tier engine leaks its store** (GLM's close, found by the test split): the D8x move
+- **A start-refused exclusive-tier engine leaks its store — delivered** (`docs/dev/v1-fail-stop.md`; GLM's close, found by the test split): the D8x move
   thread starts in `TieredStore.after_materialize` and stops only at close, and an engine refused at its start is never
   closed, so the thread keeps the store (≈ 190 MiB of VRAM, the pinned pools) alive in that process. `holon serve`
   starts engines in child processes, so it never leaks there; in-process users (the judge, the benches) do. Start the

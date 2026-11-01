@@ -45,6 +45,7 @@ def test_the_spill_targets_any_disk_not_known_to_rotate_or_be_remote(tmp_path, m
     else:
         assert got[0] == {"rows.place": "ple:ssd,token_embd:host"} and want in got[1]
         assert "−66%/−80%/−81%" in got[1] and "−60%/−71%/−71%" in got[1]      # the cost as measured (release head)
+        assert "without the MTP head (decode 24–37% slower" in got[1]           # where RAM holds a share (m8)
     assert deploy.spill({"rows.place": "ple:ssd"}, "/data/model.gguf") is None        # nothing in RAM to spill
 
 

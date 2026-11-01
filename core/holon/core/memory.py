@@ -255,8 +255,10 @@ class Ledger:
                              f"{self.host_memory + short} or more starts anyway (pinning past what is free may swap)")
         try:
             pool._set(units)              # allocated once, now, for the engine's lifetime
-        except BaseException:
+        except BaseException as e:
             del self.pools[name]
+            if isinstance(e, (OSError, RuntimeError)):          # the OS refused the map or the pin: memory (A m4)
+                raise OutOfUnits(f"host memory: pinning {name} ({units * unit_bytes >> 20} MiB) failed: {e}") from e
             raise
         return pool
 

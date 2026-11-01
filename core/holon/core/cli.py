@@ -18,6 +18,7 @@ import contextlib
 import dataclasses
 import fcntl
 import functools
+import inspect
 import os
 import pathlib
 import re
@@ -117,9 +118,11 @@ def serve_history(model: str, flags: dict[str, object], found: tuple | None, aut
                   ) -> list[tuple[EngineConfig, str | None]]:
     """The supervisor's history, oldest first: defaults (`serve_defaults`) + flags unless not `keep_defaults`, then
     the lock (`plans.find`'s result) + `lock_extra` + flags, preceded by the same with the `spill` options if any (the
-    supervisor's memory-only entry). The requested `max_model_len` is a flag's, else the lock's, else `auto`; every
-    config clamps it to what fits and derives its GPU memory's slack unless `--memory-fraction` is given. The defaults
-    serve at most SERVE_MAX_SEQS sequences unless `--max-seqs` says otherwise."""
+    supervisor's memory-only entry) — for a drafting lock, preceded by that without speculation (memory-only too: a
+    spill's start refused for memory may serve without the drafter's head). The requested
+    `max_model_len` is a flag's, else the lock's, else `auto`; every config clamps it to what fits and derives its GPU
+    memory's slack unless `--memory-fraction` is given. The defaults serve at most SERVE_MAX_SEQS sequences unless
+    `--max-seqs` says otherwise."""
     def config(base: dict[str, object]) -> EngineConfig:
         settings = {"clamp_context": True, "memory_fraction": 0.0} | layered(base, flags)
         if settings.get("max_model_len", "auto") == "auto":
@@ -131,7 +134,9 @@ def serve_history(model: str, flags: dict[str, object], found: tuple | None, aut
     history = [(config({"max_seqs": SERVE_MAX_SEQS} | dict(defaults or {})), None)] if keep_defaults else []
     if found is not None:
         lock = layered(plans.lock_overrides(found[0]), dict(lock_extra or {}))
-        history += [(config(layered(lock, {"plugin_options": dict(spill)})), str(found[2]))] if spill else []
+        for c in [config(layered(lock, {"plugin_options": dict(spill)}))] if spill else []:
+            first = [dataclasses.replace(c, max_draft_tokens=0)] if c.max_draft_tokens else []    # (m8)
+            history += [(x, str(found[2])) for x in first + [c]]
         history.append((config(lock), str(found[2])))
     return history
 
@@ -200,8 +205,8 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
     """What fits the lock to this machine (docs/dev/v1-auto-config.md D1, D5), asking `owners` (the model plugin, the
     plugins declaring the lock's options and sources): settings giving the lock's `[sources]` no flag gives
     (`HintsSources`, in CACHE; when one is missing or the cache cannot be read, speculation off instead: they
-    are drafters' heads), the spill (`Spills`; one setting an option a flag gives is dropped) with its notes, and the
-    notes of manual alternatives."""
+    are drafters' heads), the spill (`Spills`, given the lock's class: the first owner to set an option wins; one
+    setting an option a flag gives, or adding none, is dropped) with its notes, and the notes of manual alternatives."""
     if found is None:
         return {}, {}, [], []
     given, extra, spill, notes = flags.get("plugin_options", {}), {"plugin_options": {}}, {}, []
@@ -214,10 +219,11 @@ def fit_lock(found: tuple | None, flags: Mapping[str, object], owners: list, che
             extra = {"max_draft_tokens": 0}
             break
     options = layered(plans.lock_overrides(found[0]), dict(flags)).get("plugin_options", {})
-    manual = []
-    for got in (getattr(o, "spill", lambda *a: None)(options, checkpoint) for o in owners):
-        if got and not set(got[0]) & set(given):
-            spill |= got[0]
+    manual, card = [], found[0].plan.fingerprint_class
+    for spills in (o.spill for o in owners if hasattr(o, "spill")):        # (`card` to a hook naming it: ABI 1.7)
+        got = spills(options, checkpoint, **{"card": card} if "card" in inspect.signature(spills).parameters else {})
+        if got and not set(got[0]) & set(given) and (set(got[0]) - set(spill) or not got[0]):   # (it adds an option)
+            spill = got[0] | spill                  # the first owner setting an option wins: the model plugin's
             (notes if got[0] else manual).append("".join(f"{k}={v} " for k, v in got[0].items()) + got[1])
     return extra, spill, notes, manual
 
@@ -474,13 +480,13 @@ def _main(argv: list[str] | None) -> None:
     history = serve_history(model, flags | ({"host_memory": budget} if budget is not None else {}), found,
                             auto_context(model_plugin, source), serve_defaults(args.plans), lock_extra=extra,
                             spill=spill, keep_defaults=keep)
-    spilled = history[-2][0] if spill else None
+    spilled = {id(c) for c, _ in history[int(keep):-1]}      # (the spill entries, by identity)
     history = checked_options(history, declared)
     if not history:
         raise SystemExit("holon: no configuration left to serve (the lock's was refused above, and the defaults "
                          "cannot hold this model): --no-lock serves defaults and your flags")
     config, lock = history[-1]
-    memory_only = {i: "(spilled: " + "; ".join(notes) + ")" for i, (c, _) in enumerate(history) if c is spilled}
+    memory_only = {i: "(spilled: " + "; ".join(notes) + ")" for i, (c, _) in enumerate(history) if id(c) in spilled}
     admit = functools.partial(admit_restart, derived=budget is not None)
 
     def refused(e: object) -> SystemExit:

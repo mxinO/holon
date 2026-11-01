@@ -7,7 +7,8 @@
 - locks never pin test-only plugins (the `testing.*` distribution). The tools plan and write locks for any engine —
   their own tests write CPU locks on the reference kernels into temporary directories — so this is enforced here;
 - every plugin option a lock sets is declared by an installed plugin (manifest `[options]`), with a value in its
-  `choices`, so `holon serve` serves a committed lock without a warning and never drops it;
+  `choices`, so `holon serve` serves a committed lock without a warning and never drops it; none sets `moe.ram=fit`
+  (sized from the host at the start: a lock's placement is fixed, docs/dev/v1-glm-ram.md D5);
 - `defaults.toml` (the settings `holon serve` starts from without a lock) sets EngineConfig fields only, selects
   installed plugins of the slots it names, and sets declared plugin options;
 - a lock's `[judged]` table (how L2 judged it, docs/dev/v1-glm.md D15a) names files under `judge/goldens/` that exist
@@ -58,6 +59,9 @@ for path in sorted(PLANS.rglob("*.lock")):
     options = lock.plan.engine.get("plugin_options", {})
     msgs += [f"{name}: no installed plugin declares the option {key}" for key in options if key not in declared]
     msgs += [f"{name}: {bad}" for bad in cli.outside_choices(options, declared)]
+    if str(options.get("moe.ram", "")).strip() == "fit":
+        msgs.append(f"{name}: sets moe.ram=fit, which varies with the host: a lock's placement is fixed (fit lives in "
+                    "holon serve's spills only, docs/dev/v1-glm-ram.md D5)")
 defaults = cli.serve_defaults(PLANS)
 msgs += [f"defaults.toml: {key} is no EngineConfig field" for key in defaults
          if key not in {f.name for f in dataclasses.fields(EngineConfig)}]
@@ -79,6 +83,6 @@ if "--release" in sys.argv:
             msgs += [f"{found[-1].relative_to(PLANS.parent)}: {name} differs from this tree"
                      + ("" if pin.src.startswith(f"{plans.SRC_SCHEME}:") else " (an older src scheme)")
                      for name, pin in lock.plan.units.items() if current.get(name) != pin.src]
-fail(msgs, "locks read back, one servable model id per build, no test-only plugins, declared options, no CPU tier, "
-     "defaults.toml valid"
+fail(msgs, "locks read back, one servable model id per build, no test-only plugins, declared options, no fit, no CPU "
+     "tier, defaults.toml valid"
      + (", newest locks pin this tree" if "--release" in sys.argv else ""))
