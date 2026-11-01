@@ -412,6 +412,13 @@ def prebuild(sms: list[int]) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    try:
+        _main(argv)
+    except KeyboardInterrupt:                                 # Ctrl-C (a download, a start, serving): no traceback;
+        raise SystemExit(130) from None                       # `run`'s `finally`s have stopped the engine
+
+
+def _main(argv: list[str] | None) -> None:
     installed = discover()
     parser = argparse.ArgumentParser(prog="holon")
     sub = parser.add_subparsers(dest="command", required=True)

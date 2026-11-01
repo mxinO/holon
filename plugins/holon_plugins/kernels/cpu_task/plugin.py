@@ -1,5 +1,6 @@
 """`cpu_task@1` (std.moe.kernels; docs/dev/v1-offload.md D6, spike S6): CUDA graphs hand CPU work to a persistent native
-worker — a signal op, a wait op, a word per slot in mapped pinned memory, fail-open by contract (csrc/cpu_task.cu).
+worker — a signal op, a wait op, a word per slot in mapped pinned memory, fail-open on the device by contract
+(csrc/cpu_task.cu) and fail-stop at the step's commit: the worker's error word stops the engine there.
 
 Each kind of work has its own worker (the fact `pool`): `compute` (CPU experts, F5b) and `io` (F9's SSD reads), so a
 read never stalls a layer's CPU experts. The `io` worker is one completion-driven thread (docs/dev/v1-glm.md D8f): its
@@ -27,6 +28,7 @@ import functools
 import os
 import pathlib
 
+import numpy as np
 import torch
 from holon.api import Constraint, KernelSpec
 
@@ -57,6 +59,12 @@ class Service:
         self.memop = {"spin": False, "memop": True}[str(opts.get("cpu_task.wait", "spin"))]
         self.timeout_ns = int(float(opts.get("cpu_task.timeout", TIMEOUT)) * 1e9)
         self.tasks, self.urgent, self.native, self.words, self.left = [], [], None, None, False
+        # The worker's error word, every instance's (`errors`): zeroed once, at the first step served (after the
+        # start's warm-ups), then sticky — a bit is fatal, so one a side stream sets late is caught at a later commit,
+        # never zeroed away —, checked at each commit: a wait that gave up or a failed task stops the engine whoever
+        # its consumer is (fail-stop by construction)
+        self.errors = ctx.static(f"{self.name}.errors", (1,), torch.int32)
+        self.telemetry, self.armed = {"errors": self.errors}, False
 
     def bind(self, task, urgent: bool = False) -> int:
         if self.native is not None:
@@ -82,6 +90,18 @@ class Service:
             if self.depth:
                 print(f"holon: {self.name}: {self.native.backend()}, {self.depth} reads in flight")
 
+    def before_launch(self, step):
+        if self.armed:
+            return [], []
+        self.armed = True
+        torch.cuda.synchronize(self.errors.device)  # the start's last work done: none of its bits lands after the zero
+        return [(self.errors, np.zeros(1, dtype=np.int32))], []
+
+    def after_commit(self, step, telemetry) -> None:
+        if bits := int(telemetry["errors"][0]):
+            raise RuntimeError(f"{self.name}: step {step.step}'s CPU tasks failed open (cpu_task@1 errors {bits}: 1 a "
+                               "task failed, 2 a wait timed out); the engine stops")
+
     def shutdown(self) -> None:                     # (idempotent: a store may stop its I/O worker first)
         if self.left or self.native is None:
             return
@@ -97,7 +117,7 @@ class CpuTask:
 
     def __init__(self, ctx, *, pool: str) -> None:
         self.service = ctx.shared(f"cpu_task.{pool}", functools.partial(Service, pool=pool))
-        self.errors = ctx.static(f"cpu_task.{pool}.errors", (1,), torch.int32)
+        self.errors = self.service.errors           # the worker's (its commit checks it): one word per pool
 
     def bind(self, task, urgent: bool = False) -> int:
         """Its slot; `urgent`: a hint — the worker serves its requests before requests it has not yet started."""

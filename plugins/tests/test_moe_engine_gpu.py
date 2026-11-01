@@ -148,10 +148,8 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
     experts = {k.rpartition("/")[2]: v["provider"] for k, v in engine.ctx.kernels.items() if "linear_experts" in k}
     assert experts == {"linear_experts_arena@1": "kernels.ggml_cuda"}            # arenas never bind @2
     words = [t for name, t in store.telemetry.items() if name.startswith("kernel_errors")]
-    io = [store.io.errors] if store.exclusive else []           # (the I/O worker's word: it fails open)
-    ggml = [t for t in words if not any(t is x for x in io)]
-    assert len(words) == 1 + len(io) and len(ggml) == 1 and all(   # the ggml id-error word, one per engine
-        m._kernel.errors is ggml[0] for m in engine.executor.model.modules() if hasattr(m, "cls"))
+    assert len(words) == 1 and all(            # the ggml id-error word, one per engine (the I/O worker checks its own)
+        m._kernel.errors is words[0] for m in engine.executor.model.modules() if hasattr(m, "cls"))
     if not cache:                                # a corrupt map entry: null slots read, the commit stops the engine
         store.residency.device[0, :, 0] = 1 << 20
         engine.add(prompts[0], GREEDY)
@@ -165,17 +163,51 @@ def test_the_offload_store_on_the_gpu_is_bitwise_the_resident_store(gpu_moe, pol
 
 
 def test_an_ssd_read_past_its_time_bound_stops_the_engine(gpu_moe):
-    """Exclusive tiers: the I/O worker fails open (`cpu_task@1`: a wait past its time bound, or a failed task, answers
-    at once, and every later wait too), so its error word is the store's to check at each commit — unchecked, the
-    reads it gave up on left wrong bytes in the slots and the units, silently. With a bound no read meets the step's
-    commit refuses to go on."""
+    """Exclusive tiers: the I/O worker fails open on the device (`cpu_task@1`: a wait past its time bound, or a failed
+    task, answers at once, and every later wait too), and is fail-stop by construction: its own error word, zeroed at
+    each launch, stops the engine at the commit — the store, its consumer, watches nothing (unchecked, the reads it
+    gave up on left wrong bytes in the slots and the units, silently). With a bound no read meets the step's commit
+    refuses to go on."""
     file, prompts, _ = gpu_moe
     engine = _gpu_engine(file, host_memory=1 << 27, plugin_options={
         "moe.store": "std.moe.offload@1", "moe.cache": "*=0.25", "moe.ram": "*=0.25", "cpu_task.timeout": 1e-6,
         "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
-    with pytest.raises(RuntimeError, match="kernel_errors"):
+    store = engine.ctx.shared_objects[KEY]
+    assert not any(t is store.io.errors for t in store.telemetry.values())        # no watch of its own
+    with pytest.raises(RuntimeError, match=r"cpu_task\.io: step \d+'s CPU tasks failed open"):
         _served(engine, prompts)
     engine.close()
+
+
+def test_a_start_refused_after_its_pools_releases_them(gpu_moe, monkeypatch):
+    """An engine refused at its start is never closed: it releases what it built as `close` would. An exclusive-tier
+    layout refused after its first materialize (`moe.lend_peak = require` with no tail to lend) once kept its store —
+    the move thread held it —, ≈ 170 MiB of VRAM and its pinned pools, for the process's life."""
+    import gc
+    import threading
+    import weakref
+
+    from holon.core import platform
+
+    regions, real = [], platform._Pinned
+
+    class Counted(real):
+        def __init__(self, *a, **k):
+            super().__init__()
+            regions.append(weakref.ref(self))
+    monkeypatch.setattr(platform, "_Pinned", Counted)
+    file, _, _ = gpu_moe
+    torch.cuda.synchronize()
+    held = torch.cuda.memory_allocated()
+    with pytest.raises(RuntimeError, match="moe.ring_lend is not tail"):
+        _gpu_engine(file, host_memory=1 << 27, plugin_options={
+            "moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "coldest",
+            "moe.lend_peak": "require", "moe.cache": "*=0.75", "moe.ram": "*=0.25",
+            "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"})
+    gc.collect()
+    assert len(regions) > 2 and not [r for r in regions if r() is not None]
+    assert torch.cuda.memory_allocated() <= held                 # (an earlier test's engine may go too)
+    assert not [t for t in threading.enumerate() if t.name.endswith(".move")]
 
 
 def test_rams_long_heat_is_its_oracles(gpu_moe):
@@ -401,7 +433,7 @@ def test_the_cpus_share_on_the_gpu_is_bounded_and_run_identical(gpu_moe):
     #                                                                                routing flip moves a position)
     worker.kill()                                             # the coordinator stops answering
     engine.add(prompts[1], GREEDY)
-    with pytest.raises(RuntimeError, match="kernel_errors"):
+    with pytest.raises(RuntimeError, match=r"cpu_task\.compute: .* errors 2"):        # the worker's own word
         while engine.has_work():
             engine.step()
     assert worker.flag() & 2

@@ -231,9 +231,13 @@ CPU jobs; signal] → expert_fetch → linear_experts_arena (gate/up, down) → 
   may ignore it), `signal(slot)` and `wait(slot)` (graph ops on the current stream: the slot's task runs once the stream
   reaches the signal, the device's writes before it visible to the task; work after the wait runs once the task has
   answered, its writes visible), and `errors`, a device int32 word [1] that waits OR bits into (1: a task failed, 2: a
-  wait timed out), which the caller zeroes per step and checks at the step's commit. Fail-open: a task error answers at
-  once, a wait gives up after a time bound, and once either happened every later wait returns at once (so a graph never
-  waits forever and a drain ends). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now), with
+  wait timed out), one per worker kind and engine (an auxiliary model's instances share it). Fail-open on the device:
+  a task error answers at once, a wait gives up after a time bound, and once either happened every later wait returns
+  at once (so a graph never waits forever and a drain ends). Fail-stop at the commit, the provider's duty: a step's
+  commit that finds the word set stops the engine; a consumer may read it, never needs to watch it, and cannot recover
+  from a bit (until fail-stop, `@1` left the check to each caller; changed in place: both providers meet the duty —
+  `kernels.cpu_task` raises at the commit, the oracle `std.moe.reference.cpu_task` runs each task synchronously and
+  raises in the step). A task is the CPU kernel's (`cpu_experts@1`'s `task`): callable (runs it now), with
   `native` its handle for a native worker — `(ABI version, function, argument)` of the task ABI (kernels.cpu_task's
   csrc/holon_cpu_task.h), absent where only a synchronous run is possible. An instance also has `copy(roles) -> task`,
   the generic copy task (F9): per role `(descriptors [P, X, 4] int64, units [U, unit] uint8, requests [1 + F, 2] int32)`

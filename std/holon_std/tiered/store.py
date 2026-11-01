@@ -452,7 +452,6 @@ class TieredStore:
         self.tier_op = self.ctx.select_kernel(TIERS, site=f"std.tiered[{self.name}]", **facts).impl(self.ctx, **facts)
         self.io = self.ctx.select_kernel(CPU_TASK, site=f"std.tiered[{self.name}].io", pool="io").impl(self.ctx,
                                                                                                        pool="io")
-        self.watch(self.io.errors)               # (it fails open: a read it gave up on stops the engine at the commit)
         # SSD reads' landing (docs/dev/v1-glm.md D8f): A_od rows a class (at least a graphed step's misses), a call's
         # j-th SSD miss in row j % A_od in its round ⌊j / A_od⌋; the request rows `moe_tiers@2` writes, a round's copied
         # into the I/O worker's view before its signal

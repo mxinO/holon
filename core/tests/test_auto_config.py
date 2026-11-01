@@ -48,6 +48,18 @@ def test_host_ram_is_meminfo_and_the_cgroup_limits_less_what_they_hold(tmp_path,
     assert platform.host_headroom(total) == 6 * GiB and platform.host_headroom(256 * GiB) == int(12.8 * GiB)
 
 
+@pytest.mark.parametrize("case", ["v2", "v1", "v1 container root", "none"])
+def test_the_oom_kills_are_the_cgroups_count(tmp_path, case):
+    """The OOM killer's kills in this process's cgroup: v2's `memory.events`, v1's `memory.oom_control` (a path
+    missing here, cgroupns=host: the mount's root); None without either."""
+    proc, cg = tmp_path / "proc", tmp_path / "cg"
+    _tree(proc, {"self/cgroup": "4:memory:/user\n0::/app\n" if case.startswith("v1") else "0::/app\n"})
+    v1 = "memory/memory.oom_control" if case == "v1 container root" else "memory/user/memory.oom_control"
+    _tree(cg, {"app/memory.events": "low 0\noom 3\noom_kill 2\n",
+               v1: "oom_kill_disable 0\nunder_oom 0\noom_kill 5\n"} if case != "none" else {"app/memory.max": "max"})
+    assert platform.oom_kills(str(proc), str(cg)) == {"v2": 2, "none": None}.get(case, 5)
+
+
 def test_the_pin_lock_never_fails_a_start(tmp_path, monkeypatch, capsys):
     """Per user, in the cache: a second holder waits, then goes on with a warning; no cache to write is a warning."""
     monkeypatch.setattr(cli, "CACHE", tmp_path)
@@ -79,16 +91,16 @@ def test_a_gpu_is_shared_by_a_display_or_a_process_outside_holon(monkeypatch, ca
                                   "fill short, shared"])
 def test_the_slack_is_measured_only_where_a_cache_is_short(monkeypatch, case):
     """D2: 10% of the free memory (today's 0.9) unless a fill pool would stay below its preference there; then the
-    allocator's overshoot and a reserve (1 GiB on a shared card, 256 MiB headless), at most those 10%."""
+    reserve (1 GiB on a shared card, 256 MiB headless), at most those 10%."""
     ledger = Ledger(torch.device("cpu"))
     ledger.request("state.kv", unit_bytes=GiB // 8, min_units=1, tokens_per_unit=16)
     if case != "no fill pool":
         ledger.plugin_pool("cache", unit_bytes=GiB // 4, pref_units=64 if "short" in case else 4, fill=True)
     monkeypatch.setattr(platform, "gpu_shared", lambda device: "drives a display" if "shared" in case else "")
     executor = types.SimpleNamespace(device=torch.device("cpu"))
-    slack = Executor.slack(executor, ledger, free=10 * GiB, peak=GiB, out={"overshoot": 64 << 20})
-    want = {"fill short, headless": (64 << 20) + (256 << 20)}      # shared: 1 GiB + 64 MiB, capped at the 10%
-    assert slack == want.get(case, GiB) and executor.memory_note
+    slack = Executor.slack(executor, ledger, free=10 * GiB, peak=GiB)
+    want = {"fill short, headless": 256 << 20, "fill short, shared": GiB}       # (the 10%: 1 GiB)
+    assert slack == want.get(case, GiB) and executor.memory_note and "allocator" not in executor.memory_note
 
 
 def _found(sources=None, options=None, drafts=3):

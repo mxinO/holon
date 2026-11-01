@@ -161,7 +161,7 @@ class _Reads:
         self.index = torch.arange(self.width + 1, device=ctx.device)
         self.turn, self.pending = 0, 0
         self.ahead = [0, torch.zeros((), dtype=torch.int64, device=ctx.device)]   # calls read ahead, of them matched
-        ctx.shared(f"{name}.errors", lambda root: _Errors(self.io.errors, rows.name, fd))
+        ctx.shared(f"{name}.file", lambda root: _File(fd))   # (a failed read stops the engine: the worker's word)
 
     def prefetch(self, ids: np.ndarray) -> bool:
         """Read the distinct rows of the next step's ids (host-computed: a prompt step's) into a read-ahead list."""
@@ -212,19 +212,11 @@ class _Reads:
         return lst.rows[:n].view(self.dtype).view(self.shape), index.view(ids.shape)
 
 
-class _Errors:
-    """The I/O worker's error word for an SSD table's reads: zeroed at each launch, checked at each commit."""
+class _File:
+    """The SSD table's descriptor, closed at the engine's close (after the I/O worker, built first, has stopped)."""
 
-    def __init__(self, word: torch.Tensor, name: str, fd: int) -> None:
-        self.word, self.name, self.fd, self.telemetry = word, name, fd, {"errors": word}
-
-    def before_launch(self, step):
-        return [(self.word, np.zeros(1, dtype=np.int32))], []
-
-    def after_commit(self, step, telemetry) -> None:
-        if bits := int(telemetry["errors"][0]):
-            raise RuntimeError(f"std.tiered.rows@1 {self.name}: the SSD reads failed (cpu_task@1 errors {bits}: 1 a "
-                               "read failed, 2 a wait timed out)")
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
 
     def shutdown(self) -> None:
         if self.fd is not None:

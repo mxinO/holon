@@ -146,7 +146,14 @@ def _killed_engine(config, endpoints, lock=None):
 
 
 @pytest.mark.slow
-def test_an_engine_killed_while_starting_is_a_memory_failure():
-    with pytest.raises(StartFailed, match="SIGKILL") as got:
+@pytest.mark.parametrize("oom", [True, False])
+def test_an_engine_killed_while_starting_by_the_oom_killer_is_a_memory_failure(monkeypatch, oom):
+    """A SIGKILL while starting is "memory" (the supervisor rolls back to a spill) when the cgroup's OOM-kill count
+    rose, or cannot be read; else a plain failure, said so."""
+    from holon.core import platform
+
+    counts = iter([3, 4 if oom else 3])
+    monkeypatch.setattr(platform, "oom_kills", lambda: next(counts))
+    with pytest.raises(RuntimeError, match="SIGKILL") as got:
         asyncio.run(EngineProcess.start(None, _killed_engine))
-    assert got.value.kind == "memory"
+    assert isinstance(got.value, StartFailed) == oom and ("not by the OOM killer" in str(got.value)) != oom
