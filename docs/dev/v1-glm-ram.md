@@ -427,7 +427,9 @@ The design's +5 to +6 had no m8 entry, no wrapped signature and no pin refusal.
 ## 10. Step 2-3: the grid and the exactness runs (2026-11-01, 59482cdb)
 
 **The RTX 5090 grid** (one desktop; each cell its own job step, its cgroup cap enforced and logged; zero OOM kills in
-every cell). The arm is the lock's flags + `MODE2["rtx-5090"]` (`moe.ram=fit`) + `--auto`: what `holon serve`
+every cell). The grid's log labels the 72, 80 and 88 GB steps "NO-CAP": the check script's threshold
+(≤ 64 GiB, written for mode (ii)), not a missing cap. Each step's `memory.max` read 72, 80 and 88 GiB exactly, and f
+scales with it; the script now labels any set cap. The arm is the lock's flags + `MODE2["rtx-5090"]` (`moe.ram=fit`) + `--auto`: what `holon serve`
 gives at that RAM. A cell is the median over rounds of each round's median over the context's 8 requests; tok/s; SSD
 MB a decode token over tokens 1-32 and D8x's parked rows at 1K beside it.
 
