@@ -1,5 +1,8 @@
 # v1 — Fail-stop: three follow-ups of plan §10 as one small milestone
 
+Status: **built and cleared by A (2026-10-31); released with RAM-adapt (`docs/dev/v1-glm-ram.md`), one lock round for
+both (2026-11-01).**
+
 Three items from `docs/plan.md` §10:
 1. `cpu_task@1` fail-stop by construction (A's m1).
 2. A start-refused exclusive-tier engine leaks its store.

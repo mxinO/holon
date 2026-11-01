@@ -1,9 +1,8 @@
 # v1 — GLM on any host from its floor up: the RAM tier sized from the host budget
 
-Status: **design note, rev 2.1 (2026-10-31): rev 2 cleared by the panel (A, B, C), with their rev-2 items taken (§8).**
-C's replay of the step-7 recording (the panel's notes) places the grid: speed is monotonic in RAM, steep from 56 to
-≈ 74 GB, flat from ≈ 84 GB; one f is within 0.09 points of heat-greedy. Steps 0 (the D1 form) and 1 are built (§9); the
-GPU grid, R and the knee are the lead's runs.
+Status: **built (2026-11-01): rev 2.1 as cleared, steps 0-3 done (§9 the build, §10 the grid and the exactness runs),
+the code and the grid cleared by A, B and C; it closes with fail-stop in one lock round.** Open: the RTX 5080's tuned
+set (D7).
 
 **The owner's request (2026-10-31):** "we should not assume the 64g is the only one we need support, we should be able
 to adapte to different mem size (with 64g as a lower limit maybe)".
@@ -322,7 +321,7 @@ spill's `card`), ABI 1.6 → 1.7 minor (B-R4, m7). Both forms keep the single ow
   `tier` slot, now in `BuildCtx.options` as `slots`); a value other than the whole `fit` (`*=fit`); `fit` without a
   file tier in `moe.tiers`.
 - **The knee** is GLM's spill note: `KNEE["rtx-5090"] = (72, 28)`, "below ≈ 72 GB of RAM 32K decode falls under
-  ≈ 28 tok/s". **This is a PLACEHOLDER** from C's replay (72 GB: 27.9 tok/s 32K decode) until step 2's grid.
+  ≈ 28 tok/s". It was a placeholder from C's replay (72 GB: 27.9 tok/s 32K decode); the grid measured it (§10: 72 GB, 24 tok/s).
 - **Every start logs f:** `holon: moe: moe.ram=fit: 0.6211 of the experts in RAM (… GiB of … GiB left)`, or "every
   expert in RAM".
 - **Retries (D4)** need no new code. Restart admission lowers an entry's `host_memory` after a memory failure, and
@@ -417,37 +416,38 @@ The design's +5 to +6 had no m8 entry, no wrapped signature and no pin refusal.
   `BuildCtx.options`, core's +10 (+12 with A m4), and m8's entry without speculation.
 - **The code review** (A, B on `382fbf8e..f28f53c2`): A-M1, B-M1 (the README's Host RAM table) and the minors are
   taken in this round. Two docstrings now say how `BuildCtx.host_left` and `TierCtx.host_left` differ (B m3). The
-  knee's note says "est." (B m2). Plan §10's follow-up is marked delivered (B m7). B m5 (a CPU-tier suffix on
+  knee's note said "est." (B m2) until the grid measured it (§10). Plan §10's follow-up is marked delivered (B m7). B m5 (a CPU-tier suffix on
   `card`) is latent and left.
-- **Open:**
-  - GLM's knee (`KNEE`) is a placeholder until step 2;
-  - the RTX 5080 has no `MODE2` entry (D7).
+- **Open:** the RTX 5080 has no `MODE2` entry (D7).
 
 
 ## 10. Step 2-3: the grid and the exactness runs (2026-11-01, 59482cdb)
 
-**The RTX 5090 grid** (one desktop; each cell its own job step, its cgroup cap enforced and logged; zero OOM kills in
+**The RTX 5090 grid** (sizes are the job steps' cgroup caps, in GiB¹; one desktop; each cell its own job step, its cgroup cap enforced and logged; zero OOM kills in
 every cell). The grid's log labels the 72, 80 and 88 GB steps "NO-CAP": the check script's threshold
 (≤ 64 GiB, written for mode (ii)), not a missing cap. Each step's `memory.max` read 72, 80 and 88 GiB exactly, and f
 scales with it; the script now labels any set cap. The arm is the lock's flags + `MODE2["rtx-5090"]` (`moe.ram=fit`) + `--auto`: what `holon serve`
 gives at that RAM. A cell is the median over rounds of each round's median over the context's 8 requests; tok/s; SSD
 MB a decode token over tokens 1-32 and D8x's parked rows at 1K beside it.
 
-| Cap | Rounds | f (logged) | 1K prefill / decode | 4K | 32K prefill / decode | SSD 1-32, 1K / 32K | parked (1K) |
+| Cap | Rounds | f (logged; a range where rounds solved differently) | 1K prefill / decode | 4K | 32K prefill / decode | SSD 1-32, 1K / 32K | parked (1K) |
 |---|---|---|---|---|---|---|---|
-| 48 GB | 1 | 0.4297 | 109 / 11.7 | | 2,195 / 9.3 | 224 / 325 | 250 |
-| 56 GB | 3 | 0.5312 | 161 / 17.0 | | 2,660 / 13.4 | 133 / 236 | 235 |
-| 64 GB | 3 | 0.6289 | 292 / 24.9 | 771 / 22.0 | 3,079 / 19.5 | 60 / 141 | 227 |
-| 72 GB | 3 | 0.7305 | 606 / 33.1 | | 3,196 / 24.2 | 11 / 76 | 151 |
-| 80 GB | 1 | 0.8281 | 647 / 35.2 | | 3,268 / 30.2 | — / 19 | — |
-| 88 GB, `fit` | 1 | 0.9258 | 647 / 35.0 | | 3,257 / 32.4 | — / 1 | — |
-| 88 GB, the lock (it starts: budget 81.7 GiB) | 1 | — | 710 / 41.7 | | 3,454 / 36.8 | | |
+| 48 GiB | 1 | 0.4297 | 109 / 11.7 | | 2,195 / 9.3 | 224 / 325 | 250 |
+| 56 GiB | 3 | 0.5273–0.5312 | 161 / 17.0 | | 2,660 / 13.4 | 133 / 236 | 235 |
+| 64 GiB | 3 | 0.6289 | 292 / 24.9 | 771 / 22.0 | 3,079 / 19.5 | 60 / 141 | 227 |
+| 72 GiB | 3 | 0.7266–0.7305 | 606 / 33.1 | | 3,196 / 24.2 | 11 / 76 | 151 |
+| 80 GiB | 1 | 0.8281 | 647 / 35.2 | | 3,268 / 30.2 | — / 19 | — |
+| 88 GiB, `fit` | 1 | 0.9258 | 647 / 35.0 | | 3,257 / 32.4 | — / 1 | — |
+| 88 GiB, the lock (it starts: budget 81.7 GiB) | 1 | — | 710 / 41.7 | | 3,454 / 36.8 | | |
 | uncapped, the lock | 1 | — | 710 / 41.4 | 2,121 / 37.2 | 3,450 / 36.5 | | |
 
 - **Monotonic in RAM** at every context, flat from 80 to 88 GB (within one round's noise), with the step up to the
   lock where it starts (88 GB here: `holon serve` takes the lock there). C's replay placed the bend right: steep from
   56 to ≈ 72 GB, flat past ≈ 80 GB.
 - **At 64 GB, at or above the close's mode (ii)** (288 / 774 / 3,030 prefill, 24.4 / 21.5 / 19.3 decode).
+- **Prefill with no SSD reads** (C): past f ≈ 0.74 the exclusive tiers read nothing from the SSD after the seed, and
+  still run at ≈ 0.91 (1K) and ≈ 0.95 (32K) of the lock's prefill: the tiers' bookkeeping and the split calls, not the
+  drive.
 - **The knee: 72 GB** (`KNEE`): below it decode falls fastest (32K decode 24.2 tok/s at 72, 19.5 at 64; 1K prefill
   606 against 292). The spill's note warns under it.
 - **D6:** `read_ahead` 256 against 135 loses at 64 GB (1K prefill −15%, decode −7% to −9%) and at 80 GB (32K decode
@@ -459,11 +459,13 @@ equal, zero OOM kills):
 
 | Lock | Cap | f (logged) | Steps | Result |
 |---|---|---|---|---|
-| GLM, RTX 5090, `MODE2` | 80 GB | 0.8320 | 2,157 | byte-identical |
-| GLM, RTX 5080, std's generic spill | 64 GB | 0.6562 | 2,157 | byte-identical |
+| GLM, RTX 5090, `MODE2` | 80 GiB | 0.8320 | 2,157 | byte-identical |
+| GLM, RTX 5080, std's generic spill | 64 GiB | 0.6562 | 2,157 | byte-identical |
 | Qwen3-30B-A3B Q4_K_M, RTX 5080 offload lock, generic spill | 16 GB | 0.3281 | 2,158 | byte-identical |
 | Flash-Next IQ2_XS, RTX 5080, MTP off, PLE + generic spill | 36 GB | 0.7539 | 2,158 | byte-identical |
-| the same | 48 GB | ≥ 1 ("every expert in RAM": the inclusive `fit`, A-M1's path) | 2,158 | byte-identical |
+| the same | 48 GiB | ≥ 1 ("every expert in RAM": the inclusive `fit`, A-M1's path) | 2,158 | byte-identical |
+
+¹ GiB throughout: the caps, the knee (72 GiB, `KNEE`'s "GB") and the README's sizes are cgroup limits in GiB.
 
 **Open:** m8 end to end (`holon serve` Flash-Next with MTP at 36 GB: the lock refused, the spill refusing the head,
 the no-drafting entry serving) needs a current lock, so it runs after the close's lock round; the RTX 5080 has the

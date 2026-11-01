@@ -15,7 +15,6 @@ MODE2 = {"rtx-5090": {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1
                       "moe.stream_tokens": "65536", "ggml_cuda.pass_rows": "8192", "moe.loan_fixed_mib": "1024",
                       "moe.loan_margin": "1.12", "moe.loan_taper": "8192,32768", "moe.loan_largest": "0.55"}}
 # The knee by card (docs/dev/v1-glm-ram.md D4): below this host RAM (GB), 32K decode falls under this rate (tok/s).
-# PLACEHOLDER: C's replay of the step-7 recording (≈ 72 GB, 27.9 tok/s), until the capped grid (step 2) measures it
 KNEE = {"rtx-5090": (72, 24)}     # measured: 32K decode 24.2 tok/s at 72 GB, 19.5 at 64 (docs/dev/v1-glm-ram.md §10)
 
 
