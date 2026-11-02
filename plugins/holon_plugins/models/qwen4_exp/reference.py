@@ -1,5 +1,7 @@
 """Oracles of Qwen3.8-Flash-Next's PLE ops (`kernels.py`), written out per row from HF's module
-(transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py:1072-1247`)."""
+(transformers 5.19.0, `models/qwen4_exp/modeling_qwen4_exp.py:1072-1247`).
+
+Adapted from HF transformers 5.19.0 (Apache-2.0; THIRD_PARTY_NOTICES.md)."""
 from __future__ import annotations
 
 import math

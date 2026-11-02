@@ -103,7 +103,8 @@ def pack_state(path: str | pathlib.Path) -> dict[str, torch.Tensor]:
 def mtp_pooled(state: dict[str, torch.Tensor], config, embeds: torch.Tensor, hidden: torch.Tensor) -> torch.Tensor:
     """The MTP head's output-mixer x [T, H] for token embeddings `embeds` [T, H] and the trunk's residual `hidden`
     [T, n·H] (before its output mixer), positions 0..T-1, over `state` (the pack's names, `mtp.*`). SGLang's form:
-    `pre_fc_norm_hidden` is one RMS over the n·H features (pooled), then `fc_hidden` per stream."""
+    `pre_fc_norm_hidden` is one RMS over the n·H features (pooled), then `fc_hidden` per stream. Adapted from SGLang
+    0.5.21's `qwen4_exp_mtp.py:91-112` (Apache-2.0; THIRD_PARTY_NOTICES.md)."""
     from transformers.models.qwen4_exp import modeling_qwen4_exp as hf
 
     c = copy.deepcopy(config)
