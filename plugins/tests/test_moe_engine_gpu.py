@@ -217,6 +217,7 @@ def test_a_start_refused_after_its_pools_releases_them(gpu_moe, monkeypatch):
     file, _, _ = gpu_moe
     torch.cuda.synchronize()
     held = torch.cuda.memory_allocated()
+    movers = {t for t in threading.enumerate() if t.name.endswith(".move")}    # (another test's engine on this worker)
     with pytest.raises(RuntimeError, match="moe.ring_lend is not tail"):
         _gpu_engine(file, host_memory=1 << 27, plugin_options={
             "moe.store": "std.moe.offload@1", "moe.ring_tokens": 32, "moe.ring_lend": "coldest",
@@ -225,7 +226,7 @@ def test_a_start_refused_after_its_pools_releases_them(gpu_moe, monkeypatch):
     gc.collect()
     assert len(regions) > 2 and not [r for r in regions if r() is not None]
     assert torch.cuda.memory_allocated() <= held                 # (an earlier test's engine may go too)
-    assert not [t for t in threading.enumerate() if t.name.endswith(".move")]
+    assert not [t for t in threading.enumerate() if t.name.endswith(".move") and t not in movers]   # its own gone
 
 
 def test_rams_long_heat_is_its_oracles(gpu_moe):

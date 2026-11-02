@@ -344,11 +344,19 @@ def test_the_profiles_peak_is_what_the_allocator_maps():
     """GLM step 6: an RTX 5090 at --memory-fraction 0.99 kept 3 MiB free after 32K steps, the caching allocator's
     segments past the allocated peak the startup profile measured. The profile's peak is the allocator's reserved
     growth: here 64 1-MiB blocks, every other one freed, then a 40 MiB block the holes cannot hold — 72 MiB allocated
-    at most, at least 104 MiB mapped."""
-    device = torch.device("cuda")
+    at most, at least 104 MiB mapped. In a process of its own: a worker's earlier tests leave segments their live
+    tensors hold, whose holes the 1-MiB blocks would take first (a sharded run's order)."""
+    import subprocess
 
-    def fragmenting():
-        blocks = [torch.empty(1 << 20, dtype=torch.uint8, device=device) for _ in range(64)]
-        del blocks[::2]
-        return torch.empty(40 << 20, dtype=torch.uint8, device=device)
-    assert platform.peak_memory(device, fragmenting) >= 104 << 20
+    code = """
+import torch
+from holon.core import platform
+device = torch.device("cuda")
+def fragmenting():
+    blocks = [torch.empty(1 << 20, dtype=torch.uint8, device=device) for _ in range(64)]
+    del blocks[::2]
+    return torch.empty(40 << 20, dtype=torch.uint8, device=device)
+print(platform.peak_memory(device, fragmenting))
+"""
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert int(out.stdout.split()[-1]) >= 104 << 20
