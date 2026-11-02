@@ -528,3 +528,21 @@ serve` gives it (`fit`: 0.6250); decode tokens 33–96 after a 32K prompt; zero 
 
 More RAM closes it (Holon is ahead at every context from 72 GiB). The to-do item closes as "investigated, not worth the
 complexity".
+
+## 12. A minimum host RAM: refuse rather than serve slowly (2026-11-02)
+
+The owner's answer to Q1 (§6): "yea, we need a min mem refuse". GLM now refuses below a minimum host RAM instead of
+serving down to the working floor.
+- **Per model, enforced in std.** `glm5_next`'s spill sets `moe.ram_min` (GiB, `MIN_RAM` = 60, next to `KNEE`) on
+  every card: with its measured set on the RTX 5090, and alone, beside std's generic spill, elsewhere. The 30B and
+  Flash-Next set none: their spills serve down to the working floor as before.
+- **Compared with the host's RAM, not the budget.** `BuildCtx.host_total()` (ABI 1.8, core +3) returns `MemTotal`, or
+  the lowest cgroup limit above the process where lower (`platform.host_ram`'s total). Under `fit`'s exclusive tiers,
+  `fit.minimum` refuses below the minimum: once, at build, as a memory failure, naming the minimum, the host's RAM and
+  what the lock pins (every expert, 80.1 GiB, beside its other pools and the headroom).
+- **Why 60 GiB.** A 64 GB machine's `MemTotal` is its 64 GiB less the kernel's and firmware's reservations (the
+  kernel image and page tables, ACPI and device regions, a crash kernel, an integrated GPU's carve-out): typically
+  ≈ 62–63.5 GiB, lower with a large carve-out. 60 GiB takes every such machine and a 64 GiB cgroup cap (exact), and
+  refuses a 56 GiB cap and less, where 1K decode measured 17 tok/s and below (§10).
+- **Unchanged:** the knee's warning between the minimum and 72 GiB; the working floor (§9) below a model without a
+  minimum. Placement-free (it only refuses): no trace moves.

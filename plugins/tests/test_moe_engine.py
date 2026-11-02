@@ -774,6 +774,24 @@ def test_fit_solves_one_share_once_and_refuses_below_its_floor():
         fit.budget(types.SimpleNamespace(options={"slots": {"tier": "std.state_tier"}}, host_left=lambda: gib), "moe")
 
 
+
+def test_fit_refuses_a_host_below_the_models_minimum():
+    """docs/dev/v1-glm-ram.md §12: a model's minimum host RAM (`moe.ram_min`, GiB, its spill's) against the host's
+    (`BuildCtx.host_total`: MemTotal, or a lower cgroup limit): a 64 GB machine (MemTotal ≈ 62.5 GiB) or a 64 GiB cap
+    serves above a 60 GiB minimum; a 56 GiB cap is refused once, as a memory failure, naming the minimum, the host's
+    RAM and what the lock pins; no minimum refuses nothing."""
+    from holon.api import OutOfUnits
+    from holon_std.tiered import fit
+
+    gib, experts = 1 << 30, int(80.1 * (1 << 30))
+    for host in (62.5, 64):
+        fit.minimum(types.SimpleNamespace(host_total=lambda h=host: int(h * gib)), "moe", 60, experts)
+    fit.minimum(types.SimpleNamespace(host_total=lambda: 8 * gib), "moe", 0, experts)
+    with pytest.raises(OutOfUnits, match=r"this host's RAM, 56\.0 GiB, is below the model's minimum .*, 60 GiB "
+                                         r"\(moe\.ram_min, its spill's\): refused\. Its lock pins every expert in "
+                                         r"RAM, 80\.1 GiB"):
+        fit.minimum(types.SimpleNamespace(host_total=lambda: 56 * gib), "moe", 60, experts)
+
 def test_fit_where_every_expert_fits_is_the_locks_store(tiny_moe, tmp_path):
     """docs/dev/v1-glm-ram.md D2, B-R10: `moe.ram=fit` (the spill's tiers too) on a host budget holding every expert
     beside the reserve runs as the lock: inclusive, the same arenas, seed and map, the same outputs bit for bit, and

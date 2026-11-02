@@ -136,7 +136,7 @@ class TieredStore:
                  tiers: tuple[str, ...] = ("std.tiered.pinned@1",), cache: str = "", profile: str = "",
                  ram: str = "", read_ahead: int = 0, loan_fixed: int = 0, ram_heat: float | None = None,
                  loan_margin: float | None = None, loan_taper: tuple[int, int] | None = None,
-                 loan_largest: float = 0.0, beside: str = "on") -> None:
+                 loan_largest: float = 0.0, beside: str = "on", ram_min: float = 0.0) -> None:
         self.ctx, self.name, self.items, self.roles, self.top_k = ctx, name, items, roles, top_k
         # `loan_fixed` (`moe.loan_fixed_mib`): a lent step's loan is its share of the worst step's by its prompt tokens
         # plus these bytes (at least LOAN_SLACK) — a step's fixed costs (the mixers' sub-batch temporaries, the
@@ -249,6 +249,7 @@ class TieredStore:
         # `ram`: the RAM tier's units per class, or `fit` (docs/dev/v1-glm-ram.md D1, `fit.py`): one share of every
         # class sized from the host budget at the first `before_materialize`, the tier made again with its units
         self._fit, self._tier_refs, self._keeps = ram.strip() == "fit", tiers, staging
+        self._ram_min = ram_min                  # GiB: `fit`'s exclusive tiers refuse a host below it (the model's)
         if "fit" in ram and not self._fit:
             raise ValueError(f"{name}: moe.ram {ram!r}: fit is the whole value (one share of every class)")
         self.tiers = [ctx.unit(Ref(t), ram="" if self._fit else ram) for t in tiers]
@@ -540,6 +541,8 @@ class TieredStore:
         if self._fit:                            # f ≥ 1 (every piece fits beside the reserve): the lock's store
             total = sum(len(c.pieces) * c.unit_bytes for c in self.classes.values())
             self.exclusive = not fit.whole(fit.budget(self.ctx, self.name), total)
+            if self.exclusive:
+                fit.minimum(self.ctx, self.name, self._ram_min, total)
             if self.exclusive and self._auxiliary:
                 raise OutOfUnits(f"{self.name}: moe.ram=fit: the host holds a share of the experts only (exclusive "
                                  "tiers), which take no auxiliary model's experts (a drafter's head: "

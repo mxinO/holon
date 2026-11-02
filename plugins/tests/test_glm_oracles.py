@@ -77,9 +77,10 @@ def test_the_ram_short_spill_is_mode_ii_as_measured_on_its_card(monkeypatch):
     """`holon serve`'s spill for GLM's offload locks (docs/dev/v1-auto-config.md D1; docs/dev/v1-glm-ram.md D5): on the
     card mode (ii) was measured on (the RTX 5090's lock) its measured settings, RAM's share sized to the host (`fit`),
     each an option an installed plugin declares with a value in its choices, the note giving the cost and the knee;
-    none on another card (the RTX 5080's lock) or for options already setting RAM's share. Through `holon serve`'s
-    merge, model plugin first and first setter winning, the measured set is what serves on its card (its note alone),
-    std's generic spill (the tiers and `fit` alone) on the other."""
+    on another card (the RTX 5080's lock) only the model's minimum host RAM (`moe.ram_min`), on every card with a note
+    saying it refuses below it; none for options already setting RAM's share. Through `holon serve`'s merge, model
+    plugin first and first setter winning, the measured set is what serves on its card (its note alone), std's generic
+    spill (the tiers and `fit`) with the minimum on the other."""
     from holon.core import cli
     from holon.core.plugins import discover
     from holon_plugins.models.glm5_next import deploy
@@ -90,16 +91,19 @@ def test_the_ram_short_spill_is_mode_ii_as_measured_on_its_card(monkeypatch):
         "rtx-5090/cu130-torch2.11", "rtx-5080/cu130-torch2.11")
     options, note = deploy.spill(lock, "/data/glm.gguf", card=cards[0])
     declared = cli.declared_options(discover())
-    assert options == deploy.MODE2["rtx-5090"] and options["moe.ram"] == "fit" and set(options) <= set(declared)
+    least = {"moe.ram_min": str(deploy.MIN_RAM)}
+    assert options == deploy.MODE2["rtx-5090"] | least and options["moe.ram"] == "fit" and set(options) <= set(declared)
     assert not cli.outside_choices(options, declared) and "mode (ii)" in note and "1.7–1.9×" in note
-    assert "below ≈ {} GB of RAM 32K decode falls under ≈ {} tok/s (docs".format(*deploy.KNEE["rtx-5090"]) in note
-    assert deploy.spill(lock, "/data/glm.gguf", card=cards[1]) is None
+    assert "below ≈ {} GiB 32K decode falls under ≈ {} tok/s".format(*deploy.KNEE["rtx-5090"]) in note
+    assert f"below {deploy.MIN_RAM} GiB of RAM it refuses to start" in note
+    other, note = deploy.spill(lock, "/data/glm.gguf", card=cards[1])
+    assert other == least and f"below {deploy.MIN_RAM} GiB of RAM it refuses to start" in note
     assert deploy.spill(lock | {"moe.ram": "*=0.5"}, "/data/glm.gguf", card=cards[0]) is None
     monkeypatch.setattr(cli.plans, "lock_overrides", lambda found: dict(found.plan.engine))
     generic = {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1", "moe.ram": "fit"}
-    for card, want in zip(cards, (deploy.MODE2["rtx-5090"], generic), strict=True):
+    for card, want in zip(cards, (deploy.MODE2["rtx-5090"] | least, generic | least), strict=True):
         plan = types.SimpleNamespace(sources={}, engine={"plugin_options": lock}, fingerprint_class=card)
         _, spill, notes, _ = cli.fit_lock((types.SimpleNamespace(plan=plan), False, "1.lock"), {}, [Plugin(), Moe()],
                                           "/data/glm.gguf")
-        assert spill == want and len(notes) == 1 and ("mode (ii)" in notes[0]) == (want is not generic)   # (std's,
-        #                                                                     adding nothing to GLM's, says nothing)
+        assert spill == want and len(notes) == (1 if "moe.placement" in want else 2)   # (std's, adding nothing to
+        assert "refuses to start" in notes[0]                                          # GLM's, says nothing)

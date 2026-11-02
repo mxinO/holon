@@ -14,20 +14,28 @@ MODE2 = {"rtx-5090": {"moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1
                       "moe.placement": "placement.promote@1", "moe.split": "on", "moe.read_ahead": "135",
                       "moe.stream_tokens": "65536", "ggml_cuda.pass_rows": "8192", "moe.loan_fixed_mib": "1024",
                       "moe.loan_margin": "1.12", "moe.loan_taper": "8192,32768", "moe.loan_largest": "0.55"}}
-# The knee by card (docs/dev/v1-glm-ram.md D4): below this host RAM (GB), 32K decode falls under this rate (tok/s).
-KNEE = {"rtx-5090": (72, 24)}     # measured: 32K decode 24.2 tok/s at 72 GB, 19.5 at 64 (docs/dev/v1-glm-ram.md §10)
+# The knee by card (docs/dev/v1-glm-ram.md D4): below this host RAM (GiB), 32K decode falls under this rate (tok/s).
+KNEE = {"rtx-5090": (72, 24)}     # measured: 32K decode 24.2 tok/s at 72 GiB, 19.5 at 64 (docs/dev/v1-glm-ram.md §10)
+# The least host RAM (GiB: MemTotal, or a lower cgroup limit) the spill serves on, on every card (the owner: refuse
+# rather than serve slowly; docs/dev/v1-glm-ram.md §12): a 64 GB machine's MemTotal is ≈ 62-63 GiB, so 60 takes it
+# and refuses 56 GiB and less, where 1K decode measured 17 tok/s and below
+MIN_RAM = 60
+LOCK_RAM = 88                     # GiB: the RTX 5090 lock starts there (docs/dev/v1-glm-ram.md §10)
 
 
 def spill(options: Mapping[str, object], checkpoint: str, *, card: str) -> tuple[dict[str, str], str] | None:
     """Mode (ii) on the card it was measured on (`card`, the lock's fingerprint class); None on any other, or for
     options already setting RAM's share or the tiers."""
     gpu = card.partition("/")[0]
-    if options.get("moe.store") != "std.moe.offload@1" or "moe.ram" in options or "moe.tiers" in options or \
-            gpu not in MODE2:
+    if options.get("moe.store") != "std.moe.offload@1" or "moe.ram" in options or "moe.tiers" in options:
         return None
+    floor = (f"below {MIN_RAM} GiB of RAM it refuses to start (its lock pins every expert: about {LOCK_RAM} GiB "
+             "for full speed)")
+    if gpu not in MODE2:                       # std's generic spill (the tiers and fit) applies, with the minimum
+        return {"moe.ram_min": str(MIN_RAM)}, f"mode (ii) unmeasured on this card: {floor}"
     ram, rate = KNEE[gpu]
-    return dict(MODE2[gpu]), ("mode (ii): the experts this host's RAM holds pinned, the rest read from the "
-                              "checkpoint's file (keep it on a local NVMe drive); with 64 GB of RAM 1K-4K prefill ≈ "
-                              "2.5–2.8×, decode ≈ 1.7–1.9× and 32K prefill ≈ 1.1× slower than the lock, faster with "
-                              f"more (docs/dev/v1-glm.md); below ≈ {ram} GB of RAM 32K decode falls under ≈ {rate} "
-                              "tok/s (docs/dev/v1-glm-ram.md)")
+    return dict(MODE2[gpu]) | {"moe.ram_min": str(MIN_RAM)}, (
+        "mode (ii): the experts this host's RAM holds pinned, the rest read from the checkpoint's file (keep it on a "
+        "local NVMe drive); with 64 GiB of RAM 1K-4K prefill ≈ 2.5–2.8×, decode ≈ 1.7–1.9× and 32K prefill ≈ 1.1× "
+        f"slower than the lock, faster with more (docs/dev/v1-glm.md); below ≈ {ram} GiB 32K decode falls under ≈ "
+        f"{rate} tok/s; {floor} (docs/dev/v1-glm-ram.md)")
