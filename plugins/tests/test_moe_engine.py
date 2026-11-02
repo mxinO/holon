@@ -804,8 +804,9 @@ def test_fit_where_every_expert_fits_is_the_locks_store(tiny_moe, tmp_path):
     file, _ = _gguf_and_dense(checkpoint, tmp_path, Q.Q8_0, types={"ffn_down_exps": Q.Q4_0})
     lock = {"moe.store": "std.moe.offload@1", "moe.cache": "*=0.25"}
     fitted = lock | {"moe.ram": "fit", "moe.tiers": "std.tiered.pinned@1,std.tiered.gguf_direct@1"}
-    engines = [_engine(file, host_memory=1 << 24, plugin_options=lock), _engine(file, host_memory=4 << 30,
-                                                                               plugin_options=fitted)]
+    engines = [_engine(file, host_memory=1 << 24, plugin_options=lock)]
+    with _fit_at(1.0):                           # (every piece beside the reserve, not the machine's free RAM)
+        engines.append(_engine(file, host_memory=4 << 30, plugin_options=fitted))
     stores = [e.ctx.shared_objects[KEY] for e in engines]
     layout = [([(c.name, c.held, c.at, c.size, c.staging) for c in s.classes.values()], s.residency.host.tolist())
               for s in stores]
