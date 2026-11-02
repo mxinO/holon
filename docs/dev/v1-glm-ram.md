@@ -546,3 +546,10 @@ serving down to the working floor.
   refuses a 56 GiB cap and less, where 1K decode measured 17 tok/s and below (§10).
 - **Unchanged:** the knee's warning between the minimum and 72 GiB; the working floor (§9) below a model without a
   minimum. Placement-free (it only refuses): no trace moves.
+- **The cost of refusing at build (B mr1).** Below 60 GiB `holon serve` builds twice before it refuses: the lock
+  (refused for host memory), then the spill (refused by the minimum). An instant check in the CLI before any build
+  would need a new hook (the spill would have to see the host's RAM and veto), core lines and an ABI member more, to
+  save one engine build on a host the model does not serve anyway; not worth it.
+- **The override (B mr2).** `--plugin-options moe.ram_min=0` serves below the minimum: a flag giving an option a spill
+  sets drops that spill (`fit_lock`), so GLM's measured set goes with it and std's generic spill (the tiers and `fit`
+  alone) serves down to the working floor.

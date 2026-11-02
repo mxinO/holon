@@ -405,6 +405,8 @@ uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
   lock's (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode
   tokens, so keep the files on a local NVMe drive. **Below 60 GiB of RAM it refuses to start** (the host's RAM:
   `MemTotal`, or a lower cgroup limit; a 64 GB machine reports about 62–63 GiB), naming its minimum and the host's RAM.
+  `--plugin-options moe.ram_min=0` serves below it anyway, with std's generic spill instead of GLM's measured set
+  (slower: the table's 48 and 56 GiB rows were GLM's set).
   Speed by the host's RAM, measured on one RTX 5090 with the job's RAM capped (medians: 3 rounds at 56–72 GB, 1
   round at 48, 80 and 88; the lock from about 88 GiB, where the host budget holds every expert; tok/s, 1K / 32K;
   `docs/dev/v1-glm-ram.md` §10):
