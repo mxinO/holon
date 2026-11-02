@@ -27,7 +27,7 @@ def _tree(root, files):
 
 
 @pytest.mark.parametrize("case", ["none", "limited", "container root", "v1", "unreadable"])
-def test_host_ram_is_meminfo_and_the_cgroup_limits_less_what_they_hold(tmp_path, case):
+def test_host_ram_is_meminfo_and_the_cgroup_limits_less_what_they_hold(tmp_path, monkeypatch, case):
     """Clean file pages count as free (dirty and writeback pages do not); the lowest limit, an ancestor's included,
     and `memory.high`, bound both figures; a cgroup path missing here (cgroupns=host) reads the mount's root; v1 is
     not read; one that cannot be read falls back to meminfo, saying so."""
@@ -47,6 +47,9 @@ def test_host_ram_is_meminfo_and_the_cgroup_limits_less_what_they_hold(tmp_path,
     else:                                  # 24 − 20 + 2 + 1 − 0.5
         assert (available, total) == (int(6.5 * GiB), 24 * GiB) and why.startswith("cgroup /")
     assert platform.host_headroom(total) == 6 * GiB and platform.host_headroom(256 * GiB) == int(12.8 * GiB)
+    from holon.core.build import BuildContext  # (a model's minimum compares with it)
+    monkeypatch.setattr(platform, "host_ram", lambda: (available, total, why))
+    assert BuildContext.host_total(None) == total
 
 
 @pytest.mark.parametrize("case", ["v2", "v1", "v1 container root", "none"])

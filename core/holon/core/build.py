@@ -127,6 +127,9 @@ class BuildContext:
             available, total, _ = platform.host_ram()
             return min(self.ledger.host_memory - self.ledger.host_bytes(), available - platform.host_headroom(total))
 
+    def host_total(self) -> int:
+        return platform.host_ram()[1]
+
     def shared(self, key: str, factory: Any) -> Any:
         if key not in self.shared_objects:
             if self.sealed:
@@ -173,7 +176,7 @@ class ChildContext:
     def __init__(self, parent: BuildContext, namespace: str, options: dict[str, Any] | None = None) -> None:
         self.parent, self.namespace = parent, namespace
         self.plugins, self.device, self.dtype = parent.plugins, parent.device, parent.dtype
-        self.fingerprint, self.host_left = parent.fingerprint, parent.host_left
+        self.fingerprint, self.host_left, self.host_total = parent.fingerprint, parent.host_left, parent.host_total
         self.options = parent.options | (options or {})
 
     def unit_class(self, ref: Ref) -> Any:

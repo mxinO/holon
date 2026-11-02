@@ -874,6 +874,12 @@ with an HTTP error while four desktops listed it within minutes. Next: step 11 o
 - **D8x's move thread: views once a move** (GLM, `docs/dev/v1-glm.md` D8x): the thread builds its landing-row and
   RAM-unit views per piece under the GIL (≈ 450 a 1K prompt), likely the rest of the launches' p99 (+1.01 ms at
   GLM's close, at the bound); build them once a move, so it holds the GIL only to index and copy.
+- **GLM's minimum host RAM — delivered** (`docs/dev/v1-glm-ram.md` §12; the owner: "we need a min mem refuse"): GLM's
+  spill sets `moe.ram_min` 60 GiB on every card; std refuses exclusive tiers on a host whose RAM (`MemTotal`, or a
+  lower cgroup limit: `BuildCtx.host_total`, ABI 1.8) is below it, once at build, naming the minimum, the host's RAM
+  and what the lock pins. A 64 GB machine (`MemTotal` ≈ 62–63 GiB) serves; 56 GiB and less are refused.
+  Minor, for the next change to std's `fit` (B mr2): name the override (`--plugin-options moe.ram_min=0`) in the
+  refusal's message.
 - **GLM's 64 GiB 32K decode gap against Maya — investigated, not worth the complexity** (`docs/dev/v1-glm-ram.md` §11):
   after RAM-adapt the only cell under Maya is 32K decode at 64 GiB (≈ 0.93); at 72 GiB Holon is ahead. An nsys pass
   puts the exclusive tiers' in-graph bookkeeping at 2.6 ms of a ≈ 54 ms token (single-CTA promote, settle and tiers a

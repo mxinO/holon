@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "unit"
 license = "Apache-2.0"
-core_abi = ">=1.7,<2.0"   # shared objects, host pools, fill pools, step hooks, extents; BuildCtx.host_left
+core_abi = ">=1.8,<2.0"   # shared objects, host pools, fill pools, step hooks, extents; BuildCtx.host_left, host_total
 
 [resources]
 provides = ["unit.std.tiered.store@1", "unit.std.tiered.pinned@1", "unit.std.tiered.gguf_direct@1",

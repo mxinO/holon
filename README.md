@@ -74,8 +74,8 @@ measured; "other use" counts Holon's own processes, ≈ 3 GiB, est.):
 | Qwen3-30B-A3B Q4_K_M, RTX 5080 | the experts, ≈ 16.4 GiB ([Offload](#offload)) | 32 GB, ≤ ≈ 8 GiB other use | std's generic spill: the experts the RAM holds (`moe.ram=fit`), the rest read from the model file on the SSD; below the working floor refused, naming each term |
 | Qwen3.8-Flash-Next IQ2_XS, RTX 5080 | the experts, the PLE table, the token embeddings, ≈ 61 GiB | ≈ 80 GB | the PLE table read from the model file on the SSD (byte-identical, slower prefill) and the experts by `moe.ram=fit` (all in RAM where they fit); where they do not, without the MTP head (decode 24–37% slower) |
 | Qwen3.8-Flash-Next IQ3_S, RTX 5090 | the same, ≈ 74.5 GiB | 96 GB, ≤ ≈ 10 GiB other use | the same |
-| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 88 GiB (measured: the lock starts under an 88 GiB cap) | mode (ii): the share of the experts the host fits in RAM, the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)); below the working floor refused |
-| GLM-5.3-Flash, RTX 5080 | the same | ≈ 88 GiB (est., as the RTX 5090) | std's generic spill, as the Qwen3-30B-A3B row |
+| GLM-5.3-Flash, RTX 5090 | the experts and the token embeddings, ≈ 81 GiB | 88 GiB (measured: the lock starts under an 88 GiB cap) | mode (ii): the share of the experts the host fits in RAM, the rest read from the model file on the SSD ([GLM-5.3-Flash](#glm-53-flash)); refused below 60 GiB of RAM |
+| GLM-5.3-Flash, RTX 5080 | the same | ≈ 88 GiB (est., as the RTX 5090) | std's generic spill, as the Qwen3-30B-A3B row; refused below 60 GiB of RAM |
 
 On every offload lock the RAM-short retry is std's generic spill (`moe.ram=fit`: the RAM tier sized from the host
 budget, `docs/dev/v1-glm-ram.md`); a model plugin refines it where it measured its own (GLM on the RTX 5090). Its speed
@@ -403,15 +403,18 @@ uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
   rest read from the model file on the SSD as they are needed (exclusive tiers, `docs/dev/v1-glm.md` D10;
   `plugins/holon_plugins/models/glm5_next/deploy.py`), logged with its share and cost. The output is the same as the
   lock's (placement only: checked byte-identical on the card). It reads the SSD at every prompt and at some decode
-  tokens, so keep the files on a local NVMe drive. Below the store's working floor the start is refused, naming each
-  term. Speed by the host's RAM, measured on one RTX 5090 with the job's RAM capped (medians: 3 rounds at 56–72 GB, 1
+  tokens, so keep the files on a local NVMe drive. **Below 60 GiB of RAM it refuses to start** (the host's RAM:
+  `MemTotal`, or a lower cgroup limit; a 64 GB machine reports about 62–63 GiB), naming its minimum and the host's RAM.
+  `--plugin-options moe.ram_min=0` serves below it anyway, with std's generic spill instead of GLM's measured set
+  (slower: the table's 48 and 56 GiB rows were GLM's set).
+  Speed by the host's RAM, measured on one RTX 5090 with the job's RAM capped (medians: 3 rounds at 56–72 GB, 1
   round at 48, 80 and 88; the lock from about 88 GiB, where the host budget holds every expert; tok/s, 1K / 32K;
   `docs/dev/v1-glm-ram.md` §10):
 
   | RAM | RAM tier (share of all experts) | prefill | decode |
   |---|---|---|---|
-  | 48 GiB | 43% | 109 / 2,195 | 11.7 / 9.3 |
-  | 56 GiB | 53% | 161 / 2,660 | 17.0 / 13.4 |
+  | 48 GiB (refused at start now) | 43% | 109 / 2,195 | 11.7 / 9.3 |
+  | 56 GiB (refused at start now) | 53% | 161 / 2,660 | 17.0 / 13.4 |
   | 64 GiB | 63% | 292 / 3,079 | 24.9 / 19.5 |
   | 72 GiB | 73% | 606 / 3,196 | 33.1 / 24.2 |
   | 80 GiB | 83% | 647 / 3,268 | 35.2 / 30.2 |
@@ -419,7 +422,8 @@ uv run holon serve peasantsmith/GLM-5.3-Flash-Maya-GGUF:Maya-S-v2-IQ2_XXS
 
   1K prefill doubles from 64 to 72 GiB and 1K decode rises fastest below 72 GiB; 32K decode keeps rising to about 80
   GiB. From about 80 GiB to the lock speed is flat, and the lock is about 15–20% faster at decode. The start warns
-  below 72 GiB (the RAM sizes here, and the start's note's "GB", are the job's cgroup limits in GiB).
+  below 72 GiB (the RAM sizes here are the job's cgroup limits in GiB). The 48 and 56 GiB rows were measured before
+  the minimum: the start refuses them now.
 - **First start:** about a minute to ready on an RTX 5090 at mode (ii), reading about 79 GiB from the drive (the
   checkpoint about once; `docs/dev/v1-glm.md` §13 step 7). A restart rereads the experts but not the file's hash.
 - **Accuracy** (`docs/dev/v1-glm.md` §13): the locks pass L2 in its reference form on both prompt sets (the RTX 5090:

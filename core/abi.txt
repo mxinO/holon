@@ -1,4 +1,4 @@
-abi 1.7
+abi 1.8
 
 ## The version rule (scripts/ci/check_abi.py): a removal or change, a member added to a required Protocol
 ## plugins implement, or a dataclass field without a default is major; any other addition minor — a
@@ -48,6 +48,7 @@ protocol BuildCtx() required, implemented by core
   workspace(self, name: 'str', nbytes: 'int') -> 'torch.Tensor'
   pool(self, name: 'str', *, unit_bytes: 'int', segments: 'int' = 1, min_units: 'int' = 0, pref_units: 'int' = 0, device: "Literal['device', 'host']" = 'device', mapped: 'bool' = False, fill: 'bool' = False, priority: 'int' = 0) -> 'Pool'
   host_left(self) -> 'int | None'
+  host_total(self) -> 'int'
   shared(self, key: 'str', factory: 'Callable[[BuildCtx], Any]') -> 'Any'
   aux_model(self, namespace: 'str', spec: 'AuxSpec', tensors: 'Iterable[tuple[str, torch.Tensor | QTensor]]', options: 'Mapping[str, Any] | None' = None) -> 'torch.nn.Module'
   weight_source(self, path: 'str') -> 'WeightSource'

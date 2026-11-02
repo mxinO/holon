@@ -36,6 +36,17 @@ def budget(ctx, name: str) -> int:
     return left
 
 
+def minimum(ctx, name: str, least: float, total: int) -> None:
+    """A model's minimum host RAM for exclusive tiers (`moe.ram_min`, GiB, set by its spill), against the host's RAM
+    (`ctx.host_total()`: `MemTotal`, or a lower cgroup limit): refused (OutOfUnits) below it, once at build, naming
+    the minimum, the host's RAM and what serving every expert from RAM (the lock) pins: `total` bytes."""
+    if least and (host := ctx.host_total()) < least * GiB:
+        raise OutOfUnits(f"{name}: this host's RAM, {host / GiB:.1f} GiB, is below the model's minimum for reading "
+                         f"part of its experts from the checkpoint's file, {least:g} GiB (moe.ram_min, its spill's): "
+                         f"refused. Its lock pins every expert in RAM, {total / GiB:.1f} GiB, beside its other pools "
+                         "and the headroom `holon serve` keeps free (at least 6 GiB)")
+
+
 def whole(left: int, total: int) -> bool:
     """Every piece (`total` bytes) fits in `left` beside the reserve: f ≥ 1, the lock's inclusive store (no I/O
     pools)."""

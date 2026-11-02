@@ -150,6 +150,10 @@ class BuildCtx(Protocol):
         on `clamp_context` and reads the live RAM too: sizing a pool to the host is placement, which a lock-writing
         run may do, where a tier taking less than its option asks would change what the lock serves."""
 
+    def host_total(self) -> int:
+        """The host's RAM (ABI 1.8): `MemTotal`, or the lowest cgroup limit above this process where lower — what a
+        model's minimum host RAM is compared with."""
+
     def shared(self, key: str, factory: Callable[[BuildCtx], Any]) -> Any:
         """One object per engine for `key` (by convention the provider's resource name, e.g. "cpu_task.worker"): the
         first call builds it with `factory(ctx)`, where `ctx` is the engine's own context even when an auxiliary
