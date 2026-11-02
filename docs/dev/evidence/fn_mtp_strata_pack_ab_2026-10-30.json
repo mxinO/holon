@@ -1,0 +1,184 @@
+{
+ "date": "2026-10-30",
+ "doc": "README (Qwen3.8-Flash-Next against Strata: the MTP head as packed); docs/dev/v1-flash-next.md",
+ "what": "MTP decode with Strata's MTP pack loaded as is (BF16 dense projections, Q2_0 experts) against the earlier Q8_0-projection pack, on the same card and build (the MTP load-only change)",
+ "method": "bench/offload_ctx.py, the Flash-Next locks' deployments (RTX 5080 IQ2_XS, RTX 5090 IQ3_S), 8 prompts at 1K / 4K / 32K and 256 greedy tokens, a discarded warm-up then 3 rounds with the arms reversed on odd rounds; new / old per prompt and round, mean and standard error",
+ "arms": {
+  "old_q8": "the Q8_0-projection pack (as the FN close's MTP rows)",
+  "new_strata": "Strata's pack as is"
+ },
+ "cards": {
+  "rtx-5080": {
+   "rounds": 3,
+   "new_over_old": {
+    "decode_tps": {
+     "1024": {
+      "mean": 0.9908,
+      "se": 0.003,
+      "n": 24
+     },
+     "4096": {
+      "mean": 0.9762,
+      "se": 0.0053,
+      "n": 24
+     },
+     "32768": {
+      "mean": 0.9875,
+      "se": 0.0039,
+      "n": 24
+     }
+    },
+    "prefill_tps": {
+     "1024": {
+      "mean": 0.9986,
+      "se": 0.0003,
+      "n": 24
+     },
+     "4096": {
+      "mean": 0.9989,
+      "se": 0.0001,
+      "n": 24
+     },
+     "32768": {
+      "mean": 0.9992,
+      "se": 0.0001,
+      "n": 24
+     }
+    },
+    "tokens_per_pass": {
+     "1024": {
+      "mean": 1.0089,
+      "se": 0.0035,
+      "n": 24
+     },
+     "4096": {
+      "mean": 0.992,
+      "se": 0.0057,
+      "n": 24
+     },
+     "32768": {
+      "mean": 1.0059,
+      "se": 0.0033,
+      "n": 24
+     }
+    }
+   },
+   "means_tok_s": {
+    "old_q8": {
+     "1024": {
+      "decode_tps": 133.52,
+      "prefill_tps": 1607.47
+     },
+     "4096": {
+      "decode_tps": 132.72,
+      "prefill_tps": 3315.08
+     },
+     "32768": {
+      "decode_tps": 130.86,
+      "prefill_tps": 3172.99
+     }
+    },
+    "new_strata": {
+     "1024": {
+      "decode_tps": 132.14,
+      "prefill_tps": 1605.16
+     },
+     "4096": {
+      "decode_tps": 129.59,
+      "prefill_tps": 3311.27
+     },
+     "32768": {
+      "decode_tps": 129.21,
+      "prefill_tps": 3170.42
+     }
+    }
+   }
+  },
+  "rtx-5090": {
+   "rounds": 3,
+   "new_over_old": {
+    "decode_tps": {
+     "1024": {
+      "mean": 0.9901,
+      "se": 0.0043,
+      "n": 24
+     },
+     "4096": {
+      "mean": 0.9817,
+      "se": 0.0039,
+      "n": 24
+     },
+     "32768": {
+      "mean": 0.9888,
+      "se": 0.0031,
+      "n": 24
+     }
+    },
+    "prefill_tps": {
+     "1024": {
+      "mean": 0.9995,
+      "se": 0.0027,
+      "n": 24
+     },
+     "4096": {
+      "mean": 1.0012,
+      "se": 0.0039,
+      "n": 24
+     },
+     "32768": {
+      "mean": 0.9978,
+      "se": 0.0004,
+      "n": 24
+     }
+    },
+    "tokens_per_pass": {
+     "1024": {
+      "mean": 1.0029,
+      "se": 0.0048,
+      "n": 24
+     },
+     "4096": {
+      "mean": 0.9952,
+      "se": 0.0042,
+      "n": 24
+     },
+     "32768": {
+      "mean": 1.0012,
+      "se": 0.0037,
+      "n": 24
+     }
+    }
+   },
+   "means_tok_s": {
+    "old_q8": {
+     "1024": {
+      "decode_tps": 175.53,
+      "prefill_tps": 2104.88
+     },
+     "4096": {
+      "decode_tps": 174.02,
+      "prefill_tps": 5507.52
+     },
+     "32768": {
+      "decode_tps": 194.85,
+      "prefill_tps": 5545.82
+     }
+    },
+    "new_strata": {
+     "1024": {
+      "decode_tps": 173.96,
+      "prefill_tps": 2103.44
+     },
+     "4096": {
+      "decode_tps": 171.03,
+      "prefill_tps": 5512.6
+     },
+     "32768": {
+      "decode_tps": 192.49,
+      "prefill_tps": 5533.65
+     }
+    }
+   }
+  }
+ }
+}

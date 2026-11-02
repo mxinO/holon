@@ -20,8 +20,15 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.sh`, then modified by
   `plugins/holon_plugins/kernels/ggml_cuda/vendor.patch` (bf16 activations and output, also with mmvq's fused
   scale, no environment reads, top-k ids at row stride k, a bf16 combine, mmq's src1 precision exported, an IQ1_M
-  mmq tile loader after IQ2_S's with its own template instance);
-  `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
+  mmq tile loader after IQ2_S's with its own template instance; for expert offload and MoE prefill: mmq with ids
+  always tiled over a compact list of the active slots, its id helper rewritten with a per-slot and a device-wide
+  path, an offload arena's null slots stored as zeros without a read, passes of up to `pass_rows` launching only
+  the column tiles that hold rows, a batched-decode tile width per call, SwiGLU fused into mmq's store for merged
+  gate / up stacks with an optional clamp, a sparse call quantizing only its live rows, tile loaders keeping a row's
+  last K step inside the row with their own instances, the MoE mmvq's unfused calls at 4 rows a block, the router's
+  GEMV and top-k selection in one launch (softmax, or sigmoid scores with a selection bias), writing the experts'
+  q8_1 activations, a residual add in the combine, a bf16 router, and the judge's plant hooks; every semantic hunk
+  carries a `Holon:` marker); `plugins/holon_plugins/kernels/ggml_cuda/SHA256SUMS` pins the result.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/shim.cu` — adapted: ggml's type traits, tensor helpers and device
   table, after `ggml/src/ggml.c` and `ggml/src/ggml-cuda/ggml-cuda.cu`.
 - `plugins/holon_plugins/kernels/ggml_cuda/csrc/api.cu` — adapted: llama.cpp's matmul dispatch (dense and
@@ -52,8 +59,9 @@ Songlin Yang, Yu Zhang). License text below and in `plugins/holon_plugins/kernel
   `plugins/holon_plugins/kernels/fla/vendor.patch` (no vLLM imports or environment reads, one pinned config per
   kernel, keyed by module where two share a name, the `v_head_tiled` order, the recurrent kernel's skip sentinel at
   slot < 0, has-initial-state flags; in `kda.py` the recurrent functions and the norm layer dropped, the host-built
-  chunk indices and offsets passed through, in-step snapshots and an output buffer; in `fused_sigmoid_gating` KDA's
-  bounded gate and the per-head `b` stride of its `IS_KDA` branch);
+  chunk indices and offsets passed through, in-step snapshots and an output buffer; in `fused_sigmoid_gating`
+  q, k, v, a and b read through their token strides (column views), KDA's bounded gate and the per-head `b` stride
+  of its `IS_KDA` branch);
   `plugins/holon_plugins/kernels/fla/SHA256SUMS` pins the upstream files.
 
 ### FreeToken (and vLLM, which it adapted) — Apache-2.0
@@ -66,6 +74,22 @@ vLLM's `vllm/models/qwen4_exp/nvidia/ops/qsa.py`). Apache-2.0, as Holon.
   structure (one program per query, kv head and split of the selected tokens, the group's query heads as one tile, the
   tokens gathered through the page table with an online softmax, the splits merged by their log-sum-exp), here over
   selected blocks, gqa's HND layouts and q8_0 / fp8 read in the kernel, the output gate applied at the store.
+
+### Hugging Face transformers — Apache-2.0
+
+Source: https://github.com/huggingface/transformers at v5.19.0
+(`src/transformers/models/qwen4_exp/modeling_qwen4_exp.py`), Copyright The HuggingFace Team. Apache-2.0, as Holon.
+
+- `plugins/holon_plugins/models/qwen4_exp/reference.py` — adapted: the PLE ops' oracles, written out per row from the
+  module's lines 1072-1247.
+
+### SGLang — Apache-2.0
+
+Source: https://github.com/sgl-project/sglang at v0.5.21 (`python/sglang/srt/models/qwen4_exp_mtp.py`), Copyright
+the SGLang authors. Apache-2.0, as Holon.
+
+- `judge/holon_judge/qwen4exp.py` (`mtp_pooled`) — adapted: the MTP head's pooled hidden norm and input projection,
+  transcribed from lines 91-112, for the golden recorder.
 
 ### Qwen tokenizer — Apache-2.0
 

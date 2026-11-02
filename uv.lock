@@ -389,7 +389,7 @@ wheels = [
 
 [[package]]
 name = "holon-workspace"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -444,7 +444,7 @@ dev = [
 
 [[package]]
 name = "holonlm"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "core" }
 dependencies = [
     { name = "msgspec", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -465,7 +465,7 @@ requires-dist = [
 
 [[package]]
 name = "holonlm-judge"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "judge" }
 dependencies = [
     { name = "accelerate", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -498,7 +498,7 @@ requires-dist = [
 
 [[package]]
 name = "holonlm-plugins"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "plugins" }
 dependencies = [
     { name = "fastapi", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -523,7 +523,7 @@ requires-dist = [
 
 [[package]]
 name = "holonlm-std"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "std" }
 dependencies = [
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -544,7 +544,7 @@ requires-dist = [
 
 [[package]]
 name = "holonlm-testing"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "testing" }
 dependencies = [
     { name = "compressed-tensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -571,7 +571,7 @@ requires-dist = [
 
 [[package]]
 name = "holonlm-tools"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "tools" }
 dependencies = [
     { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },

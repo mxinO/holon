@@ -101,20 +101,19 @@ clamped to what fits.
 
 ## Install
 
-This README describes `main`. The last release, v0.1.1
-([docs/releases/RELEASE_NOTES_v0.1.1.md](docs/releases/RELEASE_NOTES_v0.1.1.md)), predates expert offload, the KV tiers
-and Qwen3.8-Flash-Next: their locks pin `main`'s code, so install `main` for them, or the tag (`--branch v0.1.1`, whose
-README describes it) for the release. Release steps 7–10's locks and records name commits of the release line as
-first built; the same commits are on `main` under new SHAs, with identical code and a privacy-scrubbed spike README
-(`docs/dev/evidence/v0_release_line_sha_map_2026-10-16.txt` maps them; `docs/dev/evidence/history_scrub_commit_map_2026-10-16.txt` maps
-older SHAs). v0.1.1's locks were carried to its code with byte-identical snapshot traces.
+This README describes `main`. The last release, v0.2.0
+([docs/releases/RELEASE_NOTES_v0.2.0.md](docs/releases/RELEASE_NOTES_v0.2.0.md)), serves everything below: install
+the tag (`--branch v0.2.0`) for it, or `main`. Its locks were propagated to its code with byte-identical snapshot traces.
+Release steps 7–10's locks and records (v0.1.0) name commits of the release line as first built; the same commits are
+on `main` under new SHAs (`docs/dev/evidence/v0_release_line_sha_map_2026-10-16.txt`;
+`docs/dev/evidence/history_scrub_commit_map_2026-10-16.txt` maps older SHAs).
 
 Host requirements: Linux x86-64, an NVIDIA driver supporting CUDA 13, the CUDA 13 toolkit (`nvcc` on `PATH` or under
 `CUDA_HOME`), gcc / g++, git and [uv](https://docs.astral.sh/uv/). uv brings Python 3.12, torch 2.11 for CUDA 13.0 and
 every pinned dependency from `uv.lock`.
 
 ```bash
-git clone https://github.com/mxinO/holon.git holon && cd holon      # main; --branch v0.1.1 for the release
+git clone https://github.com/mxinO/holon.git holon && cd holon      # main; --branch v0.2.0 for the release
 uv sync --frozen                     # Python 3.12, torch 2.11 + CUDA 13 and every pin from uv.lock
 uv run holon prebuild                # GGUF kernels and FlashInfer modules for the visible GPUs, once
 ```
@@ -128,19 +127,20 @@ routing profiles, and the test dependencies.
 
 The `Dockerfile` installs the release's environment for hosts without a CUDA toolkit and prebuilds for SM 86, 89 and
 120. Build it from the release tag, never from a working directory; the build takes ≈ 10–15 min on a many-core host,
-and the image is ≈ 14.8 GB. It has not been checked against `main`:
+and the image is ≈ 14.8 GB (both at v0.1.1). The image was last built and checked at v0.1.1, not rebuilt for v0.2.0:
 
 ```bash
-git archive --format=tar v0.1.1 | docker build -t holon:v0.1.1 -           # --build-arg MAX_JOBS=N caps compiles
-docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.1.1 serve /models/<file> --host 0.0.0.0
-docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.1.1 \
+git archive --format=tar v0.2.0 | docker build -t holon:v0.2.0 -           # --build-arg MAX_JOBS=N caps compiles
+docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.2.0 serve /models/<file> --host 0.0.0.0
+docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.2.0 \
   serve unsloth/Qwen3.8-27B-GGUF --host 0.0.0.0                            # a hub model, kept in <hf cache dir>
 ```
 
-The image's `HOME` is `/opt/holon/user`, writable by any user, for every tool in it (on `main`; v0.1.1's image has
-none). Mount a directory at `/opt/holon/user/.cache/holon` to keep Holon's own cache across containers: the hashes of
-weight files (each start would otherwise re-read the file) and the files locks name. Containers without a memory
-limit do not see each other's starts: give each a limit (`--memory`), which the server reads.
+The image's `HOME` is `/opt/holon/user`, writable by any user, for every tool in it (the `Dockerfile` after v0.1.1:
+v0.1.1's image has none). Mount a directory at `/opt/holon/user/.cache/holon` to keep Holon's own cache across
+containers: the hashes of weight files (each start would otherwise re-read the file) and the files locks name.
+Containers without a memory limit do not see each other's starts: give each a limit (`--memory`), which the server
+reads.
 
 ```bash
 docker run --gpus all --user "$(id -u):$(id -g)" -v <cache dir>:/opt/holon/user/.cache/holon \
@@ -447,8 +447,9 @@ down to its floor; below it the server falls back to defaults, without a tier.
 
 On an agent trace whose sessions are parked and resumed (`agent_park`; the RTX 5080's Qwen3.8-27B UD-IQ3_S), time to
 first token p50 fell to 0.047× the VRAM-only engine's and throughput rose 2.26×; against `llama-server --cache-ram`
-sized to serve the trace, TTFT p50 was 0.122× and throughput 1.79× (`docs/dev/v1-kv-tiers.md` "Step 4",
-`docs/dev/evidence/k4_agent_park_rtx-5080_2026-10-19.json`; on the tier lock as first written, at 49,152 tokens of context
+sized to serve the trace, TTFT p50 was 0.122× and throughput 1.79× over 3 rounds (`docs/dev/v1-kv-tiers.md` "Step 4",
+row 3d; the VRAM-only figures in `docs/dev/evidence/k4_agent_park_rtx-5080_2026-10-19.json`; on the tier lock as first
+written, at 49,152 tokens of context
 where the shipped lock serves 40,960). The tier moves state without changing it (tier invariance and run-identity,
 through host and SSD levels); the `branch` and `answer` checkpoints change where a resumed prompt is recomputed from,
 so they were checked within bounds (KL), not bitwise. An SSD level below the host level (`state_tier.levels=ssd`,
@@ -591,7 +592,8 @@ Holon decodes with MTP at 129–132 tok/s on the RTX 5080 and 175–194 tok/s on
 
 **Since then, the MTP head as packed.** The MTP rows above ran the head's dense projections in Q8_0, a step Holon no
 longer takes: it loads Strata's pack as it is (BF16 projections). Re-measured against that Q8_0 head on the same card
-and build, MTP decode is 0.991 / 0.976 / 0.988 on the RTX 5080 and 0.990 / 0.982 / 0.989 on the RTX 5090, with the
+and build (`docs/dev/evidence/fn_mtp_strata_pack_ab_2026-10-30.json`), MTP decode is 0.991 / 0.976 / 0.988 on the RTX
+5080 and 0.990 / 0.982 / 0.989 on the RTX 5090, with the
 same tokens per verify pass and prefill unchanged; scaled, the RTX 5090's MTP decode at 4K and 32K is about 0.98 / 0.99
 against Strata, under its 1.0 bar, until a quantization step returns.
 
