@@ -30,6 +30,7 @@ name experiments not kept in the repository. New experiments live in the untrack
 | [v1-flash-next.md](v1-flash-next.md) | v1 FN: Qwen3.8-Flash-Next and its offload, compared with Strata |
 | [v1-auto-config.md](v1-auto-config.md) | v1: automatic deployment values (host RAM, GPU slack, a lock's files) |
 | [v1-glm.md](v1-glm.md) | v1 GLM: GLM-5.3-Flash on limited VRAM, compared with Project Maya |
+| [v1-pip.md](v1-pip.md) | v1: `pip install holonlm`, wheels with prebuilt CUDA extensions |
 
 Paths under `local/` (e.g. `local/fn/`, `local/models/`, `local/tmp/`) name the authors' untracked working files:
 downloads of public models, clones of the reference engines at their public commits, files built from those with the
