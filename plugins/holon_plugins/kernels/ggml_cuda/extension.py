@@ -16,16 +16,21 @@ from types import ModuleType
 
 import torch
 
+from holon_plugins import host
+
 HERE = pathlib.Path(__file__).resolve().parent
 VENDOR, CSRC = HERE / "vendor", HERE / "csrc"
 CUDA_DIR = VENDOR / "ggml" / "src" / "ggml-cuda"
 NAME = "holon_ggml_cuda"
 PREBUILD = "python -m holon_plugins.kernels.ggml_cuda.prebuild"
 # The user cache (XDG), which an image pins to a path of its own (Dockerfile).
+SHIPPED = HERE / "prebuilt"   # an overlay's modules by key (holonlm-cuda-sm*, docs/dev/v1-pip.md D5), before the cache
 CACHE = pathlib.Path(os.environ.get("XDG_CACHE_HOME") or pathlib.Path.home() / ".cache") / "holon" / "ggml_cuda"
 
 ARCHS = {86: "86", 89: "89", 120: "120a"}     # 120a: the fp4 mmq instances need the arch-specific target
-NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "-use_fast_math", "-extended-lambda", "-Xcompiler", "-fPIC")
+# `--compress-mode=size`: the fatbin compressed (the SASS identical, compared per function; docs/dev/v1-pip.md D2)
+NVCC_FLAGS = ("-std=c++17", "-O3", "-DNDEBUG", "-use_fast_math", "-extended-lambda", "-Xcompiler", "-fPIC",
+              "--compress-mode=size")
 INCLUDES = (VENDOR / "ggml" / "include", VENDOR / "ggml" / "src", CUDA_DIR, CSRC)
 
 
@@ -46,16 +51,18 @@ def cuda_major() -> int:
 
 
 def key(sm: int) -> str:
-    """The cache key: vendored + own sources, flags, target SM, CUDA major, the Python ABI and torch (the module
-    links libtorch)."""
-    h = hashlib.sha256(" ".join((*NVCC_FLAGS, gencode(sm))).encode())
+    """The cache key: vendored + own sources, flags, the build recipe (this file), target SM, CUDA major, the Python
+    ABI and torch (the module links libtorch)."""
+    h = hashlib.sha256(" ".join((*NVCC_FLAGS, gencode(sm))).encode() + b"\0" + pathlib.Path(__file__).read_bytes())
     for f in sorted(p for d in (VENDOR, CSRC) for p in d.rglob("*") if p.is_file()):
         h.update(str(f.relative_to(HERE)).encode() + b"\0" + f.read_bytes())
     return f"sm{sm}-cu{cuda_major()}-{sys.implementation.cache_tag}-torch{torch.__version__}-{h.hexdigest()[:16]}"
 
 
 def module_path(sm: int) -> pathlib.Path:
-    return CACHE / key(sm) / "ext" / f"{NAME}.so"
+    """The module an overlay ships for `sm`, else the user cache's."""
+    shipped = SHIPPED / key(sm) / f"{NAME}.so"
+    return shipped if shipped.is_file() else CACHE / key(sm) / "ext" / f"{NAME}.so"
 
 
 def load(sm: int) -> ModuleType:
@@ -64,8 +71,9 @@ def load(sm: int) -> ModuleType:
         raise NotBuilt(f"kernels.ggml_cuda supports sm {sorted(ARCHS)}, not sm {sm}")
     path = module_path(sm)
     if not path.is_file():
-        raise NotBuilt(f"kernels.ggml_cuda: no prebuilt extension for sm {sm}, CUDA {cuda_major()}, torch "
-                       f"{torch.__version__} (looked for {path}); build it with: {PREBUILD} --sm {sm}")
+        raise NotBuilt(host.shipped_mismatch("kernels.ggml_cuda", key(sm), SHIPPED)
+                       or f"kernels.ggml_cuda: no prebuilt extension for sm {sm}, CUDA {cuda_major()}, torch "
+                       f"{torch.__version__} (looked for {path}); build it with: {PREBUILD} --sm {sm} (CUDA 13's nvcc)")
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -77,6 +85,8 @@ def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
     builds of one key take turns (a lock file in its directory)."""
     from torch.utils import cpp_extension
 
+    if (shipped := SHIPPED / key(sm) / f"{NAME}.so").is_file():     # an overlay ships it: nothing to build
+        return shipped
     nvcc = shutil.which("nvcc") or (cpp_extension.CUDA_HOME and str(pathlib.Path(cpp_extension.CUDA_HOME, "bin/nvcc")))
     if not nvcc or not pathlib.Path(nvcc).is_file():
         raise RuntimeError("kernels.ggml_cuda: nvcc not found")

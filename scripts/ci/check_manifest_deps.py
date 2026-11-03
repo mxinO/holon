@@ -13,7 +13,7 @@ import tomllib
 
 from _common import ROOT, fail, py_files
 
-DISTS = {"holonlm": "core/holon", "holonlm-std": "std/holon_std", "holonlm-plugins": "plugins/holon_plugins",
+DISTS = {"holonlm-core": "core/holon", "holonlm-std": "std/holon_std", "holonlm-plugins": "plugins/holon_plugins",
          "holonlm-testing": "testing/holon_testing", "holonlm-judge": "judge/holon_judge",
          "holonlm-tools": "tools/holon_tools"}
 OWN = {path.rsplit("/", 1)[1] for path in DISTS.values()}

@@ -1,10 +1,12 @@
 """Third-party code is declared (AGENTS.md, "Third-party code"): the repository is Apache-2.0 (LICENSE, NOTICE); every
 path THIRD_PARTY_NOTICES.md names exists; every code file whose header marks it as taken from elsewhere is named
 there; every plugin's `[provenance]` has an allowed license, its source in the notices, its files present and named
-there, and vendored directories carry their upstream LICENSE."""
+there, and vendored directories carry their upstream LICENSE; every vendored tree (a `vendor/` path with a LICENSE) is
+declared by some manifest, a library std's units share included (`files` may reach it with `..`)."""
 from __future__ import annotations
 
 import hashlib
+import posixpath
 import re
 import subprocess
 import tomllib
@@ -36,7 +38,7 @@ for manifest in sorted(p for p in tracked if p.endswith("plugin.toml")):
     if prov.get("license") not in ALLOWED:
         msgs.append(f"{manifest}: provenance license {prov.get('license')!r} not in {sorted(ALLOWED)}")
     for f in prov.get("files", []):
-        path = base + f
+        path = posixpath.normpath(base + f) + ("/" if f.endswith("/") else "")
         if not (ROOT / path).exists():
             msgs.append(f"{manifest}: provenance file {f} does not exist")
         elif f.endswith("/"):
@@ -52,4 +54,6 @@ for path in tracked:
     if CODE.search(path) and not any(path.startswith(v) for v in vendored) and path not in named \
             and MARKER.search((ROOT / path).read_text(errors="replace")):
         msgs.append(f"{path}: marked as third-party code but not in THIRD_PARTY_NOTICES.md")
+msgs += [f"{p}: a vendored tree no manifest's [provenance] declares" for p in tracked
+         if "/vendor/" in p and p.endswith("/LICENSE") and not any(p.startswith(v) for v in vendored)]
 fail(msgs, "third-party code declared (license, notices, provenance)")

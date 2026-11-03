@@ -13,6 +13,7 @@ done
 bash ../../plugins/holon_plugins/kernels/ggml_cuda/vendor.sh --check || rc=1   # vendored llama.cpp = upstream + patch
 bash ../../plugins/holon_plugins/kernels/fla/vendor.sh --check || rc=1         # vendored vLLM fla = upstream + patch
 bash ../../plugins/holon_plugins/kernels/ggml_cpu/vendor.sh --check || rc=1    # vendored ggml-cpu subset = upstream
+bash ../../std/holon_std/vendor/vendor.sh --check || rc=1                       # vendored gguf-py subset = upstream; stamps
 bash ../../plugins/tests/fixtures/jsts.sh --check || rc=1                       # JSON-Schema-Test-Suite = upstream
 python3 check_abi.py --base "${1:-origin/main}" || rc=1                           # ABI listings, bumps vs base
 python3 check_commit_messages.py "${1:-origin/main}" || rc=1                    # commit messages vs base: no private names

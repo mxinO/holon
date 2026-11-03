@@ -1,41 +1,35 @@
-# Holon installed from source, for hosts without a CUDA toolkit (release design D1). Build it from a clean tree, the
-# release tag's archive, never from a working directory:
+# Holon from its wheels, for hosts without a CUDA toolkit (docs/dev/v1-pip.md D12): Ubuntu 24.04's Python 3.12, its
+# headers and gcc (Triton's launchers), and Holon's wheels with their pins. No toolkit and no prebuild: the native
+# modules come prebuilt. It is also the GPU acceptance's container.
 #
-#   git archive --format=tar <tag> | docker build -t holon:<tag> -
-#   docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:<tag> serve /models/<file> --host 0.0.0.0
+#   docker build -f Dockerfile -t holon <a directory holding the release's wheels>     # the tested artifacts
+#   docker build --build-arg HOLON=holonlm==<version> -t holon - < Dockerfile          # from PyPI, once published
+#   docker run --gpus all -p 8000:8000 -v <model dir>:/models holon serve /models/<file> --host 0.0.0.0
 #
-# The environment's identity is the plan's `uv_lock` hash (the runtime closure) plus the base image digest below.
-FROM nvidia/cuda:13.0.3-devel-ubuntu24.04@sha256:b7ae301dea2c162444795462ce17a05f6a516e5a75944b57af5b88540a1a2266
+# `--build-arg HEADERS=` leaves out Python's headers (the acceptance's negative run: the start must refuse at once).
+FROM ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852
 
+ARG HEADERS=python3.12-dev
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential ca-certificates \
+    && apt-get install -y --no-install-recommends python3.12-venv $HEADERS build-essential ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
-COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348eef8fd2463c50c13347478769aaedd0ce \
-     /uv /usr/local/bin/uv
 
-# Every cache at a fixed path, whoever runs the container: Python and the packages (uv), the prebuilt GGUF kernels
-# (XDG), FlashInfer's modules, the kernels Triton and CuTe DSL (FlashInfer's norms) compile at first use, the hub;
-# and a home for every user and tool (HOME: Holon's own files, ~/.cache/holon, a volume keeps across containers).
-ENV UV_PYTHON_INSTALL_DIR=/opt/holon/python \
-    UV_CACHE_DIR=/opt/holon/uv-cache \
-    XDG_CACHE_HOME=/opt/holon/cache \
-    FLASHINFER_WORKSPACE_BASE=/opt/holon/cache \
+# Every cache at a fixed path, whoever runs the container: Holon's (the weights' hashes, the files locks name),
+# FlashInfer's workspace (it writes generated sources there), Triton's and CuTe DSL's kernels, the hub.
+ENV HOME=/opt/holon/user \
+    HF_HOME=/opt/holon/hf \
     TRITON_CACHE_DIR=/opt/holon/cache/triton \
     CUTE_DSL_CACHE_DIR=/opt/holon/cache/cute \
-    HF_HOME=/opt/holon/hf \
-    HOME=/opt/holon/user \
-    PATH=/opt/holon/src/.venv/bin:$PATH
+    PATH=/opt/holon/venv/bin:$PATH
 
-WORKDIR /opt/holon/src
-COPY . .
-RUN uv sync --frozen && rm -rf "$UV_CACHE_DIR"
-# Native code for every supported SM (no GPU needed to build): the GGUF kernels and FlashInfer's modules.
-# `--build-arg MAX_JOBS=N` caps the parallel compiles (default: every CPU).
-# Then every cache is writable by whichever user runs the container (`docker run --user`).
-ARG MAX_JOBS
-RUN holon prebuild --sm 86 89 120 \
-    && mkdir -p "$HF_HOME" "$TRITON_CACHE_DIR" "$CUTE_DSL_CACHE_DIR" "$HOME/.cache/holon" \
-    && chmod -R a+rwX "$XDG_CACHE_HOME" "$HF_HOME" "$HOME"
+ARG HOLON=holonlm
+COPY . /opt/holon/wheels/
+RUN python3.12 -m venv /opt/holon/venv \
+    && wheels=$(ls /opt/holon/wheels/*.whl 2> /dev/null || true) \
+    && /opt/holon/venv/bin/pip install --no-cache-dir ${wheels:-$HOLON} \
+    && rm -rf /opt/holon/wheels \
+    && mkdir -p "$HOME" "$HF_HOME" "$TRITON_CACHE_DIR" "$CUTE_DSL_CACHE_DIR" \
+    && chmod -R a+rwX "$HOME" "$HF_HOME" /opt/holon/cache
 
 EXPOSE 8000
 ENTRYPOINT ["holon"]

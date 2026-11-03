@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "logits_processor"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.9,<2.0"   # holon.api.HostError (docs/dev/v1-pip.md D-H)
 
 [resources]
 provides = ["grammar.constraint@1"]

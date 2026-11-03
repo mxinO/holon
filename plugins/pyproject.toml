@@ -2,10 +2,11 @@
 name = "holonlm-plugins"
 version = "0.2.0"
 license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]   # symlinks to the root's
 requires-python = ">=3.12,<3.13"
 description = "Holon first-party plugins: models, kernels, dialects, frontends"
 dependencies = [                  # std units are reached through Ref, never imported
-    "holonlm",
+    "holonlm-core",
     "flashinfer-python==0.6.12",  # kernels.flashinfer
     "triton==3.6.0",              # the Triton kernels (torch 2.11's pin)
     "transformers",               # the models' bundles (tokenizers; pinned by holonlm-std)
@@ -48,6 +49,9 @@ dependencies = [                  # std units are reached through Ref, never imp
 "placement.promote" = "holon_plugins.placement.promote"
 "transforms.tail_skip" = "holon_plugins.transforms.tail_skip"
 "tiers.pagecache" = "holon_plugins.tiers.pagecache"
+
+[project.urls]
+Repository = "https://github.com/mxinO/holon"
 
 [build-system]
 requires = ["hatchling"]

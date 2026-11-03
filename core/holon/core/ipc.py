@@ -32,7 +32,7 @@ import msgspec
 import zmq
 import zmq.asyncio
 
-from holon.api import Abort, EngineRequest, RequestError, SamplingParams, TokenDelta
+from holon.api import Abort, EngineRequest, HostError, RequestError, SamplingParams, TokenDelta
 
 from . import platform
 from .memory import OutOfUnits
@@ -46,12 +46,19 @@ _DECODE = {b"submit": msgspec.msgpack.Decoder(EngineRequest), b"abort": msgspec.
 _POLL_MS = 1000
 # Kinds of `failed` messages, the first type that matches: "plugin" and "memory" fail every start of that configuration
 # alike (the resolver's errors — no provider, another plugin ABI, an unknown slot — and state that does not fit);
-# "error" is anything else, a plugin's own import or registration failure included (it may be transient).
-FAILED_KINDS = {PluginLoadFailed: "error", PluginError: "plugin", OutOfUnits: "memory"}
+# "host" every start on this host (a plugin's `HostError`: a missing C compiler, a torch build its binaries do not
+# fit); "error" is anything else, a plugin's own import or registration failure included (it may be transient).
+FAILED_KINDS = {PluginLoadFailed: "error", PluginError: "plugin", OutOfUnits: "memory", HostError: "host"}
 
 
-def _kind(e: BaseException) -> str:
-    return next((k for t, k in FAILED_KINDS.items() if isinstance(e, t)), "error")
+def _kind(e: BaseException | None) -> str:
+    """The first kind other than "error" along `e`'s explicit causes, outermost first: a generic wrapper (a plugin's
+    failed load) is transparent, a refusal keeps its own kind over what it wraps."""
+    while e is not None:
+        if (kind := next((k for t, k in FAILED_KINDS.items() if isinstance(e, t)), "error")) != "error":
+            return kind
+        e = e.__cause__
+    return "error"
 
 
 def _failed(e: BaseException, prefix: str = "") -> list[bytes]:

@@ -10,7 +10,14 @@ core_abi = ">=1.2,<2.0"   # QTensor.extents
 provides = ["weight_source.gguf@1"]
 
 [dependencies]
-python = ["gguf", "tokenizers"]
+python = ["tokenizers"]
 
 [support]
 detect = ["*.gguf"]
+
+[provenance]   # gguf-py's tables and dequantization, vendored in std (std/holon_std/vendor/vendor.sh): the commit is this
+               # unit's stamp, so a re-vendor outdates its locks (docs/dev/v1-pip.md D7)
+source = "https://github.com/ggml-org/llama.cpp"
+commit = "27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd"
+license = "MIT"
+files = ["../../vendor/gguf/"]

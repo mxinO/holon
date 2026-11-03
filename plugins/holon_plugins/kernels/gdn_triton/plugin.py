@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from .kernel import causal_conv1d, gated_rmsnorm
 
 CONV, NORM = "causal_conv1d", "gated_rmsnorm"
@@ -31,6 +33,7 @@ def _half(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         for op, impl, supports in ((CONV, CausalConv1d, lambda f: _half(f) and 2 <= f["kernel_size"] <= 8
                                     and f.get("weight_dtype", "float32") == "float32"),   # (KDA's f32 weights)
                                    (NORM, GatedRMSNorm, lambda f: _half(f) and f["dim"] in (64, 128, 256)

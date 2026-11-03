@@ -13,7 +13,8 @@ from collections.abc import Iterator
 from typing import Any
 
 import numpy as np
-from gguf import GGML_QUANT_SIZES, GGMLQuantizationType
+
+from holon_std.vendor.gguf.constants import GGML_QUANT_SIZES, GGMLQuantizationType
 
 _SCALARS = {0: np.uint8, 1: np.int8, 2: np.uint16, 3: np.int16, 4: np.uint32, 5: np.int32, 6: np.float32,
             7: np.bool_, 10: np.uint64, 11: np.int64, 12: np.float64}

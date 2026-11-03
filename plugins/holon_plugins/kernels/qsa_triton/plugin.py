@@ -6,6 +6,8 @@ from __future__ import annotations
 
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from . import mla
 from .kernel import qsa_attend, qsa_index, qsa_select
 
@@ -65,6 +67,7 @@ def _pow2(n: int) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         checks = {INDEX: lambda f: _pow2(f["head_dim"]) and f["page"] % f["ratio"] == 0
                   and f["rotary_dim"] % 2 == 0 and f["rotary_dim"] <= f["head_dim"],
                   SELECT: lambda f: _pow2(f["head_dim"]) and f["head_dim"] >= 16 and f["heads"] <= 32,

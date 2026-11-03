@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from .kernel import ple_block, ple_rows
 
 ROWS, BLOCK = "qwen4_exp.ple_rows", "qwen4_exp.ple_block"
@@ -29,6 +31,7 @@ class PleBlock:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         for op, impl, supports in ((ROWS, PleRows, lambda f: f["ngram"] in (2, 3)),
                                    (BLOCK, PleBlock, lambda f: f["kernel"] <= 8)):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.ple_triton", impl=impl,

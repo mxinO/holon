@@ -5,6 +5,8 @@ from __future__ import annotations
 import torch
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from . import mhc
 from .kernel import BK, hc_gr_combine, hc_gr_mix
 
@@ -58,6 +60,7 @@ def _mhc(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         for op, impl, supports in ((MIX, Mix, lambda f: f["hidden"] % BK == 0),
                                    (COMBINE, Combine, lambda f: f["hidden"] % BK == 0),
                                    (MHC_MIX, MhcMix, _mhc), (MHC_WRITEBACK, MhcWriteback, _mhc)):

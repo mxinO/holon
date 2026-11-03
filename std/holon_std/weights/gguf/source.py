@@ -18,8 +18,9 @@ from typing import Any
 
 import numpy as np
 import torch
-from gguf import GGMLQuantizationType
 from holon.api import Extent, Layout, QTensor, Scheme
+
+from holon_std.vendor.gguf.constants import GGMLQuantizationType
 
 from . import reader
 

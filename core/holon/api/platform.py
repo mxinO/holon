@@ -5,6 +5,13 @@ from __future__ import annotations
 import dataclasses
 
 
+class HostError(RuntimeError):
+    """The host lacks something a plugin needs (a C compiler, a fitting torch build: the message names it and the
+    fix), so a retry or another configuration on this host cannot help: the start fails at once, kind "host"
+    (ABI 1.9; docs/dev/v1-pip.md D-H). Not for what a plugin itself lacks (a missing prebuilt module is its own
+    error)."""
+
+
 @dataclasses.dataclass(frozen=True, slots=True)
 class Fingerprint:
     """Static facts that select tuned locks (design §4.4). UUIDs and measured numbers go to evidence only."""

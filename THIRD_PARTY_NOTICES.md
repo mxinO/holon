@@ -3,7 +3,7 @@
 Holon is licensed under the Apache License 2.0 (`LICENSE`, `NOTICE`). This file lists every piece of third-party
 code in this repository — copied, vendored or adapted — with its source, version, license and where it lives.
 Libraries Holon only depends on (installed from their own packages: PyTorch, Triton, FlashInfer, transformers,
-tokenizers, gguf-py, safetensors, xgrammar, …) are not in this repository; their own licenses apply. Rules for adding an entry:
+tokenizers, safetensors, xgrammar, …) are not in this repository; their own licenses apply. Rules for adding an entry:
 `AGENTS.md`, "Third-party code"; `scripts/ci/check_provenance.py` checks them.
 
 ## In the engine
@@ -44,6 +44,11 @@ Copyright (c) 2023-2026 The ggml authors. License text below and in
   backend's FP4 scale tables, after `ggml/src/ggml.c` and `ggml/src/ggml-cpu/ggml-cpu.c`.
 - `plugins/holon_plugins/kernels/ggml_cpu/csrc/cpu_experts.cpp` (`traits`) — adapted: the CPU backend's dot product
   and activation type per weight type, after `ggml/src/ggml-cpu/ggml-cpu.c` (`type_traits_cpu`).
+- `std/holon_std/vendor/gguf/` — gguf-py's type tables (`constants.py`), dequantization (`quants.py`) and its lazy
+  array helper (`lazy.py`), with gguf-py's `LICENSE` (MIT, Copyright (c) 2023 Georgi Gerganov), unmodified upstream
+  files from `gguf-py/` at llama.cpp `27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd`, fetched by
+  `std/holon_std/vendor/vendor.sh`; `std/holon_std/vendor/SHA256SUMS` pins them. The units that use them
+  (`std.weights.gguf`, `std.mixers.qsa`, `std.moe`) name that commit in their manifests' `[provenance]`.
 
 ### flash-linear-attention, as copied into vLLM — MIT and Apache-2.0
 
@@ -128,6 +133,32 @@ tracked scripts and patches below contain or modify upstream lines.
 MIT License
 
 Copyright (c) 2023-2026 The ggml authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### MIT (gguf-py)
+
+```
+MIT License
+
+Copyright (c) 2023 Georgi Gerganov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

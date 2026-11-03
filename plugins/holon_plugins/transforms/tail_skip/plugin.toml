@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "kernel"
 license = "Apache-2.0"
-core_abi = ">=1.0,<2.0"
+core_abi = ">=1.9,<2.0"   # holon.api.HostError (docs/dev/v1-pip.md D-H)
 
 [resources]   # A1's route transform: its contract (oracle: reference.py), the CPU provider and the CUDA one (Triton)
 provides = ["op.moe_route_transform.tail_skip@1", "kernel.moe_route_transform.tail_skip@1"]

@@ -325,13 +325,13 @@ def cpu_experts(jobs: torch.Tensor, x: torch.Tensor, gate_up: torch.Tensor, down
     """The `cpu_experts@1` oracle: `rows` with each job's entries written (float64 sums, written as f32): weights
     dequantized by gguf-py, activations quantized as ggml-cpu's `from_float` of the type's `vec_dot_type` does
     (`quantize_cpu`); `glu_limit` > 0 clamps the SwiGLU (D6)."""
-    import gguf
+    from holon_std.vendor.gguf import quants
 
     out = rows.clone()
     for job in jobs[1:1 + int(jobs[0, 0])].tolist():
         _, u, v, n, *entries = job
-        gu = torch.from_numpy(gguf.quants.dequantize(gate_up[u].numpy(), _ggml(gate_up_type))).double()
-        dn = torch.from_numpy(gguf.quants.dequantize(down[v].numpy(), _ggml(down_type))).double()
+        gu = torch.from_numpy(quants.dequantize(gate_up[u].numpy(), _ggml(gate_up_type))).double()
+        dn = torch.from_numpy(quants.dequantize(down[v].numpy(), _ggml(down_type))).double()
         gu, dn = gu.reshape(2 * inter, -1), dn.reshape(x.shape[1], inter)
         for entry in entries[:n]:
             xq = quantize_cpu(x[entry // top_k].float(), gate_up_type)
@@ -351,9 +351,9 @@ Q8_K_DOT = {"q2_k", "q3_k", "q4_k", "q5_k", "q6_k", "iq1_s", "iq1_m", "iq2_xxs",
 
 
 def _ggml(layout: str):
-    import gguf
+    from holon_std.vendor.gguf.constants import GGMLQuantizationType
 
-    return gguf.GGMLQuantizationType[layout.split("/")[0].removeprefix("ggml.").upper()]
+    return GGMLQuantizationType[layout.split("/")[0].removeprefix("ggml.").upper()]
 
 
 def quantize_cpu(x: torch.Tensor, layout: str) -> torch.Tensor:

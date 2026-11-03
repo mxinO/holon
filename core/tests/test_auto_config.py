@@ -12,6 +12,7 @@ import pytest
 import torch
 from holon.api import OutOfUnits
 from holon.core import build, cli, platform
+from holon.core import supervisor as supervisor_module
 from holon.core.executor import Executor
 from holon.core.ipc import StartFailed
 from holon.core.memory import Ledger
@@ -235,3 +236,17 @@ def test_a_spill_entry_is_rolled_back_to_only_for_memory_and_restarts_are_admitt
     sup._start_s, sup._reports = [1.0], {1: {"host_bytes": 9 * GiB}}
     asyncio.run(sup._launch())
     assert asked == [("lock", {"host_bytes": 9 * GiB}), ("spill", None)] and "a restart needs 9 GiB" in sup._failure
+
+
+def test_a_host_failure_is_tried_once_per_configuration_then_given_up(monkeypatch):
+    """A "host" refusal (a plugin's HostError: no C compiler) takes the refusals' path: no retry, roll back at once,
+    so each configuration starts once and the supervisor gives up naming it (docs/dev/v1-pip.md D-H)."""
+    started = []
+
+    async def start(config, target, lock):
+        started.append(config)
+        raise StartFailed("host", "HostError: this host has no C compiler")
+    monkeypatch.setattr(supervisor_module.EngineProcess, "start", start)
+    sup = Supervisor([("defaults", None), ("lock", "l")])
+    asyncio.run(sup._launch())
+    assert started == ["lock", "defaults"] and "no C compiler" in sup._failure

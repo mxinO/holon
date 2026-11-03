@@ -24,3 +24,7 @@ docs/design-brainstorm.md
 bench/.envs
 bench/.out/
 *.pid
+
+# Prebuilt native modules an overlay installs into a plugin (holonlm-cuda-sm*, docs/dev/v1-pip.md D5): never in a
+# source tree or the plugins wheel.
+plugins/holon_plugins/kernels/*/prebuilt/

@@ -59,3 +59,10 @@ module = "reference"
 "moe.read_ahead" = { help = "exclusive tiers: the landing rows of a layer's read-ahead set — its first SSD-only experts read two layers ahead in prompt steps of 2048 tokens or more", default = "the graphed steps' staging" }
 "moe.ram" = { help = "the RAM tier's units per class (the store forwards it to its first tier): <class>=<slots or fraction>,… (* for the rest); fewer than every piece makes RAM exclusive (a slower tier in moe.tiers holds the rest); fit: one share of every class's experts sized from the host budget at the start (exclusive tiers where they do not all fit; holon serve's RAM-short spill, never in a lock)", default = "every piece" }
 "moe.ram_min" = { help = "with moe.ram=fit: the host RAM (GiB; MemTotal, or a lower cgroup limit) below which exclusive tiers refuse to start — a model's minimum, set by its spill", default = "0 (none)" }
+
+[provenance]   # gguf-py's tables and dequantization, vendored in std (std/holon_std/vendor/vendor.sh): the commit is this
+               # unit's stamp, so a re-vendor outdates its locks (docs/dev/v1-pip.md D7)
+source = "https://github.com/ggml-org/llama.cpp"
+commit = "27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd"
+license = "MIT"
+files = ["../vendor/gguf/"]

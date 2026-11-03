@@ -4,7 +4,7 @@ version = "1.0.0"
 entry = "plugin:Plugin"
 slot = "kernel"
 license = "Apache-2.0"
-core_abi = ">=1.2,<2.0"   # shared objects (the worker), host pools (its words)
+core_abi = ">=1.9,<2.0"   # holon.api.HostError (was >=1.2,<2.0: shared objects (the worker), host pools (its words))
 
 [resources]
 provides = ["kernel.cpu_task@1"]

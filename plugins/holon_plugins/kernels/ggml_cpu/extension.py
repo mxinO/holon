@@ -58,7 +58,7 @@ def load(tier: str) -> ModuleType:
     path = module_path(tier)
     if not path.is_file():
         raise NotBuilt(f"kernels.ggml_cpu: no prebuilt module for {tier}, torch {torch.__version__} (looked for "
-                       f"{path}); build it with: {PREBUILD}")
+                       f"{path}); build it with: {PREBUILD} (gcc and g++; no CUDA toolkit)")
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

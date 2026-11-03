@@ -112,13 +112,43 @@ def test_failed_kinds_tell_resolver_errors_from_a_plugin_failing_to_load(tmp_pat
     from holon.core.ipc import _DECODE, _failed
 
     monkeypatch.syspath_prepend(str(tmp_path))
-    plugins = PluginSet({"toy_broken": _package(tmp_path, "toy_broken", plugin="import not_a_module_anywhere\n")})
+    plugins = PluginSet({"toy_broken": _package(tmp_path, "toy_broken", plugin="import not_a_module_anywhere\n"),
+                         "toy_host": _package(tmp_path, "toy_host", plugin=HOST)})
     kinds = []
-    for fails in (lambda: plugins.load("toy_broken"), lambda: plugins.load("not.installed")):
+    for fails in (lambda: plugins.load("toy_broken"), lambda: plugins.load("not.installed"),
+                  lambda: plugins.load("toy_host")):
         with pytest.raises(PluginError) as e:
             fails()
         kinds.append(_DECODE[b"failed"].decode(_failed(e.value)[1])[0])
-    assert kinds == ["error", "plugin"]
+    assert kinds == ["error", "plugin", "host"]          # a HostError under the load's generic wrapper: "host"
+
+
+def test_a_failed_kind_is_the_outermost_refusal_along_the_causes():
+    """`_kind` walks the explicit causes outermost first, with only "error" transparent (docs/dev/v1-pip.md D-H): a
+    refusal keeps its own kind over a HostError it wraps, and an implicit context is not a cause."""
+    from holon.api import HostError
+    from holon.core.ipc import _kind
+    from holon.core.memory import OutOfUnits
+
+    def raised(outer, inner, cause=True):
+        try:
+            try:
+                raise inner
+            except Exception as e:
+                if cause:
+                    raise outer from e
+                raise outer from None
+        except Exception as e:
+            return e
+    assert _kind(raised(RuntimeError("wrap"), HostError("no gcc"))) == "host"
+    assert _kind(raised(OutOfUnits("full"), HostError("no gcc"))) == "memory"
+    assert _kind(raised(PluginError("no provider"), HostError("no gcc"))) == "plugin"
+    assert _kind(raised(RuntimeError("wrap"), HostError("no gcc"), cause=False)) == "error"
+
+
+HOST = """from holon.api import HostError
+raise HostError("Triton compiles a small C launcher at first use, and this host has no C compiler")
+"""
 
 
 RESOLVES = """from holon.api import Resolved

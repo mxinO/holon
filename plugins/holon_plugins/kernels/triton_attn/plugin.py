@@ -9,6 +9,8 @@ import functools
 import torch
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from .kernel import (
     FP8,
     MODEL,
@@ -194,6 +196,7 @@ def _fused_supports(layout: str):
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         anywhere, fp8_sms = Constraint(sm_min=80, sm_max=129), Constraint(sm_min=89, sm_max=129)
         props = frozenset({"graph_safe", "deterministic"})
         for layout, impl in (("kv.hnd", KvWrite), ("kv.hnd.fp8", KvWriteFp8), ("kv.hnd.q8_0", KvWriteQ8)):

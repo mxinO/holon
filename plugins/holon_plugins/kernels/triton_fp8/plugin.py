@@ -16,6 +16,8 @@ import collections
 import torch
 from holon.api import Constraint, KernelSpec, QTensor
 
+from holon_plugins import host
+
 from . import kernel, rows
 
 OP = "qlinear"
@@ -67,6 +69,7 @@ class LinearRows:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.triton_fp8", impl=QLinear,
                                         requires=Constraint(sm_min=89), supports=_supports,
                                         props=frozenset({"graph_safe", "deterministic"}), config={"act": ACT}))

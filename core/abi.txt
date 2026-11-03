@@ -1,4 +1,4 @@
-abi 1.8
+abi 1.9
 
 ## The version rule (scripts/ci/check_abi.py): a removal or change, a member added to a required Protocol
 ## plugins implement, or a dataclass field without a default is major; any other addition minor — a
@@ -124,6 +124,7 @@ protocol FrontendPlugin() required, implemented by plugins
   serve(self, client: 'EngineClient', bundle: 'FrontendBundle', host: 'str', port: 'int', options: 'dict[str, object]') -> 'None'
 dataclass HitLen frozen
   #0 length: int
+class HostError(RuntimeError)
 dataclass InStepPublish frozen
   #0 row: int
   #1 spec: str
@@ -683,5 +684,6 @@ ipc frames
   submit
 ipc failed kinds
   error
+  host
   memory
   plugin

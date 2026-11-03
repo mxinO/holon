@@ -11,6 +11,8 @@ from __future__ import annotations
 import ast
 import dataclasses
 import hashlib
+import importlib.metadata
+import importlib.util
 import pathlib
 import tomllib
 import typing
@@ -28,8 +30,13 @@ from .plugins import Installed
 
 CORE_UNIT = "holon"          # the core pins its own source like a unit: a core change reaches every plan
 CORE_DIR = pathlib.Path(__file__).resolve().parents[1]
-TREE = CORE_DIR.parents[1]   # the source tree holding the core: its `plans/` and `uv.lock`
-RUNTIME = ("holonlm", "holonlm-std", "holonlm-plugins")     # what a user installs; `uv_lock` hashes their closure
+_CHECKOUT = CORE_DIR.parents[1] if CORE_DIR.parent.name == "core" and (CORE_DIR.parents[1] / "plans").is_dir() else None
+_spec = importlib.util.find_spec("holon_locks")     # an installed release's locks (docs/dev/v1-pip.md D6)
+INSTALLED = pathlib.Path(_spec.submodule_search_locations[0]) if _spec and _spec.submodule_search_locations else None
+# The tree holding `plans/` and `uv.lock`: the checkout the core runs from (it wins over an installed `holon_locks`,
+# which the CLI warns of), else the installed locks, else where a checkout would be (no locks: the CLI says so).
+TREE = _CHECKOUT or INSTALLED or CORE_DIR.parents[1]
+RUNTIME = ("holonlm-core", "holonlm-std", "holonlm-plugins")     # what a user installs; `uv_lock` hashes their closure
 # EngineConfig fields a plan does not record: identified elsewhere (model_id, class, sites), per-host budgets and
 # cores (a plugin pins the pool sizes that matter in its own options), or how the deployment was arrived at (pins and
 # preferences show as sites; the clamp as `max_model_len`).
@@ -47,7 +54,8 @@ _DOCUMENTED = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 def src_hash(path: pathlib.Path) -> str:
     """A unit's `src`: `src_digest` of the files under `path`. Content only, so a checkout and an installed copy
     agree."""
-    return src_digest((f.relative_to(path).as_posix(), f.read_bytes()) for f in path.rglob("*") if f.is_file())
+    return src_digest((f.relative_to(path).as_posix(), f.read_bytes()) for f in path.rglob("*")
+                      if f.is_file() and _is_source(f.relative_to(path)))      # never reads a binary it leaves out
 
 
 def src_digest(files: Iterable[tuple[str, bytes]]) -> str:
@@ -168,9 +176,33 @@ def unit_pin(inst: Installed) -> UnitPin:
 
 def uv_lock(path: pathlib.Path) -> str:
     """The hash of the runtime closure in `uv.lock`: the sorted (name, version, source) of every package the runtime
-    distributions reach, so dev-only pins never move a plan; "none" without a lock file."""
+    distributions reach, so dev-only pins never move a plan; "none" without a lock file. Where packages installed here
+    differ from it (`drifted`), "installed:" and a hash of the differences instead, so a plan never claims the lock's
+    environment for another (docs/dev/v1-pip.md D6)."""
     if not path.is_file():
         return "none"
+    if drift := drifted(path):
+        return "installed:" + canonical_hash(drift)
+    return canonical_hash(sorted((n, p.get("version", ""), str(p["source"])) for n, p in _closure(path).items()))
+
+
+def drifted(path: pathlib.Path) -> list[str]:
+    """The runtime closure's packages installed at another version than `uv.lock`'s ("name version (lock version)"),
+    a local label aside (PyPI's torch `2.11.0` is the index's `2.11.0+cu130`). One not installed is no drift: the
+    closure ignores markers, so it holds packages of other platforms (PyPy's cffi), and one missing fails at import."""
+    out = []
+    for name, package in _closure(path).items():
+        try:
+            have = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            continue
+        if have not in ((want := package.get("version", "")), want.split("+")[0]):
+            out.append(f"{name} {have} (lock {want})")
+    return sorted(out)
+
+
+def _closure(path: pathlib.Path) -> dict[str, dict[str, Any]]:
+    """`uv.lock`'s packages the runtime distributions reach, by name."""
     packages = {p["name"]: p for p in tomllib.loads(path.read_text())["package"]}
     seen, todo = set(), [{"name": name} for name in RUNTIME]
     while todo:                      # (package, extras) pairs: torch reaches the CUDA libraries through extras
@@ -180,7 +212,7 @@ def uv_lock(path: pathlib.Path) -> str:
             package = packages[dep["name"]]
             todo += package.get("dependencies", [])
             todo += [d for e in key[1] for d in package.get("optional-dependencies", {}).get(e, [])]
-    return canonical_hash(sorted({(n, packages[n].get("version", ""), str(packages[n]["source"])) for n, _ in seen}))
+    return {n: packages[n] for n, _ in seen}
 
 
 def diff(a: Plan, b: Plan) -> dict[str, tuple[Any, Any]]:
