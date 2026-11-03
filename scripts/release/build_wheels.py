@@ -195,13 +195,18 @@ def reference(sm: int, out: pathlib.Path) -> None:
         shutil.copy(src, tree / rel)
 
 
+ANON = re.compile(r"\d+_GLOBAL__N__[0-9a-f]+_\d+_\w+?_[0-9a-f]{8}_\d+")    # an anonymous namespace's mangled id
+
+
 def sass_hashes(so: pathlib.Path) -> collections.Counter[tuple[str, str]]:
     """(function, hash of its SASS) for every function of every cubin in `so`, streamed from `cuobjdump -sass` with
-    the address columns stripped (the module's own load addresses are not code)."""
+    the address columns stripped (the module's own load addresses are not code). An anonymous namespace's id is
+    nvcc's hash of the translation unit, which the host compiler's headers move, so it is read as one name."""
     out: collections.Counter[tuple[str, str]] = collections.Counter()
     name, h = None, None
     proc = subprocess.Popen(["cuobjdump", "-sass", str(so)], stdout=subprocess.PIPE, text=True)
     for line in proc.stdout:
+        line = ANON.sub("_ANON_", line)
         if (m := re.match(r"\s*Function : (\S+)", line)):
             if name:
                 out[(name, h.hexdigest())] += 1
