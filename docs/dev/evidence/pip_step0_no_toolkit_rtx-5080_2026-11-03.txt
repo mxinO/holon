@@ -1,0 +1,33 @@
+# v1-pip step 0: Holon (main 4b5baf77's code, design branch a9748e8c) serving with no CUDA toolkit on an RTX 5080
+# Container: public ubuntu:24.04 + apt gcc libc6-dev curl (no CUDA toolkit); Python: uv-managed CPython 3.12.12 venv
+# from uv.lock (uv sync --frozen); native modules from 'holon prebuild --sm 120' on another host (CUDA 13.0.0 nvcc);
+# FlashInfer's modules reached through an AOT-directory stand-in (a 'flashinfer_jit_cache' shim, probe only: D5's override).
+# Script: run_probe.sh (local, untracked). Paths below are shortened to <plans>.
+
+== toolkit check
+nvcc on PATH: none
+CUDA_HOME=unset CUDA_PATH=unset
+/usr/local/cuda*: none
+gcc: gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0
+os: Ubuntu 24.04.5 LTS
+NVIDIA GeForce RTX 5080
+
+== model 1: ready after 90 s (alive: yes)
+ answer: {"id":"chatcmpl-2b7f87c89c0d40aea592f80037d4bf26","object":"chat.completion","created":1793739151,"model":"Qwen3-8B-Q4_K_M","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"Okay, let's see. I need to calculate 17 multiplied by 23. Hmm, how do I approach this? Maybe I can break it down into smaller parts. Let me think... I remember that multiplying numbers can s
+   holon: starting from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/22.lock
+   holon: the fallback without a lock: max_seqs 8 (--max-seqs)
+   holon: engine ready, plan sha256:7c4bf0f30dcbea65caef8d0c298063c9d3779aacd5f854d4ac467bca2ff1db47, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/22.lock
+== model 2: ready after 72 s (alive: yes)
+ answer: {"id":"chatcmpl-34fbd750bd2e44fbbf1f18d9b5be28d4","object":"chat.completion","created":1793739225,"model":"Qwen3-8B-FP8","choices":[{"index":0,"message":{"role":"assistant","content":"","reasoning_content":"Okay, let's see. I need to calculate 17 multiplied by 23. Hmm, how do I approach this? Well, maybe I can break it down into smaller parts. Let me think... I remember that multiplying two number
+   holon: starting from <plans>/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/14.lock
+   holon: the fallback without a lock: max_seqs 8 (--max-seqs)
+   holon: engine ready, plan sha256:a030d8d1a13255565daf48cd10167b7eb89cceea2c3796b58147f9f3e4846eb7, from <plans>/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/14.lock
+== model 3: ready after 113 s (alive: yes)
+ answer: {"id":"chatcmpl-023882614f6d44478467d693effadb55","object":"chat.completion","created":1793739340,"model":"Qwen3.8-27B-UD-IQ3_S","choices":[{"index":0,"message":{"role":"assistant","content":"391","reasoning_content":"User asks simple multiplication, answer briefly. Need final only brief. 17*23 = 391."},"logprobs":null,"finish_reason":"stop"}],"usage":{"prompt_tokens":65,"completion_tokens":32,"to
+   holon: starting from <plans>/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/21.lock
+   holon: the fallback without a lock: max_seqs 8 (--max-seqs)
+   holon: engine ready, plan sha256:d416537b136e5e4872e5db637bcd698ffb50f94c8ece0eb2d4d7c3456f461733, from <plans>/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/21.lock
+== native modules added during serving:
+== triton cache entries: 68 cubins, 26 launcher .so
+
+FlashInfer workspace after serving: generated .cu sources only (Python code generation, 92 KB); no .so built; JIT log empty.

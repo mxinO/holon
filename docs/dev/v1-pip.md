@@ -731,3 +731,32 @@ reports are not in the repository; each row says what changed.
 | **C** CI memory | **Fixed.** `MAX_JOBS=3` by default; 4 only if proven under a 14 GB cap in step 2; ≈ 25–45 min per job; `UV_NO_CACHE` | D11 |
 | **C G1** the SASS gate | **Fixed.** In the devel image (`cuobjdump` 13.0), streamed per-function hashes, failing on unmatched functions | D10.5 |
 | **C H1** gcc without `libc6-dev` | **Taken.** The check compiles a one-line C file that includes `Python.h` | D-H |
+
+## 14. Step 0, as run (2026-11-03): serving with no toolkit
+
+Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
+
+- **The setup.**
+  - **Container:** the public `ubuntu:24.04` with `gcc`, `libc6-dev` and `curl` added, on one RTX 5080. The check
+    found no `nvcc` on `PATH`, no `CUDA_HOME` or `CUDA_PATH`, and no `/usr/local/cuda*`.
+  - **Python:** a uv-managed CPython 3.12.12 venv from `uv.lock`, so the repository's code at this branch.
+  - **Native modules:** `holon prebuild --sm 120`'s, built on another host.
+  - **FlashInfer:** its modules reached through a stand-in for D5's AOT override. The stand-in is a
+    `flashinfer_jit_cache` shim, kept in `local/` and never shipped.
+- **Result: all three start from this card's lock and answer.**
+
+  | lock | what it exercises | ready after | answer |
+  |---|---|---|---|
+  | Qwen3-8B Q4_K_M | ggml_cuda, FlashInfer, Triton | 90 s | still reasoning at the 200-token cap |
+  | Qwen3-8B FP8 | `triton_fp8`, bound after the weights | 72 s | still reasoning at the 200-token cap |
+  | Qwen3.8-27B UD-IQ3_S | fla, state_copy, the 16 GiB KV tier | 113 s | 391, correct |
+
+  - Each plan was reported ready from its lock, with no diff.
+  - No native module was built during serving.
+  - Triton compiled 68 kernels and 26 launchers with the container's gcc.
+  - CuTe DSL's norms ran without a toolkit.
+- **F4's unknowns are settled.**
+  - Nothing besides Triton needs a compiler.
+  - FlashInfer still writes Python-generated `.cu` sources (92 KB) into its workspace, though it compiles nothing. So
+    D12.7's read-only run keeps FlashInfer's workspace (under `HOME`) writable, and makes only site-packages read-only.
+  - The rest of the design stands as written. Step 1 (the code) starts from here.
