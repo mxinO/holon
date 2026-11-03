@@ -128,7 +128,8 @@ def _toolchain(image: str) -> dict[str, str]:
 def _modules(sm: int, stage: pathlib.Path) -> dict[str, pathlib.Path]:
     """`holon prebuild --sm N` into `stage`, then every module it built, by its overlay path."""
     env = os.environ | {"XDG_CACHE_HOME": str(stage / "xdg"), "FLASHINFER_WORKSPACE_BASE": str(stage / "fi"),
-                        "MAX_JOBS": os.environ.get("MAX_JOBS", "3")}
+                        "MAX_JOBS": os.environ.get("MAX_JOBS", "3"),
+                        "PATH": f"{pathlib.Path('.venv/bin').resolve()}:{os.environ['PATH']}"}   # the venv's ninja
     sh("uv", "sync", "--frozen", "-q")
     subprocess.run([".venv/bin/holon", "prebuild", "--sm", str(sm)], check=True, env=env)
     found = json.loads(sh(".venv/bin/python", "-c", f"""
