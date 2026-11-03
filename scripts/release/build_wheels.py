@@ -31,7 +31,8 @@ SMS = (86, 89, 120)
 LIMIT = 100 << 20                       # PyPI's default per-file limit
 EXTENSIONS = ("ggml_cuda", "expert_io", "promote", "state_copy", "cpu_task")     # prebuilt per SM (D2)
 EXTERNAL = {"libc10.so", "libc10_cuda.so", "libtorch_cpu.so", "libtorch_python.so", "libtorch.so",
-            "libtorch_cuda.so", "libcudart.so.13"}                  # torch and its CUDA runtime provide them (D4)
+            "libtorch_cuda.so", "libcudart.so.13",                  # torch and its CUDA runtime provide them (D4)
+            "libcuda.so.1"}                                          # the driver itself (any GPU host has it)
 SYSTEM = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "libdl.so.2", "librt.so.1", "libpthread.so.0",
           "ld-linux-x86-64.so.2"}                                    # manylinux's allowed system libraries
 LICENSES = ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
