@@ -5,4 +5,4 @@ RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends build-e
     && rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348eef8fd2463c50c13347478769aaedd0ce \
      /uv /uvx /usr/local/bin/
-ENV UV_PYTHON_INSTALL_DIR=/opt/python UV_NO_CACHE=1 UV_LINK_MODE=copy UV_PYTHON_PREFERENCE=only-managed
+ENV CUDA_HOME=/usr/local/cuda UV_PYTHON_INSTALL_DIR=/opt/python UV_NO_CACHE=1 UV_LINK_MODE=copy UV_PYTHON_PREFERENCE=only-managed
