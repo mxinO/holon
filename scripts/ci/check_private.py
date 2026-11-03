@@ -7,7 +7,9 @@ so the names themselves never enter the repo.
 
 `--wheels DIR` scans built wheels instead (docs/dev/v1-pip.md D10.6, before any upload): every member, binaries
 through their printable strings (what a compiled module embeds: `__FILE__`, header paths), RECORD and METADATA
-included.
+included. A binary is held to the path and host/user patterns only: its compressed device code reads as random text,
+where the machine patterns (a CPU model is four digits and an X) match by chance, and a build host's details reach a
+binary only as paths and names.
 """
 from __future__ import annotations
 
@@ -31,11 +33,11 @@ VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/", "plugins/holon_pl
 SELF = "scripts/ci/check_private.py"         # its patterns name what they look for
 
 
-def patterns() -> re.Pattern[str]:
+def patterns(machine: bool = True) -> re.Pattern[str]:
     local = ROOT / ".private-patterns"
     extra = [] if not local.is_file() else [
         line.strip() for line in local.read_text().splitlines() if line.strip() and not line.startswith("#")]
-    return re.compile("|".join(f"(?:{p})" for p in GENERIC + MACHINE + extra), re.IGNORECASE)
+    return re.compile("|".join(f"(?:{p})" for p in GENERIC + MACHINE * machine + extra), re.IGNORECASE)
 
 
 def _files() -> list[str]:
@@ -54,7 +56,7 @@ def _safetensors_meta(path) -> str:
 
 def wheels(directory: pathlib.Path) -> list[str]:
     """Hits in every member of every wheel in `directory`; vendored upstream members are skipped as in the tree."""
-    pat, msgs = patterns(), []
+    pat, binary, msgs = patterns(), patterns(machine=False), []
     vendored = tuple(v.split("/", 1)[1] for v in VENDORED)       # the distribution's path, without its directory
     for wheel in sorted(directory.glob("*.whl")):
         with zipfile.ZipFile(wheel) as z:
@@ -62,9 +64,10 @@ def wheels(directory: pathlib.Path) -> list[str]:
                 if name.startswith(vendored):
                     continue
                 data = z.read(name)
-                text = "\n".join(m.decode() for m in re.findall(rb"[\x20-\x7e]{6,}", data)) if b"\0" in data \
-                    else data.decode(errors="replace")
-                msgs += [f"{wheel.name}:{name}: {m.group(0)!r}" for m in pat.finditer(name + "\n" + text)]
+                printable = re.findall(rb"[\x20-\x7e]{6,}", data) if b"\0" in data else None
+                strings = None if printable is None else "\n".join(m.decode() for m in printable)
+                text, found = (strings, binary) if strings is not None else (data.decode(errors="replace"), pat)
+                msgs += [f"{wheel.name}:{name}: {m.group(0)!r}" for m in found.finditer(name + "\n" + text)]
     return msgs
 
 

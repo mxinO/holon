@@ -121,7 +121,7 @@ def _toolchain(image: str) -> dict[str, str]:
     (otherwise Rocky's gcc 8.5 would be used silently, D4)."""
     if pathlib.Path.cwd() != pathlib.Path("/holon"):
         raise SystemExit("build at /holon, from `git archive` (in_image.sh): binaries embed their build paths")
-    nvcc = sh("nvcc", "--version").strip().splitlines()[-1]
+    nvcc = next(line for line in sh("nvcc", "--version").splitlines() if "release" in line)
     gcc, gxx = (sh(c, "--version").splitlines()[0] for c in ("gcc", "c++"))
     if NVCC not in sh("nvcc", "--version") or not all(re.search(r" 13\.\d+\.\d+", c) for c in (gcc, gxx)):
         raise SystemExit(f"{image}: nvcc {nvcc}, gcc {gcc}, c++ {gxx}: want nvcc {NVCC} and gcc 13")
