@@ -32,6 +32,8 @@ LIMIT = 100 << 20                       # PyPI's default per-file limit
 EXTENSIONS = ("ggml_cuda", "expert_io", "promote", "state_copy", "cpu_task")     # prebuilt per SM (D2)
 EXTERNAL = {"libc10.so", "libc10_cuda.so", "libtorch_cpu.so", "libtorch_python.so", "libtorch.so",
             "libtorch_cuda.so", "libcudart.so.13"}                  # torch and its CUDA runtime provide them (D4)
+SYSTEM = {"libc.so.6", "libm.so.6", "libstdc++.so.6", "libgcc_s.so.1", "libdl.so.2", "librt.so.1", "libpthread.so.0",
+          "ld-linux-x86-64.so.2"}                                    # manylinux's allowed system libraries
 LICENSES = ("LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md")
 OWN = {"holonlm-core", "holonlm-std", "holonlm-plugins", "holon-workspace"}
 TAG = "cp312-cp312-manylinux_2_28_x86_64"
@@ -172,10 +174,13 @@ def overlay(sm: int, out: pathlib.Path) -> None:
         sh("uvx", "--from", "wheel", "wheel", "tags", "--remove", "--python-tag", "cp312", "--abi-tag", "cp312",
            "--platform-tag", "manylinux_2_28_x86_64", next((where / "dist").glob("*.whl")))
         wheel = next((where / "dist").glob(f"*{TAG}.whl"))
-        report = sh("uvx", "auditwheel", "show", wheel)     # the modules' glibc symbols and their external libraries
-        external = set(re.findall(r"\blib[\w.+-]+\.so[.\d]*", report.split("external shared libraries:")[-1]))
-        if "manylinux_2_28_x86_64" not in report or not external <= EXTERNAL:
-            raise SystemExit(f"auditwheel: not manylinux_2_28, or external libraries beyond torch's:\n{report}")
+        report = sh("uvx", "auditwheel", "show", wheel)     # the modules' glibc symbols: manylinux_2_28 at most
+        policy = re.search(r'constrains the platform tag to "manylinux_2_(\d+)_x86_64"', report.replace("\n", " "))
+        needed = {n for so in where.rglob("*.so")
+                  for n in re.findall(r"\(NEEDED\)\s+Shared library: \[([^]]+)\]", sh("readelf", "-d", so))}
+        if not policy or int(policy.group(1)) > 28 or not needed <= EXTERNAL | SYSTEM:
+            raise SystemExit(f"not manylinux_2_28, or libraries beyond torch's: {sorted(needed - EXTERNAL - SYSTEM)}"
+                             f"\n{report}")
         out.mkdir(parents=True, exist_ok=True)
         shutil.copy(wheel, out)
 
