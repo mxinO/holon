@@ -1,30 +1,34 @@
 # v1 — `pip install holonlm`: wheels with prebuilt CUDA extensions
 
-Status: **design rev 1 (2026-11-03), for the three-reviewer panel. Nothing is built or published.**
+Status: **design rev 2 (2026-11-03): the panel's findings on rev 1 (1030b0d1) answered in §13. Nothing is built or
+published.** It builds to the coordinator's defaults for the owner questions (§12).
 
 **The owner's goal:** `pip install holonlm`, then `holon serve <model>`, just works on a supported consumer GPU, with
 no git clone, no uv and no local CUDA toolkit. "Easy to use is important."
 
 **Decided before this design:** gguf-py's reader is vendored into Holon at llama.cpp `27c7a769` (D7). Publishing is a
-public action: the owner approves the first upload. This milestone stops at a local-wheel install (TestPyPI on the
-owner's go, Q6).
+public action: the owner approves the first upload, and the TestPyPI upload too. This milestone stops at a local-wheel
+install.
 
 ## 1. Findings (2026-11-03, on the development host; no GPU run)
 
 - **F1. A wheel install hashes like the checkout; it does not find the locks.**
   - `uv build --wheel` of core, std and plugins from a clean `main` (4b5baf77), unpacked: all 54 units, the core
     included, have the same `src2` hash as in the checkout. All 27 newest locks are current against the unpacked
-    wheels. Scheme 2 hashes relative paths and content only. Hatchling ships every tracked file under the package
-    directories (`csrc/`, `vendor/`, `plugin.toml`, profiles). The hash leaves out `.so`, `__pycache__`, `*.md` and
-    tests, so binaries added to a unit directory do not move it.
+    wheels.
+  - Why it matches: scheme 2 hashes relative paths and content only, and the wheels hold exactly the tracked files.
+    A counted that for each package: plugins 291/291, std 125/125, core 35/35. The hash leaves out `.so`,
+    `__pycache__`, `*.md` and tests.
+  - The extension cache keys hash every file under `vendor/` and `csrc/`, so they match too.
   - **The blocker:** `plans.TREE` is `CORE_DIR.parents[1]`. In a wheel install that is `<venv>/lib/python3.12`, so
     `holon serve` finds no `plans/` (every checkpoint serves with defaults) and no `uv.lock` (`uv_lock = "none"`). D6
     fixes it.
-- **F2. PyPI's torch 2.11.0 is the cu130 build.** Its `manylinux_2_28_x86_64` cp312 wheel and the PyTorch cu130
-  index's `2.11.0+cu130` wheel have the same RECORD, file for file (12,482 entries), except `METADATA`. That includes
-  `torch/version.py`, so `torch.__version__` is `2.11.0+cu130` in both. Both depend on `cuda-toolkit==13.0.2`. The
-  comparison read both RECORDs by HTTP range requests. So pip needs no extra index, and the toolchain class
-  (`cu130-torch2.11`) and every extension cache key are the same under either wheel.
+- **F2. PyPI's torch 2.11.0 is the cu130 build.**
+  - Its `manylinux_2_28_x86_64` cp312 wheel and the PyTorch cu130 index's `2.11.0+cu130` wheel have the same RECORD,
+    file for file (12,482 entries), except `METADATA`. Their `METADATA` differ only in the `Version` line;
+    `Requires-Dist` is identical (`cuda-toolkit==13.0.2`, …). Both were read by HTTP range requests.
+  - `torch/version.py` is among the identical files, so `torch.__version__` is `2.11.0+cu130` under either wheel.
+  - So pip needs no extra index, and the toolchain class (`cu130-torch2.11`) and every cache key are the same.
 - **F3. Sizes.**
   - **ggml_cuda, built from `main`'s sources for each SM** (deflated is the wheel's compression):
 
@@ -35,70 +39,101 @@ owner's go, Q6).
     | 120a | 179 MB | 154 MB | 60 MB | 60 / 38 MB |
 
     nvcc's default mode stores this fatbin uncompressed.
-  - **`size` mode leaves the SASS unchanged.** On one mmq instance per SM (sm_86, sm_120a), `cuobjdump -sass`
-    differs only by the "compressed" tag.
+  - **`size` mode on one mmq instance per SM** (sm_86, sm_120a): `cuobjdump -sass` differs only by the "compressed"
+    tag. One instance proves little; D10's gate compares every function of every module.
   - **FlashInfer's modules, deflated:** 8.3 MB for sm_86's 8 and 22 MB for sm_120f's 14 (measured); sm_89's 14,
     ≈ 22 MB est.
   - **The rest:** the other extensions are under 1 MB per SM together. The locks and `defaults.toml` are 1.5 MB
     deflated; the snapshot JSONs, which serving does not need, are 15 MB more.
-- **F4. What runs without a toolkit, from the code.**
+  - **A whole pip install** is ≈ 3.2 GB downloaded (C, from `uv.lock`'s wheel sizes) and ≈ 6 GB installed. pip's
+    cache keeps another ≈ 3 GB unless `--no-cache-dir` is passed.
+- **F4. What runs without a toolkit, from the code.** A and C checked these independently.
   - **Holon's own extensions** (ggml_cuda, expert_io, promote, state_copy, cpu_task) link libtorch and
-    `libcudart.so.13`. torch loads the CUDA runtime first, from its pip CUDA packages. They need nothing else.
-  - **FlashInfer** loads a module with no compiler when its AOT path holds it:
-    `jit_env.FLASHINFER_AOT_DIR/<name>/<name>.so`, read when the module is fetched. Otherwise its JIT runs nvcc.
-    Its modules link `libcudart.so.13` and TVM FFI, not libtorch.
-  - **CuTe DSL** (FlashInfer's norms) compiles with its bundled toolchain.
-  - **Triton 3.6** compiles its `cuda_utils` and per-kernel launchers at first use with `gcc`/`clang` against
-    `Python.h`. **So a pip host needs a C compiler and Python's headers** (Q5).
-  - **Not verified:** no Holon serve has run without a toolkit. Every GPU run so far was inside a CUDA devel
-    container. Step 0 checks it first.
-- **F5. The locks' nvcc is CUDA 13.0.0 (V13.0.48)**, the release environment's. The `Dockerfile` builds with
-  13.0.3, so its image's binaries are not the ones the locks were verified with (noted for the Docker item, Q9).
+    `libcudart.so.13`. torch loads the CUDA runtime first, from its pip CUDA packages.
+  - **FlashInfer** loads a module with no ninja or nvcc when its AOT path holds it:
+    `jit_env.FLASHINFER_AOT_DIR/<name>/<name>.so`, read on every fetch. Without nvcc, its CUDA version comes from
+    `torch.version.cuda`. Its modules link `libcudart.so.13` and TVM FFI, not libtorch.
+  - **CuTe DSL** (FlashInfer's norms) compiles with its embedded compiler. It looks for a toolkit only to dump SASS.
+  - **No module carries PTX:** ggml_cuda, the torch extensions and FlashInfer's modules are SASS only. So no driver
+    JIT happens, and an unsupported SM fails cleanly.
+  - **Triton 3.6** uses its bundled `ptxas` in both installs. It compiles its `cuda_utils` and per-kernel launchers
+    at first use with `$CC`, `gcc` or `clang` against `sysconfig`'s `Python.h`. **So a pip host needs a C compiler
+    and Python's headers** (D-H).
+  - **A pip install contains an nvcc anyway:** `nvidia-cuda-nvcc` 13.2.86, through `flashinfer-python →
+    cuda-tile[tileiras]`, under `site-packages/nvidia/cu13/bin`. It is not on `PATH`, and torch, FlashInfer and CuTe
+    DSL never find it.
+  - **Not verified:** no Holon serve has run without a toolkit. Step 0 checks it first.
+- **F5. The locks' nvcc is CUDA 13.0.0 (V13.0.48)**, the release environment's: the public
+  `nvidia/cuda:13.0.0-devel-ubuntu24.04` image, with its gcc 13. The `Dockerfile` builds with 13.0.3, so its image's
+  binaries are not the ones the locks were verified with (D12 replaces it).
 - **F6. What Holon uses from gguf-py.**
-  - **std:** the type tables in `constants.py` (`GGML_QUANT_SIZES`, `GGMLQuantizationType`) in `weights.gguf`, and
-    `quants.dequantize` in `quants.py`. qsa uses `dequantize` at load (GLM's Q6_K `k_b`/`v_b`); moe uses it in its
-    reference. `quants.py` imports `constants` and `lazy`. Those three upstream files (≈ 8,200 lines, numpy only)
-    cover std.
+  - **std:** five import statements in four files.
+    - `weights/gguf/reader.py:16` and `source.py:21`: the type tables of `constants.py`.
+    - `mixers/qsa/units.py:312`: `quants.dequantize` at load, for GLM's Q6_K `k_b`/`v_b`.
+    - `moe/reference.py:328` and `:354`: `quants.dequantize`, in the reference.
+    - `quants.py` imports `constants` and `lazy`. Those three upstream files (≈ 8,200 lines, numpy only) cover std.
   - **judge, testing and the tests:** `GGUFReader`, `GGUFWriter`, `Keys`, `quants.quantize`, that is, the whole
     package.
-- **F7. Names.** `holonlm`, `holonlm-core`, `holonlm-std`, `holonlm-plugins`, `holonlm-judge` and `holonlm-tools` are
-  free on PyPI, and nothing reserves them before a first upload. `uv.lock` has one git source (gguf) and one extra
-  index (torch). The runtime closure is 91 packages, 3 of them Holon's.
-- **F8. A pre-existing bug, found while measuring.** `python -m holon_plugins.kernels.ggml_cuda.prebuild --sm 89 120`
-  builds the second SM's module as `holon_ggml_cuda_v1.so`. torch's extension loader versions a name already
-  loaded in the process, and `load` then never finds the module. The same applies to every plugin `prebuild` module
-  that loops over SMs in one process. `holon prebuild` is not affected: it runs one process per (plugin, SM). Fixed
-  in step 1, with its test.
+- **F7. Names and sources.** `holonlm`, `holonlm-core`, `holonlm-std`, `holonlm-plugins`, `holonlm-judge` and
+  `holonlm-tools` are free on PyPI, and nothing reserves them before a first upload. `uv.lock` has one git source
+  (gguf) and one extra index (torch). The runtime closure is 91 packages, 3 of them Holon's.
+- **F8. Pre-existing bug:** a plugin `prebuild` module given several SMs builds the second as `<name>_v1.so`.
+  - Example: `python -m holon_plugins.kernels.ggml_cuda.prebuild --sm 89 120`.
+  - torch's extension versioner renames a name already built in the process. The module also exports
+    `PyInit_<name>_v1`, so renaming the file would not help, and `load` never finds it.
+  - It affects ggml_cuda, expert_io, promote, state_copy and cpu_task.
+  - `holon prebuild` is not affected: it runs one process per (plugin, SM).
+- **F9. Today's modules embed the build host's absolute paths.**
+  - The current sm_86 ggml_cuda module holds 51 strings with the development host's absolute paths, the user
+    directory and worktree names included. They come from ggml's `__FILE__` asserts and from torch's
+    `INTERNAL ASSERT … at "<venv>/…/c10/util/intrusive_ptr.h"`.
+  - The expert_io module holds 7. FlashInfer's `rope.so` holds 5.
+  - A wheel built from such a tree would publish them (B1).
+- **F10. CI sizing.** A full `holon prebuild --sm 120`, the largest SM, on the development host at `MAX_JOBS=16`:
+  - 12.5 min wall and 72 CPU-minutes (4,010 s user and 336 s system);
+  - FlashInfer's 14 modules took 191 s of it, built one after another;
+  - the largest single compile peaked at 3.4 GB RSS.
 
 ## 2. Distributions (D1)
 
 | distribution | content | wheel | depends on |
 |---|---|---|---|
-| `holonlm` | **what users install**: no code; the locks (D6) | `py3-none-any` | every dist below `==X.Y.Z`, plus the runtime closure pinned exactly (D9) |
-| `holonlm-core` (renamed from `holonlm`) | `holon` (ABI and core), the `holon` command | `py3-none-any` | torch `==2.11.0`, numpy, msgspec, pyzmq, nvidia-ml-py (as today) |
+| `holonlm` | **what users install**: the `holon` command; the locks (D6) | `py3-none-any`, `requires-python >=3.12,<3.13` | every dist below `==X.Y.Z`; the runtime closure pinned exactly, with markers (D9) |
+| `holonlm-core` (renamed from `holonlm`) | `holon` (ABI and core); `python -m holon` | `py3-none-any` | torch `==2.11.0`, numpy, msgspec, pyzmq, nvidia-ml-py (minimums, as today) |
 | `holonlm-std` | `holon_std`, with the vendored gguf-py subset (D7) | `py3-none-any` | as today, without `gguf` |
-| `holonlm-plugins` | `holon_plugins`, sources included (`csrc/`, `vendor/`: the cache keys hash them; the fallback build needs them) | `py3-none-any` | as today |
-| `holonlm-cuda-sm86`, `-sm89`, `-sm120` | the prebuilt native modules for one SM (D2), installed into the kernel plugins' `prebuilt/` directories | `cp312-cp312-manylinux_2_28_x86_64` | `holonlm-plugins==X.Y.Z`, torch `==2.11.0` |
+| `holonlm-plugins` | `holon_plugins`, sources included (`csrc/`, `vendor/`: the keys hash them; the fallback build needs them) | `py3-none-any` | as today |
+| `holonlm-cuda-sm86`, `-sm89`, `-sm120` | prebuilt native modules for one SM, as `.so` files in the kernel plugins' `prebuilt/` directories (D2); `BUILDINFO` in dist-info | `cp312-cp312-manylinux_2_28_x86_64` | `holonlm-plugins==X.Y.Z`, torch `==2.11.0` |
 
 - **Not published:** `holonlm-judge`, `holonlm-tools` and `holonlm-testing`. The judge and the tools work on the
   repository's goldens, snapshots and lock history; testing is never installed with Holon. The workspace root
-  (`holon-workspace`) stays the development project. There are **no extras**: everything a lock can select is in the
-  base install, as release D1 left it.
+  (`holon-workspace`) stays the development project.
+- **Wheels only.** There are no sdists: an sdist of an overlay or of `holonlm` would make pip try a hopeless build on
+  aarch64 or macOS. There are no extras.
 - **Why the core is renamed:** `pip install holonlm` has to bring everything. Today `holonlm` is the core alone, which
-  std and plugins depend on, so it cannot also be the umbrella. Nothing is published yet, so the rename costs nothing
-  outside the repository (Q1). In the repository it touches the members' dependencies, the root `[tool.uv.sources]`,
-  `plans.RUNTIME`, `check_manifest_deps.DISTS`, a test fixture and the docs.
-- **Why one overlay per SM:** each stays under PyPI's 100 MB default (§7), so neither PyPI nor TestPyPI needs a
-  size-limit request. An overlay holds only `.so` files at paths no other distribution writes, so the three install
-  side by side, and uninstalling one removes only its own files. The plugins look only in their own directory (D5),
-  so merging the overlays into one later, after a limit request (Q3), changes no plugin code.
-- **One version:** every published distribution is `X.Y.Z`, and they pin each other exactly.
-  - `scripts/bump_version.py` and `check_version.py` stay the mechanism. The build script reads the version from
-    `core/pyproject.toml` for the distributions it generates (`holonlm`, the overlays), so they cannot disagree.
-  - The plan's "one version file" (a `VERSION` file read through hatchling's dynamic version) stays deferred. It
-    buys nothing for pip, and dynamic workspace versions change what `uv.lock` records, and with it `plans.uv_lock`.
-- **Plugin discovery:** unchanged. pip installs std's and plugins' `holon.plugins` entry points as uv does. The
-  locks use a new entry-point group, `holon.locks` (D6).
+  std and plugins depend on. Nothing is published, so the rename costs nothing outside the repository. In the
+  repository it touches:
+  - the members' dependencies and the root `[tool.uv.sources]`;
+  - `plans.RUNTIME` and `check_manifest_deps.DISTS`;
+  - a test fixture and the docs.
+- **The `holon` command** moves from `holonlm-core` to `holonlm` and to the workspace root, so exactly one installed
+  distribution owns `bin/holon`.
+  - This makes `pipx install holonlm`, `uv tool install holonlm` and `uvx --from holonlm holon …` work. pipx and uv
+    expose only the named package's commands.
+  - A components-only install runs `python -m holon`.
+- **Why one overlay per SM:** a user downloads all three either way, ≈ 155 MB, because pip has no GPU markers. The
+  split is purely a size-limit shard: each stays under PyPI's 100 MB default (§8), so neither PyPI nor TestPyPI needs
+  a request.
+  - A size-limit request is filed in parallel (Q3). If PyPI grants it before the first upload, the binaries fold into
+    `holonlm-plugins` as one platform wheel: a packaging-only change, since the plugins look only in their own
+    directory (D5).
+  - Overlays write only `.so` files at paths no other distribution writes (asserted, D10). So the three install side
+    by side, an uninstall removes only its own files, and an upgrade replaces them.
+- **One version:** every published distribution is `X.Y.Z`, pinned to each other exactly.
+  - `scripts/bump_version.py` and `check_version.py` stay the mechanism. The build script takes the version from
+    `core/pyproject.toml` for the distributions it generates.
+  - The plan's "one version file" stays deferred: it buys nothing for pip, and dynamic workspace versions change what
+    `uv.lock` records.
+- **Plugin discovery:** unchanged; pip installs std's and plugins' `holon.plugins` entry points as uv does.
 
 ## 3. Native code (D2–D5)
 
@@ -108,173 +143,341 @@ owner's go, Q6).
   |---|---|---|
   | `kernels.ggml_cuda` | torch extension, one per SM (86, 89, 120a) | prebuilt, fatbin compressed (`--compress-mode=size`) |
   | `kernels.expert_io`, `.promote`, `.state_copy`, `.cpu_task` | torch extensions, one per SM | prebuilt |
-  | `kernels.flashinfer` | FlashInfer JIT modules: `holon prebuild`'s set, 8 on sm_86, 14 on sm_89 and sm_120 | prebuilt, per SM, used as FlashInfer's AOT directory |
-  | `kernels.ggml_cpu` | torch extension per CPU tier, C/C++ only | **not prebuilt**: an opt-in no lock uses; `holon prebuild` builds it with gcc/g++, no toolkit (Q8) |
-  | Triton kernels (`triton_*`, `gdn_triton`, `hc_triton`, `ple_triton`, `qsa_triton`, `fla`) | Triton JIT | none: compiled and cached at first use (F4) |
-  | CuTe DSL norms (through FlashInfer) | in-memory JIT | none (bundled compiler) |
+  | `kernels.flashinfer` | `holon prebuild`'s FlashInfer set: 8 modules on sm_86, 14 on sm_89 and sm_120 | prebuilt, per SM: Holon's AOT directory for FlashInfer |
+  | `kernels.ggml_cpu` | torch extension per CPU tier, C/C++ only | **not prebuilt** (an opt-in no lock uses). `holon prebuild` builds it with gcc/g++, and its `NotBuilt` names gcc/g++, not nvcc |
+  | Triton kernels (`triton_*`, `gdn_triton`, `hc_triton`, `ple_triton`, `qsa_triton`, `fla`) | Triton JIT | none: compiled and cached at first use |
+  | CuTe DSL norms (through FlashInfer) | in-memory JIT | none (embedded compiler) |
 
-  - **`--compress-mode=size`** joins ggml_cuda's `NVCC_FLAGS` for every build, local prebuilds included, so there
-    is one binary per key. It leaves the SASS unchanged (F3) and cuts ggml_cuda's deflated size by 37% (sm_86,
-    sm_89) and 36% (sm_120). The cost is decompression when the module loads, measured in step 2. If it adds more
-    than 1 s to a start, it is dropped: the overlays fit without it (§7).
-  - The flag changes ggml_cuda's cache key, so repository installs run `holon prebuild` once more.
+  - **`--compress-mode=size`** joins ggml_cuda's `NVCC_FLAGS` for every build, local prebuilds included.
+    - It cuts ggml_cuda's deflated size by 37% (sm_86, sm_89) and 36% (sm_120).
+    - It is kept only if D10's full SASS comparison (compressed against uncompressed, every function, every SM)
+      finds no difference.
+    - It is also kept only if D12's warm start shows less than 1 s of decompression. The decompressed image (≈ 120–154
+      MB) becomes anonymous memory per engine process; its RSS is recorded.
+    - Otherwise it is dropped: the overlays fit without it (§8).
 - **D3. SMs:** 86, 89 and 120: RTX 3090; RTX 4090; RTX 5080, RTX 5090 and RTX PRO 6000 Blackwell. These are the
-  locks' classes and the SMs the code already targets (`ARCHS`). Any other SM finds no binary, and the plugin reports
-  it with the existing messages (GGUF refused at startup, as today).
-- **D4. ABI.**
-  - torch is pinned `==2.11.0`, the core's pin today. The specifier matches PyPI's `2.11.0` and the index's
-    `2.11.0+cu130`, which are the same build (F2), so there is no extra index URL.
-  - **The overlays are built in `nvidia/cuda:13.0.0-devel-rockylinux8`, pinned by digest.** It has glibc 2.28,
-    the same nvcc as the locks (F5), gcc-toolset-13 (the major version of the lock environment's Ubuntu 24.04
-    gcc), and uv-managed CPython 3.12 for the headers.
-  - `auditwheel show` must find `manylinux_2_28` with only torch's libraries and `libcudart.so.13` external. These
-    are excluded, never bundled: torch's own dependencies provide them. The wheel is then tagged
-    `cp312-cp312-manylinux_2_28_x86_64` (`wheel tags`).
-  - **No new compatibility check.** Each extension's existing cache key (sources, flags, SM, CUDA, CPython tag, torch
-    version) names its shipped directory. A different torch or Python does not find the directory and falls back
-    (D5). FlashInfer's directory is named by `flashinfer.__version__` and the SM (D5), so the module set always
-    matches the installed FlashInfer. Its modules do not link libtorch.
-- **D5. Lookup and fallback, in the plugins only.**
-  - **Holon's extensions:** `module_path` looks in `HERE / "prebuilt" / key(sm)`, then in the user cache as today.
-    `build()` returns at once when the shipped module exists, so `holon prebuild` in a pip install builds only what
-    is missing. FlashInfer's prebuild module likewise skips an SM whose AOT directory is shipped.
-  - **FlashInfer:** the plugin, when it first binds on a device, sets `flashinfer.jit.env.FLASHINFER_AOT_DIR` to
-    `HERE / "prebuilt" / f"{flashinfer.__version__}-sm{sm}"` if that directory exists. FlashInfer reads the attribute
-    on each module fetch; its `jit/env.py` says its attributes exist to be overridden. An engine process serves one
-    device, so one SM; this is documented.
-  - **When nothing matches:** the user cache, then today's `NotBuilt` error. It now says what the install ships
-    ("prebuilt for sm 86/89/120, torch 2.11.0+cu130, CPython 3.12; found …") and that `holon prebuild` needs CUDA
-    13's nvcc. FlashInfer looks in the AOT directory, then in its JIT cache (where a repository install's
-    `holon prebuild` puts the modules, as today). A module in neither starts FlashInfer's JIT, which needs nvcc.
-    That failure is re-raised with the same message.
+  locks' classes and the SMs the code already targets (`ARCHS`). Any other SM installs, then fails at start with the
+  existing messages (GGUF refused). The README lists the supported SMs before the install command.
+- **D4. ABI and the build image.**
+  - **torch** is pinned `==2.11.0`, the core's pin today. That matches PyPI's `2.11.0` (F2). Another torch is refused
+    (D5).
+  - **The overlays are built in `nvidia/cuda:13.0.0-devel-rockylinux8`, pinned by digest.** It has glibc 2.28 and
+    the locks' nvcc (F5). Its compiler is gcc-toolset-13, set for nvcc (`-ccbin`), torch's `cpp_extension` (`CC`,
+    `CXX`) and FlashInfer's ninja. The script asserts `gcc 13.*` and nvcc `V13.0.48` before compiling, because
+    otherwise Rocky's gcc 8.5 is used silently. uv-managed CPython 3.12 provides the headers.
+  - **The build happens only at the fixed neutral path `/holon`**, from the `git archive` unpacked there: venv at
+    `/holon/.venv`, staging at `/holon/stage`, uv's Python under `/opt/python`. The host compiler also gets
+    `-ffile-prefix-map=/holon=.` (through `-Xcompiler` for nvcc). Whatever `__FILE__` or a header path embeds is
+    then `/holon/…` or relative. D10's scan proves it.
+  - **The wheel tag:** `auditwheel show` must find `manylinux_2_28`, with only torch's libraries and
+    `libcudart.so.13` external. These are never bundled, because torch's dependencies provide them. The wheel is
+    then tagged `cp312-cp312-manylinux_2_28_x86_64` (`wheel tags`).
+  - **No new compatibility record.** Each extension's cache key names its shipped directory: sources, flags, SM, CUDA,
+    CPython tag, torch version, and now its own `extension.py` (the build recipe: A-m4, as ggml_cpu already does).
+    FlashInfer's directory is named by everything its modules depend on (D5).
+- **D5. Lookup, refusal and fallback, in the plugins.**
+  - **Holon's extensions:**
+    - `module_path` looks in `HERE / "prebuilt" / key(sm)`, then in the user cache as today.
+    - `build()` returns at once when the shipped module exists, so `holon prebuild` in a pip install builds only what
+      is missing.
+    - **F8's fix:** each plugin `prebuild` module re-executes itself once per SM, as ggml_cpu does per tier. The test
+      mocks `subprocess.run` and asserts one process per SM.
+  - **FlashInfer:**
+    - Holon's AOT directory for FlashInfer is always
+      `HERE / "prebuilt" / f"{flashinfer}-tvmffi{tvm_ffi}-cu{torch.version.cuda}-sm{sm}"`. The plugin sets
+      `flashinfer.jit.env.FLASHINFER_AOT_DIR` to it when it first binds, even when the directory is missing, so an
+      installed `flashinfer-jit-cache` can never supply foreign modules.
+    - Without an AOT module, FlashInfer falls to its JIT cache, where a repository install's `holon prebuild` puts
+      them, as today. The prebuild skip tests each spec's `aot_path`.
+    - Setting a third-party module global is acceptable for a kernel plugin: invariant 3 is about Holon's own state.
+      The plugin says so in a comment.
+    - A process that binds a second SM raises: the same-major binary would otherwise run sm_86 code on an sm_89
+      device without error.
+    - At bind, the plugin asserts that FlashInfer's norms run CuTe DSL (`not flashinfer.norm._USE_CUDA_NORM`). If
+      `nvidia-cutlass-dsl` fails to import, FlashInfer silently switches to another norm, which changes numerics.
+  - **Refusal of another torch:** a `+cu128` or `+cpu` torch satisfies `torch==2.11.0`. Such a torch finds no
+    shipped module (the key holds `cu12` / the version).
+    - Holon's loaders and the FlashInfer plugin then raise `HostError` (D-H), when the overlay ships modules but none
+      for this torch.
+    - The message: "this install's torch is 2.11.0+cu128; Holon's prebuilt modules need torch 2.11.0 for CUDA 13.0
+      (PyPI's): `pip install --force-reinstall torch==2.11.0 --index-url https://pypi.org/simple`, in a venv without
+      extra indexes".
+  - **When nothing matches and torch is right** (another SM, or a components-only install): today's `NotBuilt`.
+    - It now names what the install ships (the `prebuilt/` directories) and that `holon prebuild` needs CUDA 13's
+      nvcc, or gcc/g++ for ggml_cpu.
+    - A FlashInfer module in neither the AOT directory nor the JIT cache makes FlashInfer run nvcc. That failure is
+      re-raised with the same message.
 
-## 4. Locks, data and third-party code (D6–D9)
+## 4. Host prerequisites, failing fast (D-H)
+
+- **The requirement:** a C compiler and Python 3.12's headers, both for Triton's launchers (F4). A default Ubuntu
+  24.04 desktop usually lacks `python3.12-dev` and often gcc.
+- **What fails today:** the first Triton compile raises inside the engine's start, as a plain `RuntimeError` or as
+  gcc's stderr above a bare `CalledProcessError`.
+  - That is an `"error"` start failure, so the supervisor retries it four times, rolls back to the defaults, and
+    retries four more (`supervisor.py:362-371`). Each attempt reloads the weights.
+  - If a kernel first compiles after "ready", the failure is a crash-rollback onto a configuration that is not the
+    lock.
+- **The fix has three parts:**
+  1. **`holon.api.HostError(RuntimeError)`** (additive ABI): the host lacks something a plugin needs, so retrying
+     cannot help. The engine reports it as the new failed-kind `"host"`. `_kind` follows `__cause__`, so it also
+     survives the loader's `PluginLoadFailed` wrapping. The supervisor gives up at once on `"host"`, with no retry
+     and no rollback, and the CLI prints the message (≈ 6 core lines).
+  2. **`holon_plugins/host.py`**, a shared library module outside every plugin family; the independence contract
+     lists families. Its `require_c_toolchain()` looks for `$CC`, `gcc` or `clang`, and for `Python.h` under
+     `sysconfig.get_paths()["include"]` (with Triton's `posix_local` → `posix_prefix` correction). Its message:
+     > Triton compiles a small C launcher at first use: install a C compiler and Python 3.12's headers (Ubuntu:
+     > `sudo apt install build-essential python3.12-dev`), or use a uv-managed Python (`uv tool install --python
+     > 3.12 holonlm`), which has its headers.
+
+     The eight Triton kernel plugins call it at load, before any weight is read. Step 1 checks that order.
+  3. **The README**:
+     - the apt one-liner as the first command;
+     - the uv-managed Python as the alternative, which also serves distros whose Python is not 3.12;
+     - a negative container in D12 checks the message and the time to fail.
+- **Later, not v1 (C):** Triton's launcher key depends only on the C source and the platform, and Triton 3.6 has a
+  `knobs.build.impl` hook. Shipping `cuda_utils` and the locks' launchers would remove gcc and `Python.h`.
+
+## 5. Locks, data and third-party code (D6–D9)
 
 - **D6. Locks in the wheel.**
-  - `holonlm` ships the package `holon_locks`: `plans/**/<n>.lock`, `plans/defaults.toml` and `uv.lock`. The
+  - `holonlm` ships the data package `holon_locks`: `plans/**/<n>.lock`, `plans/defaults.toml` and `uv.lock`. The
     snapshot JSONs stay out (judge data; 15 MB).
-  - It declares the entry point `[project.entry-points."holon.locks"] holon = "holon_locks"`.
-  - **Core** (`plans.py`, ≈ 10 lines): `TREE` is the checkout when `CORE_DIR.parents[1] / "plans"` is a directory,
-    else the directory of the one installed `holon.locks` entry point. More than one is an error, for now. Then
-    `TREE / "plans"` and `TREE / "uv.lock"` work unchanged, and `plan_of`'s `uv_lock` equals the repository's hash.
-    That is honest because the closure is pinned exactly (D9).
-  - The group is general: any distribution may ship lock histories. Merging several roots is additive and left for
-    later.
+  - **Core** (`plans.py`, 2 lines, B's form): `TREE` is `holon_locks`'s directory if
+    `importlib.util.find_spec("holon_locks")` finds it, else `CORE_DIR.parents[1]`, the checkout.
+    - `find_spec` of a top-level package imports nothing, so it is safe at import, where argparse defaults read it.
+    - No entry-point group and no ambiguity rule.
+    - Naming Holon's own data package names no model, layer, format or feature (invariant 1). A development venv never
+      installs `holonlm`, so it always uses the checkout.
+  - **No locks package** (a components-only install, or an overlay alone): `TREE` is `parents[1]`. The existing
+    warning "no lock directory …: serving defaults" (`cli.py:254-256`) gains "install `holonlm` for the locks".
+  - **`uv_lock` reflects what is installed** (A-M2; ≈ 12 core lines).
+    - `plans.uv_lock` walks the lock's runtime closure as today and compares each package's installed version
+      (`importlib.metadata`) with the lock's. It accepts an equal version, or the public part of a local-labelled lock
+      version (F2's `2.11.0` against `2.11.0+cu130`).
+    - All equal: the lock's hash, as today. Else: `installed:<hash of the installed (name, version) set>`, and
+      `holon serve` warns once at start, naming each package that differs.
+    - A drifted environment then shows `uv_lock` in `served`'s diff.
+    - One code path for the checkout and pip, so a uv venv that drifted is caught too.
   - **`src` in a pip install:** F1 shows it matches. Three things keep it matching:
     - wheels are built only from `git archive` of a commit;
     - the overlays add only `.so` files, which the hash leaves out;
-    - the build's CPU check (D10) installs every wheel in a fresh venv and fails unless every newest lock is current.
+    - D10's CPU check installs every wheel in a fresh venv and fails unless every newest lock is current.
+  - **`src_hash` filters before it reads** (B-M2; one core line): `_is_source(rel)` is tested before
+    `read_bytes()`. Otherwise every `holon serve` and `plan_of` would read and hold the overlays' hundreds of MB. It
+    moves no hash. Its test: an excluded large file is never opened.
   - **Data already inside the wheels:** std's routing profiles (`std/holon_std/tiered/profiles`, part of `std.tiered`).
-    Holon ships no tokenizer or template data; both come from the checkpoint. The Qwen pre-tokenizer regex is code.
-- **D7. gguf-py vendored.** `std/holon_std/vendor/gguf/`, laid out like the other vendored trees:
-  - **Upstream files, unmodified:** `constants.py`, `quants.py` and `lazy.py`, plus upstream's `LICENSE` (MIT, the
+    Holon ships no tokenizer or template data; both come from the checkpoint.
+- **D7. gguf-py vendored.** In `std/holon_std/vendor/gguf/`, laid out like the other vendored trees:
+  - **Upstream files, unmodified:** `constants.py`, `quants.py` and `lazy.py`, with upstream's `LICENSE` (MIT, the
     ggml authors), at llama.cpp `27c7a769`.
   - **Our files:** an empty `__init__.py`; `vendor.sh` (`--check` joins `run_all.sh`); `SHA256SUMS`. There is no
-    patch: the files' relative imports work as they are.
-  - **std's three import sites** become `holon_std.vendor.gguf.constants` / `.quants`. std drops `gguf>=0.17`.
-  - **Where:** a library of the std distribution, outside every unit directory, because three units use it and units
-    never import each other. So, like gguf-py today, it is in no unit's `src`. A re-vendor is a dependency bump
-    followed by a propagation, as a `uv.lock` change is.
-  - **judge, testing and the tests** keep gguf-py from the git source (F6: they need the reader and writer). Those
-    distributions are not published, so PyPI's rule does not apply. `vendor.sh --check` asserts that its commit is
-    the root's `gguf` source rev, so the oracle and std read the same tables.
+    patch.
+  - **std's five imports in four files** (F6) become `holon_std.vendor.gguf.constants` / `.quants`. std drops
+    `gguf>=0.17`. `std/holon_std/vendor` joins ruff's `extend-exclude`, as fla's vendor does.
+  - **The using units are stamped** (A-M3, B-M1).
+    - `std.weights.gguf`, `std.mixers.qsa` and `std.moe` each get a `[provenance]` in their `plugin.toml`, as AGENTS.md
+      already asks of a plugin that uses vendored code: source llama.cpp, commit `27c7a769…`, MIT, and the vendored
+      path relative to the unit (`../../vendor/gguf/`; `../vendor/gguf/` for moe).
+    - `plugin.toml` is in each unit's `src`, so a re-vendor, which must change the commit, moves exactly those units'
+      hashes and outdates their locks.
+    - `vendor.sh --check` asserts that the three manifests name its `COMMIT`. `check_provenance` normalizes `..` in
+      `files`.
+  - **judge, testing and the tests** keep gguf-py from the git source (F6: they need the reader and writer). They are
+    not published.
+    - `vendor.sh --check` also asserts that its commit is the root's `gguf` source rev, so the oracle and std read the
+      same tables.
+    - The two copies coexist in the development venv. Their `GGMLQuantizationType` classes are distinct: equality,
+      hashing and dict lookups work (IntEnum), but `isinstance`, `is` and class patterns across them do not. A test
+      or judge module never mixes them. The rule goes in the vendored `__init__.py`'s comment.
   - **The MTP pack hint is rewritten.** `models.qwen4_exp`'s `source_hint` (`deploy.py`) and the README's
-    Qwen3.8-Flash-Next section tell users how to make the MTP pack with `uv run` and the workspace's `gguf`. A pip
-    user has neither. The new recipe runs Strata's tools in a venv of their own:
-    `pip install "gguf @ git+https://github.com/ggml-org/llama.cpp@27c7a769…#subdirectory=gguf-py"`. pip accepts a
-    git URL on the command line; PyPI forbids one only in a package's metadata.
-  - **`THIRD_PARTY_NOTICES.md`:** an entry under llama.cpp / ggml (commit `27c7a769`, MIT, the paths).
-  - **`check_provenance`** learns non-plugin vendored trees: every tracked `vendor/` directory must have a `LICENSE`
-    and be named in the notices.
+    Qwen3.8-Flash-Next section use `uv run` and the workspace's `gguf`; a pip user has neither.
+    - The new recipe is a side venv with numpy and
+      `"gguf @ https://github.com/ggml-org/llama.cpp/archive/27c7a769….zip#subdirectory=gguf-py"`, an archive URL that
+      needs no git.
+    - Strata at `296b59d` comes as an archive too.
+  - **`THIRD_PARTY_NOTICES.md`** gets an entry under llama.cpp / ggml (commit `27c7a769`, MIT, the paths).
+    `check_provenance` learns non-plugin vendored trees: every tracked `vendor/` directory needs a `LICENSE` and a
+    mention in the notices.
 - **D8. Notices inside the wheels.**
   - **Every published wheel** carries `LICENSE`, `NOTICE` and `THIRD_PARTY_NOTICES.md` in `dist-info/licenses`
-    (`license-files`). `core/`, `std/` and `plugins/` get tracked symlinks to the root files. The generated
-    distributions copy them.
-  - **Vendored trees** ship with their upstream `LICENSE`: ggml_cuda, ggml_cpu, fla and the new gguf.
+    (`license-files`). `core/`, `std/` and `plugins/` get tracked symlinks to the root files; the generated
+    distributions copy them. `[project.urls]` names the public repository.
+  - **Vendored trees** ship with their upstream `LICENSE`: ggml_cuda, ggml_cpu, fla and gguf.
   - **`THIRD_PARTY_NOTICES.md` gains "In the binary wheels"**, the compiled code the overlays redistribute, with the
-    license texts not yet in the file:
+    license texts not yet in it:
     - llama.cpp / ggml (MIT);
     - FlashInfer 0.6.12 (Apache-2.0) and the headers its modules compile: CUTLASS (BSD-3-Clause), CCCL (Apache-2.0
       with LLVM exception), spdlog (MIT), TVM FFI (Apache-2.0);
     - the PyTorch and pybind11 headers inlined into the torch extensions (BSD-3-Clause).
-  - **Device code** compiled with the CUDA toolkit is redistributable under its EULA's terms for object code, as for
-    every CUDA wheel on PyPI.
-  - **The build script** fails if a wheel lacks the three files.
-  - **FlashInfer itself** is a plain dependency (`flashinfer-python==0.6.12` from PyPI). Neither
-    `flashinfer-jit-cache` nor `flashinfer-cubin` is used: Holon's modules come from its own overlays.
+  - **Device code** compiled with the CUDA toolkit is redistributable as object code under its EULA, as for every
+    CUDA wheel on PyPI.
+  - The build fails if a wheel lacks the three files. FlashInfer itself stays a dependency (`flashinfer-python` from
+    PyPI); `flashinfer-jit-cache` and `flashinfer-cubin` are not used.
 - **D9. Sources and pins.**
   - **torch** comes from PyPI (F2). The workspace keeps the cu130 index in `uv.lock`; the files are identical.
-  - **gguf:** see D7. Nothing else in the runtime closure comes from outside PyPI (F7).
+    **gguf:** see D7. Nothing else comes from outside PyPI.
   - **`holonlm` pins every third-party package of the runtime closure to `uv.lock`'s version** (87 once std drops
-    gguf; torch as `==2.11.0`).
-    - The build script generates them with `plans.uv_lock`'s closure walk, so `uv.lock` stays the only source.
-    - A pip install then resolves the environment the locks were verified in. tokenizers, jinja2 (chat templates),
-      xgrammar, nvidia-cutlass-dsl and the CUDA libraries all shape outputs.
-    - It also keeps the shipped `uv.lock` hash honest.
-  - The cost: those versions are fixed in the venv, so the README recommends a dedicated one (`python3.12 -m venv`,
-    or `pipx install holonlm`) (Q2).
+    gguf; torch as `==2.11.0`). **The components keep their minimums**, so library use and third-party plugins can
+    compose `holonlm-core`, `-std`, `-plugins` and an overlay without the pins.
+  - **How the pins are generated:** by `plans.uv_lock`'s closure walk at build time, so `uv.lock` stays the only
+    source.
+    - Each dependency's marker is carried over (A-m7: `cffi` is PyPy-only).
+    - The generator asserts one version per name: a forked `uv.lock` fails.
+  - **Why:** a pip install then resolves the environment the locks were verified in. tokenizers, jinja2 (chat
+    templates), xgrammar, nvidia-cutlass-dsl and the CUDA libraries all shape outputs. D6's `uv_lock` check catches
+    later drift.
+  - **The cost:** security fixes in pinned packages (certifi, urllib3, starlette, h11, jinja2) need a patch release.
+    That brings a propagation round, which is automatic under release §22 when traces are byte-identical.
+  - **The README** recommends `uv tool install --python 3.12 holonlm` or `pipx install holonlm`, or a dedicated venv
+    without extra indexes.
 
-## 5. Build and CI (D10–D11)
+## 6. Build and CI (D10–D11)
 
-- **D10. One script, `scripts/release/build_wheels.py`**, used both locally (`docker`, output under
-  `local/tmp/pip/`) and in CI. It works from `git archive <ref>`:
-  1. `uv build --wheel` for core, std and plugins.
-  2. `holonlm` from a generated `pyproject.toml`: the pins, `holon_locks`, the entry point and the license files.
-  3. Per SM, inside the build image (D4):
-     - `uv sync --frozen` (runtime only);
-     - `holon prebuild --sm N`, with `XDG_CACHE_HOME` and `FLASHINFER_WORKSPACE_BASE` pointed at a staging directory;
+- **D10. One script, `scripts/release/build_wheels.py`**, the same locally (docker on the development host) and in
+  CI. It always runs inside its image, at `/holon` (D4), from `git archive <ref>`. It never runs on a bind-mounted
+  checkout.
+  1. **Pure wheels:** `uv build --wheel` for core, std and plugins.
+  2. **`holonlm`,** from a generated `pyproject.toml`: the pins, `holon_locks`, the `holon` script, the license
+     files and `requires-python`.
+  3. **Per SM, in the build image:**
+     - `uv sync --frozen`, runtime only;
+     - `holon prebuild --sm N`, with `XDG_CACHE_HOME` and `FLASHINFER_WORKSPACE_BASE` under `/holon/stage`;
      - the `.so` files copied into the overlay layout;
-     - the overlay built from a generated `pyproject.toml`, checked by `auditwheel show`, and retagged.
-  4. **The CPU check:**
-     - each wheel is under 100 MB and has its license files;
-     - a fresh `python3.12 -m venv` installs every wheel, with the third-party pins from PyPI;
-     - `holon --help` runs;
-     - every newest lock is current against the installed units (`plans.current_srcs`, as `holon models` computes
-       it).
-- **D11. CI: `.github/workflows/wheels.yml`**, run on `workflow_dispatch` and on `v*` tags.
-  - **`pure`** (ubuntu-24.04): steps 1, 2 and 4.
-  - **`cuda`:** a matrix over sm 86 / 89 / 120 in the build image, step 3, on the 4-vCPU runner. Estimate: 20–40
-    min per SM, from the measured build times scaled by cores. It frees runner disk first; the image and the
-    environment are ≈ 15 GB est.
-  - Artifacts: the wheels.
-  - **`publish`:** a manual job behind a GitHub environment (`testpypi`, `pypi`) whose required reviewer is the
-    owner. It uses trusted publishing (OIDC, no tokens) and uploads exactly the artifacts the GPU matrix tested.
-  - **GPU tests are not in GitHub** (no GPU runners). `scripts/release/wheel_check.sh` (D12) runs them on each card
-    class against a run's artifacts, and the results are evidence records.
+     - the overlay built from a generated project outside any checkout, with `[tool.hatch.build] ignore-vcs = true`
+       and `artifacts = ["*.so"]`. The root `.gitignore`'s `*.so` must never empty it (C-M4).
+     - `BUILDINFO` in dist-info: commit, image digest, nvcc and gcc versions, torch, FlashInfer and TVM FFI;
+     - `auditwheel show`, then the retag.
+  4. **The reference build** (the exactness gate's other half; A-M1, C-M2): the same `holon prebuild --sm N` of the
+     same commit in the lock environment's image, `nvidia/cuda:13.0.0-devel-ubuntu24.04` by digest with its gcc 13,
+     also at `/holon`.
+  5. **The SASS gate,** per SM, CPU-only. Every shipped module must have the same SASS as the reference's, function
+     by function: ggml_cuda, the four small extensions, and every FlashInfer module.
+     - Method: `cuobjdump -sass`, split per function, address columns stripped.
+     - This covers Rocky's gcc-toolset-13 against Ubuntu's gcc 13, kernel by kernel, with no GPU.
+     - **Once, in step 2,** the same comparison runs between compressed and uncompressed builds of every module on
+       every SM. That proves `size` mode before the flag is kept, and is repeated whenever nvcc changes.
+  6. **The CPU check,** in its own job after all wheels exist:
+     - **Wheel contents:**
+       - each wheel is under 100 MB and has its license files;
+       - the plugins wheel has no `prebuilt/` path;
+       - each overlay holds exactly the expected modules (ggml_cuda, expert_io, promote, state_copy, cpu_task, and
+         FlashInfer's `specs(sm)` names), nothing but `.so` under `holon_plugins/kernels/*/prebuilt/` besides its
+         dist-info, and no path shared with another overlay.
+     - **Privacy (B1), a hard gate before any upload:** `check_private.py --wheels <dir>`, a new mode, scans every
+       member of every wheel: text members as text, and binaries through `strings`, `RECORD` and `METADATA` included.
+       Any hit fails.
+       - CI runs the generic and machine patterns.
+       - The lead runs the full patterns (`.private-patterns`, which stays untracked) on the exact artifacts before
+         asking the owner to approve an upload, and records the result.
+       - A vendored upstream string that matches is allowed by its exact text, never by skipping a file.
+     - **Fresh install:** a `python3.12 -m venv` installs every wheel by path, with the third-party pins from PyPI.
+       This proves that PyPI torch's requirements agree with the pins (B-m7). Then:
+       - `holon --help` runs;
+       - `torch.__version__` equals `uv.lock`'s;
+       - every newest lock is current (`plans.current_srcs`);
+       - `uv_lock` equals the lock's hash (D6);
+       - for every shipped SM, each extension's `module_path(sm)` is a shipped file under `prebuilt/`, and every
+         `specs(sm)` name exists in the AOT directory. `key()` needs only torch, not a GPU.
+     - `uv pip install` of the same set prints no file conflict.
+- **D11. CI: `.github/workflows/wheels.yml`** on GitHub-hosted runners (the repository is public, and Actions runs on
+  every push). It runs on `workflow_dispatch` and on `v*` tags.
+  - **Jobs:**
+    - `pure`: steps 1 and 2;
+    - `cuda`: a matrix over the three SMs, step 3, in the build image;
+    - `reference`: a matrix over the three SMs, step 4;
+    - `check`: steps 5 and 6, needing all of them.
+  - **Artifacts:** the wheels, `BUILDINFO` and the gate's reports.
+  - **Runner sizing (F10):** the standard public runner is 4 vCPU, 16 GB RAM and 14 GB free disk; it can free about
+    30 GB by removing preinstalled SDKs.
+    - Per SM, a `cuda` or `reference` job needs ≈ 72 CPU-minutes, so ≈ 20–35 min on 4 vCPU (est.).
+    - Memory: `MAX_JOBS=4` keeps nvcc at ≤ 4 × 3.4 GB, about 13.6 GB of the 16 GB; `MAX_JOBS=3` if a job runs out of
+      memory.
+    - Disk: the image (≈ 10 GB) plus the venv (≈ 6 GB) plus the build need the freeing step.
+    - Six build jobs run in parallel, far inside the 6 h job limit.
+  - **`publish`:** a manual job behind the GitHub environments `testpypi` and `pypi`, whose required reviewer is the
+    owner. It uses trusted publishing (OIDC, no tokens) and uploads exactly the artifacts D12 tested. Pending
+    publishers are registered only when the go is close.
+  - **GPU tests are not in GitHub** (no GPU runners): `scripts/release/wheel_check.sh` runs D12 on each card class
+    against a run's artifacts, and the results become evidence records.
 
-## 6. Acceptance (D12–D13)
+## 7. Acceptance (D12–D13)
 
-- **D12. GPU matrix: RTX 3090, RTX 4090, RTX 5080, RTX 5090, each on the desktop its class's locks were propagated
-  on.** Each class gets one fresh container from the public `ubuntu:24.04`, with `python3.12-venv`, `python3.12-dev`,
-  `gcc` and `g++` only. It is checked to have no `nvcc`, no `CUDA_HOME` and no `/usr/local/cuda*`. In it:
-  1. `python3.12 -m venv`, then `pip install --find-links <artifacts> holonlm`.
-  2. `holon models`: this card's locks are listed as current.
+- **D12. The image and the GPU matrix.**
+  - **The image (Q9):** the `Dockerfile` becomes the wheel-based runtime image.
+    - `ubuntu:24.04` by digest, plus `python3.12-venv python3.12-dev build-essential`.
+    - A venv at `/opt/holon/venv` gets Holon's wheels by path from the build context's `wheels/` (or
+      `holonlm==X.Y.Z` from PyPI once published).
+    - No CUDA toolkit and no prebuild. It is ≈ 6–7 GB est., against 14.8 GB.
+    - This image is D12's container; the desktops run it as an imported container image.
+    - The source-install image and its nvcc 13.0.3 (F5) go. If step 2 shows the new image is not cheap, the current
+      base is instead pinned to 13.0.0.
+  - **Per card class** (RTX 3090, RTX 4090, RTX 5080, RTX 5090), each on the desktop its class's locks were propagated
+    on. In the image, checked first:
+    - no `nvcc` on `PATH`;
+    - no `CUDA_HOME` / `CUDA_PATH`;
+    - no `/usr/local/cuda*`.
+
+    The venv's pip nvcc 13.2 (F4) is present. That nothing native compiles is shown by watching the caches, as
+    `bench/cold_start.py` does: `prebuilt/`, the AOT directory, FlashInfer's JIT directory and `~/.cache/holon/*` gain
+    nothing; only Triton's cache may.
+  1. **Origins:** `pip inspect` shows every `holonlm*` distribution with the artifacts' RECORD hashes. Installing by
+     path already means a same-version upload by someone else on PyPI cannot be chosen (F7).
+  2. **Locks:** `holon models` lists this card's locks as current.
   3. **Smoke:**
      - `holon serve` the class's Qwen3-8B Q4_K_M lock;
      - one chat request answers;
-     - the served report's `diff` against the lock is empty (`plans.served`).
-  4. **Load:** every shipped module loads on the card through its plugin's `load` (ggml_cuda, expert_io, promote,
-     state_copy, cpu_task, FlashInfer's modules). This covers the binaries no lock binds today (promote, cpu_task).
-  5. **Traces:** each snapshot trace must be byte-identical to the lock's recorded trace. The locks run on each class
-     cover the shipped binaries the locks bind:
-     - Qwen3-8B Q4_K_M everywhere (ggml_cuda, FlashInfer, Triton);
-     - Qwen3.8-27B everywhere (fla; state_copy on the RTX 5080 and RTX 5090);
-     - Qwen3-30B-A3B Q4_K_M on the RTX 5080 (expert_io, offload).
-
-     The judge comes from the tag's checkout, installed on top with `--no-deps`. `pip show` confirms the runtime is
-     still the wheels'.
-  6. **Cold start:** Triton's first compile is within `Policy.start_timeout`.
+     - `served`'s diff against the lock is empty, `uv_lock` included.
+  4. **Load:** every shipped module loads on the card through its plugin's `load`. This covers what no lock binds
+     today (promote, cpu_task).
+  5. **Traces:** every newest lock of the class (27 over the four classes; the step-3 propagation's set, on the
+     same desktops) runs its snapshot trace from the pip install. Each must be byte-identical to the lock's recorded
+     trace.
+     - **The tools,** installed for this in a second venv layer:
+       - the tag's checkout, `pip install -e ./judge -e ./tools`, editable because `holon_tools` finds its prompts
+         from `__file__`;
+       - their dependencies under a constraints file generated from `uv.lock` (accelerate, pandas, pyarrow,
+         compressed-tensors, xgrammar), plus gguf from the git rev;
+       - `--plans` on a scratch copy, since an advance writes a lock.
+     - **Unchanged runtime:** `pip freeze` before and after shows only additions; the 91 runtime packages are
+       unchanged.
+  6. **Speed against the repository install on the same desktop** (C-M1):
+     - **Serving:** an ABBA run (3 rounds, `perf_smoke`'s rule and clock screen), with the pip venv as one arm, for
+       Qwen3-8B Q4_K_M batch-1 decode and one prefill depth. The verdict must be within noise.
+       `bench/backends/`' interpreter-override pattern (as for `FREETOKEN_PYTHON`) gives the Holon arm the pip
+       venv's `python -m holon`.
+     - **First start:** `bench/cold_start.py` from the pip venv, with empty Triton and CuTe caches, plus one warm
+       start. Each is recorded against the repository install's, along with the engine process's RSS. The warm start
+       isolates `size` mode's cost (D2).
+     - **Install:**
+       - wall time of `pip install` into a fresh venv with an empty pip cache, with `uv pip install` for reference;
+       - the bytes downloaded and the installed size.
+     - **Time to first answer:** install + first `holon serve` + one chat, against the repository's clone +
+       `uv sync` + `holon prebuild` + serve.
+     - All of these are evidence records. The README states the measured numbers.
+  7. **Negative and restricted runs (RTX 5080 only):**
+     - the image without `python3.12-dev`: `holon serve` fails within seconds with D-H's message, without a retry;
+     - one run as a non-root user with site-packages read-only: nothing writes into `prebuilt/` or the AOT directory;
+     - a `pip install --upgrade` from the previous release's artifacts, once one exists: old overlay files go.
 - **D13. Acceptance (the owner's list):**
-  - in a fresh venv, `pip install` from local wheels serves on each card class with no toolkit (D12 1–4);
-  - outputs are identical to the repository install (D12 5: the locks were propagated from it);
-  - every wheel is under 100 MB (§7);
-  - `check_provenance` and the notices are green (D7, D8);
+  - in a fresh venv, a local-wheel install serves on each card class with no toolkit (D12 1–4);
+  - outputs are identical to the repository install: D10's SASS gate on every module, and D12.5's every-lock traces;
+  - speed matches the repository install, and the install-to-first-answer time is measured (D12.6);
+  - every wheel is under 100 MB (§8);
+  - `check_provenance`, the notices and the wheel privacy scan are green (D7, D8, D10);
   - the README's install section is rewritten:
-    - `pip install holonlm` and `holon serve`;
-    - the host needs: Linux x86-64, a driver for CUDA 13.0 (R580 or newer), CPython 3.12 with its headers, gcc/g++;
-    - the source install moves below it, for contributors.
+    - supported SMs first;
+    - the Ubuntu apt line, `python3.12 -m venv`, `pip install holonlm`, `holon serve`;
+    - the uv-managed alternative (`uv tool install --python 3.12 holonlm`);
+    - the measured download and disk;
+    - where it does not work: no Python 3.12, aarch64, macOS, Windows, drivers older than R580, other SMs, PEP 668
+      outside a venv; WSL2 untested;
+    - the source install, for contributors, below it.
+  - The README's sentence on run-identical traces says that identity holds per machine. Elsewhere it is "within the
+    judge's budget", since glibc's libm and the interpreter differ. D12 itself changes the interpreter (Ubuntu's
+    CPython against uv's).
 
-## 7. Wheel sizes (deflated, est.)
+## 8. Wheel sizes (deflated, est.)
 
 The ggml_cuda and FlashInfer columns come from F3. Totals add < 1 MB for the other extensions.
 
@@ -290,77 +493,147 @@ The ggml_cuda and FlashInfer columns come from F3. Totals add < 1 MB for the oth
 | `holonlm` | | | ≈ 1.6 MB (the locks, `uv.lock`) | |
 
 - Every wheel is under 100 MB with or without `size` mode. The largest leaves 39 MB of headroom, or 17 MB without.
-- If more is needed, FlashInfer's modules can take the same flag (`FLASHINFER_EXTRA_CUDAFLAGS` at prebuild).
-- A user downloads ≈ 158 MB of Holon, beside torch's 531 MB wheel and its dependencies. The development venv,
-  for scale, is 6.1 GB installed, 3.1 GB of it NVIDIA's CUDA packages.
+  FlashInfer's modules could take the same flag (`FLASHINFER_EXTRA_CUDAFLAGS`) if more is ever needed.
+- The 10 GB per-project quota allows ≈ 160 releases of the largest overlay.
+- A user downloads ≈ 158 MB of Holon within F3's ≈ 3.2 GB.
 
-## 8. Core lines, ABI and locks (D14)
+## 9. Core lines, ABI and locks (D14)
 
-- **Core:**
-  - `plans.py`: `TREE` from the checkout or `holon.locks` (≈ 10 lines);
-  - `RUNTIME` renamed (`holonlm-core`).
-  - Below 5,300 of 6,000 lines.
-- **ABI:** no `holon.api` change. The new entry-point group `holon.locks` is additive and goes into design §4.1.
-  The `[build]` module CLI is unchanged.
-- **std:** three imports and the vendored package.
-- **plugins:** six loaders (shipped directory first), the FlashInfer AOT directory, ggml_cuda's flag, the MTP pack
-  hint.
-- **Every lock is outdated by this change** (the core, `std.weights.gguf`, `std.mixers.qsa`, `std.moe`, the kernel
-  plugins; the rename also moves `uv_lock`).
+- **Core** (≈ 22 lines, below 5,300 of 6,000):
+  - `plans.py`: `TREE` by `find_spec` (2 lines);
+  - `uv_lock` against the installed versions (≈ 12);
+  - `src_hash` filtering before it reads (1);
+  - `RUNTIME` renamed;
+  - the `"host"` failure kind and the supervisor's give-up (≈ 6).
+- **ABI:** `holon.api.HostError` is additive (a new contract, free under invariant 6; `core/abi.txt` regenerated).
+  No entry-point group; the `[build]` CLI is unchanged.
+- **std:** five imports, the vendored package and three `[provenance]` sections.
+- **plugins:**
+  - `holon_plugins/host.py`, about 15 lines of host checks;
+  - six loaders (shipped directory first, `extension.py` in the key, the refusal);
+  - the FlashInfer AOT directory, the second-SM refusal and the norm assert;
+  - F8's re-exec;
+  - ggml_cuda's flag;
+  - the Triton plugins' host check;
+  - the MTP pack hint.
+- **Every lock is outdated** (the core; `std.weights.gguf`, `std.mixers.qsa`, `std.moe`; the kernel plugins; the
+  rename also moves `uv_lock`).
   - **One propagation round** on the four classes closes it: 2-run traces byte-identical, no L2 expected, because no
     numerics change.
-  - This is the "next relock" the plan anticipated.
-  - The wheels are then built from the propagated commit, so `holon_locks` holds locks that pin the wheels' code.
+  - The wheels are built from the propagated commit, so `holon_locks` pins the wheels' code.
 
-## 9. Steps
+## 10. Steps
 
-0. **No-toolkit probe (first, ≈ ½ day, one RTX 5080):** today's environment, with the FlashInfer AOT override
-   prototyped under `local/`, in an Ubuntu 24.04 container without a toolkit. `holon serve` Qwen3-8B Q4_K_M and
-   bf16, then Qwen3.8-27B. This settles F4's unknowns (Triton's headers, CuTe DSL, FlashInfer loading) before any
-   build code.
-1. **Code:** D7 (gguf), the rename, D6 (core), D5 (loaders, FlashInfer), D2's flag, D8 (symlinks, notices,
-   provenance), D10's script; CPU tests.
-2. **Local build:** the wheels in docker on the development host; sizes, the load-time cost of `size` mode, the CPU
-   check.
+0. **No-toolkit probe** (first, ≈ ½ day, one RTX 5080). Today's environment, with the FlashInfer AOT override
+   prototyped under `local/`, runs in an Ubuntu 24.04 container without a toolkit. `holon serve` Qwen3-8B Q4_K_M and
+   bf16, then Qwen3.8-27B. This settles F4's unknowns before any build code.
+1. **Code:**
+   - D7 (gguf, stamps), the rename and the `holon` script;
+   - D6 (core: `TREE`, `uv_lock`, `src_hash`) and D-H (`HostError`, `host.py`);
+   - D5 (loaders, keys, refusal, FlashInfer, F8);
+   - D2's flag and D8 (symlinks, notices, provenance);
+   - D10's script, the privacy `--wheels` mode, the Dockerfile;
+   - CPU tests.
+2. **Local build** of all wheels in docker on the development host:
+   - sizes;
+   - the full SASS comparisons (compressed against uncompressed; Rocky against Ubuntu);
+   - the CPU check and the full-pattern privacy scan.
 3. **Propagation** of the 27 locks (repository install, four classes), committed.
-4. **Merge;** then the `wheels` workflow, dispatched on `main`, builds the artifacts.
-5. **D12 on the artifacts**, four classes; evidence records.
-6. **README;** then the owner's go for TestPyPI and PyPI (Q6).
+4. **Merge;** then `wheels.yml`, dispatched on `main`, builds the artifacts.
+5. **D12 on the artifacts,** four classes; evidence records.
+6. **README;** then the owner's go for TestPyPI, then PyPI.
 
-## 10. Risks
+## 11. Risks
 
-- **A trace moves between the wheel and the repository install.** The binaries come from the same nvcc. The host
-  compiler preprocesses device code with its own libstdc++ headers, though: gcc-toolset-13 on Rocky 8 against the
-  locks' Ubuntu gcc 13. If a trace moves, the overlays' compiler moves to the locks' exact gcc. Failing that, the
-  propagation runs on the overlay binaries, so the wheels become the reference.
+- **The SASS gate finds a difference** (Rocky's gcc-toolset-13 against Ubuntu's gcc 13). The host compiler
+  preprocesses device code with its own libstdc++ headers. The gate names the kernels first, before any GPU time.
+  The fallbacks, in order, with their costs:
+  1. **Match Ubuntu's gcc point release in the build image** (gcc-toolset-13's 13.x against Ubuntu's 13.3, est.). The
+     cost: a custom compiler in the image.
+  2. **Build the overlays on Ubuntu 24.04.** The wheels become `manylinux_2_39`. They drop hosts with older glibc:
+     Ubuntu 22.04 (2.35), Debian 12 (2.36), RHEL/Rocky 9 (2.34). They keep Ubuntu 24.04+, Debian 13 and Fedora 40+.
+     torch itself would still install on the dropped hosts; Holon would not. This is the owner's call.
+  3. **Propagate from the overlay binaries.** Then repository installs become the unverified side. They already
+     build with whatever gcc a contributor has, so trace identity across host compilers was never guaranteed for
+     them either.
 - **Step 0 finds another runtime compile** (e.g. CuTe DSL wanting `ptxas`). Then its pip package becomes a pin, or a
   requirement is documented.
-- **GitHub runner limits:** disk and the 6 h job limit. Fallback: build on the development host with the same
-  script, and upload the artifacts from a CI job that only publishes.
-- **Python other than 3.12:** pip reports no matching distribution. The README says so (Q4).
-- **Names taken before the first upload** (F7; Q6).
+- **The privacy scan's false positives in vendored strings.** They are allowed by exact text; a real hit stops the
+  upload.
+- **Python other than 3.12:** `holonlm`'s `requires-python` makes pip say so plainly. The README points to uv.
+- **Names taken before the first upload** (F7): the size-limit request and the pending publishers are filed only when
+  the go is close.
 - **The RTX 3090 27B trace differs by desktop** (plan §10, open): D12 runs on the desktop that propagated.
 
-## 11. Owner questions
+## 12. Owner questions: the defaults this design builds to
 
-1. **Rename the core distribution to `holonlm-core`**, so that `holonlm` is the one-line install (D1)? Default: yes.
-2. **Pin the whole runtime closure exactly in `holonlm`** (87 pins; D9)? This gives reproducible locks and an honest
-   `uv_lock`, but fixes numpy, fastapi and the others in the venv. The alternative pins only what shapes outputs
-   (torch, triton, flashinfer, cutlass-dsl, xgrammar, transformers, tokenizers, jinja2) and puts floors on the rest.
-   Default: all.
-3. **Three per-SM overlays**, each under 100 MB with no PyPI request? Or one `holonlm-cuda` (≈ 155 MB) after a
-   file-size-limit request to PyPI (and TestPyPI), whose wait is out of our hands? Default: per SM.
-4. **Python 3.12 only** in v1 (cp312 binaries, Ubuntu 24.04's Python)? 3.13 would need cp313 overlays and a trace
-   check. Default: 3.12, 3.13 later.
-5. **A C compiler and Python's headers as host requirements** (Triton's launcher)? Default: yes, documented; the
-   alternative is no small change.
+The coordinator set these defaults; the owner has not answered.
+
+1. **Rename the core to `holonlm-core`:** yes.
+2. **Exact pins:** in `holonlm` only; the components keep minimums. The README recommends `uv tool install` or
+   `pipx`.
+3. **Per-SM overlays:** yes. A PyPI size-limit request is filed in parallel; if granted before the first upload, the
+   binaries fold into `holonlm-plugins`.
+4. **Python 3.12 only:** yes.
+5. **gcc and Python's headers as requirements:** yes, with D-H's fail-fast check.
 6. **Publishing:**
-   - trusted publishing from GitHub Actions, with you as the required reviewer of the `testpypi` and `pypi`
-     environments;
-   - a TestPyPI upload counts as public: your go there too?
-   - register PyPI "pending publishers" now? They do not reserve the names.
-7. **Leave `holonlm-judge`, `holonlm-tools` and `holonlm-testing` unpublished?** Default: yes.
-8. **`kernels.ggml_cpu` not prebuilt** (an opt-in no lock uses; `holon prebuild` builds it with gcc/g++)? Default:
-   yes.
-9. **Docker:** rebase the image on the wheels (a runtime base, no devel toolkit, nvcc 13.0.0 binaries; F5) in a
-   later step? Default: after this milestone.
+   - trusted publishing, with the owner as approver;
+   - TestPyPI also needs the owner's go;
+   - publishers are registered only when the go is close.
+7. **Leave `holonlm-judge`, `holonlm-tools` and `holonlm-testing` unpublished:** yes.
+8. **Don't prebuild `kernels.ggml_cpu`:** yes; its message names gcc/g++.
+9. **Docker:** the wheel-based image in this milestone, as D12's container; if that is not cheap, pin the current base
+   to 13.0.0.
+
+## 13. The panel's findings on rev 1, answered
+
+A: correctness and robustness. B: architecture and simplicity. C: build, performance and user experience. The panel's
+reports are not in the repository; each row says what changed.
+
+| finding | answer | where |
+|---|---|---|
+| **B-B1** binaries embed build-host paths; nothing scans wheels | **Fixed.** Measured as F9 (51 paths in today's ggml_cuda module). Build only inside the image at `/holon`, plus `-ffile-prefix-map`. `check_private --wheels` covers members, `strings` of binaries, RECORD and METADATA; CI runs the generic patterns, the lead the full ones on the exact artifacts. A hard gate before upload | D4, D10.6 |
+| **A-M1** three models cannot back "identical outputs" | **Fixed.** Per-function SASS gate on every shipped module against the lock environment's build, plus every newest lock's trace per class on the pip install | D10.4–5, D12.5 |
+| **A-M2** `uv_lock` is a constant in a pip install | **Fixed.** `uv_lock` compares installed versions with the lock's (public part for local labels), else `installed:<hash>`, plus a start warning naming the packages | D6 |
+| **A-M3** a gguf re-vendor moves no lock | **Fixed** in B-M1's form: `[provenance]` with the commit in the three using units' manifests, enforced by `vendor.sh --check`. All five imports named | D7, F6 |
+| **A-M4** `pipx install holonlm` cannot work | **Fixed.** `holon` is declared by `holonlm` and the workspace root, not by `holonlm-core` | D1 |
+| **A-M5** missing compiler or headers fail slowly through retries | **Fixed.** `HostError`, a final `"host"` failure kind, `require_c_toolchain()` at the Triton plugins' load, the apt line, uv-managed Python, a negative container | D-H, D12.7 |
+| **A-M6** another torch is accepted; FlashInfer is not keyed on CUDA | **Fixed.** The refusal with the reinstall command; FlashInfer's directory names CUDA (and TVM FFI, B-m6); the README says a venv without extra indexes | D5, D13 |
+| **A-m1** lock-root specification | **Changed** to B-m1's `find_spec`. (a) no package: the checkout path and an amended warning; (b) `find_spec` imports nothing, so it is import-safe; (c) the heuristic is gone, since the installed package wins; (d) moot | D6 |
+| **A-m2** the CPU check cannot see the overlays | **Fixed.** `check` is its own job after every wheel; the overlay namelists, the lookups resolving to shipped files, and `torch.__version__` against `uv.lock` | D10.6, D11 |
+| **A-m3** pin the build image's host compiler | **Fixed.** gcc-toolset-13 for `-ccbin`, `CC`/`CXX` and ninja; `gcc 13.*` and `V13.0.48` asserted; recorded in `BUILDINFO` | D4, D10.3 |
+| **A-m4** keys leave out the recipe | **Fixed.** `extension.py` joins the five keys | D4 |
+| **A-m5** FlashInfer edge cases | **Fixed:** (a) the AOT directory is always set; (b) the skip tests each `aot_path`; (c) a second SM raises; (d) the CuTe-norm assert | D5 |
+| **A-m6** the pip closure holds nvcc 13.2 | **Fixed.** Noted in F4; D12 checks `PATH`, `CUDA_HOME` and `/usr/local/cuda*`, and proves "nothing compiles" by watching caches | F4, D12 |
+| **A-m7** markers in the pins; torch's METADATA | **Fixed.** Markers carried, one version per name; the METADATA `Requires-Dist` diffed: identical | D9, F2 |
+| **A-m8** the judge setup for traces | **Fixed.** Editable judge and tools, dependencies under `uv.lock` constraints, gguf from git, a scratch `--plans`, a `pip freeze` diff | D12.5 |
+| **A-m9** dependency confusion with `--find-links` | **Fixed.** Install by path; `pip inspect` against the artifacts' RECORD hashes | D12.1 |
+| **A-m10** F8's fix | **Fixed** as one process per SM, with a mocked-subprocess test | D5 |
+| **B-M1** gguf outside every `src` | **Fixed** (A-M3's row) | D7 |
+| **B-M2** `src_hash` reads the overlays | **Fixed.** Filter before reading; one core line, no hash moves, with its test | D6 |
+| **B-M3** CI on a private repository | **Rejected; the premise is outdated.** The repository is public, and Actions runs on every push, so `wheels.yml` runs on GitHub-hosted 4-vCPU runners. Runner time and size are measured (F10, D11). A PyPI upload does not change the source's visibility. `[project.urls]` names the public repository | D11, D8 |
+| **B-m1** `find_spec("holon_locks")` instead of an entry-point group | **Taken** | D6 |
+| **B-m2** `uv_lock` reports the shipped file | **Fixed** by A-M2's check rather than a note | D6 |
+| **B-m3** `--no-deps` judge cannot import `gguf` | **Fixed** by A-m8's install | D12.5 |
+| **B-m4** two gguf copies; ruff | **Taken.** No `isinstance`/`is` across the copies (said in the vendored `__init__.py`); `std/holon_std/vendor` in ruff's exclusions | D7 |
+| **B-m5** assert overlay ownership | **Taken.** No `prebuilt/` in the plugins wheel, `.so` only under `prebuilt/` in overlays, disjoint paths, no `uv pip` conflict. `prebuilt/` is gitignored in the plugin directories | D10.6 |
+| **B-m6** TVM FFI in FlashInfer's directory | **Taken**, with the comment on the third-party global | D5 |
+| **B-m7** pin asserts | **Taken.** One version per name; the fresh PyPI install stays mandatory | D9, D10.6 |
+| **B-m8** sdist policy | **Taken.** Wheels only | D1 |
+| **C-M1** no speed, first-start or install acceptance | **Fixed.** ABBA with the pip venv as an arm, cold and warm start, install time, download and disk, and install-to-first-answer, each against the repository install on the same desktop | D12.6 |
+| **C-M2** SASS evidence too thin; the costs of §10's fallback | **Fixed.** The full per-function gates (compressed against uncompressed, once; Rocky against Ubuntu, every build); every lock's trace; the `manylinux_2_39` cost and the "wheels become the reference" inversion spelled out | D10.5, D12.5, §11 |
+| **C-M3** pipx / uv tool | **Fixed** (A-M4's row); `uvx --from holonlm holon` too | D1 |
+| **C-M4** the CPU check does not prove that binaries are found; `.gitignore` can empty an overlay | **Fixed.** Overlay projects generated outside any checkout, `ignore-vcs` and `artifacts`; namelists; lookups resolved in a fresh venv | D10.3, D10.6 |
+| **C-M5** host prerequisites | **Fixed** (A-M5's row), with the README's apt line and the uv path | D-H, D13 |
+| **C-m1** `size` mode costs | **Taken.** Warm `start_s`, RSS, and the D12 desktops' driver versions recorded (the README's R580 floor checked against them) | D2, D12.6 |
+| **C-m2** build provenance | **Taken.** Compiler asserts; `BUILDINFO` | D4, D10.3 |
+| **C-m3** torch from another index | **Fixed** (A-M6's row) | D5 |
+| **C-m4** README flow and where it fails | **Taken**, as D13's list | D13 |
+| **C-m5** the judge install | **Fixed** (A-m8's row) | D12.5 |
+| **C-m6** no sdists; origins | **Taken** | D1, D12.1 |
+| **C-m7** MTP recipe without git | **Taken.** Archive URLs for gguf-py and Strata | D7 |
+| **C-m8** read-only and upgrade runs | **Taken** (the upgrade once a previous release exists) | D12.7 |
+| **C-m9** CI estimate | **Measured** (F10); disk freeing kept | D11 |
+| **C-m10** cross-host traces | **Taken** as a README sentence | D13 |
+| **C on Q5** shipping Triton launchers later | **Recorded** as the way out, not v1 | D-H |
+| **C on Q9** the wheel-based Docker image now | **Taken** as D12's container, with the 13.0.0 pin as the fallback | D12 |
