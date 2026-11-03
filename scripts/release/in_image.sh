@@ -7,14 +7,15 @@
 set -euo pipefail
 kind=$1 ref=$2 out=$3; shift 3
 here=$(cd "$(dirname "$0")" && pwd)
+root=$(git -C "$here" rev-parse --show-toplevel)         # git archive in a subdirectory archives only it
 image=holon-$kind:$(sha256sum "$here/$kind.Dockerfile" | cut -c1-12)
 docker image inspect "$image" > /dev/null 2>&1 || docker build -q -t "$image" -f "$here/$kind.Dockerfile" "$here"
 mkdir -p "$out"
-cid=$(docker create -i -e HOLON_COMMIT="$(git -C "$here" rev-parse "$ref")" \
+cid=$(docker create -i -e HOLON_COMMIT="$(git -C "$root" rev-parse "$ref")" \
   -e HOLON_IMAGE="$(sed -n 's/^FROM //p' "$here/$kind.Dockerfile")" -e MAX_JOBS="${MAX_JOBS:-3}" "$image" \
   bash -c 'mkdir /holon && tar -x -C /holon && cd /holon && uv python install -q 3.12 &&
            uv run --no-project --python 3.12 --with packaging python scripts/release/build_wheels.py "$@"' -- "$@")
 trap 'docker rm -f "$cid" > /dev/null' EXIT
 docker cp -q "$out/." "$cid:/out"
-git -C "$here" archive --format=tar "$ref" | docker start -a -i "$cid"
+git -C "$root" archive --format=tar "$ref" | docker start -a -i "$cid"
 docker cp -q "$cid:/out/." "$out"
