@@ -254,7 +254,8 @@ def _contents(root: pathlib.Path) -> list[pathlib.Path]:
             have = {m.split("/")[2] for m in files}
             msgs += [f"{w.name}: no modules of {sorted(want - have)}"] * bool(want - have)
             for m in files:
-                msgs += [f"{m}: in {w.name} and {owner[m]}"] * (m in owner)
+                if m in owner:
+                    msgs.append(f"{m}: in {w.name} and {owner[m]}")
                 owner[m] = w.name
         elif w.name.startswith("holonlm_plugins"):
             msgs += [f"{w.name}: ships {m}" for m in files if "/prebuilt/" in m]
