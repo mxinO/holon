@@ -200,8 +200,10 @@ ANON = re.compile(r"\d+_GLOBAL__N__[0-9a-f]+_\d+_\w+?_[0-9a-f]{8}_\d+")    # an 
 
 def sass_hashes(so: pathlib.Path) -> collections.Counter[tuple[str, str]]:
     """(function, hash of its SASS) for every function of every cubin in `so`, streamed from `cuobjdump -sass` with
-    the address columns stripped (the module's own load addresses are not code). An anonymous namespace's id is
-    nvcc's hash of the translation unit, which the host compiler's headers move, so it is read as one name."""
+    the address columns stripped (the module's own load addresses are not code). Only instruction lines count: a
+    cubin's header (its arch, and "compressed" in a compressed fatbin) would otherwise join the function before it.
+    An anonymous namespace's id is nvcc's hash of the translation unit, which the host compiler's headers move, so
+    it is read as one name."""
     out: collections.Counter[tuple[str, str]] = collections.Counter()
     name, h = None, None
     proc = subprocess.Popen(["cuobjdump", "-sass", str(so)], stdout=subprocess.PIPE, text=True)
@@ -211,7 +213,7 @@ def sass_hashes(so: pathlib.Path) -> collections.Counter[tuple[str, str]]:
             if name:
                 out[(name, h.hexdigest())] += 1
             name, h = m.group(1), hashlib.sha256()
-        elif name and line.strip() and not line.lstrip().startswith(("Fatbin", "code for", "arch =", "...")):
+        elif name and line.lstrip().startswith("/*"):      # instructions and encodings, never a cubin's header
             h.update(re.sub(r"/\*[0-9a-f]{4,}\*/", "", line).strip().encode() + b"\n")
     if name:
         out[(name, h.hexdigest())] += 1
