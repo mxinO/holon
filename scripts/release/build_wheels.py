@@ -218,20 +218,28 @@ def reference(sm: int, out: pathlib.Path) -> None:
     (tree / "BUILDINFO").write_text(json.dumps(built | versions, indent=1) + "\n")
 
 
-ANON = re.compile(r"\d+_GLOBAL__N__[0-9a-f]+_\d+_\w+?_[0-9a-f]{8}_\d+")    # an anonymous namespace's mangled id
+def anon(text: str) -> str:
+    """`text` with each anonymous namespace's mangled name read as `_ANON_`: its length prefix and the characters it
+    counts (`38_GLOBAL__N__a473880c_6_api_cu_383b0930`). nvcc's id hashes the translation unit, which the host
+    compiler's headers move."""
+    out, at = [], 0
+    for m in re.finditer(r"(\d+)(?=_GLOBAL__N__)", text):
+        if m.start() >= at:
+            out.append(text[at:m.start()] + "_ANON_")
+            at = m.end() + int(m.group(1))
+    return "".join(out) + text[at:]
 
 
 def sass_hashes(so: pathlib.Path) -> collections.Counter[tuple[str, str]]:
     """(function, hash of its SASS) for every function of every cubin in `so`, streamed from `cuobjdump -sass` with
     the address columns stripped (the module's own load addresses are not code). Only instruction lines count: a
     cubin's header (its arch, and "compressed" in a compressed fatbin) would otherwise join the function before it.
-    An anonymous namespace's id is nvcc's hash of the translation unit, which the host compiler's headers move, so
-    it is read as one name."""
+    Anonymous namespaces are read as one name (`anon`)."""
     out: collections.Counter[tuple[str, str]] = collections.Counter()
     name, h = None, None
     proc = subprocess.Popen(["cuobjdump", "-sass", str(so)], stdout=subprocess.PIPE, text=True)
     for line in proc.stdout:
-        line = ANON.sub("_ANON_", line)
+        line = anon(line)
         if (m := re.match(r"\s*Function : (\S+)", line)):
             if name:
                 out[(name, h.hexdigest())] += 1
@@ -265,7 +273,7 @@ def data_hashes(so: pathlib.Path) -> collections.Counter[tuple[str, str]]:
                 name = data[strings + name_at:data.index(b"\0", strings + name_at)].decode()
                 if name.startswith((".nv.constant", ".nv.global.init")):
                     body = b"" if kind == 8 else data[offset:offset + length]          # SHT_NOBITS: no bytes
-                    out[(ANON.sub("_ANON_", name), hashlib.sha256(body).hexdigest())] += 1
+                    out[(anon(name), hashlib.sha256(body).hexdigest())] += 1
     return out
 
 

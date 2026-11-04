@@ -345,10 +345,11 @@ class Supervisor:
             return False
         self.version = older[0]
         self.counters["rollbacks"] += 1
-        _say(f"trying configuration {self.version} of {len(self.history)} after a host failure (every configuration "
-             "starts once)" if kind == "host" else f"rolled back to configuration {self.version} of "
-             f"{len(self.history)} after " + (f"a {kind} failure" if kind else "crashes")
-             + f" {self.memory_only.get(self.version, '')}")
+        if kind == "host":
+            _say(f"trying configuration {self.version} of {len(self.history)} after a host failure (each starts once)")
+        else:
+            _say(f"rolled back to configuration {self.version} of {len(self.history)} after "
+                 + (f"a {kind} failure" if kind else "crashes") + f" {self.memory_only.get(self.version, '')}")
         return True
 
     async def _launch(self) -> None:

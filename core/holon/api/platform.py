@@ -6,9 +6,10 @@ import dataclasses
 
 
 class HostError(RuntimeError):
-    """The host lacks something a plugin needs (a C compiler, a fitting torch build, an add-on of prebuilt modules: the
-    message names it and the fix), so a retry cannot help: the start is refused with kind "host", with no retry, each
-    configuration tried once (ABI 1.9; docs/dev/v1-pip.md D-H)."""
+    """The host lacks something a plugin needs (a C compiler, a fitting torch build, an add-on of prebuilt modules), or
+    the process asks for what this host's modules cannot serve (a second GPU architecture): the message names it and
+    the fix. A retry cannot help, so the start is refused with kind "host": no retry, each configuration tried once
+    (ABI 1.9; docs/dev/v1-pip.md D-H)."""
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

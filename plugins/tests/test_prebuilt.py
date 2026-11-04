@@ -34,6 +34,23 @@ def test_the_c_toolchain_check_names_what_is_missing_and_the_fix(monkeypatch):
     monkeypatch.setenv("CC", "/nonexistent/cc")                           # a $CC that is not there: refused, no retry
     with pytest.raises(HostError, match=r"\(/nonexistent/cc\) that cannot build a Python extension: error: .*nonexist"):
         check()
+    monkeypatch.setenv("CC", "ccache gcc")                                # one program, as Triton runs it
+    with pytest.raises(HostError, match=r"\(ccache gcc\) that cannot build"):
+        check()
+
+
+def test_only_a_cuda_13_nvcc_counts_as_a_toolkit(tmp_path, monkeypatch):
+    for v in ("CUDA_HOME", "CUDA_PATH"):
+        monkeypatch.delenv(v, raising=False)
+    nvcc = tmp_path / "nvcc"
+    monkeypatch.setattr(host.shutil, "which", lambda name: str(nvcc) if name == "nvcc" else None)
+    monkeypatch.setattr(host.pathlib.Path, "is_file", lambda p: str(p) == str(nvcc) and p.exists())
+    for release, ok in (("12.4", False), (torch.version.cuda, True)):
+        nvcc.write_text(f"#!/bin/sh\necho 'Cuda compilation tools, release {release}, V{release}.1'\n")
+        nvcc.chmod(0o755)
+        host.toolkit.cache_clear()
+        assert host.toolkit() is ok, release
+    host.toolkit.cache_clear()
 
 
 def test_every_triton_user_checks_the_c_toolchain_at_load():
@@ -65,20 +82,21 @@ def test_a_torch_the_shipped_modules_do_not_fit_is_refused_with_the_fix(tmp_path
     want = ext.key(120)
     assert "torch" + torch.__version__ in want
     (tmp_path / want.replace(f"torch{torch.__version__}", "torch2.11.0+cu130x")).mkdir()       # another torch build
-    with pytest.raises(HostError, match=r"torch is .*pip install --force-reinstall \"torch==2.11.0\+cu130\" --index"):
+    with pytest.raises(HostError, match=r"torch is .*install --force-reinstall --no-deps \"torch==2.11.0\+cu130\""):
         ext.load(120)
     for d in tmp_path.iterdir():
         d.rmdir()
     (tmp_path / (want[:-16] + "0" * 16)).mkdir()                            # this torch, other sources: another version
-    with pytest.raises(ext.NotBuilt, match=r"another Holon version.*force-reinstall holonlm=="):
+    with pytest.raises(HostError, match=r"another Holon version.*force-reinstall holonlm=="):
         ext.load(120)
     (tmp_path / (want[:-16] + "0" * 16)).rmdir()
-    (tmp_path / ext.key(86)).mkdir()                                        # another SM only:
-    monkeypatch.setattr(host, "toolkit", lambda: True)                      # with a toolkit, prebuild names it
-    with pytest.raises(ext.NotBuilt, match=r"no prebuilt module for sm 120.*CUDA 13's nvcc"):
+    (tmp_path / ext.key(86)).mkdir()                                        # another SM only: the add-on, always,
+    monkeypatch.setattr(host, "toolkit", lambda: True)                      # and with a CUDA 13 toolkit the prebuild
+    with pytest.raises(HostError, match=r"\(sm 120\) are not installed: `pip install holonlm-cuda-sm120==.*source "
+                                        r"install builds them with: python -m holon_plugins.kernels.expert_io"):
         ext.load(120)
-    monkeypatch.setattr(host, "toolkit", lambda: False)                     # without, the add-on to install, at once
-    with pytest.raises(HostError, match=r"\(sm 120\) are not installed: `pip install holonlm-cuda-sm120=="):
+    monkeypatch.setattr(host, "toolkit", lambda: False)
+    with pytest.raises(HostError, match=r"\(sm 120\) are not installed: `pip install holonlm-cuda-sm120==[^;]*$"):
         ext.load(120)
     with pytest.raises(HostError, match=r"this GPU is sm 80, and Holon's prebuilt modules cover sm 86, 89, 120"):
         ext.load(80)
@@ -101,6 +119,8 @@ def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch):
     aot.directory.cache_clear()
     monkeypatch.setattr(host, "toolkit", lambda: True)
     monkeypatch.setattr(aot.env, "FLASHINFER_JIT_DIR", tmp_path / "jit")
+    needed = ["rope", "silu_and_mul"]                                       # the modules Holon needs, by name
+    monkeypatch.setattr(aot.prebuild, "specs", lambda sm: [type("Spec", (), {"name": n}) for n in needed])
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
     capability = {"cuda:0": (8, 6), "cuda:1": (8, 9)}
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda d: capability[d])
@@ -114,11 +134,14 @@ def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch):
     (tmp_path / "prebuilt" / foreign).mkdir(parents=True)
     with pytest.raises(HostError, match="prebuilt modules are for CUDA 13.0"):
         aot.bind("cuda:1")
-    (tmp_path / "jit" / "rope").mkdir(parents=True)                         # the user built FlashInfer's own:
-    (tmp_path / "jit" / "rope" / "rope.so").write_bytes(b"")                # theirs serve, as the extensions' cache
+    for n in needed:                                                        # the user built every one Holon needs:
+        (tmp_path / "jit" / n).mkdir(parents=True)                          # theirs serve, as the extensions' cache
+        (tmp_path / "jit" / n / f"{n}.so").write_bytes(b"")
     aot.bind("cuda:1")
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
-    (tmp_path / "jit" / "rope" / "rope.so").unlink()
+    (tmp_path / "jit" / "rope" / "rope.so").unlink()                        # one missing: not theirs, so refused
+    with pytest.raises(HostError, match="prebuilt modules are for CUDA 13.0"):
+        aot.bind("cuda:1")
     for d in (tmp_path / "prebuilt").glob("*-cu12.8-*"):
         d.rmdir()
     monkeypatch.setattr(host, "toolkit", lambda: False)                     # no add-on module, no toolkit: refused

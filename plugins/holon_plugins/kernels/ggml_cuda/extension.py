@@ -72,7 +72,7 @@ def load(sm: int) -> ModuleType:
         raise NotBuilt(f"kernels.ggml_cuda supports sm {sorted(ARCHS)}, not sm {sm}")
     path = module_path(sm, k := key(sm))
     if not path.is_file():
-        raise host.missing("kernels.ggml_cuda", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}", NotBuilt)
+        raise host.missing("kernels.ggml_cuda", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}")
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

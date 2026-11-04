@@ -122,6 +122,10 @@ uv run holon prebuild                # GGUF kernels and FlashInfer modules for t
 `holon prebuild --sm 86 89 120` names the targets instead, and `MAX_JOBS=N` caps the parallel compiles.
 `uv sync --frozen --group dev` also installs the lock tools (`python -m holon_tools`), which make the offload locks'
 routing profiles, and the test dependencies.
+The locks were verified with modules built by Ubuntu 24.04's gcc 13, which defines `_FORTIFY_SOURCE=3` by default;
+nvcc preprocesses device code with the host compiler's headers, so on another distribution build with
+`NVCC_APPEND_FLAGS=-D_FORTIFY_SOURCE=3` (on SM 86 one FlashInfer module's code differs without it:
+[docs/dev/v1-pip.md](docs/dev/v1-pip.md) §16).
 
 ### Docker
 

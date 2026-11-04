@@ -109,7 +109,7 @@ def test_a_per_shape_floor_routes_as_the_table_does(floor):
     `mmvq_rows` picks today at its step rows on its class (`compare` refuses a candidate whose paths differ), so a
     change to the crossover table that moves a shape must re-record the floor. Needs the GGUF file and a prebuilt
     extension (llama.cpp's rule is host code), no GPU."""
-    from holon.api import Fingerprint
+    from holon.api import Fingerprint, HostError
     from holon_plugins.kernels.ggml_cuda import extension, plugin
     from huggingface_hub.constants import HF_HUB_CACHE
     from safetensors import safe_open
@@ -121,7 +121,7 @@ def test_a_per_shape_floor_routes_as_the_table_does(floor):
         pytest.skip(f"{meta['model']} not cached")
     try:
         plugin.rule_module(CLASS_SM[meta["crossover"]])
-    except extension.NotBuilt:
+    except (extension.NotBuilt, HostError):           # none built, or none installed (a HostError)
         pytest.skip("no prebuilt ggml extension")
     paths = judge_gguf.row_paths(path, meta["step_rows"], Fingerprint(gpu=meta["crossover"],
                                  sm=CLASS_SM[meta["crossover"]], vram_gib=0, toolchain=""))

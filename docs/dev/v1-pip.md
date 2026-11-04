@@ -210,13 +210,18 @@ install.
     does not, for example after `pip install -U holonlm-plugins` alone. The message is its own: "the prebuilt
     modules are from another Holon version: `pip install --force-reinstall holonlm==X.Y.Z`". This is a `NotBuilt`,
     not a `HostError`.
-  - **When nothing matches and torch is right** (a missing add-on, another SM, a components-only install), and no
-    CUDA toolkit could build the module: `HostError`, refused at once (code review, A-C2 and C-C1). The message names
-    the add-on to install (`pip install holonlm-cuda-sm<N>==<v>`, or `pip install holonlm`), or, for an SM no add-on
-    covers, that it needs a source install with CUDA 13's nvcc. One helper words it for every extension and
-    FlashInfer (`holon_plugins/host.py`: `missing`, `no_add_on`).
-    - **With a toolkit** (a source install): today's `NotBuilt`, naming `holon prebuild`.
-    - FlashInfer counts the user's own modules in its JIT cache as built, as the extensions count their cache.
+  - **When nothing matches** (a missing add-on, another SM, a components-only install, a source install not yet
+    prebuilt): always `HostError`, refused at once, since the engine never compiles (code review, A-C2 and C-C1; its
+    re-review, C-R2). One helper words it for every extension and FlashInfer (`holon_plugins/host.py`: `missing`,
+    `no_add_on`):
+    - another torch build's add-on, or another Holon version's: as above;
+    - SM 86, 89 or 120: the add-on to install (`pip install holonlm-cuda-sm<N>==<v>`, or `pip install holonlm`),
+      and with a CUDA 13 toolkit also the prebuild command;
+    - another SM: a source install with CUDA 13's nvcc (with one, the prebuild command).
+    - **A toolkit counts only with an nvcc of torch's CUDA major (13)**: an A100's CUDA 12 cannot build them.
+    - **FlashInfer** counts the user's own modules as built only when every module Holon needs (`prebuild.specs(sm)`
+      by name) is in its JIT cache. With a CUDA 13 toolkit it may still build a missing one itself, at first use, as
+      a source install always has.
 
 ## 4. Host prerequisites, failing fast (D-H)
 
@@ -460,10 +465,12 @@ install.
       need the freeing step.
     - Six build jobs run in parallel, far inside the 6 h job limit.
   - **Publishing is `.github/workflows/publish.yml`, never a rebuild** (code review, A-C1, B-M3, C-C2). The rule:
-    - D12 runs on one `wheels.yml` run's artifacts, and its evidence record lists each wheel's sha256;
+    - D12 runs on one `wheels.yml` run's artifacts, and its runner writes the evidence record: `sha256sum *.whl`
+      output (`<sha256>  <file>` lines), committed under `docs/dev/evidence/`;
     - the publish dispatch names that run and that record;
-    - it downloads that run's `wheels` artifact and uploads it only if the files are exactly the record's, behind the
-      GitHub environment (`testpypi`, `pypi`) whose required reviewer is the owner;
+    - it downloads that run's `wheels` artifact, checks it with `sha256sum --strict -c` and that its file names are
+      the record's, no more, and uploads it only then, behind the GitHub environment (`testpypi`, `pypi`) whose
+      required reviewer is the owner;
     - trusted publishing (OIDC), no tokens. Pending publishers are registered only when the go is close.
   - **GPU tests are not in GitHub** (no GPU runners): `scripts/release/wheel_check.sh` runs D12 on each card class
     against a run's artifacts, and the results become evidence records.
@@ -856,3 +863,22 @@ Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
 | **B m9** leftovers | **Fixed:** `_spec` deleted, the wheel count from `SMS`, `OWN` without the root |
 | **B m10** two ways to tell a foreign torch | **Kept**, and said in `aot.directory`'s docstring |
 | **A, note** "host" still rolls back | **Kept** (rev 2.1, B's form), the log line reworded |
+
+**The re-review of `ccb15f08..c7052db8`.** B found nothing blocking; A's and C's remaining items:
+
+| finding | answer |
+|---|---|
+| **C-R1** the PyPI page's GPU table | **Fixed.** Keyed by SM with the card families; tuned locks named for four cards, the others served with automatic defaults; only another SM is refused |
+| **C-R2** any toolkit counts as able to build | **Fixed.** `toolkit()` needs an nvcc of torch's CUDA major; every missing-module path is a `HostError`, naming the add-on for SM 86, 89 and 120 even with a toolkit (D5) |
+| **A-R-3, C-R3** the torch fix moves pinned packages | **Fixed.** `--no-deps`: the umbrella's pins already hold the rest |
+| **A-R-1, C-R4** `$CC` split | **Fixed.** Probed as one program, as Triton runs it; `CC="ccache gcc"` is refused |
+| **A-R-2** any module in FlashInfer's JIT cache counts | **Fixed.** Every module Holon needs, by `prebuild.specs(sm)` name |
+| **B rr1** `rule_module` stops at a `HostError` | **Fixed.** It catches both |
+| **B rr2** `shipped_mismatch` has one caller | **Inlined** into `missing`, which now returns one `HostError` for every case |
+| **B rr3** a conditional inside the message | **Fixed.** A plain if/else |
+| **B rr4, A-R-4** the record's format | **Fixed.** `sha256sum` lines, checked with `sha256sum -c` and a file-set comparison (D11); D12's runner writes them |
+| **B rr5, C-R5** the core's message names a torch version | **Fixed.** Version-free, pointing to the README's install |
+| **B rr6** `HostError` and the second SM | **Fixed** in its docstring |
+| **A-R-5** the anonymous-namespace pattern matched none of ggml_cuda's | **Fixed.** The name is read by its length prefix; on the sm_86 reference all 27 anonymous names of the five modules normalize (ggml_cuda's 10 among them) |
+| **A, C notes** `_FORTIFY_SOURCE` in a source install | **Taken:** a line in the README's source install |
+| **C-R6** serve the rebuilt wheels | **In step 5:** the wheels are rebuilt from the propagated commit, and D12 serves them |

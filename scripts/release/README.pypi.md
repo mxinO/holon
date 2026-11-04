@@ -7,13 +7,17 @@ from the lock tuned and verified for your card. Source, documentation and the su
 
 ## Supported GPUs
 
-| GPU | SM |
-|---|---|
-| RTX 3090 | 86 |
-| RTX 4090 | 89 |
-| RTX 5080, RTX 5090, RTX PRO 6000 Blackwell | 120 |
+Holon ships its native modules for three GPU architectures. Every card of these serves:
 
-Another GPU installs but is refused at start, naming why: it needs a source install with CUDA 13's nvcc.
+| SM | cards |
+|---|---|
+| 86 | RTX 30 series; RTX A2000 to A6000; A10, A40 |
+| 89 | RTX 40 series; RTX 6000 Ada; L4, L40, L40S |
+| 120 | RTX 50 series; RTX PRO Blackwell |
+
+Tuned, verified locks exist for the RTX 3090, RTX 4090, RTX 5080 and RTX 5090 (the models each serves are in the
+repository's README); every other card of these SMs serves with automatic defaults. A GPU of another SM installs but
+is refused at start, naming why: it needs a source install with CUDA 13's nvcc.
 
 ## Requirements
 
@@ -46,5 +50,5 @@ package to the versions the locks were verified with.
 
 - **No C compiler or Python headers:** the first start is refused at once with the apt line above.
 - **Another torch build** (a `+cu128` or `+cpu` torch from another index): refused, naming the reinstall command.
-- **A GPU outside the table:** refused, naming the source install.
+- **A GPU of another SM:** refused at start, naming the source install.
 - **Python other than 3.12, aarch64, macOS, Windows:** pip finds no matching distribution.

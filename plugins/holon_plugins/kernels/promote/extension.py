@@ -48,7 +48,7 @@ def load(sm: int) -> ModuleType:
     """The prebuilt module for `sm`; NotBuilt (naming the prebuild command) if there is none."""
     path = module_path(sm, k := key(sm))
     if sm not in ARCHS or not path.is_file():
-        raise host.missing("kernels.promote", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}", NotBuilt)
+        raise host.missing("kernels.promote", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}")
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

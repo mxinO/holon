@@ -74,7 +74,7 @@ import functools
 import itertools
 
 import torch
-from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
+from holon.api import Constraint, HostError, KernelSpec, Layout, QTensor, Scheme
 
 from . import extension
 
@@ -324,8 +324,8 @@ def rule_module(sm: int):
     for arch in (sm, *extension.ARCHS):
         try:
             return extension.load(arch)
-        except extension.NotBuilt as e:
-            first = first or e                   # its own SM's reason (another Holon version's add-on, …) is the one
+        except (extension.NotBuilt, HostError) as e:
+            first = first or e                   # its own SM's reason (its add-on missing, …) is the one
     raise first
 
 
