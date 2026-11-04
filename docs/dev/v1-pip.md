@@ -769,3 +769,90 @@ Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
   - FlashInfer still writes Python-generated `.cu` sources (92 KB) into its workspace, though it compiles nothing. So
     D12.7's read-only run keeps FlashInfer's workspace (under `HOME`) writable, and makes only site-packages read-only.
   - The rest of the design stands as written. Step 1 (the code) starts from here.
+
+## 15. Steps 1–2, as built (2026-11-03 to 2026-11-04)
+
+- **Step 1, the code** (`d647e3f7`): as rev 2.1 describes; the core is at 5,322 of 6,000 lines after the code review.
+- **Step 2, the local build:** all seven wheels in docker on the development host, each image step at `/holon` from
+  `git archive`. Each overlay takes about 13 minutes at `MAX_JOBS=12`. The fixes the first builds needed are in the
+  commits after step 1: the runner copies its output in and out (the docker daemon cannot reach the source tree's
+  disk), archives the whole tree, puts the venv's ninja on `PATH`; the Rocky image has `which` (FlashInfer's JIT looks
+  for nvcc with it); the platform check reads auditwheel's symbol policy and each module's `NEEDED` libraries (the
+  driver's `libcuda.so.1` included).
+- **Sizes** (measured): `holonlm-cuda-sm86` 39.8 MB, `-sm89` 52.3 MB, `-sm120` 60.9 MB; the pure wheels and the
+  umbrella 3 MB together.
+- **The privacy scan** (`check_private.py --wheels`, the full patterns): clean. Today's modules embedded the build
+  host's paths (F9); the overlays' name only `/holon/…` and `/opt/python/…`. Compressed device code matched a
+  CPU-model pattern by chance (four digits and an X), so a binary is held to the path and host patterns only.
+- **The CPU check** (the rebuilt wheels, `ca8c352a`): sizes, licenses, PyPI pages and the overlays' layouts pass;
+  every module resolves to a shipped file in a fresh venv, the locks load from the installed `holon_locks`, and no
+  package drifts. Its only failures before step 3 are the outdated locks (199 pins), as expected until the lock
+  round.
+- **A GPU smoke from the wheels** (an RTX A5000, sm_86, no CUDA toolkit on `PATH`): `holon serve` Qwen3-8B Q4_K_M
+  answered "391" in 4 tokens with thinking off (finish "stop"), ready in 42 s; nothing native compiled, only Triton's
+  launchers.
+
+## 16. The SASS gate: what it found
+
+- **Two false mismatches, in the gate itself:**
+  - nvcc names an anonymous namespace by a hash of its translation unit, which the host compiler's headers move:
+    cpu_task's, promote's, state_copy's and expert_io's functions differed by name only. The gate reads the id as one
+    name (`9d96dfef`).
+  - In a compressed fatbin, each cubin's header ("compressed") joined the function before it, so the first
+    compressed-against-plain comparison showed 6 functions on every SM. The gate hashes instruction lines only
+    (`ccb15f08`). Compressed and plain ggml_cuda then have the same SASS on sm_86 (5,584 functions).
+- **One real mismatch: FlashInfer's `rope.so` on sm_86.** 16 of its 216 functions, the FP8 rope-quantize kernels
+  (`RopeQuantizeKernel` with e4m3/e5m2 output), had other code in the Rocky image than in the locks' Ubuntu image.
+  Holon never launches them, but the gate holds every function of every shipped module. sm_89 and sm_120 matched
+  (7,051 functions each).
+- **The cause, found by preprocessing:** both images have the same nvcc (13.0.48, the same build) and the same CUDA
+  headers. FlashInfer's JIT compiles `rope.cu` with the same command in both. nvcc preprocesses device code with the
+  host compiler's headers, and Ubuntu's gcc defines `_FORTIFY_SOURCE=3` by default (with `-fstack-protector-strong`
+  and `-fcf-protection`, which change host code only); Rocky's gcc-toolset-13 does not. glibc's fortify wrappers
+  then change the preprocessed device source. Compiling `rope.cu` in the Rocky image with `-D_FORTIFY_SOURCE=3` gave
+  an object identical to the Ubuntu image's.
+- **The fix** (`d0b15d05`): the overlay image sets `NVCC_APPEND_FLAGS="-D_FORTIFY_SOURCE=3"`, so every nvcc run
+  preprocesses as Ubuntu's does. BUILDINFO records it.
+- **Device data** (A-m7): the gate also compares every cubin's initialized constant and global tables, section by
+  section. On the earlier sm_89 builds every module's tables already matched the reference's (ggml_cuda's 5,762
+  sections among them): they compare deterministically.
+- **The gate after the fix and the code review** (`ca8c352a`, every overlay and reference rebuilt): **passes on every
+  SM.** sm_86: 6,459 functions and 7,153 data sections; sm_89: 7,051 and 8,205; sm_120: 7,051 and 7,320; every
+  shipped module identical to the locks' image's build in SASS and device data.
+- **Compression** (`--compress-mode=size`): ggml_cuda built plain in the reference image has the compressed module's
+  SASS on every SM (5,584 functions each; 137 against 50 MiB on sm_86 and sm_89, 170 against 57 MiB on sm_120). The
+  flag stays; its load-time cost is D12.6's warm start.
+
+## 17. The code review of `a9748e8c..ccb15f08`, answered
+
+| finding | answer |
+|---|---|
+| **A-C1, B-M3, C-C2** publish uploads a rebuild | **Fixed.** `publish.yml` takes the tested run's id and the acceptance record, and uploads that run's `wheels` artifact only if every sha256 is the record's (D11) |
+| **A-C2, C-C1** an unshipped SM or missing add-on fails slowly | **Fixed.** No add-on module and no toolkit: `HostError` naming the add-on, or that the SM needs a source install; one helper in `host.py`; FlashInfer's second-SM and CUDA-norm refusals are `HostError`s (D5) |
+| **C-C3** no PyPI page | **Fixed.** `scripts/release/README.pypi.md` for `holonlm`, one shared `README.component.md` for the rest, classifiers; the CPU check requires a page |
+| **A-m1** `drifted` with no `uv.lock` | **Fixed.** No lock file, no drift |
+| **A-m2, C c1, c2** the toolchain check | **Fixed.** A missing `$CC` or an `OSError` is a `HostError`; gcc's first error line is reported |
+| **C c3** the torch fix under an extra index | **Fixed.** `"torch==2.11.0+cu130"` from the cu130 index (D5) |
+| **C c10** a CPU-only torch | **Fixed.** The CLI refuses it before reading the GPU |
+| **A-m3** FlashInfer and the extensions treat another torch differently | **Fixed.** FlashInfer counts the user's own JIT modules as built, as the extensions count their cache |
+| **C c4** the host failure's log line | **Fixed.** It says each configuration starts once; the behaviour is rev 2.1's |
+| **A-m5, C c7** `pure` packages the working tree | **Fixed.** It builds from `git archive` (`--ref`, default `HEAD`) |
+| **A-m6, C c6** floating build inputs | **Fixed.** The compilers pinned in both images, and hatchling, wheel, auditwheel and packaging; the reference records its BUILDINFO |
+| **A-m4, C c9** the Dockerfile's PyPI mode | **Fixed.** Without wheels it installs this tree's version (`bump_version.py` sets it, `check_version.py` checks it); the empty-context build works (checked); the README's Docker section rewritten |
+| **A-m7** device data not compared | **Fixed.** The gate compares the constant and global tables (§16) |
+| **A-m8** `rule_module` loses the reason | **Fixed.** It raises its own SM's first reason |
+| **C c8** the MTP recipe | **Fixed.** numpy pinned to `uv.lock`'s 2.5.4; Strata's full commit |
+| **C c11** Root-Is-Purelib | **Kept, on purpose**, with a comment, and the CPU check requires it |
+| **B M1** the second install in the check | **Dropped**, with the duplicate torch check (`drifted` covers torch) |
+| **B M2** Python kept in strings | **Fixed.** Hidden subcommands `_modules` and `_installed` |
+| **B m1** a leftover `pass` | **Removed** |
+| **B m2, C c5** `bind` per op | **Fixed.** `directory(sm)` is cached; the shipped listing is read only when the module is missing |
+| **B m3** `key(sm)` 2–3 times a call | **Fixed.** Once a call |
+| **B m4** `HostError`'s docstring | **Fixed** |
+| **B m5** a brittle Triton-users test | **Fixed.** Any number of users; the call anywhere in `register` |
+| **B m6** fold two core tests | **Not taken:** both are short, and each documents a D-H rule |
+| **B m7** the `--no-supervised` claim | **Corrected:** that 5-line message path is not tested |
+| **B m8** the closure walked several times | **Fixed** in `uv_lock` (once a call); the CLI's warning keeps its own call |
+| **B m9** leftovers | **Fixed:** `_spec` deleted, the wheel count from `SMS`, `OWN` without the root |
+| **B m10** two ways to tell a foreign torch | **Kept**, and said in `aot.directory`'s docstring |
+| **A, note** "host" still rolls back | **Kept** (rev 2.1, B's form), the log line reworded |
