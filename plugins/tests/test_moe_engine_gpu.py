@@ -18,7 +18,7 @@ from holon_testing.gguf_files import write
 
 from .moe_engine_common import GREEDY, Q, _bytes_exact, _fit_at, _gpu_engine, _no_host_sync, _served, _tail_checked
 
-PREBUILT = ("ggml_cuda", "expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
+PREBUILT = ("ggml_cuda", "expert_io", "cpu_task", "promote", "ggml_cpu")  # built if missing (conftest)
 pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
 
