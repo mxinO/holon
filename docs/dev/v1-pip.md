@@ -475,8 +475,10 @@ install.
       the record's, no more, and uploads it only then, behind the GitHub environment (`testpypi`, `pypi`) whose
       required reviewer is the owner;
     - trusted publishing (OIDC), no tokens. Pending publishers are registered only when the go is close.
-  - **GPU tests are not in GitHub** (no GPU runners): `scripts/release/wheel_check.sh` runs D12 on each card class
-    against a run's artifacts, and the results become evidence records.
+  - **GPU tests are not in GitHub** (no GPU runners): D12 runs on each card class against a run's artifacts, and the
+    results become evidence records. As built (§18): `scripts/release/wheel_check.py` (toolkit absent, origins, locks,
+    load), `holon_tools propagate --verify` (a lock's plan and trace from the install), `bench/perf_smoke.py
+    --candidate-python` and `bench/cold_start.py --python --warm`.
 
 ## 7. Acceptance (D12–D13)
 

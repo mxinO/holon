@@ -3,6 +3,7 @@
 
     python -m holon_tools impact <unit | path | A..B>... [--plans plans]
     python -m holon_tools propagate <model> [--class C] [--new-model] [--approve] [--allow-approx] [--plans plans]
+                                    [--verify]   # the lock checked from this install (a pip install's), no writes
                                     [--snapshot-runs 2] [--golden <fp32 golden> --floor <floor>...]
                                     [--reference <bf16 GPU reference>...]   # instead of the golden (D15a)
                                     [--prompts judge/prompts/v1.jsonl]
@@ -110,6 +111,12 @@ def _run(a: argparse.Namespace, start: Lock | None, config: EngineConfig, model_
     same = start is not None and start.plan.fingerprint_class == fp.cls
     pools = previous.meta.get("pool_bytes") if previous is not None and same else None
     checks = propagate.EngineChecks(config, trace(prompts), l2, pools, model_id)
+    if getattr(a, "verify", False):            # propagate's (tune always measures)
+        if start is None:
+            raise SystemExit(f"{model_id}: --verify needs a lock to check")
+        ok, lines = propagate.verify(start, checks, a.snapshot_runs)
+        print("\n".join(lines))
+        return 0 if ok else 1
     sm = fp.sm
     outcome = propagate.decide(start, checks, sm, previous, a.snapshot_runs)
     print(propagate.report(outcome))
@@ -238,6 +245,10 @@ def main(argv: list[str] | None = None) -> int:
                             "set, each judged by the budgets beside it")
         engine_flags(p)
         p.set_defaults(run=run)
+        if name == "propagate":
+            p.add_argument("--verify", action="store_true",
+                           help="check the newest lock from this install: the same plan and a byte-identical snapshot "
+                                "trace (exit 0), else exit 1; writes nothing")
         if name == "tune":
             p.add_argument("--ops", nargs="+", default=list(tune.OPS))
             p.add_argument("--batch", type=int, default=8)

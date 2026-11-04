@@ -14,9 +14,13 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3.12-venv $HEADERS build-essential ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
+# The GPU's driver libraries, compute included: the NVIDIA container hooks (Docker's runtime, enroot and pyxis) mount
+# only what these ask for, and enroot's default is `utility` alone (as the CUDA images set them).
 # Every cache at a fixed path, whoever runs the container: Holon's (the weights' hashes, the files locks name),
 # FlashInfer's workspace (it writes generated sources there), Triton's and CuTe DSL's kernels, the hub.
-ENV HOME=/opt/holon/user \
+ENV NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    HOME=/opt/holon/user \
     HF_HOME=/opt/holon/hf \
     TRITON_CACHE_DIR=/opt/holon/cache/triton \
     CUTE_DSL_CACHE_DIR=/opt/holon/cache/cute \

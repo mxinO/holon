@@ -15,6 +15,9 @@ their plugins through this environment's entry points (the installed distributio
 plugin's module from the arm's own tree: a change that adds, removes or moves a plugin between the trees cannot be
 compared this way (the arm fails to import it), only one that changes plugins' code.
 
+`--candidate-python <venv>/bin/python` makes the candidate an installed Holon instead (a pip install's venv,
+docs/dev/v1-pip.md D12.6): that interpreter, no PYTHONPATH, and every Holon module must come from its venv.
+
 Verdict and exit status: "slower" (1) or "faster" (0) when every round's candidate / base ratio lies beyond `--tol`
 on the same side, else "within noise" (0); "void" (3) when a clock screen failed.
 """
@@ -38,12 +41,14 @@ PROBE = ("import runpy, sys, holon, holon_std, holon_plugins as p; print('import
          "runpy.run_path(sys.argv[0], run_name='__main__')")
 
 
-def arm(tree: pathlib.Path, a: argparse.Namespace, out: pathlib.Path) -> dict:
-    """One fresh holon_tg process from `tree`: its tokens/s and clock screen."""
+def arm(tree: pathlib.Path, a: argparse.Namespace, out: pathlib.Path, python: str | None = None) -> dict:
+    """One fresh holon_tg process from `tree`, or from `python`'s installed Holon: its tokens/s and clock screen."""
     env = os.environ | {"PYTHONPATH": os.pathsep.join(str(tree / d) for d in ("core", "std", "plugins")),
                         "CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": str(a.gpu)}
-    cmd = [sys.executable, "-c", PROBE, str(tree / "bench" / "holon_tg.py"), "--model", a.model, "-n", str(a.n),
-           "--depths", str(a.depth), "-r", str(a.r), "--engine-args", a.engine_args, "--json", str(out)]
+    if python:
+        del env["PYTHONPATH"]
+    cmd = [python or sys.executable, "-c", PROBE, str(ROOT / "bench" / "holon_tg.py"), "--model", a.model, "-n",
+           str(a.n), "--depths", str(a.depth), "-r", str(a.r), "--engine-args", a.engine_args, "--json", str(out)]
     with tempfile.TemporaryFile("w+") as clocks:
         smi = subprocess.Popen(["nvidia-smi", "-i", str(a.gpu), "--query-gpu=clocks.sm,utilization.gpu,"
                                 "clocks_event_reasons.active", "--format=csv,noheader,nounits", "--loop-ms=100"],
@@ -54,11 +59,16 @@ def arm(tree: pathlib.Path, a: argparse.Namespace, out: pathlib.Path) -> dict:
         clocks.seek(0)
         samples = [line.split(", ") for line in clocks.read().splitlines()]
     if run.returncode:
-        raise SystemExit(f"{tree}: holon_tg failed:\n{run.stdout[-2000:]}{run.stderr[-4000:]}")
-    paths = next(line.split()[1:] for line in run.stdout.splitlines() if line.startswith("imported "))
-    own = [tree / "core" / "holon", tree / "std" / "holon_std", tree / "plugins" / "holon_plugins"]
-    if stray := [p for p, d in zip(paths, own, strict=True) if pathlib.Path(p).resolve().parent != d]:
-        raise SystemExit(f"{tree}: the arm imported Holon from elsewhere: {stray}")
+        raise SystemExit(f"{python or tree}: holon_tg failed:\n{run.stdout[-2000:]}{run.stderr[-4000:]}")
+    imported = next(line.split()[1:] for line in run.stdout.splitlines() if line.startswith("imported "))
+    paths = [pathlib.Path(p) for p in imported]
+    if python:   # the venv's own site-packages (its python is a symlink: the venv is two levels up, unresolved)
+        stray = [p for p in paths if not p.is_relative_to(pathlib.Path(python).parent.parent)]
+    else:
+        own = [tree / "core" / "holon", tree / "std" / "holon_std", tree / "plugins" / "holon_plugins"]
+        stray = [p for p, d in zip(paths, own, strict=True) if p.resolve().parent != d]
+    if stray:
+        raise SystemExit(f"{python or tree}: the arm imported Holon from elsewhere: {stray}")
     loaded = [(sm, reasons) for sm, util, reasons in samples if _number(util) is not None and _number(util) >= BUSY]
     busy = sorted(x for sm, _ in loaded if (x := _number(sm)) is not None)
     slow = sum(int(r, 16) & SLOWDOWN != 0 for _, r in loaded if r.strip().startswith("0x"))
@@ -89,6 +99,7 @@ def main() -> int:
     ap.add_argument("-r", type=int, default=5, help="repetitions per arm (after a warm-up)")
     ap.add_argument("--engine-args", default="")
     ap.add_argument("--tol", type=float, default=0.02)
+    ap.add_argument("--candidate-python", help="the candidate is this interpreter's installed Holon, not this tree")
     ap.add_argument("--json")
     a = ap.parse_args()
     trees = {"candidate": ROOT, "base": a.base.resolve()}
@@ -96,7 +107,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         for i in range(a.rounds):
             order = ["candidate", "base"] if i % 2 == 0 else ["base", "candidate"]
-            rounds.append({name: arm(trees[name], a, pathlib.Path(tmp, f"{i}-{name}.json")) for name in order})
+            rounds.append({name: arm(trees[name], a, pathlib.Path(tmp, f"{i}-{name}.json"),
+                                     a.candidate_python if name == "candidate" else None) for name in order})
             r = rounds[-1]
             print(f"round {i}: candidate {r['candidate']['tok_s']:.2f}, base {r['base']['tok_s']:.2f} tok/s, ratio "
                   f"{r['candidate']['tok_s'] / r['base']['tok_s']:.4f}", flush=True)
@@ -107,7 +119,8 @@ def main() -> int:
     if None in screens:
         verdict += " (no clock screen: the GPU reports no SM clock)"
     record = {"model": a.model.rstrip("/").rsplit("/", 1)[-1], "batch": 1, "depth": a.depth, "n": a.n, "r": a.r,
-              "engine_args": a.engine_args, "tol": a.tol, "rounds": rounds, "ratios": [round(x, 4) for x in ratios],
+              "engine_args": a.engine_args, "candidate_installed": bool(a.candidate_python), "tol": a.tol,
+              "rounds": rounds, "ratios": [round(x, 4) for x in ratios],
               "median_ratio": round(statistics.median(ratios), 4), "verdict": verdict}
     print(f"candidate / base: median {record['median_ratio']}, rounds {record['ratios']}; {verdict}")
     if a.json:

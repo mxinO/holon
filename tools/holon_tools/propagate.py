@@ -117,6 +117,22 @@ def decide(current: Lock | None, checks: Checks, sm: int, previous: Snapshot | N
                    None if unstable else first, checks.judged() if passed else None)
 
 
+def verify(current: Lock, checks: Checks, runs: int = 2) -> tuple[bool, list[str]]:
+    """`current` checked from another install of its code (a pip install: docs/dev/v1-pip.md D12.5), writing
+    nothing: the plan built here must equal the lock's but for `commit`, and the snapshot trace, run `runs` times, must
+    be run-identical and byte-identical to the lock's."""
+    changes = {k: v for k, v in plans.diff(current.plan, checks.plan()).items() if k != "commit"}
+    first, *again = (checks.snapshot() for _ in range(runs))
+    unstable = next(filter(None, (snapshot.diff(first, s) for s in again)), None)
+    same = current.snapshot is not None and trace_hash(first) == current.snapshot
+    lines = [f"  {key}: {_short(old)} -> {_short(new)}" for key, (old, new) in changes.items()]
+    lines += [f"  snapshot trace is not run-identical: {unstable}"] if unstable else []
+    lines += ["  snapshot trace byte-identical to the lock's" if same else
+              f"  snapshot trace differs from the lock's ({current.snapshot or 'none recorded'})"]
+    ok = same and not changes and not unstable
+    return ok, [f"verify: {'identical' if ok else 'DIFFERS'}", *lines]
+
+
 def _divergence(previous: Snapshot | None, new: Snapshot) -> str:
     if previous is None:
         return "trace hash differs"
