@@ -896,3 +896,8 @@ Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
 | **C D2, B dr3** the PyPI page's support text | **Fixed.** Tested cards (a tuned lock) named per SM; the other cards of each SM listed as not tested, starting from the closest tested card's lock of their SM (unverified, fitted to their memory) or from defaults |
 | **C D3** FlashInfer's compile at start is silent | **Fixed.** One line names the add-on and the prebuild command, and says it happens once |
 | **C R5** the core's refusal points to no command | **Fixed** without a version in the core: the PyPI page's install section carries the one-line torch reinstall (`--no-deps`) |
+
+**The final delta re-review of `7dc56197..14703573`.** B: none. A's E-1 (the suite's prebuild fixture still caught
+`NotBuilt`, which four extensions no longer have: it now catches `HostError`, through a `build_missing` helper with its
+own CPU test; no other stale catch in the repository) and C's three wording nits (the PyPI page's locks "tuned and
+verified on these cards", "the same SM first", and the compile notice's add-on pinned to the version) are fixed.

@@ -7,8 +7,8 @@ from the lock tuned and verified for your card. Source, documentation and the su
 
 ## Supported GPUs
 
-Holon ships its native modules for three GPU architectures (SMs). Each model's lock, tuned and verified, exists for
-these tested cards:
+Holon ships its native modules for three GPU architectures (SMs). Holon's locks were tuned and verified on these
+cards:
 
 | SM | tested cards (a tuned lock) | other cards of the same SM (not tested) |
 |---|---|---|
@@ -16,9 +16,9 @@ these tested cards:
 | 89 | RTX 4090 | RTX 40 series; RTX 6000 Ada; L4, L40, L40S |
 | 120 | RTX 5080, RTX 5090 | RTX 50 series; RTX PRO Blackwell |
 
-Another card of these SMs starts from the closest tested card's lock of its SM, marked unverified and fitted to its
-memory, or from automatic defaults for a model without one. A GPU of another SM installs but is refused at start,
-naming why: it needs a source install with CUDA 13's nvcc.
+Another card of these SMs starts from the closest tested card's lock, the same SM first, marked unverified and
+fitted to its memory, or from automatic defaults for a model without one. A GPU of another SM installs but is
+refused at start, naming why: it needs a source install with CUDA 13's nvcc.
 
 ## Requirements
 

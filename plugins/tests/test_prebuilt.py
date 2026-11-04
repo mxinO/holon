@@ -105,6 +105,23 @@ def test_a_torch_the_shipped_modules_do_not_fit_is_refused_with_the_fix(tmp_path
         ext.load(80)
 
 
+
+@pytest.mark.parametrize("name", ("expert_io", "ggml_cuda"))
+def test_the_suite_builds_an_extension_whose_module_is_missing(name, monkeypatch):
+    """The root conftest's `_prebuilt` builds what `load` refuses for want of a module (a `HostError` now)."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("root_conftest", PLUGINS.parents[1] / "conftest.py")
+    root = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(root)
+    ext, built = _ext(name), []
+
+    def missing(sm):
+        raise HostError("not installed")
+    monkeypatch.setattr(ext, "load", missing)
+    monkeypatch.setattr(ext, "build", lambda sm, *jobs: built.append(sm))
+    root.build_missing((name,), 86)
+    assert built == [86]
+
 @pytest.mark.parametrize("name", EXTENSIONS)
 def test_a_prebuild_of_several_sms_builds_each_in_its_own_process(name, monkeypatch):
     """torch's loader renames a module built twice in one process (`<name>_v1`), never found by `load` (v1-pip F8)."""

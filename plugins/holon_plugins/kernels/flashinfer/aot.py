@@ -65,7 +65,8 @@ def _bind(sm: int) -> None:
         if not host.toolkit():
             raise host.no_add_on("kernels.flashinfer", sm, build)
         print(f"holon: kernels.flashinfer: no prebuilt modules for sm {sm}"
-              + (f" (`pip install holonlm-cuda-sm{sm}` ships them)" if sm in host.SHIPPED_SMS else "")
+              + (f" (`pip install holonlm-cuda-sm{sm}=={importlib.metadata.version('holonlm-plugins')}` ships them)"
+                 if sm in host.SHIPPED_SMS else "")
               + f": FlashInfer compiles each at first use, once (about a minute each); `{build}` does it ahead of a "
               "start", file=sys.stderr, flush=True)
     if env.FLASHINFER_AOT_DIR != want:
