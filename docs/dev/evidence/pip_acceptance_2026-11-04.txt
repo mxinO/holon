@@ -356,3 +356,8 @@ exit 0 after 599.6 s
    the repository install (devel container)
   cold: serving after 43.0 s (engine start 23.3 s), first answer 0.34 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 25, 'cute_dsl': 0}, engine RSS 2017 MiB, plan sha256:ae0f1d907663, lock diff lines 0
   warm: serving after 36.0 s (engine start 19.9 s), first answer 0.22 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1962 MiB, plan sha256:ae0f1d907663, lock diff lines 0
+
+==== the pre-merge review's checker (wheel_check after A W-1, A W-2, B pm1, B pm2), rerun on the RC in the image, RTX 3090
+ok   toolkit: absent
+ok   origins: 1021 installed files hash as the wheels' RECORDs say
+ok   load: 13 modules for sm 86 from prebuilt/: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's

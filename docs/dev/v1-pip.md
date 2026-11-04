@@ -476,9 +476,10 @@ install.
       required reviewer is the owner;
     - trusted publishing (OIDC), no tokens. Pending publishers are registered only when the go is close.
   - **GPU tests are not in GitHub** (no GPU runners): D12 runs on each card class against a run's artifacts, and the
-    results become evidence records. As built (§18): `scripts/release/wheel_check.py` (toolkit absent, origins, locks,
-    load), `holon_tools propagate --verify` (a lock's plan and trace from the install), `bench/perf_smoke.py
-    --candidate-python` and `bench/cold_start.py --python --warm`.
+    results become evidence records. As built (§18): `scripts/release/wheel_check.py` (toolkit absent; origins, the
+    installed files hashed against the wheels' RECORDs; every module loaded from `prebuilt/`), `holon models` (the
+    class's locks current), `holon_tools propagate --verify` (a lock's plan and trace from the install),
+    `bench/perf_smoke.py --candidate-python` and `bench/cold_start.py --python --warm`.
 
 ## 7. Acceptance (D12–D13)
 
@@ -948,6 +949,13 @@ and 60.9 MB for the add-ons, under 2 MB for the rest.
   and then the defaults each start once. As a non-root user with the image read-only, it serves and site-packages is
   unchanged. The upgrade test waits for a previous release's wheels.
 
+**The pre-merge review's checker changes.** A W-1, A W-2, B pm1 and B pm2: `wheel_check` now hashes the installed
+files themselves; it asserts that every module came from `prebuilt/` (the shipped `module_path`, FlashInfer's AOT
+directory); its locks check is gone (`holon models` and the CPU check cover it); it imports `EXTENSIONS` from
+`build_wheels`. The RC wheels had already passed the stronger form of each through the CPU check. Rerun once on the RC, in
+the image on an RTX 3090: toolkit absent; 1,021 installed files hash as the wheels' RECORDs say; 13 modules for
+sm 86 loaded from `prebuilt/`.
+
 **What changed to run D12 (318e33c2).** `wheel_check.py`, `propagate --verify`, `perf_smoke --candidate-python` and
 `cold_start --python --warm`. The image also sets `NVIDIA_VISIBLE_DEVICES` and
 `NVIDIA_DRIVER_CAPABILITIES=compute,utility`: enroot's hook mounts only `utility` when they are unset, so the image
@@ -968,3 +976,13 @@ found no driver under pyxis.
 **Findings left open.** The supervisor's host-failure line counts configurations from 0 ("trying configuration 0 of
 2"). It is cosmetic, but fixing it moves the core's `src` and so every lock: it is left for the next change that
 propagates anyway.
+
+**The README until the first upload (pre-merge review, C P1).** The packages are not on PyPI and their names are
+not reserved, so the merged README's Install section leads with the source install. The pip install is a marked
+subsection, "pip (from the first PyPI release)", holding the requirements, sizes and failure modes measured here.
+
+**A publish-time README task (C P2), to land with the first upload:**
+- the Quickstart, Offload and GLM sections move from `uv run holon …` to `holon …`;
+- the MTP pack's recipe gets a pip-install form;
+- the "First start" and "editable" wording is reworded for an installed Holon;
+- the Install section leads with pip.

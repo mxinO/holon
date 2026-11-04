@@ -1,20 +1,24 @@
-"""The GPU acceptance's install checks (docs/dev/v1-pip.md D12, steps 0-2 and 4), run by a pip install's Python on
+"""The GPU acceptance's install checks (docs/dev/v1-pip.md D12, steps 0, 1 and 4), run by a pip install's Python on
 the card, in the wheel-based image:
 
     <venv>/bin/python scripts/release/wheel_check.py <the wheels' directory>
 
 - no CUDA toolkit: no `nvcc` on PATH, no CUDA_HOME / CUDA_PATH, no /usr/local/cuda*, and Holon finds none;
-- origins: every installed file of every `holonlm*` distribution has the hash the wheels' RECORDs give it;
-- locks: this card's class has locks, every newest one current (its units' sources are the installed ones);
-- load: every module shipped for this SM loads through its plugin's loader (the five extensions, and FlashInfer's
-  modules from the AOT directory), and no cache gains a file (`prebuilt/`, FlashInfer's JIT directory, Holon's).
+- origins: every file the `holonlm*` wheels' RECORDs hash is installed, its bytes hashing as the RECORD says;
+- load: every module shipped for this SM loads through its plugin's loader from `prebuilt/` (the five extensions
+  from their shipped `module_path`, FlashInfer's modules from the AOT directory), and no cache gains a file
+  (`prebuilt/`, FlashInfer's JIT directory, Holon's).
+
+That this class's locks are current is `holon models` (and the CPU check's, for every class).
 
 Prints one line per check and a JSON summary last; exits 1 on any problem.
 """
 from __future__ import annotations
 
+import base64
 import csv
 import glob
+import hashlib
 import importlib
 import importlib.metadata
 import io
@@ -25,7 +29,7 @@ import shutil
 import sys
 import zipfile
 
-EXTENSIONS = ("ggml_cuda", "expert_io", "promote", "state_copy", "cpu_task")
+from build_wheels import EXTENSIONS  # beside this script (standard library only at its top)
 
 
 def toolkit() -> tuple[list[str], str]:
@@ -39,8 +43,14 @@ def toolkit() -> tuple[list[str], str]:
     return msgs, "present" if msgs else "absent"
 
 
+def digest(path: pathlib.Path) -> str:
+    """A RECORD hash: sha256, urlsafe base64 without padding."""
+    return "sha256=" + base64.urlsafe_b64encode(hashlib.sha256(path.read_bytes()).digest()).rstrip(b"=").decode()
+
+
 def origins(wheels: pathlib.Path) -> tuple[list[str], str]:
-    """Each holonlm* wheel's RECORD against its installed distribution's (same version, every hashed file equal)."""
+    """Each holonlm* wheel's RECORD against the installed files themselves (the same version, every hashed file
+    present with those bytes)."""
     msgs, count = [], 0
     for whl in sorted(wheels.glob("holonlm*.whl")):
         name, version = whl.name.split("-")[:2]
@@ -51,26 +61,14 @@ def origins(wheels: pathlib.Path) -> tuple[list[str], str]:
         with zipfile.ZipFile(whl) as z:
             record = next(n for n in z.namelist() if n.endswith(".dist-info/RECORD"))
             want = {row[0]: row[1] for row in csv.reader(io.StringIO(z.read(record).decode())) if row and row[1]}
-        installed = {str(f): f"{f.hash.mode}={f.hash.value}" for f in dist.files or () if f.hash}
-        msgs += [f"{whl.name}: {path} differs or is missing" for path, h in want.items() if installed.get(path) != h]
+        for rel, h in want.items():
+            path = pathlib.Path(dist.locate_file(rel))
+            if not path.is_file() or digest(path) != h:
+                msgs.append(f"{whl.name}: {rel} {'differs' if path.is_file() else 'is missing'}")
         count += len(want)
     if not count:
         msgs.append(f"no holonlm* wheels in {wheels}")
-    return msgs, f"{count} files as the wheels' RECORDs hash them"
-
-
-def locks() -> tuple[list[str], str]:
-    import torch
-    from holon.core import plans, platform, plugins
-
-    cls = platform.fingerprint(torch.device("cuda")).cls
-    current = plans.current_srcs(plugins.discover())
-    dirs = sorted({p.parent for p in (plans.TREE / "plans").rglob("*.lock")})
-    heads = [plans.read(plans.numbered(d)[-1]) for d in dirs]
-    mine = [lock for lock in heads if lock.plan.fingerprint_class == cls]
-    msgs = [f"{lock.plan.model_id}: unit {u} outdated" for lock in mine for u, pin in lock.plan.units.items()
-            if current.get(u) != pin.src]
-    return msgs + [f"no locks for {cls}"] * (not mine), f"{len(mine)} newest locks of {cls}"
+    return msgs, f"{count} installed files hash as the wheels' RECORDs say"
 
 
 def files(*roots: pathlib.Path) -> set[str]:
@@ -90,20 +88,24 @@ def load() -> tuple[list[str], str]:
     before, loaded, msgs = files(*watched), [], []
     for k in EXTENSIONS:
         ext = importlib.import_module(f"holon_plugins.kernels.{k}.extension")
-        ext.load(sm)
+        got, shipped = pathlib.Path(ext.load(sm).__file__), ext.module_path(sm)
+        if got != shipped or not shipped.is_relative_to(ext.SHIPPED):
+            msgs.append(f"{k}: loaded {got}, not the shipped {shipped}")
         loaded.append(k)
     aot.bind(torch.device("cuda"))
     for spec in prebuild.specs(sm):
+        if not (spec.is_aot and spec.aot_path.is_relative_to(aot.directory(sm))):
+            msgs.append(f"flashinfer/{spec.name}: not in the AOT directory {aot.directory(sm)}")
         spec.build_and_load()
         loaded.append(f"flashinfer/{spec.name}")
     msgs += [f"a cache gained {p}" for p in sorted(files(*watched) - before)]
-    return msgs, f"{len(loaded)} modules for sm {sm}: {', '.join(loaded[:len(EXTENSIONS)])} and FlashInfer's"
+    return msgs, f"{len(loaded)} modules for sm {sm} from prebuilt/: {', '.join(EXTENSIONS)} and FlashInfer's"
 
 
 def main() -> int:
     wheels = pathlib.Path(sys.argv[1])
     problems, summary = [], {}
-    for name, check in (("toolkit", toolkit), ("origins", lambda: origins(wheels)), ("locks", locks), ("load", load)):
+    for name, check in (("toolkit", toolkit), ("origins", lambda: origins(wheels)), ("load", load)):
         msgs, what = check()
         problems += msgs
         summary[name] = what
