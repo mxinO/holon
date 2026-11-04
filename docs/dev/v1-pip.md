@@ -903,3 +903,68 @@ Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
 `NotBuilt`, which four extensions no longer have: it now catches `HostError`, through a `build_missing` helper with its
 own CPU test; no other stale catch in the repository) and C's three wording nits (the PyPI page's locks "tuned and
 verified on these cards", "the same SM first", and the compile notice's add-on pinned to the version) are fixed.
+
+## 18. Steps 3–6, as run (2026-11-04): the lock round and the acceptance
+
+**The lock round (step 3).** Every newest lock of the four classes was propagated to 9b161785 on its class's desktop,
+in the CUDA 13.0.0 devel image with modules from `holon prebuild` there. All 27 advanced without L2, their snapshot
+traces byte-identical (`docs/dev/evidence/pip_propagation_2026-11-04.json`; plans commit e3bacd0d). The first RTX 4090
+desktop lost its GPU in the first trace (fell off the bus; no lock written), and the class ran again on another.
+
+**The release candidate (step 4).** All seven wheels were rebuilt from 318e33c2 (the propagated locks plus D12's tools,
+which are not in any unit). The SASS gate passed on all three SMs (sm 86: 6,459 functions and 7,153 data sections;
+sm 89: 7,051 and 8,205; sm 120: 7,051 and 7,320). The CPU check installed the wheels into a fresh venv and found
+27 lock histories current, no drift and every module shipped. The wheel privacy scan was clean. Sizes: 39.8, 52.3
+and 60.9 MB for the add-ons, under 2 MB for the rest.
+
+**D12 (step 5),** on those wheels and the image built from them (≈ 7.0 GB), as a pyxis container
+(`docs/dev/evidence/pip_acceptance_2026-11-04.txt`, which holds the `sha256sum *.whl` record):
+
+| check | RTX 3090 | RTX 4090 | RTX 5080 | RTX 5090 |
+|---|---|---|---|---|
+| no toolkit; origins (1,021 files); locks current; modules load | ok, 13 modules | ok, 19 | ok, 19 | ok, 19 |
+| smoke: the 8B Q4_K_M lock serves, empty diff, "391" | ok | ok | ok | ok |
+| traces from the pip install (`propagate --verify`) | 4/4 identical | 8/8 | 9/9 | 6/6 |
+| speed, median ratio (8B Q4_K_M; the RTX 5080's offload lock) | 1.0001 | 0.9999 | 0.9999; 0.9958 | 0.9999 |
+| cold start: compiled (both installs) | Triton 23 | 23 | 23 | 25 |
+| warm start, serving after (pip / repository) | 17 / 33 s | 16 / 33 s | 21 / 26 s | 22 / 36 s |
+| `pip install` / `uv pip install` (fresh venv, empty cache) | 85 / 14 s | 82 / 15 s | 595 / 28 s | 143 / 15 s |
+
+- **Traces.** The judge and tools were installed into the image's venv from a wheelhouse of `uv.lock`'s versions
+  (13 packages added, none changed). `holon_tools propagate --verify` rebuilt each lock's plan and found it equal
+  but for `commit`, and the snapshot trace byte-identical: 27 of 27, the Flash-Next MTP and GLM locks included.
+- **Speed.** All six screens were steady in every verdict. The RTX 5080 offload lock's rounds sit 0.17–0.53% below
+  the repository's: this is inside the 2% rule, and consistent with expert_io's and cpu_task's host code coming
+  from another gcc build, which the SASS gate does not see.
+- **Starts.** A pip cold start compiles exactly the repository's Triton kernels and nothing else (no FlashInfer,
+  `prebuilt/` or Holon cache entry). Its warm start is faster than the repository's, which reads its venv from the
+  network filesystem and runs FlashInfer's JIT checks. The pip arm's first cold start also hashes the weight file
+  once.
+- **Install.** About 3.2 GB downloaded; the venv takes 6.1 GB with pip and 5.8 GB with uv. The first answer came 2–3
+  minutes after the install started (11 on the slower link), against 10–19 minutes for clone, `uv sync --frozen` and
+  `holon prebuild` (590–1,070 s).
+- **Negative and restricted runs (RTX 5080).** Without `python3.12-dev`, `holon serve` fails with D-H's message in
+  9.1 s (8B Q4_K_M) and 6.7 s (FP8: Triton's check runs at plugin load, before any weight). The lock's configuration
+  and then the defaults each start once. As a non-root user with the image read-only, it serves and site-packages is
+  unchanged. The upgrade test waits for a previous release's wheels.
+
+**What changed to run D12 (318e33c2).** `wheel_check.py`, `propagate --verify`, `perf_smoke --candidate-python` and
+`cold_start --python --warm`. The image also sets `NVIDIA_VISIBLE_DEVICES` and
+`NVIDIA_DRIVER_CAPABILITIES=compute,utility`: enroot's hook mounts only `utility` when they are unset, so the image
+found no driver under pyxis.
+
+**Deviations from D12 as designed.**
+- The repository arm cannot run in the wheel image. A source install loads FlashInfer through its JIT path, which
+  regenerates the build files and needs `nvcc` even when nothing compiles. Both speed arms therefore ran in the devel
+  container on uv's Python: the repository install (a clone, `uv sync --frozen`, `holon prebuild`) against the RC
+  wheels pip-installed into a uv-Python venv. The pip install's own starts ran in the image, with no toolkit.
+- Desktops. The RTX 4090's speed run moved to a second desktop: the first throttled (SM clock 2,520 → 450 MHz) and
+  voided the clock screen. The RTX 5080 ran on another RTX 5080 desktop, because its propagation's desktop was taken
+  for hours.
+- The wheels were built locally, not by a `wheels.yml` run. D11's publish needs a run's artifacts with this record.
+  Before an upload, D12's install checks and `--verify` traces run again on that run's wheels, or the wheels.yml
+  build is shown byte-identical to these hashes.
+
+**Findings left open.** The supervisor's host-failure line counts configurations from 0 ("trying configuration 0 of
+2"). It is cosmetic, but fixing it moves the core's `src` and so every lock: it is left for the next change that
+propagates anyway.

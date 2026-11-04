@@ -1,0 +1,62 @@
+{
+ "date": "2026-11-04",
+ "doc": "docs/dev/v1-pip.md \u00a718",
+ "what": "v1-pip's propagation round: every lock carried to 9b161785 (the vendored gguf-py, HostError and ABI 1.9, the shipped-module loaders, the FlashInfer AOT binding)",
+ "commit": "9b161785",
+ "method": "holon_tools propagate per lock without --approve, 3 snapshot runs, on each class's desktop in the CUDA 13.0.0 devel image (modules from `holon prebuild` there); a byte-identical trace advances, anything else stops for review",
+ "result": {
+  "locks": 27,
+  "advanced_byte_identical": 27,
+  "stopped": 0,
+  "by_class": {
+   "rtx-3090": 4,
+   "rtx-4090": 8,
+   "rtx-5080": 9,
+   "rtx-5090": 6
+  },
+  "class_seconds": {
+   "rtx-3090": 700,
+   "rtx-4090": 1191,
+   "rtx-5080": 2490,
+   "rtx-5090": 2170
+  }
+ },
+ "note": "The RTX 4090's first desktop lost its GPU in the first trace (fell off the bus: a cudaErrorUnknown, no lock written); the class ran from its unchanged locks on another RTX 4090 desktop.",
+ "locks": {
+  "rtx-3090": [
+   "Qwen/Qwen3-8B@f1add50ee1c6e469 \u2192 14.lock",
+   "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09 \u2192 16.lock",
+   "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243 \u2192 15.lock",
+   "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7 \u2192 17.lock"
+  ],
+  "rtx-4090": [
+   "Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd \u2192 18.lock",
+   "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4 \u2192 15.lock",
+   "Qwen/Qwen3-8B@f1add50ee1c6e469 \u2192 26.lock",
+   "nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99 \u2192 19.lock",
+   "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3 \u2192 18.lock",
+   "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09 \u2192 23.lock",
+   "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243 \u2192 15.lock",
+   "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7 \u2192 21.lock"
+  ],
+  "rtx-5080": [
+   "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b \u2192 13.lock",
+   "Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4 \u2192 15.lock",
+   "nvidia/Qwen3-8B-NVFP4@70613544a162fdd3 \u2192 18.lock",
+   "peasantsmith/GLM-5.3-Flash-Maya-GGUF/GLM-5.3-Flash-Maya-S-v2-IQ2_XXS@771c37e77b593850 \u2192 9.lock",
+   "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09 \u2192 15.lock",
+   "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6 \u2192 22.lock",
+   "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243 \u2192 23.lock",
+   "unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0 \u2192 23.lock",
+   "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e \u2192 22.lock"
+  ],
+  "rtx-5090": [
+   "ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7 \u2192 13.lock",
+   "Qwen/Qwen3-8B@f1add50ee1c6e469 \u2192 20.lock",
+   "peasantsmith/GLM-5.3-Flash-Maya-GGUF/GLM-5.3-Flash-Maya-S-v2-IQ2_XXS@771c37e77b593850 \u2192 9.lock",
+   "unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09 \u2192 16.lock",
+   "unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243 \u2192 15.lock",
+   "unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7 \u2192 16.lock"
+  ]
+ }
+}

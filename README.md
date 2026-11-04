@@ -101,6 +101,53 @@ clamped to what fits.
 
 ## Install
 
+Holon installs with pip, its native modules prebuilt for SM 86, 89 and 120 (RTX 30, 40 and 50 series, and the
+other cards of those architectures: [Supported GPUs and models](#supported-gpus-and-models)), so no CUDA toolkit is
+needed. A GPU of another SM needs the source install below.
+
+Requirements: Linux x86-64, an NVIDIA driver for CUDA 13.0 (R580 or newer), CPython 3.12 with its headers and a C
+compiler (Triton builds a small launcher per kernel at first use). The install downloads about 3.2 GB (torch and its
+CUDA 13 libraries) and takes about 6.1 GB on disk.
+
+On Ubuntu 24.04:
+
+```bash
+sudo apt install python3.12-venv python3.12-dev build-essential
+python3.12 -m venv ~/holon && . ~/holon/bin/activate
+pip install holonlm
+holon serve unsloth/Qwen3-8B-GGUF
+```
+
+On any Linux with a C compiler, a uv-managed Python brings its own headers (and serves hosts whose Python is not 3.12):
+
+```bash
+uv tool install --python 3.12 holonlm
+holon serve unsloth/Qwen3-8B-GGUF
+```
+
+`holonlm` is not on PyPI yet: until its first upload, install the seven wheels a release build makes
+(`scripts/release/build_wheels.py`, or `.github/workflows/wheels.yml`'s artifact) by path, `pip install <dir>/*.whl`,
+which pins and fetches the same packages from PyPI.
+
+Use a venv without extra package indexes: `holonlm` pins torch 2.11.0 for CUDA 13.0 (PyPI's) and every other package
+to the versions the locks were verified with. Measured on the four tested desktops
+(`docs/dev/evidence/pip_acceptance_2026-11-04.txt`): `pip install` took 82–143 s (595 s on one slower link) and
+`uv pip install` 14–28 s; the first answer came 2–3 minutes after the install started (11 on the slower link), against
+10–19 minutes for the source install, most of it `holon prebuild`. Served from the wheels, all 27 locks' snapshot
+traces are byte-identical to the source install's, and decode speed is the same (median ratios 0.9958–1.0001).
+
+What fails, and how:
+
+- **No C compiler or Python headers:** the first start is refused at once, with the apt line above.
+- **Another torch build** (a `+cu128` or `+cpu` torch from another index): refused, naming the command that replaces
+  it: `pip install --force-reinstall --no-deps "torch==2.11.0+cu130" --index-url https://download.pytorch.org/whl/cu130`.
+- **A GPU of another SM:** refused at start, naming the source install.
+- **Python other than 3.12, aarch64, macOS, Windows:** pip finds no matching distribution.
+
+### From source
+
+The source install is for development, for a GPU of another SM, and for the tagged releases.
+
 This README describes `main`. The last release, v0.2.0
 ([docs/releases/RELEASE_NOTES_v0.2.0.md](docs/releases/RELEASE_NOTES_v0.2.0.md)), serves everything below: install
 the tag (`--branch v0.2.0`) for it, or `main`. Its locks were propagated to its code with byte-identical snapshot traces.
@@ -130,9 +177,9 @@ nvcc preprocesses device code with the host compiler's headers, so on another di
 ### Docker
 
 The `Dockerfile` installs Holon from its wheels on Ubuntu 24.04, for hosts without a CUDA toolkit: no toolkit and no
-prebuild in the image, whose native modules come prebuilt ([docs/dev/v1-pip.md](docs/dev/v1-pip.md)). Build it from a
-directory holding a release's seven wheels (`scripts/release/build_wheels.py` makes them), or, once Holon is on PyPI,
-with no context at all, which installs this tree's version from PyPI:
+prebuild in the image (≈ 7.0 GB), whose native modules come prebuilt ([docs/dev/v1-pip.md](docs/dev/v1-pip.md)).
+Build it from a directory holding a release's seven wheels (`scripts/release/build_wheels.py` makes them), or, once
+Holon is on PyPI, with no context at all, which installs this tree's version from PyPI:
 
 ```bash
 docker build -f Dockerfile -t holon <directory of the wheels>
