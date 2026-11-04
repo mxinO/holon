@@ -125,16 +125,21 @@ routing profiles, and the test dependencies.
 
 ### Docker
 
-The `Dockerfile` installs the release's environment for hosts without a CUDA toolkit and prebuilds for SM 86, 89 and
-120. Build it from the release tag, never from a working directory; the build takes ≈ 10–15 min on a many-core host,
-and the image is ≈ 14.8 GB (both at v0.1.1). The image was last built and checked at v0.1.1, not rebuilt for v0.2.0:
+The `Dockerfile` installs Holon from its wheels on Ubuntu 24.04, for hosts without a CUDA toolkit: no toolkit and no
+prebuild in the image, whose native modules come prebuilt ([docs/dev/v1-pip.md](docs/dev/v1-pip.md)). Build it from a
+directory holding a release's seven wheels (`scripts/release/build_wheels.py` makes them), or, once Holon is on PyPI,
+with no context at all, which installs this tree's version from PyPI:
 
 ```bash
-git archive --format=tar v0.2.0 | docker build -t holon:v0.2.0 -           # --build-arg MAX_JOBS=N caps compiles
-docker run --gpus all -p 8000:8000 -v <model dir>:/models holon:v0.2.0 serve /models/<file> --host 0.0.0.0
-docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon:v0.2.0 \
+docker build -f Dockerfile -t holon <directory of the wheels>
+docker build -t holon - < Dockerfile                                      # from PyPI, once published
+docker run --gpus all -p 8000:8000 -v <model dir>:/models holon serve /models/<file> --host 0.0.0.0
+docker run --gpus all -p 8000:8000 -e HF_HOME=/hf -v <hf cache dir>:/hf holon \
   serve unsloth/Qwen3.8-27B-GGUF --host 0.0.0.0                            # a hub model, kept in <hf cache dir>
 ```
+
+The v0.2.0 tag's `Dockerfile` is the source install's image instead (its environment, and a prebuild for SM 86, 89
+and 120; ≈ 14.8 GB): `git archive --format=tar v0.2.0 | docker build -t holon:v0.2.0 -` builds it.
 
 The image's `HOME` is `/opt/holon/user`, writable by any user, for every tool in it (the `Dockerfile` after v0.1.1:
 v0.1.1's image has none). Mount a directory at `/opt/holon/user/.cache/holon` to keep Holon's own cache across

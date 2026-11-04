@@ -59,21 +59,20 @@ def key(sm: int) -> str:
     return f"sm{sm}-cu{cuda_major()}-{sys.implementation.cache_tag}-torch{torch.__version__}-{h.hexdigest()[:16]}"
 
 
-def module_path(sm: int) -> pathlib.Path:
-    """The module an overlay ships for `sm`, else the user cache's."""
-    shipped = SHIPPED / key(sm) / f"{NAME}.so"
-    return shipped if shipped.is_file() else CACHE / key(sm) / "ext" / f"{NAME}.so"
+def module_path(sm: int, k: str | None = None) -> pathlib.Path:
+    """The module an overlay ships for `sm`, else the user cache's (`k`: its key, if the caller has it)."""
+    k = k or key(sm)
+    shipped = SHIPPED / k / f"{NAME}.so"
+    return shipped if shipped.is_file() else CACHE / k / "ext" / f"{NAME}.so"
 
 
 def load(sm: int) -> ModuleType:
     """The prebuilt module for `sm`; NotBuilt (naming the prebuild command) if there is none."""
     if sm not in ARCHS:
         raise NotBuilt(f"kernels.ggml_cuda supports sm {sorted(ARCHS)}, not sm {sm}")
-    path = module_path(sm)
+    path = module_path(sm, k := key(sm))
     if not path.is_file():
-        raise NotBuilt(host.shipped_mismatch("kernels.ggml_cuda", key(sm), SHIPPED)
-                       or f"kernels.ggml_cuda: no prebuilt extension for sm {sm}, CUDA {cuda_major()}, torch "
-                       f"{torch.__version__} (looked for {path}); build it with: {PREBUILD} --sm {sm} (CUDA 13's nvcc)")
+        raise host.missing("kernels.ggml_cuda", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}", NotBuilt)
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -85,7 +84,7 @@ def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
     builds of one key take turns (a lock file in its directory)."""
     from torch.utils import cpp_extension
 
-    if (shipped := SHIPPED / key(sm) / f"{NAME}.so").is_file():     # an overlay ships it: nothing to build
+    if (shipped := SHIPPED / (k := key(sm)) / f"{NAME}.so").is_file():   # an overlay ships it: nothing to build
         return shipped
     nvcc = shutil.which("nvcc") or (cpp_extension.CUDA_HOME and str(pathlib.Path(cpp_extension.CUDA_HOME, "bin/nvcc")))
     if not nvcc or not pathlib.Path(nvcc).is_file():
@@ -94,12 +93,12 @@ def build(sm: int, jobs: int, verbose: bool = False) -> pathlib.Path:
     major = int(re.search(r"release (\d+)\.", version).group(1))
     if major != cuda_major():
         raise RuntimeError(f"kernels.ggml_cuda: nvcc is CUDA {major}, torch is built for CUDA {cuda_major()}")
-    out = CACHE / key(sm)
+    out = CACHE / k
     (out / "obj").mkdir(parents=True, exist_ok=True)
     with open(out / "build.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         _build(sm, nvcc, out, jobs, verbose)
-    return module_path(sm)
+    return module_path(sm, k)
 
 
 def _build(sm: int, nvcc: str, out: pathlib.Path, jobs: int, verbose: bool) -> None:

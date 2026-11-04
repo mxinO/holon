@@ -3,7 +3,7 @@
 # modules come prebuilt. It is also the GPU acceptance's container.
 #
 #   docker build -f Dockerfile -t holon <a directory holding the release's wheels>     # the tested artifacts
-#   docker build --build-arg HOLON=holonlm==<version> -t holon - < Dockerfile          # from PyPI, once published
+#   docker build -t holon - < Dockerfile             # this version from PyPI, once published (no context: no wheels)
 #   docker run --gpus all -p 8000:8000 -v <model dir>:/models holon serve /models/<file> --host 0.0.0.0
 #
 # `--build-arg HEADERS=` leaves out Python's headers (the acceptance's negative run: the start must refuse at once).
@@ -22,7 +22,9 @@ ENV HOME=/opt/holon/user \
     CUTE_DSL_CACHE_DIR=/opt/holon/cache/cute \
     PATH=/opt/holon/venv/bin:$PATH
 
-ARG HOLON=holonlm
+# Without wheels in the context: this tree's version from PyPI (scripts/bump_version.py sets it, check_version.py
+# checks it).
+ARG HOLON=holonlm==0.2.0
 COPY . /opt/holon/wheels/
 RUN python3.12 -m venv /opt/holon/venv \
     && wheels=$(ls /opt/holon/wheels/*.whl 2> /dev/null || true) \

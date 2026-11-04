@@ -464,6 +464,9 @@ def _main(argv: list[str] | None) -> None:
     plugins, declared = PluginSet(installed), declared_options(installed)
     check_flags(flags, declared)
     device = torch.device(flags.get("device", "cuda"))
+    if device.type == "cuda" and torch.version.cuda is None:
+        raise SystemExit(f"holon: this torch ({torch.__version__}) has no CUDA: install torch 2.11.0 for CUDA 13.0 "
+                         "(the README's install)")
     fp, current = platform.fingerprint(device), plans.current_srcs(installed)
     rows = locked_models(args.plans, fp, current)          # names this card's file even under --no-lock
     sized = None if args.no_size_check or device.type != "cuda" else fp

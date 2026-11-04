@@ -9,6 +9,8 @@ from collections.abc import Mapping
 
 MTP = "mtp-q2_0@a22206a4d74eafbf"        # the pack the locks name (`[sources] mtp.path`; v1-flash-next.md §13)
 GGUF_PY = "27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd"   # gguf-py with Q2_0: the llama.cpp commit std vendors (v1-pip D7)
+STRATA = "296b59d2f73c8f04a805df29c2fa97655adace78"    # Strata's tools that make the pack (v1-flash-next.md §13)
+NUMPY = "2.5.4"                                        # uv.lock's: the pack's bytes depend on nothing else
 NETWORK = {"nfs", "nfs4", "cifs", "smb3", "smbfs", "lustre", "ceph", "glusterfs", "fuse.sshfs", "9p", "gpfs",
            "beegfs", "afs"}
 
@@ -63,9 +65,9 @@ def source_hint(identity: str) -> str | None:
     out = f"~/.cache/holon/sources/{MTP}"
     return ("serving without the MTP head costs 24–37% of decode (measured on an RTX 5080 and 5090). Strata's public "
             "tools make it (README, Qwen3.8-Flash-Next), in a venv of their own with gguf-py at Holon's pin:\n"
-            "    python3.12 -m venv mtp-env && mtp-env/bin/pip install numpy \"gguf @ "
+            f"    python3.12 -m venv mtp-env && mtp-env/bin/pip install numpy=={NUMPY} \"gguf @ "
             f"https://github.com/ggml-org/llama.cpp/archive/{GGUF_PY}.zip#subdirectory=gguf-py\"\n"
-            "    mkdir strata && curl -sL https://github.com/Niko1221/Strata/archive/296b59d.tar.gz | "
+            f"    mkdir strata && curl -sL https://github.com/Niko1221/Strata/archive/{STRATA}.tar.gz | "
             "tar xz -C strata --strip-components=1\n"
             "    mtp-env/bin/python strata/tools/mtp_fetch.py fetch --out mtp\n"
             f"    mkdir -p {out}\n"

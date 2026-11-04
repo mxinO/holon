@@ -14,7 +14,7 @@ mkdir -p "$out"
 cid=$(docker create -i -e HOLON_COMMIT="$(git -C "$root" rev-parse "$ref")" \
   -e HOLON_IMAGE="$(sed -n 's/^FROM //p' "$here/$kind.Dockerfile")" -e MAX_JOBS="${MAX_JOBS:-3}" "$image" \
   bash -c 'mkdir /holon && tar -x -C /holon && cd /holon && uv python install -q 3.12 &&
-           uv run --no-project --python 3.12 --with packaging python scripts/release/build_wheels.py "$@"' -- "$@")
+           uv run --no-project --python 3.12 --with packaging==26.3 python scripts/release/build_wheels.py "$@"' -- "$@")
 trap 'docker rm -f "$cid" > /dev/null' EXIT
 docker cp -q "$out/." "$cid:/out"
 git -C "$root" archive --format=tar "$ref" | docker start -a -i "$cid"

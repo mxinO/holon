@@ -4,6 +4,9 @@ version = "0.2.0"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]   # symlinks to the root's
 requires-python = ">=3.12,<3.13"
+readme = "README.md"          # a symlink to scripts/release/README.component.md (the PyPI page)
+classifiers = ["Programming Language :: Python :: 3.12", "Operating System :: POSIX :: Linux",
+               "Environment :: GPU :: NVIDIA CUDA :: 13"]
 description = "Holon core: plugin ABI (holon.api) and runtime (holon.core); `python -m holon` (the `holon` command comes with holonlm)"
 dependencies = ["torch==2.11.0", "numpy>=2", "msgspec>=0.19", "pyzmq>=26",   # torch from the cu130 index (root)
                 "nvidia-ml-py"]   # platform.gpu_shared: whether a display or another process shares the card
@@ -12,7 +15,7 @@ dependencies = ["torch==2.11.0", "numpy>=2", "msgspec>=0.19", "pyzmq>=26",   # t
 Repository = "https://github.com/mxinO/holon"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]

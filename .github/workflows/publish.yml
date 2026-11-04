@@ -1,0 +1,48 @@
+# Publish the wheels a wheels.yml run built and the GPU acceptance tested (docs/dev/v1-pip.md D11): never a rebuild.
+# The dispatch names the run and the acceptance's evidence record, which lists each wheel's sha256; the job downloads
+# that run's `wheels` artifact and uploads it only if every file is the tested one. The environment (`testpypi`,
+# `pypi`) has the owner as its required reviewer; trusted publishing (OIDC), no tokens.
+name: publish
+on:
+  workflow_dispatch:
+    inputs:
+      run-id:
+        description: "the wheels.yml run whose artifacts the GPU acceptance tested"
+        required: true
+      record:
+        description: "that acceptance's evidence record in this commit, naming each wheel's sha256"
+        required: true
+      target:
+        description: "testpypi or pypi"
+        type: choice
+        options: [testpypi, pypi]
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    environment: ${{ inputs.target }}
+    permissions:
+      contents: read
+      actions: read                            # the tested run's artifacts
+      id-token: write                          # trusted publishing
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
+        with: {name: wheels, path: wheels, run-id: "${{ inputs.run-id }}", github-token: "${{ github.token }}"}
+      - name: every wheel is the one the acceptance tested (its sha256 in the record), and no other
+        env:
+          RECORD: ${{ inputs.record }}
+        run: |
+          python3 - <<'EOF'
+          import hashlib, json, os, pathlib, sys
+          want = json.loads(pathlib.Path(os.environ["RECORD"]).read_text())["wheels"]
+          have = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in pathlib.Path("wheels").glob("*.whl")}
+          if have != want:
+              sys.exit(f"not the tested wheels: {sorted(set(have.items()) ^ set(want.items()))}")
+          print(f"ok   {len(have)} wheels, each the one the acceptance tested")
+          EOF
+      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086   # v1.14.3
+        with:
+          packages-dir: wheels
+          repository-url: ${{ inputs.target == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}

@@ -1,7 +1,9 @@
 # The overlays' build image (docs/dev/v1-pip.md D4): glibc 2.28 (manylinux_2_28), the locks' nvcc (CUDA 13.0.0) and
 # gcc-toolset-13 for every host compile (nvcc's host compiler, torch's cpp_extension, FlashInfer's ninja).
 FROM nvidia/cuda:13.0.0-devel-rockylinux8@sha256:c229277e7f9a61e77fc2726c252e731ccdf8d5de89f723995c75a7daa7c5774a
-RUN dnf install -y -q gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-binutils which && dnf clean all
+# The compilers pinned (docs/dev/v1-pip.md D4): a new release of them is a deliberate change, gated like any build.
+RUN dnf install -y -q gcc-toolset-13-gcc-13.3.1-2.2.el8_10 gcc-toolset-13-gcc-c++-13.3.1-2.2.el8_10 \
+        gcc-toolset-13-binutils-2.40-21.el8 which-2.21-21.el8_10 && dnf clean all
 COPY --from=ghcr.io/astral-sh/uv:0.11.1@sha256:fc93e9ecd7218e9ec8fba117af89348eef8fd2463c50c13347478769aaedd0ce \
      /uv /uvx /usr/local/bin/
 # Ubuntu's gcc defines _FORTIFY_SOURCE=3 by default, and nvcc preprocesses device code with the host compiler's

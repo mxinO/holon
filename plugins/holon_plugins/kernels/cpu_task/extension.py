@@ -40,19 +40,18 @@ def key(sm: int) -> str:
     return f"sm{sm}-cu{torch.version.cuda}-{sys.implementation.cache_tag}-torch{torch.__version__}-{h.hexdigest()[:16]}"
 
 
-def module_path(sm: int) -> pathlib.Path:
-    """The module an overlay ships for `sm`, else the user cache's."""
-    shipped = SHIPPED / key(sm) / f"{NAME}.so"
-    return shipped if shipped.is_file() else CACHE / key(sm) / f"{NAME}.so"
+def module_path(sm: int, k: str | None = None) -> pathlib.Path:
+    """The module an overlay ships for `sm`, else the user cache's (`k`: its key, if the caller has it)."""
+    k = k or key(sm)
+    shipped = SHIPPED / k / f"{NAME}.so"
+    return shipped if shipped.is_file() else CACHE / k / f"{NAME}.so"
 
 
 def load(sm: int) -> ModuleType:
     """The prebuilt module for `sm`; NotBuilt (naming the prebuild command) if there is none."""
-    path = module_path(sm)
+    path = module_path(sm, k := key(sm))
     if sm not in ARCHS or not path.is_file():
-        raise NotBuilt(host.shipped_mismatch("kernels.cpu_task", key(sm), SHIPPED)
-                       or f"kernels.cpu_task: no prebuilt module for sm {sm} (looked for {path}); build it with: "
-                       f"{PREBUILD} --sm {sm} (CUDA 13's nvcc)")
+        raise host.missing("kernels.cpu_task", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}", NotBuilt)
     spec = importlib.util.spec_from_file_location(NAME, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -63,13 +62,13 @@ def build(sm: int, verbose: bool = False) -> pathlib.Path:
     """Compile the module for `sm` (concurrent builds of one key take turns); returns its path."""
     from torch.utils import cpp_extension
 
-    if (shipped := SHIPPED / key(sm) / f"{NAME}.so").is_file():     # an overlay ships it: nothing to build
+    if (shipped := SHIPPED / (k := key(sm)) / f"{NAME}.so").is_file():   # an overlay ships it: nothing to build
         return shipped
-    out = CACHE / key(sm)
+    out = CACHE / k
     out.mkdir(parents=True, exist_ok=True)
     with open(out / "build.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         os.environ["TORCH_CUDA_ARCH_LIST"] = f"{sm // 10}.{sm % 10}"     # this process builds one target
         cpp_extension.load(name=NAME, sources=[str(SOURCE)], extra_cflags=["-O2"], extra_cuda_cflags=list(FLAGS),
                            extra_include_paths=[str(CSRC)], build_directory=str(out), with_cuda=True, verbose=verbose)
-    return module_path(sm)
+    return module_path(sm, k)

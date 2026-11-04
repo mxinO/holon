@@ -320,12 +320,13 @@ def calls(rows: int, size: int) -> list[tuple[int, int]]:
 
 def rule_module(sm: int):
     """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (NotBuilt if none is)."""
+    first = None
     for arch in (sm, *extension.ARCHS):
         try:
             return extension.load(arch)
-        except extension.NotBuilt:
-            continue
-    raise extension.NotBuilt(f"kernels.ggml_cuda: no prebuilt extension; build one with: {extension.PREBUILD} --sm N")
+        except extension.NotBuilt as e:
+            first = first or e                   # its own SM's reason (another Holon version's add-on, …) is the one
+    raise first
 
 
 def _device(ctx) -> int:

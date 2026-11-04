@@ -1,16 +1,10 @@
 # Holon's wheels (docs/dev/v1-pip.md D10, D11): the pure wheels and the umbrella, one overlay of prebuilt CUDA modules
 # per SM built in its image, the same modules built in the locks' image for the SASS gate, then the CPU check and the
-# privacy scan. GPU acceptance runs off GitHub on the artifacts (D12). Publishing is a manual dispatch behind a GitHub
-# environment whose required reviewer is the owner (trusted publishing: no tokens), of exactly these artifacts.
+# privacy scan. GPU acceptance runs off GitHub on the artifacts (D12). Publishing is publish.yml: it uploads a tested
+# run's artifacts, never a rebuild.
 name: wheels
 on:
   workflow_dispatch:
-    inputs:
-      publish:
-        description: "after the checks: none, testpypi or pypi (each needs the owner's approval)"
-        default: none
-        type: choice
-        options: [none, testpypi, pypi]
   push:
     tags: ["v*"]
 permissions:
@@ -27,7 +21,7 @@ jobs:
       - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e    # v6.8.0
         with:
           version: "0.11.1"
-      - run: uv run --no-project --python 3.12 --with packaging python scripts/release/build_wheels.py pure --out dist
+      - run: uv run --no-project --python 3.12 --with packaging==26.3 python scripts/release/build_wheels.py pure --out dist
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with: {name: pure, path: dist/*.whl}
   build:                                       # an overlay, or the reference build of the same modules, per SM
@@ -41,7 +35,7 @@ jobs:
       - name: free disk (the image ≈ 10 GB, the environment ≈ 6 GB, the build)
         run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL && df -h /
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262   # v4.4.0
-      - name: build at /holon in the ${{ matrix.kind }} image (MAX_JOBS=3: nvcc peaks at 3.4 GB a compile)
+      - name: "build at /holon in the ${{ matrix.kind }} image (MAX_JOBS=3, as nvcc peaks at 3.4 GB a compile)"
         run: MAX_JOBS=3 scripts/release/in_image.sh ${{ matrix.kind }} HEAD out ${{ matrix.kind }} --sm ${{ matrix.sm }} --out /out
       - run: tar -C out -cf ${{ matrix.kind }}-sm${{ matrix.sm }}.tar .
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
@@ -67,20 +61,6 @@ jobs:
       - name: the privacy scan of every member, binaries included (the full patterns run before an upload, D10.6)
         run: python3 scripts/ci/check_private.py --wheels wheels
       - name: the CPU check (contents, then a fresh venv's install)
-        run: uv run --no-project --python 3.12 --with packaging python scripts/release/build_wheels.py check wheels
+        run: uv run --no-project --python 3.12 --with packaging==26.3 python scripts/release/build_wheels.py check wheels
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9   # v7.0.2
         with: {name: wheels, path: wheels/*.whl}
-  publish:
-    needs: check
-    if: github.event_name == 'workflow_dispatch' && inputs.publish != 'none'
-    runs-on: ubuntu-24.04
-    environment: ${{ inputs.publish }}
-    permissions:
-      id-token: write                          # trusted publishing
-    steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333   # v8.0.2
-        with: {name: wheels, path: wheels}
-      - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086   # v1.14.3
-        with:
-          packages-dir: wheels
-          repository-url: ${{ inputs.publish == 'testpypi' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}

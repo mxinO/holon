@@ -42,7 +42,6 @@ MAX_TEXT = 1 << 20                               # bytes of a constraint's JSON
 class Plugin:
     def register(self, regs: Any) -> None:
         host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
-        pass
 
     def build(self, ctx: Any, vocab: Any) -> XGrammar:
         opts = ctx.options.get("plugins", {})

@@ -9,6 +9,7 @@ from _common import ROOT, fail
 FILES = {f: r'(?m)^version = "([^"]+)"$' for f in
          ["pyproject.toml", *(f"{d}/pyproject.toml" for d in ("core", "std", "plugins", "judge", "testing", "tools"))]}
 FILES["core/holon/__init__.py"] = r'(?m)^__version__ = "([^"]+)"$'
+FILES["Dockerfile"] = r"(?m)^ARG HOLON=holonlm==(\S+)$"          # its PyPI install, without wheels
 found = {f: (m.group(1) if (m := re.search(p, (ROOT / f).read_text())) else None) for f, p in FILES.items()}
 fail([] if len(set(found.values())) == 1 and None not in found.values()
      else [f"{f}: {v}" for f, v in found.items()], "one version")

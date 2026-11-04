@@ -249,7 +249,7 @@ def test_uv_lock_hashes_the_runtime_closure_extras_included(tmp_path, monkeypatc
     base = hashed(UV_LOCK)
     assert hashed(UV_LOCK.replace('"9.0"', '"9.1"')) == base             # a dev-only pin moves no plan
     assert hashed(UV_LOCK.replace('"13.0.1"', '"13.0.2"')) != base       # reached through torch's extra
-    assert plans.uv_lock(tmp_path / "absent.lock") == "none"
+    assert plans.uv_lock(tmp_path / "absent.lock") == "none" and plans.drifted(tmp_path / "absent.lock") == []
 
 
 def _installed(versions):

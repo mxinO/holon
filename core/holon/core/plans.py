@@ -33,6 +33,7 @@ CORE_DIR = pathlib.Path(__file__).resolve().parents[1]
 _CHECKOUT = CORE_DIR.parents[1] if CORE_DIR.parent.name == "core" and (CORE_DIR.parents[1] / "plans").is_dir() else None
 _spec = importlib.util.find_spec("holon_locks")     # an installed release's locks (docs/dev/v1-pip.md D6)
 INSTALLED = pathlib.Path(_spec.submodule_search_locations[0]) if _spec and _spec.submodule_search_locations else None
+del _spec
 # The tree holding `plans/` and `uv.lock`: the checkout the core runs from (it wins over an installed `holon_locks`,
 # which the CLI warns of), else the installed locks, else where a checkout would be (no locks: the CLI says so).
 TREE = _CHECKOUT or INSTALLED or CORE_DIR.parents[1]
@@ -181,17 +182,17 @@ def uv_lock(path: pathlib.Path) -> str:
     environment for another (docs/dev/v1-pip.md D6)."""
     if not path.is_file():
         return "none"
-    if drift := drifted(path):
+    if drift := drifted(path, closure := _closure(path)):
         return "installed:" + canonical_hash(drift)
-    return canonical_hash(sorted((n, p.get("version", ""), str(p["source"])) for n, p in _closure(path).items()))
+    return canonical_hash(sorted((n, p.get("version", ""), str(p["source"])) for n, p in closure.items()))
 
 
-def drifted(path: pathlib.Path) -> list[str]:
+def drifted(path: pathlib.Path, closure: dict[str, dict[str, Any]] | None = None) -> list[str]:
     """The runtime closure's packages installed at another version than `uv.lock`'s ("name version (lock version)"),
     a local label aside (PyPI's torch `2.11.0` is the index's `2.11.0+cu130`). One not installed is no drift: the
     closure ignores markers, so it holds packages of other platforms (PyPy's cffi), and one missing fails at import."""
     out = []
-    for name, package in _closure(path).items():
+    for name, package in (closure or (_closure(path) if path.is_file() else {})).items():
         try:
             have = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:

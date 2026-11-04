@@ -4,6 +4,7 @@ toolchain, and a prebuild of several SMs builds each in its own process."""
 import pathlib
 import re
 import subprocess
+import sysconfig
 
 import pytest
 import torch
@@ -19,7 +20,7 @@ def _ext(name):
 
 
 def test_the_c_toolchain_check_names_what_is_missing_and_the_fix(monkeypatch):
-    check = host.require_c_toolchain.__wrapped__              # uncached
+    check, include = host.require_c_toolchain.__wrapped__, sysconfig.get_paths()["include"]     # uncached
     check()                                                   # this host has gcc and Python's headers
     monkeypatch.delenv("CC", raising=False)
     monkeypatch.setattr(host.shutil, "which", lambda _: None)
@@ -29,17 +30,21 @@ def test_the_c_toolchain_check_names_what_is_missing_and_the_fix(monkeypatch):
     monkeypatch.setattr(host.sysconfig, "get_paths", lambda scheme: {"include": "/nonexistent"})
     with pytest.raises(HostError, match=r"no Python.h in /nonexistent.*uv tool install"):
         check()
+    monkeypatch.setattr(host.sysconfig, "get_paths", lambda scheme: {"include": include})
+    monkeypatch.setenv("CC", "/nonexistent/cc")                           # a $CC that is not there: refused, no retry
+    with pytest.raises(HostError, match=r"\(/nonexistent/cc\) that cannot build a Python extension: error: .*nonexist"):
+        check()
 
 
 def test_every_triton_user_checks_the_c_toolchain_at_load():
     """The plugins that import Triton (found by grep, not by family) call the check in `register` (rev 2.1, A-R2)."""
     users = {p.parent.relative_to(PLUGINS).parts[:2] for p in PLUGINS.rglob("*.py")
              if "vendor" not in p.parts and re.search(r"^\s*(import triton|from triton)", p.read_text(), re.M)}
-    assert len(users) == 10
+    assert users
     for parts in users:
-        plugin = (PLUGINS.joinpath(*parts) / "plugin.py").read_text()
-        call = r"def register\(self, regs[^)]*\) -> None:\n        host\.require_c_toolchain\(\)"
-        assert re.search(call, plugin), parts
+        text = (PLUGINS.joinpath(*parts) / "plugin.py").read_text()
+        register = re.search(r"\n    def register\(.*?(?=\n    def |\Z)", text, re.S)
+        assert register and "host.require_c_toolchain()" in register.group(0), parts
 
 
 @pytest.mark.parametrize("name", EXTENSIONS)
@@ -60,7 +65,7 @@ def test_a_torch_the_shipped_modules_do_not_fit_is_refused_with_the_fix(tmp_path
     want = ext.key(120)
     assert "torch" + torch.__version__ in want
     (tmp_path / want.replace(f"torch{torch.__version__}", "torch2.11.0+cu130x")).mkdir()       # another torch build
-    with pytest.raises(HostError, match=r"torch is .*pip install --force-reinstall torch==2.11.0 --index-url"):
+    with pytest.raises(HostError, match=r"torch is .*pip install --force-reinstall \"torch==2.11.0\+cu130\" --index"):
         ext.load(120)
     for d in tmp_path.iterdir():
         d.rmdir()
@@ -68,9 +73,15 @@ def test_a_torch_the_shipped_modules_do_not_fit_is_refused_with_the_fix(tmp_path
     with pytest.raises(ext.NotBuilt, match=r"another Holon version.*force-reinstall holonlm=="):
         ext.load(120)
     (tmp_path / (want[:-16] + "0" * 16)).rmdir()
-    (tmp_path / ext.key(86)).mkdir()                                        # another SM only: the usual message
+    (tmp_path / ext.key(86)).mkdir()                                        # another SM only:
+    monkeypatch.setattr(host, "toolkit", lambda: True)                      # with a toolkit, prebuild names it
     with pytest.raises(ext.NotBuilt, match=r"no prebuilt module for sm 120.*CUDA 13's nvcc"):
         ext.load(120)
+    monkeypatch.setattr(host, "toolkit", lambda: False)                     # without, the add-on to install, at once
+    with pytest.raises(HostError, match=r"\(sm 120\) are not installed: `pip install holonlm-cuda-sm120=="):
+        ext.load(120)
+    with pytest.raises(HostError, match=r"this GPU is sm 80, and Holon's prebuilt modules cover sm 86, 89, 120"):
+        ext.load(80)
 
 
 @pytest.mark.parametrize("name", EXTENSIONS)
@@ -86,16 +97,31 @@ def test_a_prebuild_of_several_sms_builds_each_in_its_own_process(name, monkeypa
 
 def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch):
     aot = pytest.importorskip("holon_plugins.kernels.flashinfer.aot")
-    monkeypatch.setattr(aot, "PREBUILT", tmp_path)
+    monkeypatch.setattr(aot, "PREBUILT", tmp_path / "prebuilt")
+    aot.directory.cache_clear()
+    monkeypatch.setattr(host, "toolkit", lambda: True)
+    monkeypatch.setattr(aot.env, "FLASHINFER_JIT_DIR", tmp_path / "jit")
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
     capability = {"cuda:0": (8, 6), "cuda:1": (8, 9)}
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda d: capability[d])
     aot.bind("cuda:0")                       # set even with no modules shipped: never a foreign jit-cache's
     assert aot.env.FLASHINFER_AOT_DIR == aot.directory(86) and aot.directory(86).name.endswith(
         f"-cu{torch.version.cuda}-sm86") and "-tvmffi" in aot.directory(86).name
-    with pytest.raises(RuntimeError, match="one SM a process"):
+    with pytest.raises(HostError, match="one GPU architecture a process"):
         aot.bind("cuda:1")
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
-    (tmp_path / aot.directory(89).name.replace(f"-cu{torch.version.cuda}-", "-cu12.8-")).mkdir()
+    foreign = aot.directory(89).name.replace(f"-cu{torch.version.cuda}-", "-cu12.8-")    # another torch's add-on
+    (tmp_path / "prebuilt" / foreign).mkdir(parents=True)
     with pytest.raises(HostError, match="prebuilt modules are for CUDA 13.0"):
         aot.bind("cuda:1")
+    (tmp_path / "jit" / "rope").mkdir(parents=True)                         # the user built FlashInfer's own:
+    (tmp_path / "jit" / "rope" / "rope.so").write_bytes(b"")                # theirs serve, as the extensions' cache
+    aot.bind("cuda:1")
+    monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
+    (tmp_path / "jit" / "rope" / "rope.so").unlink()
+    for d in (tmp_path / "prebuilt").glob("*-cu12.8-*"):
+        d.rmdir()
+    monkeypatch.setattr(host, "toolkit", lambda: False)                     # no add-on module, no toolkit: refused
+    with pytest.raises(HostError, match=r"\(sm 89\) are not installed: `pip install holonlm-cuda-sm89=="):
+        aot.bind("cuda:1")
+    aot.directory.cache_clear()

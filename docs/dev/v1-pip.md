@@ -193,27 +193,30 @@ install.
       them, as today. The prebuild skip tests each spec's `aot_path`.
     - Setting a third-party module global is acceptable for a kernel plugin: invariant 3 is about Holon's own state.
       The plugin says so in a comment.
-    - A process that binds a second SM raises a `PluginError`: the same-major binary would otherwise run sm_86 code
-      on an sm_89 device without error.
-    - At bind, the plugin asserts that FlashInfer's norms run CuTe DSL (`not flashinfer.norm._USE_CUDA_NORM`). If
-      `nvidia-cutlass-dsl` fails to import, FlashInfer silently switches to another norm, which changes numerics.
+    - A process that binds a second SM is refused (`HostError`, since plugins raise only `holon.api` types): the
+      same-major binary would otherwise run sm_86 code on an sm_89 device without error.
+    - At bind, the plugin refuses (`HostError`) FlashInfer's CUDA norm in place of its CuTe DSL one: if
+      `nvidia-cutlass-dsl` fails to import, or `FLASHINFER_USE_CUDA_NORM=1` is set, FlashInfer silently switches,
+      which changes numerics.
   - **Refusal of another torch:** a `+cu128` or `+cpu` torch satisfies `torch==2.11.0`. Such a torch finds no
     shipped module (the key holds `cu12` / the version).
     - Holon's loaders and the FlashInfer plugin then raise `HostError` (D-H), when the overlay ships modules but none
       for this torch. They parse the shipped key (`sm…-cu…-cpython-312-torch<v>-<hash>`) to tell the cases apart.
-    - The message: "this install's torch is 2.11.0+cu128; Holon's prebuilt modules need torch 2.11.0 for CUDA 13.0
-      (PyPI's): `pip install --force-reinstall torch==2.11.0 --index-url https://pypi.org/simple`, in a venv without
-      extra indexes".
+    - The message names `pip install --force-reinstall "torch==2.11.0+cu130" --index-url
+      https://download.pytorch.org/whl/cu130`: the exact local label matches only the cu130 build (PyPI's files, F2)
+      whatever extra index `pip.conf` adds.
+    - A CPU-only torch is refused by the CLI before it reads the GPU, naming the same install.
   - **An overlay from another Holon version** (rev 2.1, A-R5): the shipped key's torch matches but its source hash
     does not, for example after `pip install -U holonlm-plugins` alone. The message is its own: "the prebuilt
     modules are from another Holon version: `pip install --force-reinstall holonlm==X.Y.Z`". This is a `NotBuilt`,
     not a `HostError`.
-  - **When nothing matches and torch is right** (another SM, or a components-only install): today's `NotBuilt`.
-    - It now names what the install ships (the `prebuilt/` directories) and that `holon prebuild` needs CUDA 13's
-      nvcc, or gcc/g++ for ggml_cpu.
-    - A FlashInfer module in neither the AOT directory nor the JIT cache makes FlashInfer run nvcc. That failure is
-      re-raised with the same message, as a `NotBuilt`: a module missing from Holon's own set is a Holon bug, not
-      the host's.
+  - **When nothing matches and torch is right** (a missing add-on, another SM, a components-only install), and no
+    CUDA toolkit could build the module: `HostError`, refused at once (code review, A-C2 and C-C1). The message names
+    the add-on to install (`pip install holonlm-cuda-sm<N>==<v>`, or `pip install holonlm`), or, for an SM no add-on
+    covers, that it needs a source install with CUDA 13's nvcc. One helper words it for every extension and
+    FlashInfer (`holon_plugins/host.py`: `missing`, `no_add_on`).
+    - **With a toolkit** (a source install): today's `NotBuilt`, naming `holon prebuild`.
+    - FlashInfer counts the user's own modules in its JIT cache as built, as the extensions count their cache.
 
 ## 4. Host prerequisites, failing fast (D-H)
 
@@ -243,7 +246,7 @@ install.
        - `PluginLoadFailed` wrapping `HostError` gives `"host"`;
        - an outer `OutOfUnits` or `PluginError` keeps its kind;
        - the supervisor makes one attempt per configuration on `"host"`;
-       - the `--no-supervised` path prints the message.
+       - the `--no-supervised` path prints the message (a 5-line message path, not tested: corrected in §15).
   2. **`holon_plugins/host.py`**, a shared library module outside every plugin family; the independence contract
      lists families.
      - **What it checks:** `require_c_toolchain()` finds `$CC`, `gcc` or `clang`, and `Python.h` under
@@ -408,6 +411,9 @@ install.
      - **It fails on any function present in one build and not the other:** names and counts must match 1:1, so a
        naming difference cannot shrink the compared set. Both builds at `/holon` should make names and assert strings
        equal; step 2's first run confirms it.
+     - **Device data too** (code review, A-m7): the initialized constant and global tables of every cubin
+       (`.nv.constant*`, `.nv.global.init`, read from `cuobjdump -xelf`), section by section. They compare
+       deterministically (§15).
      - This covers Rocky's gcc-toolset-13 against Ubuntu's gcc 13, kernel by kernel, with no GPU.
      - **Once, in step 2,** the same comparison runs between compressed and uncompressed builds of every module on
        every SM. That proves `size` mode before the flag is kept, and is repeated whenever nvcc changes.
@@ -453,9 +459,12 @@ install.
     - **Disk:** the image (≈ 8–10 GB extracted) plus the venv (≈ 6 GB, `UV_NO_CACHE`) plus the build objects (≈ 1 GB)
       need the freeing step.
     - Six build jobs run in parallel, far inside the 6 h job limit.
-  - **`publish`:** a manual job behind the GitHub environments `testpypi` and `pypi`, whose required reviewer is the
-    owner. It uses trusted publishing (OIDC, no tokens) and uploads exactly the artifacts D12 tested. Pending
-    publishers are registered only when the go is close.
+  - **Publishing is `.github/workflows/publish.yml`, never a rebuild** (code review, A-C1, B-M3, C-C2). The rule:
+    - D12 runs on one `wheels.yml` run's artifacts, and its evidence record lists each wheel's sha256;
+    - the publish dispatch names that run and that record;
+    - it downloads that run's `wheels` artifact and uploads it only if the files are exactly the record's, behind the
+      GitHub environment (`testpypi`, `pypi`) whose required reviewer is the owner;
+    - trusted publishing (OIDC), no tokens. Pending publishers are registered only when the go is close.
   - **GPU tests are not in GitHub** (no GPU runners): `scripts/release/wheel_check.sh` runs D12 on each card class
     against a run's artifacts, and the results become evidence records.
 
@@ -716,7 +725,7 @@ reports are not in the repository; each row says what changed.
 | **B r2-M2** `HostError` is a minor ABI bump | **Fixed.** ABI 1.9 (the name, and `"host"` in the failed kinds); its users declare `core_abi >= 1.9`. The core count is stated as ≈ 5,303 | D-H, §9 |
 | **A-R2** two more Triton importers; the timing guarantee | **Fixed.** The ten plugins are found by grepping `import triton` (`grammar.xgrammar` and `transforms.tail_skip` added), with a step-1 test. The guarantee is restated: before ready, no retry, after one weight load for kernels chosen after the weights. D12.7 times both cases | D-H, D12.7 |
 | **A-R3** `_kind`'s precedence; `HostError`'s scope | **Fixed.** Outermost-first, with only `"error"` transparent. `HostError` has two causes (C toolchain, torch); FlashInfer's missing module is a `NotBuilt`. Tests | D-H, D5 |
-| **A-R4, B r2-m2** the supervisor and `"host"` | **Changed** to B's form: `"host"` takes the existing no-retry, roll-back path, with one attempt per configuration, then the give-up. The `--no-supervised` path is tested | D-H |
+| **A-R4, B r2-m2** the supervisor and `"host"` | **Changed** to B's form: `"host"` takes the existing no-retry, roll-back path, with one attempt per configuration, then the give-up. The `--no-supervised` path's message is not tested (§15, B m7) | D-H |
 | **A-R5** an overlay from another Holon version | **Fixed.** Its own `NotBuilt` message, from parsing the shipped key | D5 |
 | **A-R6** a mixed venv | **Fixed.** The checkout wins over an installed `holon_locks`, with a warning | D6 |
 | **B r2-m1** `origin` is `None` for a namespace package | **Fixed.** `submodule_search_locations[0]`; the generated package's `__init__.py` is asserted | D6 |
