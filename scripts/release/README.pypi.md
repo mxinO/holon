@@ -7,17 +7,18 @@ from the lock tuned and verified for your card. Source, documentation and the su
 
 ## Supported GPUs
 
-Holon ships its native modules for three GPU architectures. Every card of these serves:
+Holon ships its native modules for three GPU architectures (SMs). Each model's lock, tuned and verified, exists for
+these tested cards:
 
-| SM | cards |
-|---|---|
-| 86 | RTX 30 series; RTX A2000 to A6000; A10, A40 |
-| 89 | RTX 40 series; RTX 6000 Ada; L4, L40, L40S |
-| 120 | RTX 50 series; RTX PRO Blackwell |
+| SM | tested cards (a tuned lock) | other cards of the same SM (not tested) |
+|---|---|---|
+| 86 | RTX 3090 | RTX 30 series; RTX A2000 to A6000; A10, A40 |
+| 89 | RTX 4090 | RTX 40 series; RTX 6000 Ada; L4, L40, L40S |
+| 120 | RTX 5080, RTX 5090 | RTX 50 series; RTX PRO Blackwell |
 
-Tuned, verified locks exist for the RTX 3090, RTX 4090, RTX 5080 and RTX 5090 (the models each serves are in the
-repository's README); every other card of these SMs serves with automatic defaults. A GPU of another SM installs but
-is refused at start, naming why: it needs a source install with CUDA 13's nvcc.
+Another card of these SMs starts from the closest tested card's lock of its SM, marked unverified and fitted to its
+memory, or from automatic defaults for a model without one. A GPU of another SM installs but is refused at start,
+naming why: it needs a source install with CUDA 13's nvcc.
 
 ## Requirements
 
@@ -46,9 +47,16 @@ holon serve unsloth/Qwen3-8B-GGUF
 Use a venv without extra package indexes: `holonlm` pins torch 2.11.0 for CUDA 13.0 (PyPI's) and every other
 package to the versions the locks were verified with.
 
+If the venv got another torch build (a `+cu128` or `+cpu` one, from an extra index in `pip.conf`), `holon serve` refuses
+it; replace it with the one Holon pins:
+
+```bash
+pip install --force-reinstall --no-deps "torch==2.11.0+cu130" --index-url https://download.pytorch.org/whl/cu130
+```
+
 ## What fails, and how
 
 - **No C compiler or Python headers:** the first start is refused at once with the apt line above.
-- **Another torch build** (a `+cu128` or `+cpu` torch from another index): refused, naming the reinstall command.
+- **Another torch build** (a `+cu128` or `+cpu` torch from another index): refused, naming the reinstall command above.
 - **A GPU of another SM:** refused at start, naming the source install.
 - **Python other than 3.12, aarch64, macOS, Windows:** pip finds no matching distribution.

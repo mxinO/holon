@@ -67,7 +67,8 @@ def module_path(sm: int, k: str | None = None) -> pathlib.Path:
 
 
 def load(sm: int) -> ModuleType:
-    """The prebuilt module for `sm`; NotBuilt (naming the prebuild command) if there is none."""
+    """The prebuilt module for `sm`; `NotBuilt` for an SM no module can serve, a `HostError` naming the fix
+    (`host.missing`) if there is none."""
     if sm not in ARCHS:
         raise NotBuilt(f"kernels.ggml_cuda supports sm {sorted(ARCHS)}, not sm {sm}")
     path = module_path(sm, k := key(sm))

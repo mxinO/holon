@@ -50,6 +50,9 @@ def test_only_a_cuda_13_nvcc_counts_as_a_toolkit(tmp_path, monkeypatch):
         nvcc.chmod(0o755)
         host.toolkit.cache_clear()
         assert host.toolkit() is ok, release
+    monkeypatch.setenv("CUDA_HOME", str(tmp_path / "runtime-only"))      # set: the only place torch and FlashInfer look
+    host.toolkit.cache_clear()
+    assert host.toolkit() is False
     host.toolkit.cache_clear()
 
 
@@ -113,18 +116,24 @@ def test_a_prebuild_of_several_sms_builds_each_in_its_own_process(name, monkeypa
     assert [cmd[cmd.index("--sm") + 1:cmd.index("--sm") + 2] for cmd in runs] == [["86"], ["120"]]
 
 
-def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch):
+def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch, capsys):
     aot = pytest.importorskip("holon_plugins.kernels.flashinfer.aot")
     monkeypatch.setattr(aot, "PREBUILT", tmp_path / "prebuilt")
-    aot.directory.cache_clear()
     monkeypatch.setattr(host, "toolkit", lambda: True)
     monkeypatch.setattr(aot.env, "FLASHINFER_JIT_DIR", tmp_path / "jit")
-    needed = ["rope", "silu_and_mul"]                                       # the modules Holon needs, by name
-    monkeypatch.setattr(aot.prebuild, "specs", lambda sm: [type("Spec", (), {"name": n}) for n in needed])
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
+    needed, listed = ["rope", "silu_and_mul"], []                           # the modules Holon needs, by name
+    monkeypatch.setattr(aot.prebuild, "specs", lambda sm: listed.append(sm) or [type("S", (), {"name": n})
+                                                                               for n in needed])
     capability = {"cuda:0": (8, 6), "cuda:1": (8, 9)}
     monkeypatch.setattr(torch.cuda, "get_device_capability", lambda d: capability[d])
-    aot.bind("cuda:0")                       # set even with no modules shipped: never a foreign jit-cache's
+
+    def bind(device):                                                       # a fresh process's first bind
+        aot.directory.cache_clear(), aot._bind.cache_clear()
+        aot.bind(device)
+    bind("cuda:0")                           # set even with no modules shipped: never a foreign jit-cache's
+    aot.bind("cuda:0")                       # every op's constructor binds: checked once a process and SM
+    assert listed == [86] and "compiles each at first use, once" in capsys.readouterr().err
     assert aot.env.FLASHINFER_AOT_DIR == aot.directory(86) and aot.directory(86).name.endswith(
         f"-cu{torch.version.cuda}-sm86") and "-tvmffi" in aot.directory(86).name
     with pytest.raises(HostError, match="one GPU architecture a process"):
@@ -133,18 +142,18 @@ def test_flashinfer_reads_holon_s_modules_for_one_sm(tmp_path, monkeypatch):
     foreign = aot.directory(89).name.replace(f"-cu{torch.version.cuda}-", "-cu12.8-")    # another torch's add-on
     (tmp_path / "prebuilt" / foreign).mkdir(parents=True)
     with pytest.raises(HostError, match="prebuilt modules are for CUDA 13.0"):
-        aot.bind("cuda:1")
+        bind("cuda:1")
     for n in needed:                                                        # the user built every one Holon needs:
         (tmp_path / "jit" / n).mkdir(parents=True)                          # theirs serve, as the extensions' cache
         (tmp_path / "jit" / n / f"{n}.so").write_bytes(b"")
-    aot.bind("cuda:1")
+    bind("cuda:1")
     monkeypatch.setattr(aot.env, "FLASHINFER_AOT_DIR", pathlib.Path("/elsewhere"))
     (tmp_path / "jit" / "rope" / "rope.so").unlink()                        # one missing: not theirs, so refused
     with pytest.raises(HostError, match="prebuilt modules are for CUDA 13.0"):
-        aot.bind("cuda:1")
+        bind("cuda:1")
     for d in (tmp_path / "prebuilt").glob("*-cu12.8-*"):
         d.rmdir()
     monkeypatch.setattr(host, "toolkit", lambda: False)                     # no add-on module, no toolkit: refused
     with pytest.raises(HostError, match=r"\(sm 89\) are not installed: `pip install holonlm-cuda-sm89=="):
-        aot.bind("cuda:1")
-    aot.directory.cache_clear()
+        bind("cuda:1")
+    aot.directory.cache_clear(), aot._bind.cache_clear()

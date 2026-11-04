@@ -63,8 +63,8 @@ def toolkit() -> bool:
     """Whether a CUDA toolkit here could build a missing module: an nvcc of torch's CUDA major (13), found as torch's
     and FlashInfer's builds find it. An older toolkit (an A100's CUDA 12) cannot."""
     cuda = torch.version.cuda
-    for nvcc in (*(pathlib.Path(os.environ[v], "bin", "nvcc") for v in ("CUDA_HOME", "CUDA_PATH") if os.environ.get(v)),
-                 shutil.which("nvcc"), "/usr/local/cuda/bin/nvcc"):
+    home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")      # set: the only place either build looks
+    for nvcc in ((pathlib.Path(home, "bin", "nvcc"),) if home else (shutil.which("nvcc"), "/usr/local/cuda/bin/nvcc")):
         if nvcc and pathlib.Path(nvcc).is_file() and cuda:
             try:
                 found = re.search(r"release (\d+)\.", subprocess.run([str(nvcc), "--version"], capture_output=True,

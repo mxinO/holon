@@ -25,10 +25,6 @@ ARCHS = (86, 89, 120)
 FLAGS = ("-O3", "-DNDEBUG", "-std=c++17")
 
 
-class NotBuilt(RuntimeError):
-    pass
-
-
 def key(sm: int) -> str:
     """The source, flags, the build recipe (this file), target SM, CUDA, the Python ABI and torch (the module links
     libtorch)."""
@@ -45,7 +41,7 @@ def module_path(sm: int, k: str | None = None) -> pathlib.Path:
 
 
 def load(sm: int) -> ModuleType:
-    """The prebuilt module for `sm`; NotBuilt (naming the prebuild command) if there is none."""
+    """The prebuilt module for `sm`; a `HostError` naming the fix (`host.missing`) if there is none."""
     path = module_path(sm, k := key(sm))
     if sm not in ARCHS or not path.is_file():
         raise host.missing("kernels.expert_io", sm, k, SHIPPED, f"{PREBUILD} --sm {sm}")

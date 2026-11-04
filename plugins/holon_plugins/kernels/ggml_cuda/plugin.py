@@ -319,7 +319,8 @@ def calls(rows: int, size: int) -> list[tuple[int, int]]:
 
 
 def rule_module(sm: int):
-    """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (NotBuilt if none is)."""
+    """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (its own SM's error if
+    none is)."""
     first = None
     for arch in (sm, *extension.ARCHS):
         try:

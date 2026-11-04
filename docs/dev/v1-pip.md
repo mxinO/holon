@@ -221,7 +221,10 @@ install.
     - **A toolkit counts only with an nvcc of torch's CUDA major (13)**: an A100's CUDA 12 cannot build them.
     - **FlashInfer** counts the user's own modules as built only when every module Holon needs (`prebuild.specs(sm)`
       by name) is in its JIT cache. With a CUDA 13 toolkit it may still build a missing one itself, at first use, as
-      a source install always has.
+      a source install always has, and says so in one line (the add-on, the prebuild command). It checks once a
+      process and SM, not in every op's constructor.
+    - **Where the toolkit is:** `CUDA_HOME` or `CUDA_PATH`, when set, is the only place looked at, as torch's and
+      FlashInfer's builds do; else `nvcc` on `PATH`, then `/usr/local/cuda`.
 
 ## 4. Host prerequisites, failing fast (D-H)
 
@@ -882,3 +885,14 @@ Record: `docs/dev/evidence/pip_step0_no_toolkit_rtx-5080_2026-11-03.txt`.
 | **A-R-5** the anonymous-namespace pattern matched none of ggml_cuda's | **Fixed.** The name is read by its length prefix; on the sm_86 reference all 27 anonymous names of the five modules normalize (ggml_cuda's 10 among them) |
 | **A, C notes** `_FORTIFY_SOURCE` in a source install | **Taken:** a line in the README's source install |
 | **C-R6** serve the rebuilt wheels | **In step 5:** the wheels are rebuilt from the propagated commit, and D12 serves them |
+
+**The delta re-review of `c7052db8..7dc56197`.** Every earlier item confirmed; the new ones:
+
+| finding | answer |
+|---|---|
+| **B dr1, A D-1** FlashInfer's module check ran in every op's constructor, regenerating its specs (≈ 0.1–0.18 s a call) | **Fixed.** `bind` computes the SM, and the rest is `_bind(sm)`, cached: once a process and SM, the second-SM refusal kept. A source-install start of Qwen3-8B bf16 on an RTX A5000 (warm caches, defaults): 43.4 s before, 23.5–24.0 s after |
+| **A D-2, C D1** `toolkit()` looked past a set `CUDA_HOME` | **Fixed.** Set, it is the only place looked at |
+| **B dr2** dead `NotBuilt` classes | **Deleted** in cpu_task, expert_io, promote and state_copy; the five `load` docstrings say what they raise |
+| **C D2, B dr3** the PyPI page's support text | **Fixed.** Tested cards (a tuned lock) named per SM; the other cards of each SM listed as not tested, starting from the closest tested card's lock of their SM (unverified, fitted to their memory) or from defaults |
+| **C D3** FlashInfer's compile at start is silent | **Fixed.** One line names the add-on and the prebuild command, and says it happens once |
+| **C R5** the core's refusal points to no command | **Fixed** without a version in the core: the PyPI page's install section carries the one-line torch reinstall (`--no-deps`) |

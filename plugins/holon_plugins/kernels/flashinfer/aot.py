@@ -12,6 +12,7 @@ from __future__ import annotations
 import functools
 import importlib.metadata
 import pathlib
+import sys
 
 import flashinfer
 import flashinfer.norm
@@ -36,15 +37,23 @@ def directory(sm: int) -> pathlib.Path:
 
 
 def bind(device: torch.device) -> None:
-    """FlashInfer reads Holon's modules for `device`'s SM, refused at once (`HostError`, no retry) where it cannot:
+    """FlashInfer reads Holon's modules for `device`'s SM (`_bind`, once a process and SM: every op's constructor
+    calls this)."""
+    major, minor = torch.cuda.get_device_capability(device)
+    _bind(10 * major + minor)
+
+
+@functools.cache
+def _bind(sm: int) -> None:
+    """Holon's modules for `sm` as FlashInfer's AOT directory, refused at once (`HostError`, no retry) where they cannot
+    serve:
     - no add-on module for this SM, and not every module Holon needs built by the user (in FlashInfer's JIT cache,
       by `prebuild.specs` name): with another torch build's add-ons, or without a CUDA 13 toolkit to let FlashInfer
-      build them (the add-on to install, or that this SM is not shipped);
+      build them (the add-on to install, or that this SM is not shipped). With one, FlashInfer builds them at first
+      use, once, as a source install always has, and this says so;
     - a second SM in one process: one major's binaries run on its newer minors, so the first SM's modules would run;
     - FlashInfer's CUDA norm in place of its CuTe DSL one (nvidia-cutlass-dsl not importing, or
       FLASHINFER_USE_CUDA_NORM=1): other numerics than the locks'."""
-    major, minor = torch.cuda.get_device_capability(device)
-    sm = 10 * major + minor
     want = directory(sm)
     if not want.is_dir() and not all((env.FLASHINFER_JIT_DIR / s.name / f"{s.name}.so").is_file()
                                      for s in prebuild.specs(sm)):
@@ -52,8 +61,13 @@ def bind(device: torch.device) -> None:
         if shipped and not any(f"-cu{torch.version.cuda}-" in name for name in shipped):
             raise HostError(f"kernels.flashinfer: this install's torch is {torch.__version__} (CUDA "
                             f"{torch.version.cuda}), and its prebuilt modules are for CUDA 13.0: {host.TORCH_FIX}")
+        build = f"python -m {prebuild.__spec__.name} --sm {sm}"
         if not host.toolkit():
-            raise host.no_add_on("kernels.flashinfer", sm, f"python -m {prebuild.__spec__.name} --sm {sm}")
+            raise host.no_add_on("kernels.flashinfer", sm, build)
+        print(f"holon: kernels.flashinfer: no prebuilt modules for sm {sm}"
+              + (f" (`pip install holonlm-cuda-sm{sm}` ships them)" if sm in host.SHIPPED_SMS else "")
+              + f": FlashInfer compiles each at first use, once (about a minute each); `{build}` does it ahead of a "
+              "start", file=sys.stderr, flush=True)
     if env.FLASHINFER_AOT_DIR != want:
         if env.FLASHINFER_AOT_DIR.parent == PREBUILT:
             raise HostError(f"kernels.flashinfer: one GPU architecture a process: it serves "
