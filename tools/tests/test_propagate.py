@@ -79,6 +79,18 @@ def test_identical_snapshot_with_a_settings_change_needs_approval_without_l2(cur
     assert out.evidence[0].endswith("not only code changed: ['engine:max_model_len'] (an approval; no L2)")
 
 
+@pytest.mark.parametrize("plan, snaps, ok, says", [
+    (_plan(commit="c2"), [_snap(), _snap()], True, "byte-identical"),       # another install of the same code
+    (_plan(commit="c2"), [_snap(9), _snap(9)], False, "differs from the lock's"),
+    (_plan(src="bbbb"), [_snap(), _snap()], False, "unit:kern"),            # the plan built here is another
+    (_plan(), [_snap(), _snap(9)], False, "not run-identical"),
+])
+def test_verify_checks_the_lock_and_writes_nothing(current, plan, snaps, ok, says):
+    checks = Scripted(plan, snaps)
+    got, lines = propagate.verify(current, checks)
+    assert got is ok and checks.calls == ["plan", "snapshot", "snapshot"] and any(says in line for line in lines)
+
+
 def test_bounded_change_needs_approval(current):
     out = propagate.decide(current, Scripted(_plan(src="bbbb"), [_snap(9), _snap(9)]), 86, previous=_snap())
     assert out.verdict == "approve" and out.lock.snapshot == propagate.trace_hash(_snap(9))
@@ -239,6 +251,8 @@ def test_cli_on_cpu(tiny_checkpoint, tiny_prompts, tiny_prompts_file, cpu_flags,
     assert first.name == "1.lock" and len(list(home.rglob("snapshots/*.json"))) == 1
     assert run(home) == 0                                       # same code and settings: nothing to do
     assert "verdict: unchanged" in capsys.readouterr().out
+    assert run(home, "--verify") == 0                           # the lock checked from here, trace and all
+    assert "verify: identical" in capsys.readouterr().out
     assert run(home, max_step_tokens=8) == 2                    # a settings change is a checked change
     assert "engine:max_step_tokens: 16 -> 8" in capsys.readouterr().out
     assert pools[-1] == 4 << 20                                 # on the lock's own class: its stored pools

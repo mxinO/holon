@@ -5,6 +5,8 @@ from __future__ import annotations
 import torch
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from .kernel import grouped
 
 OP = "linear_experts"
@@ -25,6 +27,7 @@ def _supports(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         regs.kernels.add(OP, KernelSpec(op=OP, provider="kernels.triton_experts", impl=LinearExperts,
                                         requires=Constraint(sm_min=80), supports=_supports,
                                         props=frozenset({"graph_safe", "deterministic"})))

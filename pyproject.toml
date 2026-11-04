@@ -4,7 +4,10 @@ version = "0.2.0"
 license = "Apache-2.0"
 requires-python = ">=3.12,<3.13"
 description = "Holon installed from source: the runtime distributions (`uv sync --frozen`; release design D1)"
-dependencies = ["holonlm", "holonlm-std", "holonlm-plugins"]
+dependencies = ["holonlm-core", "holonlm-std", "holonlm-plugins"]
+
+[project.scripts]          # here and in the published holonlm, never in a component: one owner of bin/holon
+holon = "holon.core.cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -22,7 +25,7 @@ environments = ["sys_platform == 'linux' and platform_machine == 'x86_64'"]
 members = ["core", "judge", "std", "plugins", "tools", "testing"]
 
 [tool.uv.sources]
-holonlm = { workspace = true }
+holonlm-core = { workspace = true }
 holonlm-judge = { workspace = true }
 holonlm-std = { workspace = true }
 holonlm-plugins = { workspace = true }
@@ -49,7 +52,8 @@ dev = ["pytest>=8", "pytest-xdist", "ruff>=0.6", "import-linter>=2.1", "httpx", 
 line-length = 120
 target-version = "py312"
 extend-exclude = ["docs/dev/spikes",  # spike records; reviewed per spike README, not linted
-                  "plugins/holon_plugins/kernels/fla/vendor"]  # vendored upstream code (vendor.sh, vendor.patch)
+                  "plugins/holon_plugins/kernels/fla/vendor",  # vendored upstream code (vendor.sh, vendor.patch)
+                  "std/holon_std/vendor/gguf"]               # gguf-py, unmodified (std/holon_std/vendor/vendor.sh)
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

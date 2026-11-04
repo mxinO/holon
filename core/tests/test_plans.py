@@ -215,7 +215,7 @@ def test_mixed_steps_need_room_mixing_planners_and_no_drafter(tiny, monkeypatch)
 
 UV_LOCK = """
 [[package]]
-name = "holonlm"
+name = "holonlm-core"
 version = "0.0.1"
 source = { editable = "core" }
 dependencies = [{ name = "torch", extra = ["cuda"] }]
@@ -240,7 +240,8 @@ source = { registry = "https://example/simple" }
 """
 
 
-def test_uv_lock_hashes_the_runtime_closure_extras_included(tmp_path):
+def test_uv_lock_hashes_the_runtime_closure_extras_included(tmp_path, monkeypatch):
+    monkeypatch.setattr(plans.importlib.metadata, "version", _installed({}))     # nothing installed: no drift
     def hashed(text):
         (tmp_path / "uv.lock").write_text(text)
         return plans.uv_lock(tmp_path / "uv.lock")
@@ -248,4 +249,44 @@ def test_uv_lock_hashes_the_runtime_closure_extras_included(tmp_path):
     base = hashed(UV_LOCK)
     assert hashed(UV_LOCK.replace('"9.0"', '"9.1"')) == base             # a dev-only pin moves no plan
     assert hashed(UV_LOCK.replace('"13.0.1"', '"13.0.2"')) != base       # reached through torch's extra
-    assert plans.uv_lock(tmp_path / "absent.lock") == "none"
+    assert plans.uv_lock(tmp_path / "absent.lock") == "none" and plans.drifted(tmp_path / "absent.lock") == []
+
+
+def _installed(versions):
+    def version(name):
+        if name not in versions:
+            raise plans.importlib.metadata.PackageNotFoundError(name)
+        return versions[name]
+    return version
+
+
+def test_uv_lock_names_an_environment_that_drifted_from_the_lock(tmp_path, monkeypatch):
+    """Only an installed package at another version than uv.lock's is drift (docs/dev/v1-pip.md D6): one not installed
+    is not (the closure ignores markers: PyPy's cffi on CPython), nor a local label the lock has and PyPI's wheel does
+    not (torch 2.11.0 for 2.11.0+cu130). Drift changes the plan's `uv_lock`; the tools never write it into a lock."""
+    (tmp_path / "uv.lock").write_text(UV_LOCK.replace('version = "2.11.0"', 'version = "2.11.0+cu130"'))
+    monkeypatch.setattr(plans.importlib.metadata, "version", _installed({}))
+    clean = plans.uv_lock(tmp_path / "uv.lock")
+    for same in ({"holonlm-core": "0.0.1", "torch": "2.11.0"}, {"torch": "2.11.0+cu130", "pytest": "1.0"}):
+        monkeypatch.setattr(plans.importlib.metadata, "version", _installed(same))
+        assert plans.drifted(tmp_path / "uv.lock") == [] and plans.uv_lock(tmp_path / "uv.lock") == clean
+    monkeypatch.setattr(plans.importlib.metadata, "version", _installed({"torch": "2.11.0", "nvrtc": "13.0.2"}))
+    assert plans.drifted(tmp_path / "uv.lock") == ["nvrtc 13.0.2 (lock 13.0.1)"]
+    drifted = plans.uv_lock(tmp_path / "uv.lock")
+    assert drifted.startswith("installed:") and drifted != clean
+    lock = Lock(Plan(model_id="m@0", fingerprint_class="cpu/x", recipe="r", commit="c", uv_lock=drifted, units={},
+                     sites={}, engine={}), None, (), 0)
+    monkeypatch.setattr(plans, "TREE", tmp_path)
+    with pytest.raises(ValueError, match=r"differ from uv.lock \(nvrtc 13.0.2 \(lock 13.0.1\)\)"):
+        locks.dumps(lock)
+
+
+def test_src_hash_never_reads_what_it_leaves_out(tmp_path, monkeypatch):
+    """An overlay's prebuilt modules (hundreds of MB) sit in a unit's directory: `src_hash` must not read them."""
+    (tmp_path / "prebuilt" / "key").mkdir(parents=True)
+    (tmp_path / "prebuilt" / "key" / "m.so").write_bytes(b"\0" * 1024)
+    (tmp_path / "a.py").write_text("x = 1\n")
+    read, real = [], type(tmp_path).read_bytes
+    monkeypatch.setattr(type(tmp_path), "read_bytes", lambda p: read.append(p.name) or real(p))
+    plans.src_hash(tmp_path)
+    assert read == ["a.py"]

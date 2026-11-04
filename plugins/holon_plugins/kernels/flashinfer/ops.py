@@ -12,9 +12,12 @@ from __future__ import annotations
 import flashinfer
 import torch
 
+from . import aot
+
 
 class RMSNorm:
     def __init__(self, ctx, *, dim: int, eps: float, offset: float, dtype: str) -> None:
+        aot.bind(ctx.device)
         self.eps, self.dim = eps, dim
         self._norm = flashinfer.gemma_rmsnorm if offset == 1.0 else flashinfer.rmsnorm
 
@@ -24,6 +27,7 @@ class RMSNorm:
 
 class AddRMSNorm:
     def __init__(self, ctx, *, dim: int, eps: float, offset: float, dtype: str) -> None:
+        aot.bind(ctx.device)
         self.eps = eps
         self._add_norm = flashinfer.gemma_fused_add_rmsnorm if offset == 1.0 else flashinfer.fused_add_rmsnorm
 
@@ -34,6 +38,7 @@ class AddRMSNorm:
 
 class Rope:
     def __init__(self, ctx, *, head_dim: int, rotary_dim: int, theta: float, max_positions: int, dtype: str) -> None:
+        aot.bind(ctx.device)
         self.head_dim, self.cos_sin = head_dim, f"rope.cos_sin[{theta},{rotary_dim},{max_positions}]"
         self.cache = ctx.static(self.cos_sin, (max_positions, rotary_dim), torch.float32)
         dims = torch.arange(0, rotary_dim, 2, device=ctx.device, dtype=torch.float32)
@@ -55,6 +60,7 @@ class SiluMul:
     NaN kept, as the reference's clamp)."""
 
     def __init__(self, ctx, *, inter: int, dtype: str, glu_limit: float = 0.0) -> None:
+        aot.bind(ctx.device)
         self.bounds = None
         if glu_limit:
             self.bounds = ctx.static(f"flashinfer.glu_bounds[{inter},{glu_limit},{dtype}]", (2, 2 * inter),

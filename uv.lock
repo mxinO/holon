@@ -11,7 +11,7 @@ supported-markers = [
 [manifest]
 members = [
     "holon-workspace",
-    "holonlm",
+    "holonlm-core",
     "holonlm-judge",
     "holonlm-plugins",
     "holonlm-std",
@@ -392,7 +392,7 @@ name = "holon-workspace"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-plugins", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-std", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
@@ -418,7 +418,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "holonlm-plugins", editable = "plugins" },
     { name = "holonlm-std", editable = "std" },
 ]
@@ -443,7 +443,7 @@ dev = [
 ]
 
 [[package]]
-name = "holonlm"
+name = "holonlm-core"
 version = "0.2.0"
 source = { editable = "core" }
 dependencies = [
@@ -471,7 +471,7 @@ dependencies = [
     { name = "accelerate", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "compressed-tensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-std", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "pandas", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -486,7 +486,7 @@ requires-dist = [
     { name = "accelerate" },
     { name = "compressed-tensors", specifier = "==0.17.0" },
     { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "holonlm-std", editable = "std" },
     { name = "huggingface-hub" },
     { name = "pandas" },
@@ -503,7 +503,7 @@ source = { editable = "plugins" }
 dependencies = [
     { name = "fastapi", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "flashinfer-python", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "triton", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "uvicorn", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -514,7 +514,7 @@ dependencies = [
 requires-dist = [
     { name = "fastapi" },
     { name = "flashinfer-python", specifier = "==0.6.12" },
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "transformers" },
     { name = "triton", specifier = "==3.6.0" },
     { name = "uvicorn" },
@@ -526,8 +526,7 @@ name = "holonlm-std"
 version = "0.2.0"
 source = { editable = "std" }
 dependencies = [
-    { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "huggingface-hub", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "safetensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "transformers", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -535,8 +534,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "huggingface-hub", specifier = ">=1.0" },
     { name = "safetensors", specifier = ">=0.5" },
     { name = "transformers", specifier = "==5.6.2" },
@@ -549,7 +547,7 @@ source = { editable = "testing" }
 dependencies = [
     { name = "compressed-tensors", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "gguf", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-judge", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-plugins", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-std", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
@@ -561,7 +559,7 @@ dependencies = [
 requires-dist = [
     { name = "compressed-tensors", specifier = "==0.17.0" },
     { name = "gguf", git = "https://github.com/ggml-org/llama.cpp?subdirectory=gguf-py&rev=27c7a769da1671c97b2e3f6cb88704a6e1e0d0cd" },
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "holonlm-judge", editable = "judge" },
     { name = "holonlm-plugins", editable = "plugins" },
     { name = "holonlm-std", editable = "std" },
@@ -574,13 +572,13 @@ name = "holonlm-tools"
 version = "0.2.0"
 source = { editable = "tools" }
 dependencies = [
-    { name = "holonlm", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
+    { name = "holonlm-core", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
     { name = "holonlm-judge", marker = "platform_machine == 'x86_64' and sys_platform == 'linux'" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "holonlm", editable = "core" },
+    { name = "holonlm-core", editable = "core" },
     { name = "holonlm-judge", editable = "judge" },
 ]
 

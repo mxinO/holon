@@ -1,0 +1,1 @@
+../scripts/release/README.component.md

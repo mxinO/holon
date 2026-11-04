@@ -4,7 +4,10 @@ supervisor's `Policy.start_timeout`.
 Native code comes from `holon prebuild`, run beforehand with the same cache variables (FLASHINFER_WORKSPACE_BASE =
 <caches>/fi, XDG_CACHE_HOME = <caches>/xdg). Per model, `holon serve` starts in a fresh process with empty Triton and
 CuTe DSL caches; recorded: the time until it serves (/health), the first chat completion's latency, and what each JIT
-cache gained — FlashInfer's modules and the GGUF extension must gain nothing.
+cache gained — FlashInfer's modules, Holon's native modules (`holon_plugins`' prebuilt/ directories, the
+FlashInfer AOT directory there, `<caches>/xdg/holon`) must gain nothing, and the engine process's RSS. `--warm`
+starts each model again on the caches the cold start filled; `--python` starts another install's Holon (a pip
+install's venv: docs/dev/v1-pip.md D12.6).
 
 Usage (from the repository root, inside Holon's .venv):
   python bench/cold_start.py --gpu 2 --caches /tmp/caches <model>... [--flags "<serve flags of model 1>" ...]
@@ -31,9 +34,9 @@ def entries(path: pathlib.Path, pattern: str) -> set[str]:
     return {str(p.relative_to(path)) for p in path.glob(pattern)} if path.is_dir() else set()
 
 
-def watched(caches: pathlib.Path) -> dict[str, set[str]]:
+def watched(caches: pathlib.Path, plugins: pathlib.Path) -> dict[str, set[str]]:
     return {"flashinfer": entries(caches / "fi", ".cache/flashinfer/*/*/cached_ops/*"),
-            "ggml_cuda": entries(caches / "xdg", "holon/ggml_cuda/*/ext/*.so"),
+            "holon": entries(caches / "xdg", "holon/**/*.so"), "prebuilt": entries(plugins, "kernels/*/prebuilt/**/*"),
             "triton": entries(caches / "run" / "triton", "*"), "cute_dsl": entries(caches / "run" / "cute", "**/*")}
 
 
@@ -44,13 +47,17 @@ def request(port: int, path: str, body: dict | None = None, timeout: float = 5) 
         return json.loads(r.read())
 
 
-def start(model: str, flags: str, gpu: int, caches: pathlib.Path, port: int, timeout: float) -> dict:
-    shutil.rmtree(caches / "run", ignore_errors=True)
-    before = watched(caches)
+def start(model: str, flags: str, gpu: int, caches: pathlib.Path, port: int, timeout: float, python: str,
+          cold: bool = True) -> dict:
+    if cold:
+        shutil.rmtree(caches / "run", ignore_errors=True)
+    plugins = pathlib.Path(subprocess.check_output(
+        [python, "-c", "import holon_plugins; print(holon_plugins.__path__[0])"], text=True).strip())
+    before = watched(caches, plugins)
     env = os.environ | {"CUDA_VISIBLE_DEVICES": str(gpu), "FLASHINFER_WORKSPACE_BASE": str(caches / "fi"),
                         "XDG_CACHE_HOME": str(caches / "xdg"), "TRITON_CACHE_DIR": str(caches / "run" / "triton"),
                         "CUTE_DSL_CACHE_DIR": str(caches / "run" / "cute")}
-    command = [sys.executable, "-m", "holon", "serve", model, "--port", str(port), *shlex.split(flags)]
+    command = [python, "-m", "holon", "serve", model, "--port", str(port), *shlex.split(flags)]
     t0 = time.monotonic()
     proc = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
@@ -71,14 +78,16 @@ def start(model: str, flags: str, gpu: int, caches: pathlib.Path, port: int, tim
                                                "messages": [{"role": "user", "content": "Count from 1 to 20."}]}, 600)
         first = time.monotonic() - t1
         metrics = request(port, "/metrics")
+        rss = subprocess.run(["ps", "-o", "rss=", "--ppid", str(proc.pid)], capture_output=True, text=True).stdout
     finally:
         proc.terminate()
         log = proc.communicate(timeout=60)[0]
-    after = watched(caches)
-    return {"model": model_id(model), "flags": flags, "serving_s": round(ready, 1),
+    after = watched(caches, plugins)
+    return {"model": model_id(model), "flags": flags, "cold": cold, "serving_s": round(ready, 1),
             "first_completion_s": round(first, 2),
             "start_s": metrics.get("start_s"), "plan_id": metrics.get("plan_id"),
             "compiled": {k: len(after[k] - before[k]) for k in after},
+            "engine_rss_mib": max((int(x) >> 10 for x in rss.split()), default=None),   # the largest child
             "log": [line.replace(f"{ROOT}/", "") for line in log.splitlines() if line.startswith("holon:")]}
 
 
@@ -90,24 +99,28 @@ def main() -> None:
     ap.add_argument("--port", type=int, default=8123)
     ap.add_argument("--timeout", type=float, default=1800)
     ap.add_argument("--flags", nargs="*", default=[], help="`holon serve` flags per model, in order")
+    ap.add_argument("--warm", action="store_true", help="start each model a second time, its caches kept")
+    ap.add_argument("--python", default=sys.executable, help="the interpreter whose Holon serves (default: this one)")
     ap.add_argument("--out", type=pathlib.Path)
     a = ap.parse_args()
     from holon.core.supervisor import Policy
 
     rows = []
     for model, flags in zip(a.models, a.flags + [""] * (len(a.models) - len(a.flags)), strict=True):
-        rows.append(start(model, flags, a.gpu, a.caches, a.port, a.timeout))
-        print(json.dumps(rows[-1]), flush=True)
+        for cold in (True, False)[:1 + a.warm]:
+            rows.append(start(model, flags, a.gpu, a.caches, a.port, a.timeout, a.python, cold))
+            print(json.dumps(rows[-1]), flush=True)
     record = {"question": "What does a cold `holon serve` compile, and how long until it serves (D1)?",
               "date": datetime.date.today().isoformat(), "commit": git("rev-parse", "HEAD"),
               "gpu_class": gpu_class(a.gpu), "start_timeout_s": Policy().start_timeout,
+              "installed": a.python != sys.executable,
               "command": f"python bench/cold_start.py --gpu {a.gpu} --caches <dir> "
                          + " ".join(model_id(m) for m in a.models)
                          + (" --flags " + " ".join(shlex.quote(f) for f in a.flags) if a.flags else ""),
               "method": __doc__.split("\n\n")[1].replace("\n", " "), "results": rows}
     if a.out:
         a.out.write_text(json.dumps(record, indent=1) + "\n")
-        print(f"wrote {a.out.relative_to(ROOT) if a.out.is_absolute() else a.out}")
+        print(f"wrote {a.out}")
 
 
 if __name__ == "__main__":

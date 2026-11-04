@@ -17,7 +17,7 @@ import numpy as np
 import torch
 from holon.api import Constraint, KernelSpec
 
-from . import ops
+from . import aot, ops
 
 # Float workspace for split-KV partials. It is only touched inside `run`, in stream order, so every instance of one
 # size shares one (allocated by the core, zero-initialized as FlashInfer requires); each wrapper keeps its own plan
@@ -45,6 +45,7 @@ def workspace_bytes(device, heads: int, kv_heads: int, head_dim: int) -> int:
 class _Paged:
     def __init__(self, ctx, *, heads: int, kv_heads: int, head_dim: int, page: int, q_dtype: str, kv_dtype: str,
                  layout: str, max_seqs: int) -> None:
+        aot.bind(ctx.device)
         self.geometry = (heads, kv_heads, head_dim, page)
         self.dtypes = {"q_data_type": getattr(torch, q_dtype), "kv_data_type": getattr(torch, kv_dtype)}
         nbytes = workspace_bytes(ctx.device, heads, kv_heads, head_dim)

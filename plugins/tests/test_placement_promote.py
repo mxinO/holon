@@ -18,7 +18,7 @@ from holon_std.moe.offload import KEY
 from .moe_engine_common import Q, _engine, _gguf_and_dense, _gpu_engine, _served
 from .test_expert_io import DEVICES, ROLES, E, K, _jobs, _log, _share, _stage, kernel, plugins, routing  # noqa: F401
 
-PREBUILT = ("expert_io",)  # CUDA extensions built if missing (conftest)
+PREBUILT = ("expert_io", "promote")  # CUDA extensions built if missing (conftest)
 
 
 OP = "moe_resolve.promote@1"

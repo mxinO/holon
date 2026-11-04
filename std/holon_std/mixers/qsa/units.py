@@ -309,10 +309,10 @@ class DSAMLA(nn.Module):
         the core refuses transforms on quantized tensors, so this is the core-free path (B3 nit)."""
         if name not in ("k_b", "v_b") or index is not None or not q.layout.scheme.elem.startswith("ggml."):
             return False
-        import gguf
+        from holon_std.vendor.gguf import constants, quants
 
-        qtype = gguf.GGMLQuantizationType[q.layout.scheme.elem.removeprefix("ggml.").upper()]
-        x = gguf.quants.dequantize(q.parts["blocks"].cpu().numpy(), qtype)
+        qtype = constants.GGMLQuantizationType[q.layout.scheme.elem.removeprefix("ggml.").upper()]
+        x = quants.dequantize(q.parts["blocks"].cpu().numpy(), qtype)
         shape = tuple(getattr(self, name).shape)
         if x.size != torch.Size(shape).numel():
             return False

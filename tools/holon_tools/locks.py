@@ -34,6 +34,10 @@ def dumps(lock: Lock, judged: dict | None = None) -> str:
     """The lock's text; `judged` (how its plan was judged, D15a: the L2 form and the recordings that decided it) is a
     `[judged]` table after `[snapshot]`, which `plans.loads` does not read and the digest covers."""
     p = lock.plan
+    if p.uv_lock.startswith("installed:"):   # the environment drifted from uv.lock: no lock records it (v1-pip D6)
+        drift = ", ".join(plans.drifted(plans.TREE / "uv.lock"))
+        raise ValueError(f"installed packages differ from uv.lock ({drift}): sync the environment (uv sync --frozen) "
+                         "before writing a lock")
     doc: dict[str, Any] = {"plan_id": p.plan_id, "model_id": p.model_id, "fingerprint_class": p.fingerprint_class,
                            "sm": lock.sm, "recipe": p.recipe, "deploy": {"commit": p.commit, "uv_lock": p.uv_lock},
                            "engine": dict(sorted(p.engine.items())),

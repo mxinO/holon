@@ -1,0 +1,363 @@
+# v1-pip D12 (docs/dev/v1-pip.md §7, §18): the release candidate's wheels served on the four card classes
+# Wheels: 318e33c2's (build_wheels.py pure at 318e33c2; overlay and reference builds of 318e33c2 in in_image.sh's
+# images). The record (`sha256sum *.whl`):
+30ca5697be635a24b8615258f3f8675cd0e17a62b32cb2a4df1313d9e2908d03  holonlm-0.2.0-py3-none-any.whl
+680c3301b27f617b5fb8ec902eafd9bad79a5e791bf60bbbe488832427500da9  holonlm_core-0.2.0-py3-none-any.whl
+e98c59439419d24ce58f6a3439313bb7d2e3412d7460fa89d6870fb60b45de50  holonlm_cuda_sm120-0.2.0-cp312-cp312-manylinux_2_28_x86_64.whl
+dfc0c092fb65c31f2291bb7ff779fce688e7be0737700452bbf4731861d3ef40  holonlm_cuda_sm86-0.2.0-cp312-cp312-manylinux_2_28_x86_64.whl
+e42f58bbe17af58a151d2cee28077d2fd278e0be035d8a11ff5f78f3771c5da3  holonlm_cuda_sm89-0.2.0-cp312-cp312-manylinux_2_28_x86_64.whl
+649a91986ec5bfa334e3d4ee2349c583e950d7a61131cc631fa8355fa578bce5  holonlm_plugins-0.2.0-py3-none-any.whl
+effb15957f86b89ba53dae2f6a94d416ad4d98819342b6087eff3544b5697b1e  holonlm_std-0.2.0-py3-none-any.whl
+#
+# Gates on these wheels (local, as wheels.yml's check job runs them):
+#   SASS gate: sm 86 6459 functions and 7153 data sections, sm 89 7051 and 8205, sm 120 7051 and 7320: every shipped
+#     module's SASS and device data equal the reference build's
+#   CPU check: a fresh venv installs the wheels: 27 lock histories current, no drift, every module shipped
+#   wheel privacy scan: no private details; sizes 39.8 (sm86), 52.3 (sm89), 60.9 MB (sm120), the rest under 2 MB
+# The image: Dockerfile on these wheels (≈ 7.0 GB; no toolkit, no prebuild), run as a pyxis container (root-remapped;
+# the read-only run as the user). Each class on one of its desktops (the RTX 4090's speed and start runs on a second
+# RTX 4090 desktop: the first throttled, SM clock 2520 -> 450 MHz, a void clock screen; the RTX 5080 on another RTX 5080
+# desktop than its propagation's, which was taken).
+# Speed: the repository arm needs nvcc at run time (a source install loads FlashInfer through its JIT path, which
+# regenerates its build files), so both speed arms ran in the CUDA 13.0.0 devel container on uv's Python 3.12.12:
+# the repository install (a clone, `uv sync --frozen`, `holon prebuild`) against the RC wheels pip-installed into a
+# uv-Python venv. The pip install's first starts ran in the wheel image with no toolkit.
+# Cold start: the pip arm's fresh cache directory also hashes the weight file once (the repository arm's hashes were
+# cached by its speed run): engine start minus that is the comparable figure; the rule is the compile set.
+# Install: bytes are all the host's received bytes during the install (on one cluster each byte counts twice, as the
+# uv rows of the same hosts show: ≈ 3.2 GB is the download).
+
+==== rtx-3090
+-- the wheel image (no toolkit): host, wheel_check, models, smoke, install
+NVIDIA GeForce RTX 3090, 24576 MiB
+pip venv: python 3.12.3 torch 2.11.0+cu130
+nvcc: none; CUDA_HOME=unset; /usr/local/cuda*: none
+image venv: 92 packages
+=== 01:14:24 wheel_check
+ok   toolkit: absent
+ok   origins: 1021 files as the wheels' RECORDs hash them
+ok   locks: 4 newest locks of rtx-3090/cu130-torch2.11
+ok   load: 13 modules for sm 86: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's
+exit 0
+=== 01:14:28 models
+exit 0
+16
+rtx-3090/cu130-torch2.11 (the first visible GPU); locks in <site-packages>/holon_locks/plans
+=== 01:14:32 smoke 8b-q4_k_m
+ready after 42.3 s
+finish stop; answer '391'; tokens 4
+holon: starting from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/15.lock
+holon: engine ready, plan sha256:78e2302d1a5b5f17bbb08f74510223547d8e77519b743ededace45efb801704c, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/15.lock
+=== 01:19:36 install pip
+exit 0 after 84.7 s; received 6382 MiB; venv 6214 MiB
+=== 01:21:05 install uv
+exit 0 after 13.7 s; received 3174 MiB; venv 5938 MiB
+-- traces from the pip install (judge/tools layer, `holon_tools propagate --verify`)
+=== 01:22:52 layer
+removed or changed:
+added: 13
+=== 01:23:25 verify 8b-bf16 (plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-3090/cu130-torch2.11/14.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-bf16 71 s
+=== 01:24:40 verify 8b-q4_k_m (plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-3090/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-q4_k_m 45 s
+=== 01:25:28 verify 30b-q4_k_m (plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-3090/cu130-torch2.11/16.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-q4_k_m 121 s
+=== 01:27:33 verify 27b-ud-q4_k_m (plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-3090/cu130-torch2.11/17.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 27b-ud-q4_k_m 160 s
+-- the repository install (phase 1, the CUDA devel container: clone, uv sync, prebuild)
+=== 00:28:48 uv sync --frozen (empty cache; Python from uv's directory)
+exit 0 after 15.4 s; received 3179 MiB; .venv 5667 MiB
+=== 00:29:07 holon prebuild --sm 86 into the repository arm's caches
+exit 0 after 764.5 s
+   the speed run's repository install (a clone at the same commit, its own .venv):
+prebuild exit 0 after 901.2 s
+=== 01:50:33 pip install of the RC wheels on uv's Python
+exit 0 after 290.0 s
+-- speed: perf_smoke ABBA, 3 rounds, each lock's engine flags, batch 1, depth 1024, 128 tokens; candidate = the RC wheels in a uv-Python venv, base = the repository install (devel container)
+ perf-8b-q4_k_m:
+  round 0: candidate 152.32 tok/s (SM clock p10/p50 1770.0/1770.0 MHz, steady True), base 152.25 tok/s (SM clock p10/p50 1755.0/1770.0 MHz, steady True)
+  round 1: base 151.93 tok/s (SM clock p10/p50 1740.0/1755.0 MHz, steady True), candidate 151.81 tok/s (SM clock p10/p50 1725.0/1755.0 MHz, steady True)
+  round 2: candidate 151.77 tok/s (SM clock p10/p50 1725.0/1740.0 MHz, steady True), base 151.75 tok/s (SM clock p10/p50 1725.0/1740.0 MHz, steady True)
+  ratios [1.0005, 0.9992, 1.0001], median 1.0001: within noise
+-- first start (bench/cold_start.py, the 8B Q4_K_M lock, no flags): the pip install in the wheel image (no toolkit)
+  cold: serving after 54.0 s (engine start 47.1 s), first answer 0.25 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 1877 MiB, plan sha256:78e2302d1a5b, lock diff lines 0
+  warm: serving after 17.0 s (engine start 10.1 s), first answer 0.25 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1827 MiB, plan sha256:78e2302d1a5b, lock diff lines 0
+   the repository install (devel container)
+  cold: serving after 38.0 s (engine start 21.6 s), first answer 0.4 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 1845 MiB, plan sha256:78e2302d1a5b, lock diff lines 0
+  warm: serving after 33.0 s (engine start 17.9 s), first answer 0.31 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1797 MiB, plan sha256:78e2302d1a5b, lock diff lines 0
+
+==== rtx-4090
+-- the wheel image (no toolkit): host, wheel_check, models, smoke, install
+NVIDIA GeForce RTX 4090, 23028 MiB
+pip venv: python 3.12.3 torch 2.11.0+cu130
+nvcc: none; CUDA_HOME=unset; /usr/local/cuda*: none
+image venv: 92 packages
+=== 01:14:28 wheel_check
+ok   toolkit: absent
+ok   origins: 1021 files as the wheels' RECORDs hash them
+ok   locks: 8 newest locks of rtx-4090/cu130-torch2.11
+ok   load: 19 modules for sm 89: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's
+exit 0
+=== 01:14:32 models
+exit 0
+16
+rtx-4090/cu130-torch2.11 (the first visible GPU); locks in <site-packages>/holon_locks/plans
+=== 01:14:35 smoke 8b-q4_k_m
+ready after 43.3 s
+finish stop; answer '391'; tokens 4
+holon: starting from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/15.lock
+holon: engine ready, plan sha256:2783ee3bbbb42b455586ae98073f3dc3a9369b7c90f35bf0c49775ab6c07a929, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/15.lock
+=== 01:19:43 install pip
+exit 0 after 82.4 s; received 6397 MiB; venv 6214 MiB
+=== 01:21:09 install uv
+exit 0 after 14.6 s; received 3176 MiB; venv 5938 MiB
+-- traces from the pip install (judge/tools layer, `holon_tools propagate --verify`)
+=== 01:22:52 layer
+removed or changed:
+added: 13
+=== 01:23:26 verify 8b-bf16 (plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-4090/cu130-torch2.11/26.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-bf16 69 s
+=== 01:24:38 verify 8b-q4_k_m (plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-4090/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-q4_k_m 44 s
+=== 01:25:25 verify 8b-nvfp4 (plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-4090/cu130-torch2.11/18.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-nvfp4 35 s
+=== 01:26:04 verify 8b-fp8 (plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-4090/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-fp8 42 s
+=== 01:26:49 verify 30b-q4_k_m (plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-4090/cu130-torch2.11/23.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-q4_k_m 117 s
+=== 01:28:49 verify 30b-nvfp4 (plans/nvidia/Qwen3-30B-A3B-NVFP4@18a0f0f7a93c6f99/rtx-4090/cu130-torch2.11/19.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-nvfp4 80 s
+=== 01:30:13 verify 30b-mxfp4_moe (plans/Face314/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE/Qwen3-30B-A3B-Instruct-2507-MXFP4_MOE@84e3f62a338c23dd/rtx-4090/cu130-torch2.11/18.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-mxfp4_moe 123 s
+=== 01:32:24 verify 27b-ud-q4_k_m (plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-4090/cu130-torch2.11/21.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 27b-ud-q4_k_m 296 s
+-- the repository install (phase 1, the CUDA devel container: clone, uv sync, prebuild)
+=== 00:28:56 uv sync --frozen (empty cache; Python from uv's directory)
+exit 0 after 15.3 s; received 3178 MiB; .venv 5667 MiB
+=== 00:29:15 holon prebuild --sm 89 into the repository arm's caches
+exit 0 after 951.0 s
+   the speed run's repository install (a clone at the same commit, its own .venv):
+-- speed: perf_smoke ABBA, 3 rounds, each lock's engine flags, batch 1, depth 1024, 128 tokens; candidate = the RC wheels in a uv-Python venv, base = the repository install (devel container)
+ perf-8b-q4_k_m-throttled:
+  round 0: candidate 151.37 tok/s (SM clock p10/p50 1155.0/2520.0 MHz, steady False), base 144.52 tok/s (SM clock p10/p50 990.0/2205.0 MHz, steady False)
+  round 1: base 126.78 tok/s (SM clock p10/p50 675.0/885.0 MHz, steady False), candidate 106.76 tok/s (SM clock p10/p50 540.0/705.0 MHz, steady False)
+  round 2: candidate 93.22 tok/s (SM clock p10/p50 435.0/570.0 MHz, steady False), base 79.18 tok/s (SM clock p10/p50 375.0/450.0 MHz, steady False)
+  ratios [1.0474, 0.8421, 1.1773], median 1.0474: void (a clock screen failed: rerun on an idle GPU)
+ perf-8b-q4_k_m:
+  round 0: candidate 152.85 tok/s (SM clock p10/p50 2745.0/2745.0 MHz, steady True), base 152.86 tok/s (SM clock p10/p50 2745.0/2745.0 MHz, steady True)
+  round 1: base 152.85 tok/s (SM clock p10/p50 2745.0/2745.0 MHz, steady True), candidate 152.84 tok/s (SM clock p10/p50 2520.0/2745.0 MHz, steady True)
+  round 2: candidate 152.86 tok/s (SM clock p10/p50 2745.0/2745.0 MHz, steady True), base 152.84 tok/s (SM clock p10/p50 2745.0/2745.0 MHz, steady True)
+  ratios [0.9999, 0.9999, 1.0001], median 0.9999: within noise
+-- first start (bench/cold_start.py, the 8B Q4_K_M lock, no flags): the pip install in the wheel image (no toolkit)
+  cold: serving after 24.0 s (engine start 17.3 s), first answer 0.25 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 1875 MiB, plan sha256:2783ee3bbbb4, lock diff lines 0
+  warm: serving after 16.0 s (engine start 9.7 s), first answer 0.25 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1826 MiB, plan sha256:2783ee3bbbb4, lock diff lines 0
+   the repository install (devel container)
+  cold: serving after 48.0 s (engine start 28.3 s), first answer 0.37 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 1844 MiB, plan sha256:2783ee3bbbb4, lock diff lines 0
+  warm: serving after 33.0 s (engine start 17.3 s), first answer 0.28 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1796 MiB, plan sha256:2783ee3bbbb4, lock diff lines 0
+
+==== rtx-5080
+-- the wheel image (no toolkit): host, wheel_check, models, smoke, install
+NVIDIA GeForce RTX 5080, 16303 MiB
+pip venv: python 3.12.3 torch 2.11.0+cu130
+nvcc: none; CUDA_HOME=unset; /usr/local/cuda*: none
+image venv: 92 packages
+=== 03:45:37 wheel_check
+ok   toolkit: absent
+ok   origins: 1021 files as the wheels' RECORDs hash them
+ok   locks: 9 newest locks of rtx-5080/cu130-torch2.11
+ok   load: 19 modules for sm 120: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's
+exit 0
+=== 03:45:40 models
+exit 0
+16
+rtx-5080/cu130-torch2.11 (the first visible GPU); locks in <site-packages>/holon_locks/plans
+=== 03:45:42 smoke 8b-q4_k_m
+ready after 51.3 s
+finish stop; answer '391'; tokens 4
+holon: starting from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/23.lock
+holon: engine ready, plan sha256:e7ed7741de0f5d8c64744dc5289964105e8f1aec8618da119588d9ff3c57fcdc, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/23.lock
+=== 03:46:34 install pip
+exit 0 after 594.9 s; received 6517 MiB; venv 6214 MiB
+=== 03:56:32 install uv
+exit 0 after 28.4 s; received 3178 MiB; venv 5938 MiB
+-- traces from the pip install (judge/tools layer, `holon_tools propagate --verify`)
+=== 03:57:03 layer
+removed or changed:
+added: 13
+=== 03:57:30 verify 8b-q4_k_m (plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/23.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-q4_k_m 25 s
+=== 03:57:58 verify 8b-ud-iq3_xxs (plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-UD-IQ3_XXS@495e28b50d2373d0/rtx-5080/cu130-torch2.11/23.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-ud-iq3_xxs 35 s
+=== 03:58:36 verify 8b-nvfp4 (plans/nvidia/Qwen3-8B-NVFP4@70613544a162fdd3/rtx-5080/cu130-torch2.11/18.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-nvfp4 39 s
+=== 03:59:18 verify 8b-fp8 (plans/Qwen/Qwen3-8B-FP8@b50e1cc92cc71ad4/rtx-5080/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-fp8 34 s
+=== 03:59:54 verify 30b-ud-iq3_xxs (plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-UD-IQ3_XXS@dbe47df66091cac6/rtx-5080/cu130-torch2.11/22.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-ud-iq3_xxs 83 s
+=== 04:01:20 verify 30b-q4_k_m-offload (plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5080/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-q4_k_m-offload 86 s
+=== 04:02:49 verify 27b-ud-iq3_s-tier (plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-IQ3_S@d847e2c1e4aa276e/rtx-5080/cu130-torch2.11/22.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 27b-ud-iq3_s-tier 123 s
+=== 04:04:55 verify fn-IQ2_XS (plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ2_XS@7dd8036e721e953b/rtx-5080/cu130-torch2.11/13.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time fn-IQ2_XS 574 s
+=== 04:19:58 verify glm (plans/peasantsmith/GLM-5.3-Flash-Maya-GGUF/GLM-5.3-Flash-Maya-S-v2-IQ2_XXS@771c37e77b593850/rtx-5080/cu130-torch2.11/9.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time glm 439 s
+-- the repository install (phase 1, the CUDA devel container: clone, uv sync, prebuild)
+=== 00:28:48 uv sync --frozen (empty cache; Python from uv's directory)
+exit 0 after 12.2 s; received 3179 MiB; .venv 5667 MiB
+=== 00:29:03 holon prebuild --sm 120 into the repository arm's caches
+exit 0 after 592.5 s
+   the speed run's repository install (a clone at the same commit, its own .venv):
+prebuild exit 0 after 701.6 s
+=== 04:45:06 pip install of the RC wheels on uv's Python
+exit 0 after 258.5 s
+-- speed: perf_smoke ABBA, 3 rounds, each lock's engine flags, batch 1, depth 1024, 128 tokens; candidate = the RC wheels in a uv-Python venv, base = the repository install (devel container)
+ perf-30b-q4_k_m-offload:
+  round 0: candidate 263.12 tok/s (SM clock p10/p50 2715.0/2745.0 MHz, steady True), base 264.53 tok/s (SM clock p10/p50 2745.0/2752.0 MHz, steady True)
+  round 1: base 264.40 tok/s (SM clock p10/p50 2745.0/2752.0 MHz, steady True), candidate 263.29 tok/s (SM clock p10/p50 2745.0/2752.0 MHz, steady True)
+  round 2: candidate 264.23 tok/s (SM clock p10/p50 2745.0/2752.0 MHz, steady True), base 264.67 tok/s (SM clock p10/p50 2745.0/2752.0 MHz, steady True)
+  ratios [0.9947, 0.9958, 0.9983], median 0.9958: within noise
+ perf-8b-q4_k_m:
+  round 0: candidate 162.10 tok/s (SM clock p10/p50 2715.0/2722.0 MHz, steady True), base 162.78 tok/s (SM clock p10/p50 2715.0/2752.0 MHz, steady True)
+  round 1: base 162.76 tok/s (SM clock p10/p50 2730.0/2745.0 MHz, steady True), candidate 162.79 tok/s (SM clock p10/p50 2715.0/2752.0 MHz, steady True)
+  round 2: candidate 162.76 tok/s (SM clock p10/p50 2700.0/2745.0 MHz, steady True), base 162.78 tok/s (SM clock p10/p50 2715.0/2730.0 MHz, steady True)
+  ratios [0.9958, 1.0002, 0.9999], median 0.9999: within noise
+-- first start (bench/cold_start.py, the 8B Q4_K_M lock, no flags): the pip install in the wheel image (no toolkit)
+  cold: serving after 53.0 s (engine start 49.0 s), first answer 0.22 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 2206 MiB, plan sha256:e7ed7741de0f, lock diff lines 0
+  warm: serving after 21.0 s (engine start 17.0 s), first answer 0.22 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 2193 MiB, plan sha256:e7ed7741de0f, lock diff lines 0
+   the repository install (devel container)
+  cold: serving after 29.0 s (engine start 16.8 s), first answer 0.35 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 23, 'cute_dsl': 0}, engine RSS 2176 MiB, plan sha256:e7ed7741de0f, lock diff lines 0
+  warm: serving after 26.0 s (engine start 12.4 s), first answer 0.26 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 2121 MiB, plan sha256:e7ed7741de0f, lock diff lines 0
+-- negative (the image without python3.12-dev) and read-only (non-root, read-only image) runs
+=== negative: Python.h absent; gcc 13.3.0
+Qwen3-8B-Q4_K_M.gguf: exit 1 after 9.1 s; rollbacks 1 (the lock's configuration, then defaults: each started once)
+holon: trying configuration 0 of 2 after a host failure (each starts once)
+holon: start failed (host): engine failed to start: PluginLoadFailed: plugin 'kernels.triton_attn' failed to load: HostError: Triton compiles a small C launcher at first use, and this host has no Python.h in /usr/include/python3.12: install a C compiler and Python 3.12's headers (Ubuntu: `sudo apt i
+holon: the engine fails to start on every configuration in its history (last: engine failed to start: PluginLoadFailed: plugin 'kernels.triton_attn' failed to load: HostError: Triton compiles a small C launcher at first use, and this host has no Python.h in /usr/include/python3.12: install a C compi
+Qwen3-8B-FP8: exit 1 after 6.7 s; rollbacks 1 (the lock's configuration, then defaults: each started once)
+holon: trying configuration 0 of 2 after a host failure (each starts once)
+holon: start failed (host): engine failed to start: PluginLoadFailed: plugin 'kernels.triton_attn' failed to load: HostError: Triton compiles a small C launcher at first use, and this host has no Python.h in /usr/include/python3.12: install a C compiler and Python 3.12's headers (Ubuntu: `sudo apt i
+holon: the engine fails to start on every configuration in its history (last: engine failed to start: PluginLoadFailed: plugin 'kernels.triton_attn' failed to load: HostError: Triton compiles a small C launcher at first use, and this host has no Python.h in /usr/include/python3.12: install a C compi
+=== read-only: uid non-root; site-packages writable: no
+ready after 51.3 s
+finish stop answer '391'
+site-packages unchanged: yes
+holon: engine ready, plan sha256:e7ed7741de0f5d8c64744dc5289964105e8f1aec8618da119588d9ff3c57fcdc, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5080/cu130-torch2.11/23.lock
+
+==== rtx-5090
+-- the wheel image (no toolkit): host, wheel_check, models, smoke, install
+NVIDIA GeForce RTX 5090, 32607 MiB
+pip venv: python 3.12.3 torch 2.11.0+cu130
+nvcc: none; CUDA_HOME=unset; /usr/local/cuda*: none
+image venv: 92 packages
+=== 10:12:23 wheel_check
+ok   toolkit: absent
+ok   origins: 1021 files as the wheels' RECORDs hash them
+ok   locks: 6 newest locks of rtx-5090/cu130-torch2.11
+ok   load: 19 modules for sm 120: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's
+exit 0
+=== 10:12:25 models
+exit 0
+16
+rtx-5090/cu130-torch2.11 (the first visible GPU); locks in <site-packages>/holon_locks/plans
+=== 10:12:27 smoke 8b-q4_k_m
+ready after 39.2 s
+finish stop; answer '391'; tokens 4
+holon: starting from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/15.lock
+holon: engine ready, plan sha256:ae0f1d907663323f0ed62eafa441c6a3421449636996a3ef2845df665cd1efce, from <plans>/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/15.lock
+=== 10:13:07 install pip
+exit 0 after 143.3 s; received 3367 MiB; venv 6214 MiB
+=== 10:15:32 install uv
+exit 0 after 14.7 s; received 3178 MiB; venv 5938 MiB
+-- traces from the pip install (judge/tools layer, `holon_tools propagate --verify`)
+=== 10:15:49 layer
+removed or changed:
+added: 13
+=== 10:16:05 verify 8b-bf16 (plans/Qwen/Qwen3-8B@f1add50ee1c6e469/rtx-5090/cu130-torch2.11/20.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-bf16 49 s
+=== 10:16:56 verify 8b-q4_k_m (plans/unsloth/Qwen3-8B-GGUF/Qwen3-8B-Q4_K_M@120307ba529eb243/rtx-5090/cu130-torch2.11/15.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 8b-q4_k_m 19 s
+=== 10:17:16 verify 30b-q4_k_m (plans/unsloth/Qwen3-30B-A3B-GGUF/Qwen3-30B-A3B-Q4_K_M@9f1a24700a339b09/rtx-5090/cu130-torch2.11/16.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 30b-q4_k_m 68 s
+=== 10:18:26 verify 27b-ud-q4_k_m-tier (plans/unsloth/Qwen3.8-27B-GGUF/Qwen3.8-27B-UD-Q4_K_M@322e194ff79741c7/rtx-5090/cu130-torch2.11/16.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time 27b-ud-q4_k_m-tier 102 s
+=== 10:20:11 verify fn-IQ3_S (plans/ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-GGUF/Qwen3.8-Flash-Next-GSQ-RCO-IQ3_S@26ec2600cd9e57d7/rtx-5090/cu130-torch2.11/13.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time fn-IQ3_S 676 s
+=== 10:35:05 verify glm (plans/peasantsmith/GLM-5.3-Flash-Maya-GGUF/GLM-5.3-Flash-Maya-S-v2-IQ2_XXS@771c37e77b593850/rtx-5090/cu130-torch2.11/9.lock)
+verify: identical
+  snapshot trace byte-identical to the lock's
+time glm 431 s
+-- the repository install (phase 1, the CUDA devel container: clone, uv sync, prebuild)
+   the speed run's repository install (a clone at the same commit, its own .venv):
+prebuild exit 0 after 731.6 s
+=== 10:59:47 pip install of the RC wheels on uv's Python
+exit 0 after 599.6 s
+-- speed: perf_smoke ABBA, 3 rounds, each lock's engine flags, batch 1, depth 1024, 128 tokens; candidate = the RC wheels in a uv-Python venv, base = the repository install (devel container)
+ perf-8b-q4_k_m:
+  round 0: candidate 272.49 tok/s (SM clock p10/p50 2677.0/2835.0 MHz, steady True), base 273.74 tok/s (SM clock p10/p50 2790.0/2857.0 MHz, steady True)
+  round 1: base 273.62 tok/s (SM clock p10/p50 2647.0/2857.0 MHz, steady True), candidate 273.68 tok/s (SM clock p10/p50 2775.0/2835.0 MHz, steady True)
+  round 2: candidate 273.67 tok/s (SM clock p10/p50 2782.0/2857.0 MHz, steady True), base 273.69 tok/s (SM clock p10/p50 2790.0/2865.0 MHz, steady True)
+  ratios [0.9954, 1.0002, 0.9999], median 0.9999: within noise
+-- first start (bench/cold_start.py, the 8B Q4_K_M lock, no flags): the pip install in the wheel image (no toolkit)
+  cold: serving after 44.0 s (engine start 40.1 s), first answer 0.16 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 25, 'cute_dsl': 0}, engine RSS 2027 MiB, plan sha256:ae0f1d907663, lock diff lines 0
+  warm: serving after 22.0 s (engine start 17.5 s), first answer 0.16 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1984 MiB, plan sha256:ae0f1d907663, lock diff lines 0
+   the repository install (devel container)
+  cold: serving after 43.0 s (engine start 23.3 s), first answer 0.34 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 25, 'cute_dsl': 0}, engine RSS 2017 MiB, plan sha256:ae0f1d907663, lock diff lines 0
+  warm: serving after 36.0 s (engine start 19.9 s), first answer 0.22 s, compiled {'flashinfer': 0, 'holon': 0, 'prebuilt': 0, 'triton': 0, 'cute_dsl': 0}, engine RSS 1962 MiB, plan sha256:ae0f1d907663, lock diff lines 0
+
+==== the pre-merge review's checker (wheel_check after A W-1, A W-2, B pm1, B pm2), rerun on the RC in the image, RTX 3090
+ok   toolkit: absent
+ok   origins: 1021 installed files hash as the wheels' RECORDs say
+ok   load: 13 modules for sm 86 from prebuilt/: ggml_cuda, expert_io, promote, state_copy, cpu_task and FlashInfer's

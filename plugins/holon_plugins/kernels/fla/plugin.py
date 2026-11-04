@@ -34,6 +34,8 @@ import torch
 import torch.nn.functional as F
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from . import rewind
 from .vendor import chunk_gated_delta_rule, fused_sigmoid_gating_delta_rule_update
 from .vendor.kda import chunk_kda_with_fused_gate
@@ -239,6 +241,7 @@ def _supports_kda(f: dict) -> bool:
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         for op, impl, supports in ((OP, GatedDeltaRule, _supports), (KDA_OP, KDA, _supports_kda),
                                    (REWIND, rewind.GDNRewind, rewind.supports)):
             regs.kernels.add(op, KernelSpec(op=op, provider="kernels.fla", impl=impl, requires=Constraint(sm_min=80),

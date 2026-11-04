@@ -74,7 +74,7 @@ import functools
 import itertools
 
 import torch
-from holon.api import Constraint, KernelSpec, Layout, QTensor, Scheme
+from holon.api import Constraint, HostError, KernelSpec, Layout, QTensor, Scheme
 
 from . import extension
 
@@ -319,13 +319,15 @@ def calls(rows: int, size: int) -> list[tuple[int, int]]:
 
 
 def rule_module(sm: int):
-    """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (NotBuilt if none is)."""
+    """A module that answers `mmvq_rows` for SM `sm`: its own if prebuilt, else any built here (its own SM's error if
+    none is)."""
+    first = None
     for arch in (sm, *extension.ARCHS):
         try:
             return extension.load(arch)
-        except extension.NotBuilt:
-            continue
-    raise extension.NotBuilt(f"kernels.ggml_cuda: no prebuilt extension; build one with: {extension.PREBUILD} --sm N")
+        except (extension.NotBuilt, HostError) as e:
+            first = first or e                   # its own SM's reason (its add-on missing, …) is the one
+    raise first
 
 
 def _device(ctx) -> int:

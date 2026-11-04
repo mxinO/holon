@@ -252,8 +252,13 @@ def find_lock(directory: pathlib.Path, source: object, fp: Fingerprint, current:
     build, a lock edited by hand) is warned about, and defaults serve."""
     found = None
     if not directory.is_dir():
-        _say(f"WARNING: no lock directory {directory}: serving defaults (name one with --plans)")
+        _say(f"WARNING: no lock directory {directory}: serving defaults (install holonlm for the locks, or name a "
+             f"directory with --plans)")
         return None
+    if plans.INSTALLED and plans.TREE != plans.INSTALLED:
+        _say(f"WARNING: the locks of the checkout this core runs from, not the installed ones in {plans.INSTALLED}")
+    if drift := plans.drifted(plans.TREE / "uv.lock"):
+        _say(f"WARNING: installed packages differ from the locks' environment (uv.lock): {', '.join(drift)}")
     try:
         found = plans.find(directory, source.identity(), fp, current)
     except ValueError as e:
@@ -459,6 +464,9 @@ def _main(argv: list[str] | None) -> None:
     plugins, declared = PluginSet(installed), declared_options(installed)
     check_flags(flags, declared)
     device = torch.device(flags.get("device", "cuda"))
+    if device.type == "cuda" and torch.version.cuda is None:
+        raise SystemExit(f"holon: this torch ({torch.__version__}) has no CUDA: install the CUDA build of torch "
+                         "Holon pins, as the README's install says")
     fp, current = platform.fingerprint(device), plans.current_srcs(installed)
     rows = locked_models(args.plans, fp, current)          # names this card's file even under --no-lock
     sized = None if args.no_size_check or device.type != "cuda" else fp
@@ -502,9 +510,14 @@ def _main(argv: list[str] | None) -> None:
 
     async def run() -> None:
         if not args.supervised:
-            async with engine_process(config, lock=lock) as client:
-                pin.close()
-                await frontend.serve(client, bundle, args.host, args.port, config.plugin_options)
+            try:
+                async with engine_process(config, lock=lock) as client:
+                    pin.close()
+                    await frontend.serve(client, bundle, args.host, args.port, config.plugin_options)
+            except StartFailed as e:                          # a refusal ("host", "plugin", "memory"): its reason
+                if e.kind == "error":
+                    raise
+                raise refused(e) from None
             return
         supervisor = Supervisor(history, memory_only=memory_only, admit=admit)
         try:

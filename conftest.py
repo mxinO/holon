@@ -37,9 +37,10 @@ def pytest_configure(config: pytest.Config) -> None:
 
 @pytest.fixture(scope="module", autouse=True)
 def _prebuilt(request):
-    """The engine never compiles (a missing prebuilt module raises NotBuilt naming `holon prebuild`), so a test module
-    lists the CUDA extensions it needs in `PREBUILT` (e.g. `("expert_io",)`) and any missing one is built here for
-    the visible GPU's SM, into the user cache, before its tests run: a fresh cache does not fail them."""
+    """The engine never compiles (a missing prebuilt module raises `HostError` naming the add-on and `holon
+    prebuild`), so a test module lists the native extensions it needs in `PREBUILT` (e.g. `("expert_io",)`) and any
+    missing one is built here for the visible GPU's SM, into the user cache, before its tests run: a fresh cache does
+    not fail them."""
     names = getattr(request.module, "PREBUILT", ())
     if not names:
         return
@@ -47,10 +48,20 @@ def _prebuilt(request):
     if not torch.cuda.is_available():
         return
     major, minor = torch.cuda.get_device_capability()
-    sm = 10 * major + minor
+    build_missing(names, 10 * major + minor)
+
+
+def build_missing(names, sm: int) -> None:
+    """Build each of the extensions `names` whose `load` finds no module for `sm` (a `HostError`); ggml_cpu, keyed by
+    CPU tier rather than SM, has its missing tiers built by its prebuild."""
+    from holon.api import HostError
+
     for name in names:
+        if name == "ggml_cpu":
+            importlib.import_module("holon_plugins.kernels.ggml_cpu.prebuild").main([])
+            continue
         ext = importlib.import_module(f"holon_plugins.kernels.{name}.extension")
         try:
             ext.load(sm)
-        except ext.NotBuilt:
+        except HostError:
             ext.build(sm, os.cpu_count()) if name == "ggml_cuda" else ext.build(sm)

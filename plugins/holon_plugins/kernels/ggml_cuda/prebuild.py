@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
+import sys
 
 import torch
 
@@ -26,8 +28,12 @@ def main(argv: list[str] | None = None) -> None:
                                                         range(torch.cuda.device_count()))})
     if not sms or not set(sms) <= extension.ARCHS.keys():
         p.error(f"pass --sm from {sorted(extension.ARCHS)} (visible GPUs: {sms or 'none'})")
-    for sm in sms:
-        print(f"sm {sm}: {extension.build(sm, args.jobs, args.verbose)}", flush=True)
+    if len(sms) > 1:   # one process per SM: torch's loader renames a module built twice in one process (v1-pip F8)
+        for sm in sms:
+            subprocess.run([sys.executable, "-m", __spec__.name, "--sm", str(sm), "--jobs", str(args.jobs),
+                            *(["--verbose"] * args.verbose)], check=True)
+        return
+    print(f"sm {sms[0]}: {extension.build(sms[0], args.jobs, args.verbose)}", flush=True)
 
 
 if __name__ == "__main__":

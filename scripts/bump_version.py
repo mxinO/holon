@@ -32,8 +32,13 @@ def main() -> None:
     if n != 1:
         sys.exit(f"{CORE}: no __version__ line")
     path.write_text(text)
+    path = ROOT / "Dockerfile"                  # its PyPI install, when built without wheels
+    text, n = re.subn(r"(?m)^ARG HOLON=holonlm==\S+$", f"ARG HOLON=holonlm=={new}", path.read_text(), count=1)
+    if n != 1:
+        sys.exit("Dockerfile: no `ARG HOLON=holonlm==…` line")
+    path.write_text(text)
     subprocess.run(["uv", "lock"], cwd=ROOT, check=True)
-    print(f"version {new}: {len(PYPROJECTS)} pyprojects, {CORE}, uv.lock")
+    print(f"version {new}: {len(PYPROJECTS)} pyprojects, {CORE}, the Dockerfile, uv.lock")
 
 
 if __name__ == "__main__":

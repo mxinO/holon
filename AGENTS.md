@@ -51,6 +51,9 @@ the history and decisions; read them only for the item at hand, never as require
   `judge/` (accuracy) or `bench/` (performance) under a plain name, with `--help`; a spike a document cites as how
   its numbers were produced may stay, with its README, under `docs/dev/spikes/`.
 - Every bug fix comes with a test that fails before and passes after.
+- Code outside a unit's directory (a distribution's shared library: `std/holon_std/vendor/`,
+  `plugins/holon_plugins/host.py`) is in no lock's `src`: it must not shape outputs, or the units that use it pin it
+  (the vendored gguf-py's `[provenance]` stamps, `docs/dev/v1-pip.md` D7).
 - A change to a path a deployment configures (a placement policy, a store's tiers, a loan) is tested under that
   deployment's own terms as well as the defaults, and smoked once on the real model at its deployment before it is
   called built.

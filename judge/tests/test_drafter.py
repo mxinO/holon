@@ -109,12 +109,12 @@ def test_a_draft_floor_routes_by_the_engine_s_merged_shapes():
     import types
 
     import gguf
-    from holon.api import Fingerprint
+    from holon.api import Fingerprint, HostError
     from holon_plugins.kernels.ggml_cuda import extension, plugin
 
     try:
         lib = plugin.rule_module(120)
-    except extension.NotBuilt:
+    except (extension.NotBuilt, HostError):           # none built, or none installed (a HostError)
         pytest.skip("no prebuilt ggml extension")
 
     def tensor(name: str, k: int, out: int, kind: str = "IQ4_XS"):

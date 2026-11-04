@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from holon.api import Constraint, KernelSpec
 
+from holon_plugins import host
+
 from . import reference
 
 OP = "moe_route_transform.tail_skip"
@@ -37,6 +39,7 @@ def _cuda(ctx, *, experts: int, top_k: int):
 
 class Plugin:
     def register(self, regs) -> None:
+        host.require_c_toolchain()            # Triton's launchers need a C compiler (docs/dev/v1-pip.md D-H)
         regs.ops.add(OP, reference.tail_skip)
         regs.kernels.add(OP, KernelSpec(op=OP, provider="transforms.tail_skip", impl=Reference,
                                         requires=Constraint(devices=frozenset({"cpu"})),

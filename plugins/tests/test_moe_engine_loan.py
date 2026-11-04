@@ -33,7 +33,7 @@ from .moe_engine_common import (
     _wide,
 )
 
-PREBUILT = ("ggml_cuda", "expert_io", "cpu_task")  # CUDA extensions built if missing (conftest)
+PREBUILT = ("ggml_cuda", "expert_io", "cpu_task", "promote")  # CUDA extensions built if missing (conftest)
 GPU = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")
 
 

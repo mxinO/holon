@@ -43,11 +43,16 @@ def main(argv: list[str] | None = None) -> None:
     os.environ["FLASHINFER_CUDA_ARCH_LIST"] = ARCHS[sm]      # read when flashinfer is imported: this process only
     from flashinfer.jit import env
 
-    built, t = specs(sm), time.perf_counter()
+    from . import aot
+
+    shipped = aot.directory(sm)       # an overlay's modules (docs/dev/v1-pip.md D5): nothing to build for them
+    every = specs(sm)
+    built = [s for s in every if not (shipped / s.name / f"{s.name}.so").is_file()]
+    t = time.perf_counter()
     for spec in built:
         spec.build(verbose=False)
-    print(f"sm {sm}: {len(built)} FlashInfer modules in {env.FLASHINFER_JIT_DIR} ({time.perf_counter() - t:.0f} s)",
-          flush=True)
+    print(f"sm {sm}: {len(built)} FlashInfer modules in {env.FLASHINFER_JIT_DIR} ({time.perf_counter() - t:.0f} s)"
+          + (f", {len(every) - len(built)} shipped in {shipped}" if len(built) < len(every) else ""), flush=True)
 
 
 if __name__ == "__main__":

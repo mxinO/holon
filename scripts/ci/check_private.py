@@ -4,13 +4,22 @@ Checks every tracked or trackable (non-ignored) file — recordings' safetensors
 paths, machine details (CPU models, memory generations, driver versions: records name the GPU and nothing else of
 the host), plus the host/cluster/user patterns listed one regex per line in the untracked `.private-patterns` file,
 so the names themselves never enter the repo.
+
+`--wheels DIR` scans built wheels instead (docs/dev/v1-pip.md D10.6, before any upload): every member, binaries
+through their printable strings (what a compiled module embeds: `__FILE__`, header paths), RECORD and METADATA
+included. A binary is held to the path and host/user patterns only: its compressed device code reads as random text,
+where the machine patterns (a CPU model is four digits and an X) match by chance, and a build host's details reach a
+binary only as paths and names.
 """
 from __future__ import annotations
 
 import json
+import pathlib
 import re
 import struct
 import subprocess
+import sys
+import zipfile
 
 from _common import ROOT, fail
 
@@ -20,15 +29,15 @@ MACHINE = [r"\b(?:EPYC|Xeon|Threadripper|Ryzen)\b", r"\bCore\(TM\)", r"\bZen ?[1
            r"\b[1-9]\d{3}X(?:3D)?\b", r"\bi[3579]-\d{4,5}[A-Z]{0,2}\b", r"\bLinux \d+\.\d{2,}"]
 # Upstream files (public, pinned by SHA256SUMS or a commit) can match the patterns; our patches on them are checked.
 VENDORED = ("plugins/holon_plugins/kernels/ggml_cuda/vendor/", "plugins/holon_plugins/kernels/ggml_cpu/vendor/",
-            "docs/dev/spikes/s2_gguf/third_party/")
+            "std/holon_std/vendor/gguf/", "docs/dev/spikes/s2_gguf/third_party/")
 SELF = "scripts/ci/check_private.py"         # its patterns name what they look for
 
 
-def patterns() -> re.Pattern[str]:
+def patterns(machine: bool = True) -> re.Pattern[str]:
     local = ROOT / ".private-patterns"
     extra = [] if not local.is_file() else [
         line.strip() for line in local.read_text().splitlines() if line.strip() and not line.startswith("#")]
-    return re.compile("|".join(f"(?:{p})" for p in GENERIC + MACHINE + extra), re.IGNORECASE)
+    return re.compile("|".join(f"(?:{p})" for p in GENERIC + MACHINE * machine + extra), re.IGNORECASE)
 
 
 def _files() -> list[str]:
@@ -45,7 +54,28 @@ def _safetensors_meta(path) -> str:
     return "\n".join(f"{k}: {v}" for k, v in header.get("__metadata__", {}).items())
 
 
+def wheels(directory: pathlib.Path) -> list[str]:
+    """Hits in every member of every wheel in `directory`; vendored upstream members are skipped as in the tree."""
+    pat, binary, msgs = patterns(), patterns(machine=False), []
+    vendored = tuple(v.split("/", 1)[1] for v in VENDORED)       # the distribution's path, without its directory
+    for wheel in sorted(directory.glob("*.whl")):
+        with zipfile.ZipFile(wheel) as z:
+            for name in z.namelist():
+                if name.startswith(vendored):
+                    continue
+                data = z.read(name)
+                printable = re.findall(rb"[\x20-\x7e]{6,}", data) if b"\0" in data else None
+                strings = None if printable is None else "\n".join(m.decode() for m in printable)
+                text, found = (strings, binary) if strings is not None else (data.decode(errors="replace"), pat)
+                msgs += [f"{wheel.name}:{name}: {m.group(0)!r}" for m in found.finditer(name + "\n" + text)]
+    return msgs
+
+
 def main() -> None:
+    if sys.argv[1:2] == ["--wheels"]:
+        msgs = wheels(pathlib.Path(sys.argv[2]))
+        fail(msgs[:40] + ([f"… {len(msgs) - 40} more"] if len(msgs) > 40 else []), "no private details in the wheels")
+        return
     pat = patterns()
     msgs = []
     for name in _files():
